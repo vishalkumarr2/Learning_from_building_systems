@@ -12,3 +12,4 @@
 -  Have mocking system, which help you test your flows.
 -  Think about what state your system should be in when it start.
 -  How your system life will be at end of life( full or partial).
+-  All system if are not ideal, then you have to set threshold for operation where you are going to assume them ideal. like 2 rpm for 0 speed, 4.5000000000001 for 4.5
