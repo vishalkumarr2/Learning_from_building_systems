@@ -10,3 +10,5 @@
     -  System Testing
 -  System should not be able to kill itself, other entity is required to kill it and report its status.
 -  Have mocking system, which help you test your flows.
+-  Think about what state your system should be in when it start.
+-  How your system life will be at end of life( full or partial).
