@@ -15,3 +15,10 @@
 -  All system if are not ideal, then you have to set threshold for operation where you are going to assume them ideal. like 2 rpm for 0 speed, 4.5000000000001 for 4.5
 -  Enable debouncing if you think that is required
 -  Have initialisation/starting procudures to have a defined procedures
+
+-  This one is for software:
+  -  Verify the input first
+  -  Type of the data
+  -  Constaints satisfaction
+  -  value of data
+  -  sources of the data
