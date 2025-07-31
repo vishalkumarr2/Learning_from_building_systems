@@ -22,3 +22,9 @@
   -  Constaints satisfaction
   -  value of data
   -  sources of the data
+
+For Simulation:
+-   Reproducability
+-   Logging
+-   Able to Fast Forwared time for quick simulations.
+-   Have models
