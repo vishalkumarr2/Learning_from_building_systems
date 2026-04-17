@@ -32,7 +32,15 @@ learn/
 │   ├── 04-uart-serial-deep-dive.md           Bit-level UART (564 lines)
 │   ├── 05-spi-deep-dive.md                   Shift registers → frames (514 lines)
 │   ├── 06-i2c-deep-dive.md                   Open-drain → transactions (571 lines)
-│   └── 07-can-deep-dive.md                   Differential → arbitration (724 lines)
+│   ├── 07-can-deep-dive.md                   Differential → arbitration (724 lines)
+│   └── exercises/                         ← NEW: Phase 1 + 2 exercises
+│       ├── 01-passive-components.md          R, C, L, RLC exercises
+│       ├── 02-semiconductors.md              Diode, BJT, MOSFET exercises
+│       ├── 03-opamps-adc-sampling.md         Op-amps, ADC, sampling exercises
+│       ├── 04-uart-serial.md                 UART protocol exercises
+│       ├── 05-spi.md                         SPI protocol exercises
+│       ├── 06-i2c.md                         I2C protocol exercises
+│       └── 07-can-bus.md                     CAN bus exercises
 │
 └── zephyr/                                ← Phase 3 + 4
     ├── 00-mastery-plan.md                    11-project hardware plan
@@ -51,7 +59,7 @@ learn/
         └── 05-jetson-ros2.md                  (649 lines)
 ```
 
-**Total content: ~15,000 lines across 20 files.**
+**Total content: ~19,000+ lines across 27 files.**
 
 ---
 
@@ -126,8 +134,10 @@ learn/
 
 ---
 
-#### Day 5: Review + Practice Problems (3 hrs)
-- Re-read any section where you couldn't answer the checkpoint
+#### Day 5: Exercises + Review (4 hrs)
+**Do:** `electronics/exercises/01-passive-components.md` — Sections A, B, C (conceptual + spot-the-bug + fill-in)
+**Do:** `electronics/exercises/02-semiconductors.md` — Sections A, B, C
+- Re-read any section where you couldn't answer
 - Work through the comparison tables in `01-passive-components.md` and `02-semiconductors.md`
 - Draw from memory: voltage divider, RC filter, BJT switch circuit, MOSFET switch circuit, BSS138 level shifter
 
@@ -185,7 +195,11 @@ learn/
 
 ---
 
-#### Day 9: Phase 1 Comprehensive Review (3 hrs)
+#### Day 9: Exercises + Phase 1 Comprehensive Review (4 hrs)
+**Do:** `electronics/exercises/01-passive-components.md` — Sections D, E (lab/calc + deeper thinking)
+**Do:** `electronics/exercises/02-semiconductors.md` — Sections D, E
+**Do:** `electronics/exercises/03-opamps-adc-sampling.md` — all sections
+
 Go through ALL checkpoint questions from Days 1–8. Mark any you can't answer → re-read.
 
 Draw from memory:
@@ -195,7 +209,7 @@ Draw from memory:
 - [ ] Non-inverting op-amp with gain formula
 - [ ] Voltage divider → buffer → ADC chain
 
-**You're ready for Phase 2 when:** You can answer every checkpoint above from memory.
+**You're ready for Phase 2 when:** You can answer every checkpoint AND complete all Section D exercises from memory.
 
 ---
 
@@ -241,7 +255,9 @@ Draw from memory:
 
 ---
 
-#### Day 12: SPI Slave + DMA — The Hard Part (3 hrs)
+#### Day 12: SPI Slave + DMA — The Hard Part (4 hrs)
+**Do:** `electronics/exercises/04-uart-serial.md` — all sections (while Day 10 is fresh)
+**Do:** `electronics/exercises/05-spi.md` — all sections (while Day 11 is fresh)
 **Read:** `zephyr/study-notes/04-spi-slave-dma.md` — PART 1 only (ELI15 concepts)
 **Focus on:**
 - Why DMA is necessary (CPU can't service SPI fast enough at 100Hz)
@@ -296,7 +312,9 @@ Draw from memory:
 
 ---
 
-#### Day 15: Protocol Comparison + Phase 2 Review (3 hrs)
+#### Day 15: Exercises + Protocol Comparison + Phase 2 Review (4 hrs)
+**Do:** `electronics/exercises/06-i2c.md` — all sections (while Day 13 is fresh)
+**Do:** `electronics/exercises/07-can-bus.md` — all sections (while Day 14 is fresh)
 
 Fill in this table from memory, then check against the deep-dive docs:
 
@@ -468,6 +486,8 @@ Re-do all Week 3–4 checkpoints from memory.
 | SPI mode timing diagrams | `electronics/05-spi-deep-dive.md` → 4 SPI modes |
 | I2C pull-up calculation | `electronics/06-i2c-deep-dive.md` → Pull-up value section |
 | CAN arbitration rules | `electronics/07-can-deep-dive.md` → Arbitration section |
+| Electronics practice problems | `electronics/exercises/01-07*.md` → Sections A–E per chapter |
 | Zephyr gotcha tables | `zephyr/study-notes/0X-*.md` → PART 3 in each file |
+| Zephyr practice problems | `zephyr/exercises/0X-*.md` → Sections A–E per chapter |
 | Hardware wiring safety | `zephyr/00-mastery-plan.md` → Section 2 |
 | Day-waster failure modes | `zephyr/00-mastery-plan.md` → Section 3 |

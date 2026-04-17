@@ -2,6 +2,10 @@
 ### Project 7: 100Hz STM32 SPI Slave to Jetson
 **Hardware:** STM32 Nucleo-H743ZI2 · Zephyr RTOS · Jetson Orin · Logic Analyzer (essential)
 
+> **Electronics prerequisite:** If shift registers, CPOL/CPHA modes, or CS timing feel unfamiliar, read first:
+> - SPI physics → `electronics/05-spi-deep-dive.md` (shift register ring, 4 modes, signal integrity)
+> - DMA buffers need D-cache awareness → `electronics/01-passive-components.md` won't help here, but understanding memory-mapped I/O is essential
+
 ---
 
 ## PART 1 — ELI15 Concept Explanations

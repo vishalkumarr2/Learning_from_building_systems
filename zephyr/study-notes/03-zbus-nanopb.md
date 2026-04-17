@@ -2,6 +2,10 @@
 ### Project 5: Sensor Packer Pipeline (ZBus → nanopb → SPI)
 **Hardware:** STM32 Nucleo-H743ZI2 · ICM-42688-P · Jetson Orin · Zephyr RTOS
 
+> **Electronics prerequisite:** Understanding the SPI frame framing (header + length + CRC) assumes you've read:
+> - SPI protocol framing → `electronics/05-spi-deep-dive.md` (why raw SPI has no message boundaries)
+> - Serialization concept → `electronics/03-opamps-adc-sampling.md` § Serializer/Deserializer
+
 ---
 
 ## PART 1 — ELI15 Concept Explanations

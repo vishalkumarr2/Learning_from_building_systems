@@ -2,6 +2,11 @@
 ### Projects 4–6: I2C IMU · CAN Encoders · UART GPS
 **Hardware:** STM32 Nucleo-H743ZI2 · ICM-42688-P · SN65HVD230 CAN transceiver · u-blox M8N GPS
 
+> **Electronics prerequisites:** If open-drain, pull-up calculations, or differential signaling feel unfamiliar, read these first:
+> - I2C physics → `electronics/06-i2c-deep-dive.md` (open-drain, pull-up calculation, wired-AND)
+> - CAN physics → `electronics/07-can-deep-dive.md` (differential signaling, arbitration, termination)
+> - UART protocol → `electronics/04-uart-serial-deep-dive.md` (frame format, baud rate, RS-232 vs TTL)
+
 ---
 
 ## PART 1 — ELI15 Concept Explanations
