@@ -236,7 +236,7 @@ void challenge_08() {
 #ifdef FIXED
     // Safe: use memcpy to deserialize from byte buffer
     uint8_t packet[] = {0x01, 0x00, 0x00, 0x00,
-                        0x41, 0x20, 0x00, 0x00,  // 10.0f in IEEE 754
+                        0x00, 0x00, 0x20, 0x41,  // 10.0f in IEEE 754 (little-endian)
                         0xFF};
     uint32_t header;
     float value;
@@ -246,7 +246,7 @@ void challenge_08() {
 #else
     // Bug: casting misaligned byte pointer to int*/float*
     uint8_t packet[] = {0x01, 0x00, 0x00, 0x00,
-                        0x41, 0x20, 0x00, 0x00,
+                        0x00, 0x00, 0x20, 0x41,
                         0xFF};
     // packet+1 is NOT aligned for uint32_t or float
     uint32_t* header = reinterpret_cast<uint32_t*>(packet + 1); // Misaligned!

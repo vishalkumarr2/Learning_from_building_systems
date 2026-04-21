@@ -1,6 +1,6 @@
 # Unified Study Plan: Electronics → Protocols → Embedded Systems
 ### From resistors to a 100Hz STM32 ↔ Jetson SPI bridge
-### Total: ~100–120 hours across 8 weeks
+### Total: ~120–130 hours across 8 weeks
 
 ---
 
@@ -136,7 +136,7 @@ Legend: 🎯 = essential for the SPI bridge goal | 📖 = skim-read OK | ⏭️ 
 
 ---
 
-### Day 5: Phase 1 Review + Draw Everything (3 hrs)
+### Day 5: Week 1 Review + Draw Everything (3 hrs)
 Go through ALL Day 1–3 checkpoints from memory. Mark misses → re-read.
 
 Draw from memory (paper, no peeking):
@@ -241,10 +241,10 @@ Fill in this table from memory, then check:
 ---
 
 ### 🔄 RECALL CHECKPOINT #1 (end of Week 2 — 15 min)
-Without opening any file, answer these from Week 1:
+Without opening any file, answer these from Weeks 1–2:
 - [ ] Calculate: 3.3V, LED Vf=2.0V, 10mA. Resistor = ? Power = ?
 - [ ] Draw: MOSFET low-side switch
-- [ ] Explain: why does DMA need `__aligned(32)` buffers?
+- [ ] Draw: SPI waveform for one byte in Mode 0 (CPOL=0, CPHA=0) — show SCLK, MOSI, CS
 
 *If you miss ≥2: spend 30 min reviewing the relevant sections before starting Week 3.*
 
@@ -292,6 +292,7 @@ Without opening any file, answer these from Week 1:
 ---
 
 ### Day 18: UART GPS 📖 (3 hrs)
+**Read:** `zephyr/study-notes/02-sensors.md` — UART section only (skim I2C/CAN parts)
 **Build:** Project 6 (NMEA parser with ring buffer)
 **Verify:** Parses `$GNGGA` correctly. Handles "no fix" without crashing.
 
@@ -437,6 +438,8 @@ Answer all of these without any files open:
 | Electronics Sections D, E exercises | Deeper thinking — valuable but not blocking | `electronics/exercises/*.md` Sections D, E |
 | UART deep exercises | You already know serial from ROS2/Python | `electronics/exercises/04-uart-serial.md` D, E |
 | CAN deep exercises | CAN = 1 project, not your main protocol | `electronics/exercises/07-can-bus.md` D, E |
+| Sensor exercises D, E | Deeper sensor analysis — not blocking | `zephyr/exercises/02-sensors.md` Sections D, E |
+| ZBus + nanopb exercises D, E | Advanced encoding patterns — not blocking | `zephyr/exercises/03-zbus-nanopb.md` Sections D, E |
 | C++ Advanced track | Separate 8-week curriculum, run in parallel or after | `cpp-advanced/STUDY-PLAN.md` |
 
 ---

@@ -22,13 +22,13 @@ Undefined Behavior (UB) is not "implementation-defined" or "unspecified" — it 
 
 **UB-07: Division by Zero.** `x / 0` and `x % 0` for integer types. Floating-point division by zero is NOT UB — it produces `inf` or `NaN` per IEEE 754. Integer division by zero may raise SIGFPE on x86 or silently produce garbage on ARM.
 
-**UB-08: Shift UB.** Shifting by a negative amount, shifting by ≥ the bit-width, or shifting a negative signed value left. `1 << 32` is UB on a 32-bit int. `1 << 31` is UB in C++17 and earlier (fixed in C++20 to be implementation-defined two's complement).
+**UB-08: Shift UB.** Shifting by a negative amount, shifting by ≥ the bit-width, or shifting a negative signed value left. `1 << 32` is UB on a 32-bit int. `1 << 31` was UB in C++17 and earlier; C++20 mandates two's complement, making it well-defined as `INT_MIN`.
 
 ### Category C: Type System UB
 
 **UB-09: Strict Aliasing Violation.** Accessing an object through a pointer of incompatible type. The classic: casting `float*` to `int*` to inspect the bit pattern. The compiler assumes pointers to different types don't alias, enabling powerful optimizations. Use `std::memcpy` or `std::bit_cast` (C++20) instead.
 
-**UB-10: Type Punning via Union.** In C, reading a different union member than last written is implementation-defined. In C++, it's UB (with narrow exceptions for common initial sequences). Use `std::bit_cast` or `memcpy`.
+**UB-10: Type Punning via Union.** In C99/C11, reading a different union member than last written is explicitly permitted (not just implementation-defined) as long as the value is a valid representation. In C++, it's UB (with narrow exceptions for common initial sequences). Use `std::bit_cast` or `memcpy`.
 
 **UB-11: Alignment Violation.** Accessing data through a misaligned pointer. `reinterpret_cast<int*>(char_ptr + 1)` may work on x86 (with a performance penalty) but will SIGBUS on ARM/RISC-V. Use `alignas` and `std::assume_aligned` (C++20).
 

@@ -78,6 +78,8 @@ void test() {
 namespace bug2 {
 
 namespace buggy {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 int classify_temperature(int temp_c) {
     int category; // BUG: uninitialized
     if (temp_c > 100) {
@@ -90,6 +92,7 @@ int classify_temperature(int temp_c) {
     // BUG: if temp_c <= 0, category is uninitialized!
     return category;
 }
+#pragma GCC diagnostic pop
 } // namespace buggy
 
 namespace fixed {
@@ -193,7 +196,7 @@ std::optional<std::vector<int>> create_data() {
     return std::vector<int>{1, 2, 3, 4, 5};
 }
 
-void consume_data(std::vector<int>&& data) {
+void consume_data(std::vector<int>&& data [[maybe_unused]]) {
     assert(!data.empty());
     // ... process ...
 }
@@ -220,6 +223,8 @@ struct Pixel {
     uint8_t r, g, b;
 };
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
 Pixel blend(Pixel a, Pixel b) {
     // BUG: integer promotion to int, then narrowing back to uint8_t
     // If a.r + b.r > 255, it wraps. The programmer intended averaging but
@@ -230,6 +235,7 @@ Pixel blend(Pixel a, Pixel b) {
     result.b = (a.b + b.b) / 2;
     return result;
 }
+#pragma GCC diagnostic pop
 } // namespace buggy
 
 namespace fixed {

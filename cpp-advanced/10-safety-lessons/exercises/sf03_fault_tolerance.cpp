@@ -67,7 +67,11 @@ void test_tmr() {
 
     // Normal read
     auto val = tmr.load();
-    std::cout << "  Normal read: " << (val ? "0x" + std::to_string(*val) : "FAIL");
+    if (val) {
+        std::cout << "  Normal read: 0x" << std::hex << std::uppercase << *val << std::dec;
+    } else {
+        std::cout << "  Normal read: FAIL";
+    }
     std::cout << " → " << (val && *val == 0xDEADBEEF ? "PASS ✓" : "FAIL ✗") << "\n";
 
     // Inject fault into copy 1

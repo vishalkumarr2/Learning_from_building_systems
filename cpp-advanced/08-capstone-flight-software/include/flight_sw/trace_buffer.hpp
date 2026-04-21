@@ -33,7 +33,7 @@ struct TraceEntry {
     }
 };
 
-static_assert(sizeof(TraceEntry) == 136 || sizeof(TraceEntry) <= 256,
+static_assert(sizeof(TraceEntry) <= 256,
               "TraceEntry should remain small for cache efficiency");
 
 template <std::size_t N = 1024>

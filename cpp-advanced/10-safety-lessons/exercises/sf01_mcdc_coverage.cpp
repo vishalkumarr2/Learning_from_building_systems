@@ -159,7 +159,7 @@ int main() {
     std::cout << "├─────────────────────┼────────────┼─────────────────────────────────────────┤\n";
     std::cout << "│ obstacle_near       │ T1 vs T2   │ A flips F→T, B=F, C=F → outcome flips  │\n";
     std::cout << "│ speed_over_limit    │ T1 vs T3   │ B flips F→T, A=F, C=F → outcome flips  │\n";
-    std::cout << "│ driver_brake        │ T1 vs T4   │ C flips F→T, A=F, C=F → outcome flips  │\n";
+    std::cout << "│ driver_brake        │ T1 vs T4   │ C flips F→T, A=F, B=F → outcome flips  │\n";
     std::cout << "└─────────────────────┴────────────┴─────────────────────────────────────────┘\n\n";
 
     // --- Coverage comparison ---

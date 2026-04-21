@@ -14,6 +14,8 @@
 
 namespace flight_sw {
 
+inline constexpr double kPi = 3.14159265358979323846;
+
 enum class FaultMode : uint8_t {
     NONE    = 0,
     STUCK   = 1,   // Value frozen at last reading
@@ -120,14 +122,14 @@ private:
     std::uniform_real_distribution<double> dropout_dist_;
 
     inline void generate_nominal(SensorReading& r, double t) noexcept {
-        double base = amplitude_ * std::sin(2.0 * M_PI * frequency_ * t);
+        double base = amplitude_ * std::sin(2.0 * kPi * frequency_ * t);
         // Accelerometer: base signal on X, small cross-coupling on Y/Z
         r.values[0] = base + noise_dist_(rng_);
         r.values[1] = 0.1 * base + noise_dist_(rng_);
         r.values[2] = 9.81 + noise_dist_(rng_);
         // Gyroscope: derivative-ish signal
-        double gyro_base = amplitude_ * 2.0 * M_PI * frequency_ *
-                           std::cos(2.0 * M_PI * frequency_ * t);
+        double gyro_base = amplitude_ * 2.0 * kPi * frequency_ *
+                           std::cos(2.0 * kPi * frequency_ * t);
         r.values[3] = gyro_base + noise_dist_(rng_);
         r.values[4] = 0.05 * gyro_base + noise_dist_(rng_);
         r.values[5] = noise_dist_(rng_);

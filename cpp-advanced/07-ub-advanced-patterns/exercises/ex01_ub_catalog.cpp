@@ -238,12 +238,11 @@ void ub_12_unsequenced() {
     std::cout << "  FIXED: i=" << i << ", j=" << j << "\n";
 #else
     int i = 0;
-    // i = i++ + ++i; // Don't even compile this — it's textbook UB
-    // Instead, demo a simpler case
-    int arr[] = {0, 1, 2, 3};
-    int idx = 1;
-    arr[idx] = idx++; // UB: unsequenced read and modification of idx
-    std::cout << "  UB: arr[idx] = idx++ where idx=1 → arr[?]=" << arr[1] << "\n";
+    // Note: `arr[idx] = idx++` was UB in C++14 and earlier, but C++17 sequences
+    // the right operand of = before the left, making it well-defined.
+    // The classic UB example that's still UB even in C++17:
+    i = i++ + ++i; // UB: two unsequenced modifications of i in one expression
+    std::cout << "  UB: i = i++ + ++i → i=" << i << " (could be anything)\n";
 #endif
 }
 

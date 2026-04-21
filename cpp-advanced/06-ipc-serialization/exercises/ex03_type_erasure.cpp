@@ -107,30 +107,21 @@ public:
     AnyCallable(const AnyCallable& other) {
         if (other.ptr_) {
             if (other.is_local_) {
+                // Fits SBO — clone directly into our buffer
                 other.ptr_->clone_to(buffer_);
                 ptr_ = local_ptr();
                 is_local_ = true;
             } else {
-                // Heap clone: allocate raw, clone into it
-                // For simplicity, we clone into a temp buffer then move
-                alignas(kSBOAlign) char tmp[kSBOSize];
-                other.ptr_->clone_to(tmp);
-                auto* tmp_ptr = std::launder(reinterpret_cast<Concept*>(tmp));
-                // Since it doesn't fit SBO, heap-allocate
-                // Actually, just clone directly:
-                other.ptr_->clone_to(buffer_);
-                ptr_ = local_ptr();
-                is_local_ = true;
-                // If size > SBO, this won't work. Let's handle properly:
-                if (other.ptr_->size() > kSBOSize) {
-                    ptr_->~Concept();
-                    // Use a heap-allocated clone
-                    auto* heap = static_cast<Concept*>(::operator new(other.ptr_->size()));
+                // Doesn't fit SBO — heap-allocate, then clone into it
+                auto* heap = static_cast<Concept*>(::operator new(other.ptr_->size()));
+                try {
                     other.ptr_->clone_to(heap);
-                    ptr_ = heap;
-                    is_local_ = false;
+                } catch (...) {
+                    ::operator delete(heap);
+                    throw;
                 }
-                tmp_ptr->~Concept();
+                ptr_ = heap;
+                is_local_ = false;
             }
         }
     }

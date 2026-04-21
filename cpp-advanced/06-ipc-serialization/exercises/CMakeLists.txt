@@ -28,4 +28,4 @@ add_executable(puzzle01 ../puzzles/puzzle01_placement_new.cpp)
 target_link_libraries(puzzle01 PRIVATE rt pthread)
 
 add_executable(puzzle02 ../puzzles/puzzle02_dlopen_leak.cpp)
-target_link_libraries(puzzle02 PRIVATE rt pthread)
+target_link_libraries(puzzle02 PRIVATE dl rt pthread)

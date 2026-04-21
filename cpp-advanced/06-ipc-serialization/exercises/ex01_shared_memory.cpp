@@ -210,7 +210,7 @@ static void run_demo() {
     auto* data = new (ptr) SharedData{};
 
     std::atomic<bool> done{false};
-    uint64_t producer_count = 0;
+    std::atomic<uint64_t> producer_count{0};
 
     // Producer thread
     auto producer = std::thread([&] {
@@ -235,7 +235,7 @@ static void run_demo() {
     int64_t total_lat = 0, min_lat = INT64_MAX, max_lat = 0;
 
     auto consumer = std::thread([&] {
-        while (!done.load(std::memory_order_acquire) || reads < producer_count) {
+        while (!done.load(std::memory_order_acquire) || reads < producer_count.load(std::memory_order_acquire)) {
             uint64_t s1, s2;
             double local[kValueCount];
             int64_t wts;
@@ -264,7 +264,7 @@ static void run_demo() {
     producer.join();
     consumer.join();
 
-    std::printf("Producer wrote: %lu messages\n", producer_count);
+    std::printf("Producer wrote: %lu messages\n", producer_count.load());
     std::printf("Consumer read:  %lu times  (torn retries: %lu)\n", reads, torn);
     if (reads > 0 && total_lat > 0) {
         std::printf("Latency — avg: %ld ns, min: %ld ns, max: %ld ns\n",

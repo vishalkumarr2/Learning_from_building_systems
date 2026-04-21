@@ -102,20 +102,23 @@ void demonstrate() {
 namespace therac25 {
 
 // THE BUG: shared state without synchronization
+// Using int instead of std::string to avoid heap corruption from data races
+// (std::string data race = UB with potential crash; int race = observable mismatch)
+enum BeamMode { MODE_NONE = 0, MODE_ELECTRON = 1, MODE_XRAY = 2 };
+
 struct BuggyController {
-    std::string beam_type = "NONE";     // shared, no lock
-    int         beam_energy = 0;         // shared, no lock
-    bool        inconsistency_detected = false;
+    volatile int beam_type = MODE_NONE;   // shared, no lock — volatile prevents caching
+    volatile int beam_energy = 0;          // shared, no lock
 
     void set_electron_mode() {
-        beam_type = "ELECTRON";
+        beam_type = MODE_ELECTRON;
         // Simulated delay — other thread can read between these two writes
         std::this_thread::sleep_for(std::chrono::microseconds(50));
         beam_energy = 5;   // 5 MeV for electron mode
     }
 
     void set_xray_mode() {
-        beam_type = "XRAY";
+        beam_type = MODE_XRAY;
         std::this_thread::sleep_for(std::chrono::microseconds(50));
         beam_energy = 25;  // 25 MeV for X-ray mode (with filtering target)
     }
@@ -123,8 +126,10 @@ struct BuggyController {
     // Check: if beam_type is ELECTRON, energy MUST be 5
     // If beam_type is XRAY, energy MUST be 25
     bool is_consistent() {
-        if (beam_type == "ELECTRON" && beam_energy != 5) return false;
-        if (beam_type == "XRAY" && beam_energy != 25) return false;
+        int bt = beam_type;
+        int be = beam_energy;
+        if (bt == MODE_ELECTRON && be != 5) return false;
+        if (bt == MODE_XRAY && be != 25) return false;
         return true;
     }
 };
@@ -132,25 +137,25 @@ struct BuggyController {
 // THE FIX: atomically update mode+energy together under a mutex
 struct SafeController {
     std::mutex mtx_;
-    std::string beam_type_ = "NONE";
-    int         beam_energy_ = 0;
+    int beam_type_ = MODE_NONE;
+    int beam_energy_ = 0;
 
     void set_electron_mode() {
         std::lock_guard lock(mtx_);
-        beam_type_ = "ELECTRON";
+        beam_type_ = MODE_ELECTRON;
         beam_energy_ = 5;
     }
 
     void set_xray_mode() {
         std::lock_guard lock(mtx_);
-        beam_type_ = "XRAY";
+        beam_type_ = MODE_XRAY;
         beam_energy_ = 25;
     }
 
     bool is_consistent() {
         std::lock_guard lock(mtx_);
-        if (beam_type_ == "ELECTRON" && beam_energy_ != 5) return false;
-        if (beam_type_ == "XRAY" && beam_energy_ != 25) return false;
+        if (beam_type_ == MODE_ELECTRON && beam_energy_ != 5) return false;
+        if (beam_type_ == MODE_XRAY && beam_energy_ != 25) return false;
         return true;
     }
 };

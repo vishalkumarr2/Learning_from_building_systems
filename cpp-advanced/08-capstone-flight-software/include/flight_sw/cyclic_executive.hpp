@@ -18,6 +18,7 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef __linux__
@@ -99,7 +100,7 @@ public:
 
     // Run the executive for `duration`
     inline void run(std::chrono::nanoseconds duration) {
-        running_.store(true, std::memory_order_relaxed);
+        running_.store(true, std::memory_order_release);
         try_set_realtime();
 
         uint64_t total_frames = static_cast<uint64_t>(duration.count() / period_ns_.count());
@@ -113,7 +114,7 @@ public:
 #endif
 
         for (uint64_t frame = 0; frame < total_frames; ++frame) {
-            if (!running_.load(std::memory_order_relaxed)) break;
+            if (!running_.load(std::memory_order_acquire)) break;
 
             // Advance target time
 #ifdef __linux__
@@ -165,10 +166,10 @@ public:
             }
         }
 
-        running_.store(false, std::memory_order_relaxed);
+        running_.store(false, std::memory_order_release);
     }
 
-    inline void stop() noexcept { running_.store(false, std::memory_order_relaxed); }
+    inline void stop() noexcept { running_.store(false, std::memory_order_release); }
 
     [[nodiscard]] inline JitterStats const& jitter_stats() const noexcept { return jitter_; }
     [[nodiscard]] inline std::vector<TaskEntry> const& tasks() const noexcept { return tasks_; }

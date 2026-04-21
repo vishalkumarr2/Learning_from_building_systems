@@ -279,7 +279,7 @@ static void memory_barrier_demo() {
     volatile int observed_data = -1;
 
     // Producer-Consumer with acquire/release
-    constexpr int kRounds = 1'000'000;
+    constexpr int kRounds = 10'000;  // Keep low — creates 2 threads per round
     int mismatches = 0;
 
     for (int round = 0; round < kRounds; ++round) {

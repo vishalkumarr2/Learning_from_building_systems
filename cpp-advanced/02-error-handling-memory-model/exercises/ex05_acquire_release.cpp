@@ -69,10 +69,12 @@ struct Point3D {
 };
 
 class SeqLock {
-    // Sequence counter: seq_cst provides total ordering that all threads agree on.
-    // A seqlock fundamentally needs both the writer and readers to agree on the
-    // ordering of the sequence number relative to data, which requires seq_cst
-    // (or platform-specific barriers like Linux's smp_rmb/smp_wmb).
+    // Sequence counter: odd = write in progress, even = stable.
+    // We use acquire on the first fetch_add and release on the second.
+    // Acquire prevents subsequent data stores from being reordered before
+    // the sequence increment (readers see odd seq before any data changes).
+    // Release prevents preceding data stores from being reordered after
+    // the sequence increment (readers see all data changes before even seq).
     std::atomic<uint32_t> seq_{0};
 
     // Data members MUST be atomic to avoid UB from concurrent read/write.
@@ -88,7 +90,9 @@ public:
     void write(const Point3D& p) {
         writer_lock_.lock();
 
-        // Odd sequence = write in progress. acquire ensures we see prior writes.
+        // Odd sequence = write in progress.
+        // Acquire prevents subsequent data stores from being reordered before
+        // this increment — readers see odd seq before any partial data update.
         seq_.fetch_add(1, std::memory_order_acquire);  // now odd
 
         // Data stores use relaxed — bounded by the seq_cst fence below.
@@ -118,8 +122,13 @@ public:
             result.y = dy_.load(std::memory_order_relaxed);
             result.z = dz_.load(std::memory_order_relaxed);
 
-            // Acquire: ensures data loads above complete before this load,
-            // so we validate the sequence AFTER reading all data.
+            // Acquire: pairs with writer's second fetch_add (release).
+            // Ensures data loads BELOW this point see the writer's stores.
+            // Note: on the abstract machine, the relaxed data loads ABOVE
+            // are not formally prevented from being reordered past this acquire.
+            // This works correctly on x86 (TSO forbids load-load reordering)
+            // and ARM (LDAR provides a full load barrier). For a fully portable
+            // version, use seq_cst or an acquire fence before reading s2.
             uint32_t s2 = seq_.load(std::memory_order_acquire);
             if (s1 == s2) break;  // stable read
         }

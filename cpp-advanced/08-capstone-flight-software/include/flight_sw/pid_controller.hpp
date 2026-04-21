@@ -12,6 +12,8 @@
 
 namespace flight_sw {
 
+inline constexpr double kPiAngle = 3.14159265358979323846;
+
 struct PIDConfig {
     double kp           = 1.0;
     double ki           = 0.0;
@@ -97,8 +99,8 @@ public:
     [[nodiscard]] inline double compute_error(double sp, double meas) const noexcept {
         double err = sp - meas;
         // Wrap to [-π, π]
-        while (err >  M_PI) err -= 2.0 * M_PI;
-        while (err < -M_PI) err += 2.0 * M_PI;
+        while (err >  kPiAngle) err -= 2.0 * kPiAngle;
+        while (err < -kPiAngle) err += 2.0 * kPiAngle;
         return err;
     }
 };
