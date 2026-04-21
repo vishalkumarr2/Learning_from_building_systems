@@ -1,0 +1,1119 @@
+# Exercises: I2C · CAN · UART Sensors
+### Projects 4–6: ICM-42688 IMU · CAN Wheel Encoders · UART GPS
+**Self-assessment guide:** Write your answer before expanding the `<details>` block.
+A wrong answer you discover yourself is far more valuable than a right answer you read.
+
+---
+
+## Section A — Conceptual Questions
+
+---
+
+**Q1.** Both I2C and SPI can connect multiple sensors to a single microcontroller. I2C uses only 2 wires (SDA, SCL) regardless of how many sensors. SPI needs 4 wires plus one extra CS wire for every additional sensor. Explain the fundamental electrical reason I2C can share wires but SPI cannot. What property of the I2C output stage makes this possible, and what does that property prevent?
+
+<details><summary>Answer</summary>
+
+I2C lines use **open-drain outputs**: each device has a transistor that can only pull the line LOW — toward 0V. No device can actively push the line HIGH. A pull-up resistor connected to VCC does the job of pulling HIGH passively. This means the line is HIGH by default, and any device can make it LOW by switching on its transistor.
+
+The critical property of open-drain: **multiple devices can all drive the same wire simultaneously without causing a short circuit.** If device A and device B both try to transmit on SDA at the same time — A sends `1` (releases the line, resistor pulls HIGH) and B sends `0` (pulls LOW) — the wire reads LOW. No current fight, no damage. The dominant signal (LOW) wins.
+
+SPI uses **push-pull outputs**: each device actively connects its output pin to either VCC (for HIGH) or GND (for LOW). If two push-pull devices both try to drive the same wire at the same time — one connecting to VCC while the other connects to GND — you create a short circuit directly from VCC to GND. The resulting current is limited only by the output transistor's resistance, which is small, causing large current, heat, and potential device damage.
+
+This is why SPI slaves must each have a dedicated chip-select (CS) line so the master can guarantee only one slave is ever driving the data wire at a time. I2C avoids this requirement entirely because open-drain outputs naturally tolerate contention.
+
+</details>
+
+---
+
+**Q2.** You have an ICM-42688 IMU with its AD0 pin floating (not connected to anything). The bus scan finds a device at both 0x68 and 0x69. Explain why this happened and what the correct fix is.
+
+<details><summary>Answer</summary>
+
+A floating input pin on a CMOS microcontroller or sensor has no defined voltage. It picks up stray charge and electromagnetic interference and settles at a voltage somewhere between 0V and VCC — often right in the middle, which is the *forbidden zone* for digital logic. In this zone, the input buffer oscillates or picks up the strongest nearby signal.
+
+In practice, a floating AD0 pin causes the IMU to behave as if AD0 is sometimes LOW (address 0x68) and sometimes HIGH (0x69), depending on noise and temperature. The I2C bus scan sees arbitrary ACKs at both addresses because the IMU is sampling its AD0 input in a metastable state at multiple points during the bus scan.
+
+**Fix:** Connect AD0 explicitly to either GND (for 0x68) or VCC (for 0x69). Never leave address pins floating. If you are using only one IMU in your design and do not need the second address, the standard is GND (0x68). Update your overlay `reg = <0x68>` to match.
+
+**Lesson:** Always confirm the physical address with a multimeter (measure AD0 to GND) before trusting your overlay file.
+
+</details>
+
+---
+
+**Q3.** A colleague says: "I2C was working fine at 100 kHz. I switched to 400 kHz (Fast mode) in the overlay and now I'm getting random corrupted readings every few seconds — no `-ENXIO` errors, just wrong data. I haven't changed any wires or resistors." Explain the physics of why this failure occurs and what they need to measure to confirm it.
+
+<details><summary>Answer</summary>
+
+At 400 kHz, one complete bit period is 2.5 µs — each half-period (HIGH or LOW) is 1.25 µs. For the receiver to correctly sample a HIGH bit, the SDA or SCL line must actually *reach* the HIGH voltage threshold (typically 0.7 × VCC = 2.3V on a 3.3V system) within that 1.25 µs window after the line is released.
+
+The line rise time is determined by an RC circuit: the pull-up resistor (R) and the total capacitance on the wire (C, from PCB traces + device input capacitances). Rise time ≈ 2.2 × R × C. If R = 10 kΩ and C = 100 pF (typical for 3 devices on 20 cm of trace): rise time = 2.2 × 10,000 × 100×10⁻¹² = 2.2 µs.
+
+2.2 µs exceeds the 1.25 µs budget. The line has not fully risen to HIGH before the next clock edge. The master samples the line while it is still rising — the sampled voltage is indeterminate. Sometimes it reads HIGH (correct), sometimes LOW (wrong). This produces occasional bit errors that look like random data corruption, with no `-ENXIO` error because the slave still ACKs. At 100 kHz (5 µs half-period), the same 2.2 µs rise time was fine because there was ample margin.
+
+**To confirm:** Use a logic analyzer and scope simultaneously. Zoom in on the rising edge of SCL or SDA after a LOW-to-HIGH transition. Measure the time from LOW to 2.3V. If it exceeds 1.25 µs, the pull-up is too large. Replace 10 kΩ with 4.7 kΩ (or 2.2 kΩ for headroom) and the problem will disappear.
+
+</details>
+
+---
+
+**Q4.** Explain CAN bus arbitration. Two nodes start transmitting simultaneously — node A sends ID `0x050`, node B sends ID `0x048`. Which one wins, why, and what happens to the loser?
+
+<details><summary>Answer</summary>
+
+CAN arbitration exploits the same wired-AND property as I2C: any node that drives the bus dominant (LOW, logical 0) beats any node that is recessive (HIGH, logical 1). Arbitration happens bit by bit, starting from the MSB of the 11-bit frame ID.
+
+Convert the IDs to binary:
+- `0x050` = `00001010000`
+- `0x048` = `00001001000`
+
+Both nodes begin transmitting their IDs simultaneously. They also continuously listen to the actual bus state and compare it to what they sent.
+
+Bits 10 down to bit 4: both send `0000101` — the bus matches for both nodes. Both continue.
+
+At bit 3: node A sends `0` (from its ID bit 3 = 0), node B sends `0` (from its ID bit 3 = 0). Still equal.
+
+At bit 2: node A sends `0` (bit 2 of `0x050` = 0), node B sends `1` (bit 2 of `0x048` = 1). Node A drives the bus LOW (dominant 0). Node B is transmitting recessive (1) but reads back dominant (0) from the bus. Node B detects that the bus disagrees with what it sent — it has lost arbitration. Node B immediately stops transmitting, sets its transmitter to recessive for all remaining bits, and schedules a retransmission when the bus returns to idle.
+
+Node A never noticed anything happened. It read back its own transmitted `0` and continues. The bus delivers node A's frame intact.
+
+**Result:** Node A (`0x048`... wait, 0x048 < 0x050, so 0x048 wins) — **the lower numerical ID always wins** because lower ID bits are `0` (dominant) where higher IDs have `1` (recessive), and dominant beats recessive. Node B (0x050) retransmits after node A finishes.
+
+Crucially: node A's frame is not corrupted, no data was lost, and no error frame was generated.
+
+</details>
+
+---
+
+**Q5.** You measure 120 Ω between CAN_H and CAN_L with the bus powered off. Is this correct, incorrect, or something else? What would you expect, and what does the reading indicate?
+
+<details><summary>Answer</summary>
+
+120 Ω is **incorrect** for a properly terminated CAN bus. The expected reading is **60 Ω**.
+
+A CAN bus should have one 120 Ω termination resistor at each physical end of the cable. Two 120 Ω resistors in parallel = 60 Ω.
+
+A reading of 120 Ω means only ONE termination resistor is present. One terminator is not enough. The missing second terminator means incoming electrical waves reach one end of the cable and find no impedance match — they reflect back down the cable and interfere with subsequent bits. At 1 Mbps (1 µs per bit), these reflections arrive during the next or second-next bit and corrupt it. The system may work accidentally at low bus utilization but will degrade as more nodes transmit simultaneously.
+
+Other readings and their meanings:
+- **60 Ω**: correct — both terminators present
+- **40 Ω**: three terminators — one extra terminator installed somewhere in the middle of the bus (common mistake when nodes include internal termination)
+- **∞ (open circuit)**: no terminators, or CAN_H/CAN_L are not connected
+- **0 Ω**: CAN_H and CAN_L are shorted (wiring fault)
+
+**Fix**: locate where the second terminator should go (the other physical end of the cable) and install a 120 Ω resistor there.
+
+</details>
+
+---
+
+**Q6.** UART is called "asynchronous" — there is no clock wire. How does the receiver know when each bit starts and ends? What is the maximum clock frequency mismatch between sender and receiver that can be tolerated at 8N1 (8 data bits, no parity, 1 stop bit)?
+
+<details><summary>Answer</summary>
+
+**Bit timing:** The receiver watches for the start bit — a HIGH-to-LOW transition on the line (the idle state is HIGH). When this transition is detected, the receiver starts an internal timer configured to tick at the agreed baud rate. After 1.5 bit-periods (intentionally positioned in the middle of bit 0 to avoid edge ambiguity), it samples bit 0. Then after every 1 bit-period it samples bits 1 through 7. Then it checks the stop bit.
+
+**Why 1.5 bit-periods for the first sample?** Because the start bit edge could have arrived at any point during the receiver's sampling interval (up to one full bit-period of alignment uncertainty). Starting at 1.5 bit-periods centers the sampling in the middle of bit 0 regardless of when exactly the edge arrived. All subsequent samples are at exact 1-bit-period intervals from that reference.
+
+**Maximum clock mismatch:** At 8N1, there are 10 bit-periods total (1 start + 8 data + 1 stop). The receiver must sample each bit in roughly the center of its period. Typically, a ±50% error within one bit-period is tolerable (sampling anywhere within the middle half). Over 10 bits, accumulated clock error must remain below ±0.5 bit-period. This gives a tolerance of ± 0.5/10 = **±5% of the baud rate**.
+
+In practice, you need headroom for other sources of timing error (oscillator temperature variation, count granularity), so the industry standard recommendation is to keep baud rate mismatch under **±2%**. A crystal oscillator offers ±0.002% (20 ppm), which is well within budget. An un-calibrated RC oscillator can be ±3–10% and may fail at higher baud rates.
+
+</details>
+
+---
+
+**Q7.** Your GPS module is sending NMEA sentences. You write an ISR that receives bytes one at a time and calls `sscanf` inside the ISR every time a `\n` arrives. Describe all the things that can go wrong with this approach.
+
+<details><summary>Answer</summary>
+
+Multiple serious problems:
+
+**1. sscanf execution time:** `sscanf` with a format string takes tens of microseconds to hundreds of microseconds on a Cortex-M4. At 115200 baud, bytes arrive every 87 µs. While `sscanf` is running inside the ISR, the next byte arrives, the UART hardware interrupt fires, but because ISRs at the same or lower priority cannot preempt a running ISR, the byte sits in the FIFO. If `sscanf` takes longer than the FIFO depth (often 4–16 bytes of UART FIFO), bytes start overflowing. You silently lose data.
+
+**2. ISRs cannot sleep or block:** On Zephyr, many C library functions including memory-allocating variants of `sscanf` can internally invoke memory allocation which may block. Blocking in an ISR causes a kernel panic or hard fault.
+
+**3. Stack depth:** ISRs run on the interrupt stack, which is typically 2 KB for the entire system (shared by all ISRs). `sscanf` is deeply nested and uses significant stack — it can overflow the interrupt stack.
+
+**4. Sentence may still be incomplete:** A `\n` arriving in the FIFO does not guarantee the entire sentence is in a contiguous buffer. The ISR fires each time the interrupt triggers, which happens for each byte or small burst. If your ISR only accumulates bytes when called, the buffer assembly code must be inside the ISR — and now you have mutable state modified in an ISR, which can race with reads from thread context.
+
+**5. Blocking ZBus publish:** If you attempt `zbus_chan_pub` inside the ISR with non-`K_NO_WAIT` timeout, it blocks. Blocked ISR = all lower-priority code freezes.
+
+**Correct approach:** ISR puts each byte into a ring buffer and gives a semaphore. A separate GPS thread wakes, drains the ring buffer, accumulates until `\n`, then calls `sscanf` safely in thread context.
+
+</details>
+
+---
+
+**Q8.** After calling `can_add_rx_filter()` with a filter for ID `0x201`, you are not receiving any callbacks. `candump` on a USB-CAN adapter shows frames with ID `0x201` on the bus. List four distinct possible causes and for each one how you would diagnose it.
+
+<details><summary>Answer</summary>
+
+**Cause 1: `can_start()` was not called**  
+Diagnosis: check the return value of all CAN API calls. `can_send()` returns `-ENETDOWN` when the controller is not started. Add `LOG_INF("CAN state: %d", can_get_state(can_dev))` — if not `CAN_STATE_ERROR_ACTIVE`, the controller is not started.  
+Fix: call `can_start(can_dev)` before `can_add_rx_filter()`.
+
+**Cause 2: Bitrate mismatch between your node and the rest of the bus**  
+Diagnosis: your node sees every frame as an error (bits don't decode correctly at 500 kbps when bus runs at 1 Mbps). `candump` on the USB-CAN adapter shows frames only if that adapter is at the correct rate. Use an oscilloscope on CAN_H/CAN_L: measure one bit period. At 1 Mbps = 1 µs per bit. Compare to your `bus-speed` setting.  
+Fix: set matching `bus-speed` in overlay for all nodes.
+
+**Cause 3: Filter mask is too strict or ID is wrong**  
+Diagnosis: log the filter ID returned by `can_add_rx_filter()` to confirm it succeeded (positive int). Temporarily change the filter to `mask = 0` (accept all frames) and see if callbacks arrive.  
+Fix: ensure `filter.id = 0x201` and `filter.mask = CAN_STD_ID_MASK` are correct. If using extended IDs, set `CAN_FRAME_IDE` in flags.
+
+**Cause 4: CAN transceiver in standby mode (STBY/RS pin)**  
+Diagnosis: even if the STM32 FDCAN controller is running correctly, if the physical transceiver is in standby, it does not drive the bus. Measure the STM32 CANTX pin with a scope — if it is toggling but the bus is silent, the transceiver is the problem. Measure the RS pin voltage on SN65HVD230 — must be LOW (near 0V) for normal operation.  
+Fix: pull RS pin to GND via populated resistor or direct connection.
+
+</details>
+
+---
+
+**Q9.** Explain what the IMU PWR_MGMT0 register is and why forgetting to write it is one of the most common ICM-42688 bugs. What symptom does it produce, and why is it easy to mistake for a different problem?
+
+<details><summary>Answer</summary>
+
+The ICM-42688, like most modern sensor ICs, boots in a **low-power sleep state** to minimize power draw before the host application has had a chance to configure the desired sample rate, filter settings, and ranges. After power-on or after an I2C wake-from-reset, the default state is:
+
+- Accelerometer: **OFF (sleep)** (PWR_MGMT0 bits 1:0 = 00)
+- Gyroscope: **OFF (sleep)** (PWR_MGMT0 bits 3:2 = 00)
+
+The output data registers (`ACCEL_XOUT_H` through `GYRO_ZOUT_L`) contain **zero** while the sensors are in sleep. They do not return the previous sample, noise, or an error flag — they return literal `0x00` in every register.
+
+When you burst-read 12 bytes and parse them, you get: `accel_x=0.00, accel_y=0.00, accel_z=0.00 g`. On a horizontal surface, gravity should produce approximately `9.81 m/s²` on the z-axis. Getting 0.0 on z means the sensor is asleep.
+
+**Why it is easily confused with other problems:**
+- The WHO_AM_I check passes — the sensor responds correctly to address `0x68` and returns `0x47`. The I2C bus is clearly working.
+- No error codes are returned from `i2c_write_read` — the read completes successfully.
+- The symptom looks like wrong sensitivity scaling, wrong register map, or wrong coordinate system interpretation.
+- Half the Stack Overflow answers suggest "try a different register map" rather than "wake the sensor first."
+
+**Fix:** Write `0x0F` to register `0x4E` (PWR_MGMT0) to place both accelerometer and gyroscope into low-noise mode. Wait 10 ms (sensor requires a startup period). Then verify by re-reading PWR_MGMT0 to confirm the write succeeded.
+
+</details>
+
+---
+
+**Q10.** Describe what happens, step by step, when the I2C master calls `i2c_write_read(dev, 0x68, &reg_addr, 1, &result, 1)`. Include the exact sequence of bus events (START, address byte, ACK/NACK, data bytes, STOP) and explain the "repeated start" (RESTART) and why it is necessary.
+
+<details><summary>Answer</summary>
+
+The `i2c_write_read()` function performs a *combined write-then-read* transaction in one uninterrupted bus operation.
+
+**Step-by-step bus events:**
+
+1. **START condition:** Master pulls SDA LOW while SCL is still HIGH. This special transition signals all slaves on the bus that a new transaction is beginning.
+
+2. **Address + Write byte (0xD0 = 0x68 << 1 | 0):** Master sends 7-bit slave address `1101000` followed by R/W bit `0` (write direction). Bit by bit on the SDA line, clocked by SCL.
+
+3. **ACK from slave:** On the 9th SCL pulse, the master releases SDA. The ICM-42688 at `0x68` pulls SDA LOW — acknowledging its address. If SDA stays HIGH (NACK), the master returns `-ENXIO` and stops.
+
+4. **Register address byte (reg_addr):** Master sends the 8-bit register address byte (e.g., `0x75` for WHO_AM_I). Slave ACKs on the 9th clock.
+
+5. **REPEATED START condition:** Instead of sending a STOP (which would end the transaction and release the bus), the master generates another START while SCL is HIGH. This is the "repeated start" (or "restart"). It transitions the bus from write mode to read mode *without releasing the bus*. Releasing the bus with a STOP before the read would allow another master to steal the bus between the write and read phases — leaving the sensor's internal read pointer at the wrong position if another master interleaved.
+
+6. **Address + Read byte (0xD1 = 0x68 << 1 | 1):** Master sends the same 7-bit slave address but with R/W bit `1` (read direction). Slave ACKs.
+
+7. **Data byte from slave:** Now the slave drives SDA. It outputs the 8-bit value of the register that was addressed in step 4. Master clocks SCL to receive the bits.
+
+8. **NACK from master:** After receiving the requested number of bytes, the master sends NACK (leaves SDA HIGH on the 9th clock) to tell the slave "stop sending, I'm done."
+
+9. **STOP condition:** Master pulls SDA LOW while SCL HIGH (same as START), then releases SDA while SCL remains HIGH. SDA going HIGH while SCL is HIGH = STOP. The slave releases the bus.
+
+**Why the RESTART matters:** The write phase tells the sensor "look at this register." The read phase says "send me what is at that register." These two phases must be atomic from the sensor's perspective — no other master should address the sensor in between. RESTART keeps bus ownership. A STOP followed by START does not guarantee this.
+
+</details>
+
+---
+
+## Section B — Spot the Bug
+
+---
+
+**Bug 1.** The following `prj.conf` is for a project that reads an I2C IMU and receives GPS over UART. Find all the bugs.
+
+```ini
+CONFIG_I2C=y
+CONFIG_UART=y
+CONFIG_LOGGING=y
+CONFIG_LOG_DEFAULT_LEVEL=4
+CONFIG_RING_BUFFER=y
+CONFIG_ZBUS=y
+```
+
+<details><summary>Answer</summary>
+
+Multiple issues:
+
+**Bug 1: `CONFIG_UART=y` does not exist** — the correct symbol is `CONFIG_SERIAL=y`. Using `CONFIG_UART=y` silently has no effect — Kconfig ignores unknown symbols by default (it does not error unless you set `CONFIG_KCONFIG_WARN_UNKNOWN=y`).
+
+**Bug 2: `CONFIG_LOGGING=y` should be `CONFIG_LOG=y`** — the correct symbol is `CONFIG_LOG`. `CONFIG_LOGGING` does not exist and will be silently ignored.
+
+**Bug 3: Missing `CONFIG_UART_INTERRUPT_DRIVEN=y`** — the interrupt-driven UART API needed for ring-buffer-based UART reception is not enabled. Without it, `uart_irq_callback_set()` returns an error at runtime.
+
+**Bug 4: Missing `CONFIG_GPIO=y`** — needed for the DRDY interrupt pin on the IMU.
+
+**Corrected prj.conf:**
+```ini
+CONFIG_I2C=y
+CONFIG_I2C_STM32_BUS_RECOVERY=y   # enable automatic stuck-bus recovery
+CONFIG_SERIAL=y
+CONFIG_UART_INTERRUPT_DRIVEN=y
+CONFIG_GPIO=y
+CONFIG_LOG=y
+CONFIG_LOG_DEFAULT_LEVEL=4
+CONFIG_RING_BUFFER=y
+CONFIG_ZBUS=y
+```
+
+</details>
+
+---
+
+**Bug 2.** Find the bug in this CAN initialization code.
+
+```c
+void can_init(void)
+{
+    struct can_filter f = {
+        .flags = 0,
+        .id    = 0x201,
+        .mask  = CAN_STD_ID_MASK,
+    };
+
+    int fid = can_add_rx_filter(can_dev, motor_cb, NULL, &f);
+    if (fid < 0) {
+        LOG_ERR("filter failed: %d", fid);
+        return;
+    }
+
+    int rc = can_start(can_dev);
+    if (rc != 0) {
+        LOG_ERR("can_start failed: %d", rc);
+    }
+
+    LOG_INF("CAN ready, filter %d", fid);
+}
+```
+
+<details><summary>Answer</summary>
+
+**Bug: `can_add_rx_filter()` is called BEFORE `can_start()`.**
+
+`can_add_rx_filter()` requires the CAN controller to be in a state where it can accept filter configuration. On STM32 FDCAN, filters must be configured while the controller is in Initialization mode (before start) OR the driver handles this internally — but the critical issue is that `can_start()` enables bus-on operation. If a frame arrives *after* the filter is registered but *before* the controller confirms its RX path is active, the frame may be missed.
+
+More severely: on some Zephyr CAN drivers, calling `can_add_rx_filter()` on a not-yet-started controller returns an error code that looks like success (filter ID ≥ 0) but the filter is not actually registered for hardware filtering. Subsequent received frames never match and the callback never fires.
+
+**Correct order:**
+```c
+void can_init(void)
+{
+    /* 1. Start controller FIRST */
+    int rc = can_start(can_dev);
+    if (rc != 0) {
+        LOG_ERR("can_start failed: %d", rc);
+        return;
+    }
+
+    /* 2. Register filter AFTER start */
+    struct can_filter f = {
+        .flags = 0,
+        .id    = 0x201,
+        .mask  = CAN_STD_ID_MASK,
+    };
+
+    int fid = can_add_rx_filter(can_dev, motor_cb, NULL, &f);
+    if (fid < 0) {
+        LOG_ERR("filter failed: %d", fid);
+        return;
+    }
+
+    LOG_INF("CAN ready, filter %d", fid);
+}
+```
+
+</details>
+
+---
+
+**Bug 3.** Find the bug in this IMU read function.
+
+```c
+static int imu_read_accel_x(float *out)
+{
+    uint8_t raw[2];
+    uint8_t reg = ICM42688_ACCEL_XOUT_H;
+
+    int rc = i2c_write_read(i2c_dev, IMU_ADDR, &reg, 1, raw, 2);
+    if (rc != 0) return rc;
+
+    uint16_t raw_val = (raw[0] << 8) | raw[1];
+    *out = raw_val / 2048.0f;  /* ±16g range */
+    return 0;
+}
+```
+
+<details><summary>Answer</summary>
+
+**Bug: `raw_val` is declared as `uint16_t` but the sensor outputs a signed 16-bit value.**
+
+When the IMU reads a negative acceleration (e.g., when the board is inverted and gravity is -9.81 m/s²), the raw bytes represent a two's-complement negative number such as `0xD9E0` (-9728 in int16) for approximately -4.75g. Storing this in a `uint16_t` gives `55776`. Dividing by 2048.0f gives `+27.23g` — clearly wrong, but no compile error, no runtime error.
+
+**Fix: cast to `(int16_t)` before the division:**
+
+```c
+int16_t raw_val = (int16_t)((raw[0] << 8) | raw[1]);
+*out = raw_val / 2048.0f;
+```
+
+The `(int16_t)` cast forces the compiler to interpret the bit pattern as a signed integer. For `0xD9E0`: `(int16_t)(0xD9E0)` = -9728. Divided by 2048.0f = -4.75g. Correct.
+
+**Additional issue:** If the board is horizontal, gravity shows on the z-axis, not x. accel_x should be close to 0.0g in that orientation. The bug is not visible until the board is oriented so that accel_x has a negative value. Many testers only test flat on a table and miss this entirely.
+
+</details>
+
+---
+
+**Bug 4.** Find the bug in this UART ISR.
+
+```c
+static void gps_isr(const struct device *dev, void *user_data)
+{
+    if (!uart_irq_update(dev)) return;
+    if (!uart_irq_rx_ready(dev)) return;
+
+    uint8_t buf[16];
+    int n = uart_fifo_read(dev, buf, sizeof(buf));
+
+    for (int i = 0; i < n; i++) {
+        if (buf[i] == '\n') {
+            k_sem_give(&line_ready_sem);
+        }
+    }
+
+    /* Copy bytes to the sentence buffer for the main thread */
+    memcpy(sentence_buf + sentence_idx, buf, n);
+    sentence_idx += n;
+}
+```
+
+<details><summary>Answer</summary>
+
+Multiple bugs:
+
+**Bug 1: `sentence_buf` is written from the ISR and read from the main thread with no synchronization.** `sentence_buf` and `sentence_idx` are shared mutable state. The main thread may read `sentence_buf` while the ISR is in the middle of the `memcpy`, seeing a partially-written sentence with bytes from two different lines mixed together (classic TOCTOU race condition).
+
+**Bug 2: No bounds check on `sentence_idx`.** If the GPS sends longer sentences than `sentence_buf` was allocated for, or if a sentence never contains `\n` (incomplete read, cable disconnected mid-sentence), `sentence_idx` grows unboundedly and overflows `sentence_buf`, corrupting adjacent memory.
+
+**Bug 3: The bytes are copied to `sentence_buf` even after `k_sem_give`.** If the main thread processes the previous sentence and resets `sentence_idx` between the `k_sem_give` and the `memcpy`, the ISR writes data starting from the wrong offset.
+
+**Bug 4: The `k_sem_give` is inside the byte loop, so for a buffer that contains `'\n'` followed by the start of the next sentence, the semaphore is given but then more bytes from the next sentence are appended to `sentence_buf` before the main thread gets to process the current one.**
+
+**Correct approach:** Use a ring buffer. The ISR only writes to the ring buffer and gives the semaphore. The main thread owns all parsing logic including sentence assembly.
+
+```c
+static void gps_isr(const struct device *dev, void *user_data)
+{
+    if (!uart_irq_update(dev)) return;
+    if (!uart_irq_rx_ready(dev)) return;
+
+    uint8_t byte;
+    while (uart_fifo_read(dev, &byte, 1) == 1) {
+        ring_buf_put(&gps_rb, &byte, 1);
+    }
+    k_sem_give(&gps_rx_sem);
+}
+```
+
+</details>
+
+---
+
+**Bug 5.** Find the bug in this CAN receive callback.
+
+```c
+static void wheel_rx_cb(const struct device *dev,
+                         struct can_frame *frame,
+                         void *user_data)
+{
+    int16_t rpm = (frame->data[2] << 8) | frame->data[3];
+    float vel = (float)rpm / 60.0f * WHEEL_CIRCUMFERENCE_M;
+
+    struct wheel_msg msg = { .vel_mps = vel };
+
+    /* Publish and block until subscriber processes it */
+    zbus_chan_pub(&wheel_chan, &msg, K_FOREVER);
+
+    LOG_INF("Wheel vel: %.2f m/s", (double)vel);
+}
+```
+
+<details><summary>Answer</summary>
+
+**Bug 1: `K_FOREVER` inside a CAN RX callback.** CAN callbacks may run in ISR context (or in a high-priority Zephyr CAN thread with ISR-like restrictions). `K_FOREVER` means "block indefinitely until the channel accepts the message." If the ZBus subscriber is not running or is slow, this call blocks — stalling the CAN ISR, preventing any other CAN frames from being received. On a real bus at 100Hz this escalates quickly: dropped frames, error counters climbing, eventual bus-off.
+
+**Bug 2: `LOG_INF` inside a CAN callback.** In deferred logging mode (the default), `LOG_INF` is ISR-safe but takes a non-trivial amount of time if the log buffer is under pressure. In immediate mode, it directly calls the UART backend which can block. Either way, nontrivial operations inside CAN callbacks are inadvisable.
+
+**Fix:** Use `K_NO_WAIT` and move logging to the thread that receives from ZBus.
+
+```c
+static void wheel_rx_cb(const struct device *dev,
+                         struct can_frame *frame,
+                         void *user_data)
+{
+    int16_t rpm = (int16_t)((frame->data[2] << 8) | frame->data[3]);
+    float vel = (float)rpm / 60.0f * WHEEL_CIRCUMFERENCE_M;
+
+    struct wheel_msg msg = { .vel_mps = vel };
+    zbus_chan_pub(&wheel_chan, &msg, K_NO_WAIT);
+    /* Logging happens in the subscriber thread, not here */
+}
+```
+
+Note also: `frame->data[2]` is `uint8_t`, so `(frame->data[2] << 8)` produces a `uint32_t` intermediate. The bitwise-OR result must be cast to `(int16_t)` to correctly represent negative RPM values. Both the original code and fix need this cast.
+
+</details>
+
+---
+
+**Bug 6.** Find the bug in this devicetree overlay.
+
+```dts
+&i2c1 {
+    status = "okay";
+    clock-frequency = <I2C_BITRATE_FAST>;
+
+    imu: icm42688@0x68 {
+        compatible = "invensense,icm42688p";
+        reg = <0x68>;
+        int-gpios = <&gpiob 3 GPIO_ACTIVE_HIGH>;
+    };
+};
+```
+
+<details><summary>Answer</summary>
+
+**Bug: The node name has `@0x68` but it should be `@68`. The `0x` prefix is not valid in DTS node address notation.**
+
+In Devicetree Source, the address after `@` in a node name is a *hexadecimal number without the `0x` prefix*. The format `device@HH` where HH is the hex address without prefix. `icm42688@0x68` will either cause a DTS compile error or (in some toolchains) be silently treated differently from the `reg = <0x68>` property, leading to a node address mismatch warning.
+
+**Corrected:**
+```dts
+imu: icm42688@68 {
+    compatible = "invensense,icm42688p";
+    reg = <0x68>;    /* 0x prefix IS valid here (it's a cell value, not an address string) */
+    int-gpios = <&gpiob 3 GPIO_ACTIVE_HIGH>;
+};
+```
+
+Note: the `@68` and `reg = <0x68>` both refer to hex 0x68 = decimal 104. The `@` label uses plain hex digits; the property cell uses C-style `0x` notation. Both must represent the same value.
+
+</details>
+
+---
+
+**Bug 7.** Find the bug. This code is supposed to detect CAN bus-off and recover.
+
+```c
+static void state_cb(const struct device *dev,
+                      enum can_state state,
+                      struct can_bus_err_cnt err,
+                      void *user_data)
+{
+    if (state == CAN_STATE_BUS_OFF) {
+        /* Recover and immediately restart filter */
+        can_recover(dev, K_MSEC(100));
+        can_start(dev);
+        can_add_rx_filter(dev, motor_cb, NULL, &motor_filter);
+    }
+}
+```
+
+<details><summary>Answer</summary>
+
+**Bug: `can_start()` is called after `can_recover()` inside the state change callback.**
+
+The state change callback fires from the CAN driver context (potentially ISR or CAN management thread). Calling `can_start()` from within the state change callback can cause a deadlock or re-entrant driver call: the CAN driver is in the middle of state management when you call another CAN API that requires the same internal lock.
+
+Additionally, `can_add_rx_filter()` should not be called again if the filter was already registered — each call registers an additional filter slot. CAN controllers have a limited number of filter slots (typically 14–28 on STM32 FDCAN). After a few hundred bus-off events, all filter slots are exhausted and `can_add_rx_filter` returns an error.
+
+**Fix:** Use `k_work_submit()` in the callback to defer the recovery to a work queue thread (thread context, not ISR context). Track whether the filter has already been registered.
+
+```c
+static struct k_work can_recover_work;
+static bool filter_registered = false;
+
+static void can_recover_work_fn(struct k_work *work)
+{
+    can_recover(can_dev, K_MSEC(100));
+    if (!filter_registered) {
+        int fid = can_add_rx_filter(can_dev, motor_cb, NULL, &motor_filter);
+        filter_registered = (fid >= 0);
+    }
+}
+
+static void state_cb(const struct device *dev,
+                      enum can_state state,
+                      struct can_bus_err_cnt err,
+                      void *user_data)
+{
+    if (state == CAN_STATE_BUS_OFF) {
+        k_work_submit(&can_recover_work);
+    }
+}
+```
+
+</details>
+
+---
+
+**Bug 8.** This code reads a GPS sentence and converts the latitude. Find the coordinate conversion bug.
+
+```c
+static void parse_lat(const char *lat_str, char ns, float *out)
+{
+    float raw = atof(lat_str);   /* e.g. "4807.038" for 48°07.038' */
+
+    /* Convert degrees-minutes to decimal degrees */
+    int degrees = (int)raw / 100;
+    float minutes = raw - (degrees * 100);
+    float decimal = degrees + minutes / 60.0f;
+
+    if (ns == 'S') decimal = -decimal;
+    *out = decimal;
+}
+```
+
+<details><summary>Answer</summary>
+
+**Bug: integer division on `(int)raw / 100` truncates incorrectly for latitudes ≥ 100°.**
+
+For latitude `4807.038`: `(int)raw` = `4807`. `4807 / 100` = `48` (integer division). This is correct for this value.
+
+But consider longitude `13930.500` (139°30.500', typical in Japan): `(int)raw` = `13930`. `13930 / 100` = `139` (integer division). Still correct here.
+
+The actual bug is more subtle: **the cast `(int)raw / 100` is `(int)(raw) / 100` — operator precedence**. The cast applies to `raw` only, producing an integer, and then integer division by `100` truncates. For `4807.038`:
+- `(int)raw` = 4807
+- `4807 / 100` = 48 ✓
+
+But if `raw` had any fractional component in the degrees part (which it cannot, since NMEA format always has the fractional part in the minutes), or if the value were negative (which it also cannot be in NMEA format since the sign comes from N/S), this would fail.
+
+**The real bug is:** `int degrees = (int)(raw / 100.0f)` — with a float division first — would be safer. But the actual bug present is that for `raw = 4807.038`, `(int)raw` correctly gives `4807` only because `atof` returned the full precision. If the string parsing returned `4807.0379...` then `(int)raw` still gives `4807` so the degrees calculation is accident-correct.
+
+**The definitive bug:** `minutes = raw - (degrees * 100)` gives `4807.038 - 4800 = 7.038`. `decimal = 48 + 7.038/60 = 48.1173`. This is actually correct.
+
+The more likely subtle bug: when `ns == 'S'` or when parsing is applied to longitude with `ew == 'W'`, the W/E test is often missing in the caller. Also `atof` vs `strtof` — `atof` does not set `errno` on failure, `strtof` does. On Zephyr's minimal libc, `atof` behavior on malformed strings is undefined.
+
+**Better implementation:**
+```c
+float lat_deg = (int)(lat_raw / 100.0f) + fmod(lat_raw, 100.0f) / 60.0f;
+```
+Using `fmod` is idiomatic for this NMEA conversion and matches Zephyr/embedded style.
+
+</details>
+
+---
+
+## Section C — Fill in the Blank
+
+Read each code snippet and fill in the `X___X` placeholders. Answers in the details blocks.
+
+---
+
+**C1.** Complete the I2C overlay node for an ICM-42688 at address 0x69 on I2C1 at 400 kHz with a data-ready interrupt on PC7.
+
+```dts
+&i2c1 {
+    status = "okay";
+    clock-frequency = <X___X>;
+
+    imu: icm42688@X___X {
+        compatible = "invensense,icm42688p";
+        reg = <X___X>;
+        int-gpios = <X___X X___X X___X>;
+    };
+};
+```
+
+<details><summary>Answer</summary>
+
+```dts
+&i2c1 {
+    status = "okay";
+    clock-frequency = <I2C_BITRATE_FAST>;      /* 400 kHz */
+
+    imu: icm42688@69 {                          /* address without 0x prefix */
+        compatible = "invensense,icm42688p";
+        reg = <0x69>;                           /* 0x69: AD0 pin is HIGH */
+        int-gpios = <&gpioc 7 GPIO_ACTIVE_HIGH>; /* port C, pin 7, active high */
+    };
+};
+```
+
+</details>
+
+---
+
+**C2.** Complete the burst-read call that reads 12 bytes starting at register `ACCEL_XOUT_H` from slave address `0x68`.
+
+```c
+uint8_t start_reg = ICM42688_ACCEL_XOUT_H;
+uint8_t raw[12];
+
+int rc = i2c_write_read(X___X, X___X,
+                        X___X, X___X,
+                        X___X, X___X);
+```
+
+<details><summary>Answer</summary>
+
+```c
+uint8_t start_reg = ICM42688_ACCEL_XOUT_H;
+uint8_t raw[12];
+
+int rc = i2c_write_read(i2c_dev,     /* the I2C device obtained from DEVICE_DT_GET */
+                        0x68,        /* slave address */
+                        &start_reg,  /* write buffer: address of the register to start at */
+                        1,           /* write length: 1 byte (the register address) */
+                        raw,         /* read buffer: destination for 12 sensor bytes */
+                        12);         /* read length: 12 bytes (6 accel + 6 gyro) */
+```
+
+</details>
+
+---
+
+**C3.** The accelerometer raw value is stored in two consecutive bytes `raw[0]` (high) and `raw[1]` (low) as a signed big-endian 16-bit integer. Fill in the conversion to a float in units of g for ±16g range (sensitivity = 2048 LSB/g).
+
+```c
+float accel_x_g = X___X;
+```
+
+<details><summary>Answer</summary>
+
+```c
+float accel_x_g = (int16_t)((raw[0] << 8) | raw[1]) / 2048.0f;
+```
+
+The `(int16_t)` cast is mandatory — without it, `(raw[0] << 8) | raw[1]` evaluates to `uint32_t` (due to integer promotion), and negative values become large positive numbers. The `/2048.0f` converts from raw ADC counts to g. The `f` suffix on `2048.0f` keeps the arithmetic in single-precision float rather than double.
+
+</details>
+
+---
+
+**C4.** Complete the CAN filter that accepts only standard frames with ID exactly `0x100`.
+
+```c
+static struct can_filter my_filter = {
+    .flags = X___X,
+    .id    = X___X,
+    .mask  = X___X,
+};
+```
+
+<details><summary>Answer</summary>
+
+```c
+static struct can_filter my_filter = {
+    .flags = 0,               /* 0 = standard 11-bit ID (not extended 29-bit) */
+    .id    = 0x100,           /* accept frames with this exact ID */
+    .mask  = CAN_STD_ID_MASK, /* 0x7FF: all 11 bits of the ID must match */
+};
+```
+
+If you used `.mask = 0`, ALL frames would be accepted regardless of ID (every bit is a don't-care). `CAN_STD_ID_MASK` = `0x7FF` means "all 11 ID bits must exactly match `.id`." For a partial match (e.g., accept any ID between 0x100 and 0x107), you would use a mask with the lower 3 bits cleared: `.mask = 0x7F8`.
+
+</details>
+
+---
+
+**C5.** Complete the UART ring buffer declaration and ISR byte-push.
+
+```c
+#define RX_BUF_SZ 512
+X___X(gps_rb, RX_BUF_SZ);
+
+static void gps_isr(const struct device *dev, void *user_data)
+{
+    if (!uart_irq_update(dev)) return;
+    if (!uart_irq_rx_ready(dev)) return;
+
+    uint8_t byte;
+    while (X___X(dev, &byte, 1) == 1) {
+        X___X(&gps_rb, &byte, 1);
+    }
+    X___X(&gps_rx_sem);
+}
+```
+
+<details><summary>Answer</summary>
+
+```c
+#define RX_BUF_SZ 512
+RING_BUF_DECLARE(gps_rb, RX_BUF_SZ);   /* declares struct ring_buf and backing array */
+
+static void gps_isr(const struct device *dev, void *user_data)
+{
+    if (!uart_irq_update(dev)) return;
+    if (!uart_irq_rx_ready(dev)) return;
+
+    uint8_t byte;
+    while (uart_fifo_read(dev, &byte, 1) == 1) {  /* read from hardware FIFO */
+        ring_buf_put(&gps_rb, &byte, 1);           /* write to software ring buffer */
+    }
+    k_sem_give(&gps_rx_sem);   /* wake reader thread */
+}
+```
+
+</details>
+
+---
+
+**C6.** Complete the NMEA coordinate conversion from DDDMM.MMMM format to decimal degrees.
+
+```c
+float lat_raw = 4807.038f;   /* from sscanf */
+char ns = 'N';
+
+float lat_decimal = X___X + X___X / 60.0f;
+if (X___X) lat_decimal = -lat_decimal;
+```
+
+<details><summary>Answer</summary>
+
+```c
+float lat_raw = 4807.038f;
+char ns = 'N';
+
+float lat_decimal = (int)(lat_raw / 100.0f) + fmod(lat_raw, 100.0f) / 60.0f;
+//                  ^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+//                  degrees: 4807/100 = 48    minutes: fmod(4807.038, 100) = 7.038
+//                                             7.038 / 60 = 0.1173
+//                  Result: 48 + 0.1173 = 48.1173 degrees
+
+if (ns == 'S') lat_decimal = -lat_decimal;
+```
+
+Breaking down: `(int)(4807.038f / 100.0f)` = `(int)(48.07)` = `48` (degrees). `fmod(4807.038f, 100.0f)` = `7.038` (minutes). `7.038 / 60.0f` = `0.1173`. Sum = `48.1173` decimal degrees.
+
+</details>
+
+---
+
+## Section D — Lab Tasks
+
+These require actual hardware: STM32 Nucleo-H743ZI2, ICM-42688 breakout, and optionally a logic analyzer.
+
+---
+
+### Lab Task 1: I2C Bus Scan and Stuck Bus Recovery
+
+**Objective:** Verify your ICM-42688 is wired correctly, diagnose pull-up issues, and deliberately trigger and recover from a stuck bus.
+
+**Step 1: Write a bus scan**
+```c
+/* Find all I2C devices on the bus. Valid addresses: 0x08 to 0x77. */
+void i2c_scan(const struct device *dev)
+{
+    LOG_INF("Scanning I2C bus...");
+    for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+        uint8_t dummy;
+        int rc = i2c_read(dev, &dummy, 1, addr);
+        if (rc == 0) {
+            LOG_INF("  Found device at 0x%02x", addr);
+        }
+    }
+    LOG_INF("Scan complete");
+}
+```
+
+**Step 2: Run the scan and record the address found.**
+
+**Expected result:** One device found at either `0x68` or `0x69`.
+
+**Verification:** Measure AD0 pin voltage with a multimeter. Does the measured address match the address in your overlay?
+
+**Step 3: Verify pull-up values**
+- Disconnect power, measure resistance from SDA to VCC (3.3V rail) with a multimeter.
+- Measure resistance from SCL to VCC.
+- Expected: 2.2–4.7 kΩ.
+- If your breakout board has pull-ups: do not add more. Parallel resistance = lower R = overdrive.
+
+**Step 4: Deliberately trigger a stuck bus**
+- While the MCU is running and reading the IMU, pull SDA LOW manually with a jumper wire to GND *very briefly* (one second maximum). Release immediately.
+- Observe: subsequent `i2c_write_read` calls fail with `-EIO`.
+- Your init code should call `i2c_recover_bus()` and retry.
+
+**Verification criteria:**
+- [ ] Bus scan shows exactly one device at the expected address
+- [ ] WHO_AM_I check passes (reads 0x47)
+- [ ] After deliberately stuck-bus trigger, `i2c_recover_bus()` restores operation within 3 retries
+- [ ] Accelerometer z-axis reads approximately 9.81 m/s² when board is horizontal
+
+---
+
+### Lab Task 2: CAN Loopback and Termination Validation
+
+**Objective:** Verify CAN wiring, termination, and data path using a USB-CAN adapter before connecting to actual motor controllers.
+
+**Tools required:** USB-CAN adapter (CANable or PCAN-USB), `can-utils` on Linux host (`sudo apt install can-utils`)
+
+**Step 1: Physical wiring check**
+1. Power off everything.
+2. Measure resistance between CAN_H and CAN_L with a multimeter.
+3. Record the reading. Expected: 60 Ω (two 120 Ω terminators in parallel).
+4. If you see 120 Ω: add the second terminator. If infinite: add both.
+
+**Step 2: Setup the USB-CAN adapter on your Linux laptop**
+```bash
+sudo ip link set can0 type can bitrate 1000000
+sudo ip link set can0 up
+candump can0     # leave this running in a terminal
+```
+
+**Step 3: Send a test frame from STM32**
+```c
+/* In Zephyr app, after can_start(): */
+struct can_frame tx = {
+    .id = 0x123,
+    .dlc = 4,
+    .data = {0xDE, 0xAD, 0xBE, 0xEF},
+};
+int rc = can_send(can_dev, &tx, K_MSEC(10), NULL, NULL);
+LOG_INF("TX result: %d", rc);
+```
+
+**Expected:** `candump` shows `can0  123   [4]  DE AD BE EF`
+
+**Step 4: Send from adapter, receive on STM32**
+```bash
+cansend can0 201#0100023D0000089A    # 8 bytes: RPM=+256, etc.
+```
+Verify your Zephyr callback fires and decodes the values correctly.
+
+**Verification criteria:**
+- [ ] Multimeter reads 60 Ω across CAN_H/CAN_L (with power off)
+- [ ] `candump` shows STM32-originated frames with correct ID and data
+- [ ] `cansend` from host triggers the Zephyr RX callback
+- [ ] After `can_send`, the return value is 0 (not `-ENETDOWN`)
+- [ ] No bus-off events during 60 seconds of 100Hz transmission
+
+---
+
+### Lab Task 3: UART GPS Loopback Test (No Real GPS Required)
+
+**Objective:** Verify the full UART ring buffer pipeline and NMEA parser without requiring a real GPS fix (useful indoors).
+
+**Method:** Use a second UART or a USB-UART adapter to inject known NMEA sentences.
+
+**Step 1: Prepare test sentences**
+```bash
+# On your Linux laptop with a USB-UART adapter connected to STM32 USART1 RX:
+echo '$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A' > /dev/ttyUSB0
+echo '$GPRMC,123520,A,4807.039,N,01131.001,E,023.1,084.5,230394,003.1,W*70' > /dev/ttyUSB0
+```
+
+**Step 2: Run the GPS thread and observe output**
+Expected log output:
+```
+gps_uart: GPS parsed: lat=48.1173 lon=11.5167 speed=0.0115 m/s
+```
+
+**Step 3: Test the partial-sentence edge case**
+Split the sentence across two sends with a 1 ms delay between them:
+```bash
+printf '$GPRMC,123519,A,4807.038,' > /dev/ttyUSB0
+sleep 0.001
+printf 'N,01131.000,E,022.4,084.4,230394,003.1,W*6A\r\n' > /dev/ttyUSB0
+```
+Verify: the parser still produces a correct result. If it fails, your accumulation logic has the "one callback = one sentence" bug.
+
+**Step 4: Test V-status (no fix) handling**
+```bash
+echo '$GPRMC,123519,V,0000.000,N,00000.000,E,000.0,000.0,010190,000.0,W*77' > /dev/ttyUSB0
+```
+Expected: no GPS message published to ZBus. The `V` status means void — a properly written parser ignores it.
+
+**Verification criteria:**
+- [ ] Valid sentences (status=A) produce correct lat/lon on ZBus
+- [ ] Split sentences (sent in two parts) still parse correctly
+- [ ] Void sentences (status=V) produce no ZBus publish
+- [ ] Ring buffer overflow counter stays at 0 during 60-second test
+- [ ] No assertion or panic when GPS module is disconnected mid-sentence
+
+---
+
+### Lab Task 4: DRDY Interrupt Timing Validation
+
+**Objective:** Verify the DRDY interrupt pathway and measure latency from IMU data-ready to application receipt.
+
+**Setup:** Logic analyzer on ICM-42688 INT1 pin and on a GPIO that you toggle in your ISR.
+
+**Step 1: Toggle a test GPIO in the DRDY ISR**
+```c
+/* In your DRDY ISR, toggle a test pin for logic analyzer capture */
+static const struct gpio_dt_spec test_pin =
+    GPIO_DT_SPEC_GET(DT_ALIAS(test_gpio), gpios);
+
+static void imu_drdy_isr(const struct device *dev,
+                          struct gpio_callback *cb, uint32_t pins)
+{
+    gpio_pin_toggle_dt(&test_pin);   /* visible on logic analyzer */
+    k_sem_give(&imu_drdy_sem);
+}
+```
+
+**Step 2: Decode timing on logic analyzer**
+Set up two channels:
+- Channel A: INT1 from ICM-42688
+- Channel B: your test GPIO
+
+Trigger on Channel A rising edge. Measure time from Channel A rising to Channel B toggling.
+
+Expected: < 5 µs (ISR latency on Cortex-M7 at 480 MHz).
+
+**Step 3: Measure end-to-end latency to ZBus publish**
+Add a second GPIO toggle at the point of `zbus_chan_pub` in your reader thread. Measure from INT1 rising to your second toggle.
+
+Expected: < 500 µs (dominated by I2C transfer time at 400 kHz: 12 bytes × 2 clock periods × 2.5 µs ≈ 300 µs total).
+
+**Step 4: Measure actual IMU sample rate**
+Measure the period between consecutive INT1 rising edges.
+Configure IMU for 100 Hz ODR (output data rate). Expected period: 10.0 ms ± 0.1 ms.
+
+**Verification criteria:**
+- [ ] ISR latency (INT1 to test GPIO toggle) < 5 µs
+- [ ] End-to-end latency (INT1 to ZBus publish) < 500 µs
+- [ ] Measured IMU ODR within 1% of configured 100 Hz
+- [ ] No semaphore overflow (ISR should never give faster than the thread can take)
+
+---
+
+## Section E — Deeper Thinking
+
+---
+
+**E1.** You are building a robot with three ICM-42688 IMUs for fault detection and voting. You need all three on the same I2C bus. The ICM-42688 only supports two addresses (0x68 and 0x69). How would you solve this without changing to SPI? Describe three different approaches, their trade-offs, and which you would choose for a production system.
+
+<details><summary>Answer</summary>
+
+**Approach 1: I2C multiplexer (PCA9548A)**  
+A PCA9548A chip connects to the master I2C bus and presents 8 downstream channel ports, each of which can be independently enabled/disabled. You wire each IMU to a different channel. The master sends a command to the PCA9548A to enable channel 0, reads IMU at 0x68, disables channel 0, enables channel 1, reads the second IMU at 0x68, etc.
+
+Trade-offs: adds one additional chip (PCA9548A at ~$1), adds ~2 µs overhead per channel switch, requires an extra I2C address (PCA9548A at 0x70–0x77), increases software complexity. Cannot read all three IMUs simultaneously. For fault detection, this is acceptable because you just need the samples to be close in time, not truly simultaneous.
+
+**Approach 2: Three separate I2C buses**  
+The STM32H743 has four I2C peripherals (I2C1–I2C4). Wire one IMU to each bus. All three can be polled at 0x68 independently.
+
+Trade-offs: uses three GPIO pairs (6 pins total) and three I2C peripherals. No additional chips. Software accesses three different `i2c_dev` pointers. However, Zephyr I2C drivers on H743 support all four buses. This is the cleanest approach for a new design — no additional components, no software multiplexing.
+
+**Approach 3: I2C address translator (LTC4317)**  
+An address translator sits between the master and one slave and reprograms its I2C address. The master addresses the translator at a configured address, and the translator forwards the transaction to the slave at its original address. Transparent to the slave.
+
+Trade-offs: one chip per address remapping, specialized component, more complex wiring. The LTC4317 is expensive (~$4). Rarely used compared to multiplexers or separate buses.
+
+**Production choice:** Separate I2C buses (Approach 2). It is the simplest, requires no additional components, and uses available hardware resources on the H743. The only cost is 6 GPIO pins which are typically available on a Nucleo. The software change is trivial (three `DEVICE_DT_GET` calls, three separate overlays).
+
+If GPIO pins are critically constrained (high-density PCB), use the PCA9548A mux.
+
+</details>
+
+---
+
+**E2.** Your CAN network has four nodes: a motor controller (1 Mbps, sends at 100 Hz), a safety supervisor (1 Mbps, sends at 50 Hz), a GPS bridge (1 Mbps, sends at 10 Hz), and a status logger (1 Mbps, sends at 5 Hz). Design a CAN message ID scheme that ensures safety-critical messages always win arbitration, and calculate the total bus utilization.
+
+<details><summary>Answer</summary>
+
+**ID design (lower ID = higher priority):**
+
+| Node | Message | ID | Priority |
+|------|---------|-----|---------|
+| Safety supervisor | E-stop command | 0x001 | Highest |
+| Safety supervisor | Fault status | 0x002 | |
+| Motor controller | Velocity feedback | 0x010 | |
+| Motor controller | Current/temperature | 0x011 | |
+| GPS bridge | Position (RMC) | 0x100 | |
+| Status logger | Heartbeat | 0x200 | Lowest |
+
+This ensures the E-stop (0x001) always wins arbitration over any other message, regardless of when it is sent.
+
+**Bus utilization calculation at 1 Mbps:**
+
+One standard CAN frame with 8 bytes of data:
+- SOF (1 bit) + 11-bit ID (11) + RTR (1) + IDE (1) + R0 (1) + DLC (4) + Data (8×8=64) + CRC (15) + CRC delim (1) + ACK (2) + EOF (7) + IFS (3) = ~111 bits minimum
+- Bit stuffing adds up to 20% overhead → ~130 bits typical for 8-byte frame
+- At 1 Mbps: 130 bits × 1 µs = 130 µs per frame
+
+| Node | Rate | Frames/sec | µs/sec |
+|------|------|-----------|--------|
+| Motor controller (2 msgs × 100 Hz) | 200 | 200 × 130 = 26,000 µs |
+| Safety supervisor (2 msgs × 50 Hz) | 100 | 100 × 130 = 13,000 µs |
+| GPS bridge (1 msg × 10 Hz) | 10 | 10 × 130 = 1,300 µs |
+| Status logger (1 msg × 5 Hz) | 5 | 5 × 130 = 650 µs |
+
+Total: 40,950 µs out of 1,000,000 µs = **4.1% bus utilization**. Well within the comfortable limit of 50% (above 50%, collision probability and latency increase non-linearly).
+
+Remaining for additional messages: ~45,900 additional frames/second of capacity.
+
+</details>
+
+---
+
+**E3.** You are implementing a sensor fusion algorithm that combines IMU data (from I2C at 100 Hz via DRDY interrupt) and GPS data (from UART at 1 Hz). The fusion algorithm requires timestamps for both to calculate time-of-validity correctly. Where should each timestamp be captured, and what error source dominates the timestamp accuracy for each? At 100 Hz IMU rate, how much position error does a 5 ms timestamp error introduce if the platform is moving at 2 m/s?
+
+<details><summary>Answer</summary>
+
+**IMU timestamp:** Capture `k_ticks_to_us_near64(k_uptime_ticks())` *immediately after* the `i2c_write_read()` call returns in the reader thread. The timestamp error is dominated by:
+- ISR latency: ~5 µs (from INT1 high to ISR executing)
+- Semaphore schedule latency: ~50–200 µs (time from k_sem_give to thread wake, depending on scheduler and competing threads)
+- I2C transfer time: ~300 µs at 400 kHz for 12 bytes (occurs before the timestamp is captured)
+
+Total: the timestamp is captured ~350–500 µs after the data was *physically ready* at the sensor. For a 100 Hz sensor fusion, this is the dominant error unless you use the DRDY interrupt timestamp directly (capture timestamp IN the ISR before the semaphore give).
+
+Better: capture timestamp in the ISR: `imu_ts = k_ticks_to_us_near64(k_uptime_ticks())` before `k_sem_give`. This reduces error to the ISR latency (~5 µs). The data registers CONTAIN the sample, and the INT1 rising edge is the reference for data validity.
+
+**GPS timestamp:** NMEA sentences encode the time of the GPS fix (the `HHMMSS` field in the sentence) — this is GPS time, not your microcontroller's clock. For sensor fusion, you need the timestamp in your local clock domain. Capture the reception timestamp as the first `\n` byte is received — i.e., when the ring buffer reader thread detects `\n` and before parsing. Error sources: UART transmission delay (~7 ms at 9600 baud for 80 bytes), thread wake latency (~200 µs). UART transmission delay dominates: the last byte of the sentence arrives ~7 ms after the first byte was transmitted.
+
+**Position error from 5 ms timestamp error at 2 m/s:**
+```
+position_error = velocity × time_error
+               = 2 m/s × 0.005 s
+               = 0.01 m = 1 cm
+```
+
+At 100 Hz with angular velocity: if the platform is also rotating at 0.5 rad/s (moderate turn), the heading change during 5 ms is 0.5 × 0.005 = 0.0025 rad ≈ 0.14°. Over 1 minute of integration at 2 m/s, this heading error propagates to 2 × 60 × sin(0.14°) ≈ 30 cm position error. Seemingly small timestamp errors compound in navigation.
+
+This is why `rclcpp::Clock().now()` (called after ioctl returns on the Jetson) is a known source of drift in navigation stacks — the 1–3 ms latency looks small but compounds in EKF position estimation.
+
+</details>
+
+---
+
+**E4.** The Zephyr `ring_buf_put()` function returns the number of bytes actually written. In your GPS ISR, you checked the return value and added a log warning when it returns 0. A colleague says: "The log warning in an ISR is fine, it uses `LOG_WRN_ONCE` so it only prints once." Is there a remaining problem with this approach, even with `_ONCE`? What would you do instead?
+
+<details><summary>Answer</summary>
+
+Yes, there is still a problem. `LOG_WRN_ONCE` prevents repeated logging, but the underlying issue — the ring buffer being permanently full — is not resolved by the log call.
+
+Once `ring_buf_put()` returns 0, the ring buffer is full. Every subsequent byte from the UART is also dropped silently (the warning fires only once, so you won't see the continuing overflow). The GPS thread may never drain the buffer fast enough because:
+
+1. The GPS thread is lower priority than something else running, or
+2. The GPS thread is blocked waiting for some other resource, or
+3. `sscanf` in the parse step takes longer than expected (common with locale-sensitive sscanf implementations on debug builds)
+
+Meanwhile the UART hardware FIFO (typically 16 bytes on STM32) also fills up once the software ring buffer is full. When the hardware FIFO is full, incoming bytes cause a UART overrun error (`UART_RX_OVERRUN` in the error IRQ). On STM32, overrun is a sticky error that disables further UART reception until cleared — meaning your ISR will stop receiving bytes entirely until you call `uart_err_check` and clear the flag.
+
+**What to do instead:**
+
+1. **Track byte-loss count as a telemetry counter** — not just a one-shot warning. A thread periodically logs the count so you know the rate of loss in the field.
+
+2. **Detect and clear UART overrun error** in the ISR: call `uart_err_check()` and reset the error flags.
+
+3. **Size the ring buffer larger** (1024 or 2048 bytes) to tolerate GPS bursts at 10 Hz where several sentences arrive in rapid succession.
+
+4. **Raise the GPS thread priority** temporarily upon detecting loss, then return to normal priority.
+
+5. Root cause: if the ring buffer consistently fills, the GPS thread is too slow for normal operation. Profile where the time goes with `k_thread_stack_space_get()` and timing measurements.
+
+</details>
+
