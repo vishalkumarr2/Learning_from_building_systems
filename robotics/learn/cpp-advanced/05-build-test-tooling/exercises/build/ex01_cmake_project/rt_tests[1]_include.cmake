@@ -1,5 +1,0 @@
-if(EXISTS "/home/viku/ai/issueanalyser/learn/cpp-advanced/05-build-test-tooling/exercises/build/ex01_cmake_project/rt_tests[1]_tests.cmake")
-  include("/home/viku/ai/issueanalyser/learn/cpp-advanced/05-build-test-tooling/exercises/build/ex01_cmake_project/rt_tests[1]_tests.cmake")
-else()
-  add_test(rt_tests_NOT_BUILT rt_tests_NOT_BUILT)
-endif()
