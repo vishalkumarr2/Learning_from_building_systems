@@ -1,21 +1,32 @@
 # Unified Study Plan: Electronics → Protocols → Embedded Systems
 ### From resistors to a 100Hz STM32 ↔ Jetson SPI bridge
-### Total: ~110–140 hours across 4 phases
+### Total: ~100–120 hours across 8 weeks
 
 ---
 
 ## How This Plan Works
 
 ```
-Phase 1: Electronics Foundations     ──→  You understand the PHYSICAL layer
-Phase 2: Protocol Deep Dives        ──→  You understand the WIRE layer
-Phase 3: Zephyr + STM32 Projects    ──→  You can BUILD firmware
-Phase 4: Jetson + ROS2 Integration  ──→  You have a WORKING system
+Week 1:  Electronics Essentials       ──→  You understand the PHYSICAL layer
+Week 2:  SPI-Focused Protocol Deep Dive ──→  You understand the WIRE layer
+Week 3:  Zephyr Foundations            ──→  You can BUILD firmware
+Week 4:  Sensors + ZBus + nanopb       ──→  You can READ sensors + ENCODE data
+Week 5–6: SPI Slave DMA               ──→  You can DMA at 100Hz (hardest part)
+Week 7:  Jetson spidev + ROS2 Node     ──→  You can RECEIVE on the Jetson
+Week 8:  EKF + Full Pipeline           ──→  You have a WORKING system
 ```
 
 **Rule:** Finish each week's checkpoint before moving on. If you can't answer a checkpoint question from memory, re-read that section.
 
-**Study approach:** Read the study notes → do the exercises → build on hardware (Phase 3+). Each "day" assumes 3–4 hours of focused study. Adjust to your schedule.
+**Study approach:** Read the study notes → do the exercises → build on hardware (Week 3+). Each "day" assumes 3–4 hours of focused study. Adjust to your schedule.
+
+### When You're Stuck (max 30 min per issue)
+
+1. **Re-read the relevant study note section** (not the whole file — use Ctrl+F)
+2. **Draw the problem** — timing diagram, signal flow, memory layout on paper
+3. **Check the Day-Wasters list** in `zephyr/00-mastery-plan.md` Section 3
+4. **Ask one specific question** — "GDB shows X but logic analyzer shows Y" beats "it doesn't work"
+5. **If stuck >30 min:** Skip to the next section, mark it, come back tomorrow fresh
 
 ---
 
@@ -24,7 +35,7 @@ Phase 4: Jetson + ROS2 Integration  ──→  You have a WORKING system
 ```
 learn/
 ├── STUDY-PLAN.md                          ← YOU ARE HERE
-├── electronics/                           ← Phase 1 + 2
+├── electronics/                           ← Week 1 + 2
 │   ├── 00-learning-plan.md                   Topic dependency graph
 │   ├── 01-passive-components.md              R, C, L, RLC (870 lines)
 │   ├── 02-semiconductors.md                  Diodes, BJT, MOSFET (591 lines)
@@ -33,7 +44,7 @@ learn/
 │   ├── 05-spi-deep-dive.md                   Shift registers → frames (514 lines)
 │   ├── 06-i2c-deep-dive.md                   Open-drain → transactions (571 lines)
 │   ├── 07-can-deep-dive.md                   Differential → arbitration (724 lines)
-│   └── exercises/                         ← NEW: Phase 1 + 2 exercises
+│   └── exercises/
 │       ├── 01-passive-components.md          R, C, L, RLC exercises
 │       ├── 02-semiconductors.md              Diode, BJT, MOSFET exercises
 │       ├── 03-opamps-adc-sampling.md         Op-amps, ADC, sampling exercises
@@ -42,7 +53,7 @@ learn/
 │       ├── 06-i2c.md                         I2C protocol exercises
 │       └── 07-can-bus.md                     CAN bus exercises
 │
-└── zephyr/                                ← Phase 3 + 4
+└── zephyr/                                ← Week 3–8
     ├── 00-mastery-plan.md                    11-project hardware plan
     ├── 01-17 source docs                     Reference material
     ├── study-notes/
@@ -61,406 +72,350 @@ learn/
 
 **Total content: ~19,000+ lines across 27 files.**
 
+Legend: 🎯 = essential for the SPI bridge goal | 📖 = skim-read OK | ⏭️ = skip if behind schedule
+
 ---
 
-## Phase 1 — Electronics Foundations (Week 1–2)
+## Week 1 — Electronics Essentials (5 days)
 *No hardware needed. Paper, pen, and a calculator.*
 
-### Week 1: Passive Components + Semiconductors
-
-#### Day 1: Resistors & Ohm's Law (3 hrs)
-**Read:** `electronics/01-passive-components.md` — Resistors section only
+### Day 1: Resistors, Capacitors, RC Filters 🎯 (3.5 hrs)
+**Read:** `electronics/01-passive-components.md` — Resistors + Capacitors + RLC sections
 **Focus on:**
-- V = IR — compute LED current-limiting resistors (you'll need this in Week 5)
+- V = IR — compute LED current-limiting resistors (you'll need this in Week 3)
 - Voltage dividers — compute output voltage with and without a load
 - Pull-up / pull-down — what "floating" means for CMOS inputs
-- Power dissipation P = I²R — when a resistor gets dangerously hot
-
-**Checkpoint — answer without looking:**
-- [ ] 3.3V GPIO, LED Vf=2.0V, target 10mA. What resistor? What power does it dissipate?
-- [ ] 10kΩ + 10kΩ divider on 5V. Load is 1kΩ. What's the actual output voltage?
-- [ ] Why does an unconnected CMOS input oscillate randomly?
-
----
-
-#### Day 2: Capacitors & RC Circuits (3 hrs)
-**Read:** `electronics/01-passive-components.md` — Capacitors + RLC sections
-**Focus on:**
-- The water tank analogy for capacitor charging
 - τ = RC time constant — the 63% rule and 5τ for "fully charged"
-- Xc = 1/(2πfC) — why caps block DC, pass AC
 - Why 100nF decoupling caps go next to EVERY IC
 - Low-pass RC filter: f₋₃dB = 1/(2πRC)
 
-**Checkpoint:**
+**Checkpoint — answer without looking:**
+- [ ] 3.3V GPIO, LED Vf=2.0V, target 10mA. What resistor? What power does it dissipate?
 - [ ] 10kΩ + 100nF filter. What's the cutoff frequency? (159 Hz)
-- [ ] Why does a 100nF cap next to VCC help during a 10ns digital switching event but a 10µF electrolytic doesn't?
-- [ ] How long to charge a 1µF cap through 10kΩ to 99% of Vcc? (5 × 10ms = 50ms)
+- [ ] Why does a 100nF cap next to VCC help during a 10ns switching event but a 10µF doesn't?
 
 ---
 
-#### Day 3: Inductors + Diodes (3 hrs)
+### Day 2: Inductors, Diodes, Transistors 🎯 (3.5 hrs)
 **Read:** `electronics/01-passive-components.md` — Inductors section
-**Read:** `electronics/02-semiconductors.md` — Diodes section
+**Read:** `electronics/02-semiconductors.md` (full)
 **Focus on:**
-- Inductor = flywheel analogy (resists current changes)
 - Back-EMF when switching off inductive loads → flyback diode
-- PN junction, forward drop (0.7V Si, 0.3V Schottky)
-- Zener diodes for voltage clamping / regulation
-- TVS diodes for ESD protection on signal lines
+- MOSFET as voltage-controlled switch — "logic-level" Vgs(th) < 3.3V
+- Rds(on) determines heat. BSS138 level-shifting for 3.3V ↔ 5V I2C
+- BJT: base current × β. MOSFET: Vgs > threshold. Know the difference.
 
 **Checkpoint:**
-- [ ] You switch off a relay coil. Why does a voltage spike appear and how does a flyback diode fix it?
-- [ ] A 3.3V GPIO drives an LED through 150Ω. The LED Vf is 1.8V. What current flows? (10mA)
-- [ ] Why are Schottky diodes used instead of regular silicon in power supply rectification?
+- [ ] You switch off a relay coil. Why does a voltage spike appear?
+- [ ] Why can't you use IRLZ44N (Vgs(th)=2-4V) reliably from 3.3V? (Threshold ≠ full enhancement)
+- [ ] Draw the BSS138 level shifter from memory.
 
 ---
 
-#### Day 4: Transistors — BJT + MOSFET (4 hrs)
-**Read:** `electronics/02-semiconductors.md` — BJT + MOSFET sections (full)
+### Day 3: Op-Amps + ADC + Sampling Theory 🎯 (3.5 hrs)
+**Read:** `electronics/03-opamps-adc-sampling.md` (full)
 **Focus on:**
-- BJT as a current-controlled switch (base current × β = collector current)
-- MOSFET as a voltage-controlled switch (Vgs > Vgs(th) → channel opens)
-- "Logic-level" MOSFET — why Vgs(th) must be < 3.3V for MCU-driven switching
-- Rds(on) — on-resistance determines heat in power switching
-- BSS138 level-shifting circuit for I2C 3.3V ↔ 5V
-- H-bridge concept (4 MOSFETs for DC motor direction control)
+- Op-amp golden rules. Non-inverting gain = 1 + Rf/Rin. Voltage follower = buffer.
+- 12-bit ADC: LSB = Vref/4096. SAR = binary search.
+- Nyquist: sample ≥ 2× max frequency. Anti-alias filter BEFORE the ADC.
+- Shift registers: the physical core of SPI TX/RX.
 
 **Checkpoint:**
-- [ ] Design a circuit: 3.3V GPIO → NPN BJT → 12V/50mA relay coil. Calculate base resistor.
-- [ ] Why can't you use a standard IRLZ44N (Vgs(th)=2-4V) reliably from 3.3V GPIO? (Threshold is *start* of conduction, not full enhancement)
-- [ ] Draw the BSS138 level shifter. How does it shift bidirectionally?
-- [ ] BJT vs MOSFET: which needs continuous base/gate current to stay ON?
+- [ ] Piezo 0–5V → your 0–3.3V ADC. Design the signal chain.
+- [ ] 150Hz signal sampled at 200Hz. What do you see? (50Hz alias)
+- [ ] What physically happens inside SPI TX on every clock edge? (Shift register shifts)
 
 ---
 
-#### Day 5: Exercises + Review (4 hrs)
-**Do:** `electronics/exercises/01-passive-components.md` — Sections A, B, C (conceptual + spot-the-bug + fill-in)
+### Day 4: Exercises — Sections A, B, C only 🎯 (4 hrs)
+**Do:** `electronics/exercises/01-passive-components.md` — Sections A, B, C
 **Do:** `electronics/exercises/02-semiconductors.md` — Sections A, B, C
-- Re-read any section where you couldn't answer
-- Work through the comparison tables in `01-passive-components.md` and `02-semiconductors.md`
-- Draw from memory: voltage divider, RC filter, BJT switch circuit, MOSFET switch circuit, BSS138 level shifter
+**Do:** `electronics/exercises/03-opamps-adc-sampling.md` — Sections A, B, C
+- Re-read any section where you struggled
+- Draw from memory: voltage divider, RC filter, BJT switch, MOSFET switch, non-inverting amp
 
 ---
 
-### Week 2: Op-Amps, ADC, Sampling + Digital Building Blocks
+### Day 5: Phase 1 Review + Draw Everything (3 hrs)
+Go through ALL Day 1–3 checkpoints from memory. Mark misses → re-read.
 
-#### Day 6: Op-Amps (3 hrs)
-**Read:** `electronics/03-opamps-adc-sampling.md` — Op-Amp section
-**Focus on:**
-- Two golden rules (with negative feedback): no input current, inputs at same voltage
-- Inverting amp: gain = −Rf/Rin
-- Non-inverting amp: gain = 1 + Rf/Rin
-- Voltage follower (buffer): WHY high-impedance sensors need one before ADC
-- Comparator: op-amp without feedback, output slams to rail
-
-**Checkpoint:**
-- [ ] Non-inverting amp with Rf=10kΩ, Rin=2kΩ. Gain? (6)
-- [ ] A piezo sensor outputs 0–5V but your ADC takes 0–3.3V. Design the signal chain.
-- [ ] What happens if you forget negative feedback on an op-amp? (Becomes a comparator)
-
----
-
-#### Day 7: ADC + Sampling Theory (3 hrs)
-**Read:** `electronics/03-opamps-adc-sampling.md` — ADC + Sampling Theory sections
-**Focus on:**
-- 12-bit ADC: LSB = Vref / 4096 — for 3.3V, one step = 0.806mV
-- SAR ADC (binary search, one bit per clock — most common in MCUs)
-- Nyquist theorem: sample at ≥ 2× highest frequency. Violate it → aliasing.
-- Aliasing: the "wagon wheel" effect. 150Hz signal sampled at 200Hz → appears as 50Hz
-- Anti-aliasing filter MUST come BEFORE the ADC (physics, not fixable in software)
-- Oversampling: sample at 10× and average → ~1.5 extra effective bits
-
-**Checkpoint:**
-- [ ] 12-bit ADC reads 2048 with Vref=3.3V. What voltage? (1.65V)
-- [ ] You sample a 150Hz signal at 200Hz. What frequency do you see? (50Hz — alias)
-- [ ] Why can't you fix aliasing after digitization?
-- [ ] What order of RC filter cutoff do you need before a 1kHz-sampled ADC? (<500Hz)
-
----
-
-#### Day 8: MUX, Serializer, Deserializer, ICs (2 hrs)
-**Read:** `electronics/03-opamps-adc-sampling.md` — Digital Building Blocks section
-**Focus on:**
-- Multiplexer: N inputs → 1 output, selected by address bits
-- Serializer (parallel → serial): the core of SPI TX
-- Deserializer (serial → parallel): the core of SPI RX
-- Shift registers: 74HC595 (output expansion), 74HC165 (input expansion)
-- IC packages: DIP, SOIC, QFP, BGA — how to read pin 1
-- How to read page 1 of a datasheet (max voltage, max current, key parameter)
-
-**Checkpoint:**
-- [ ] You have 8 LEDs but only 3 GPIO pins. How do you control all 8? (74HC595 shift register)
-- [ ] What physically happens inside SPI TX on every clock edge? (Shift register shifts one bit out, one bit in)
-
----
-
-#### Day 9: Exercises + Phase 1 Comprehensive Review (4 hrs)
-**Do:** `electronics/exercises/01-passive-components.md` — Sections D, E (lab/calc + deeper thinking)
-**Do:** `electronics/exercises/02-semiconductors.md` — Sections D, E
-**Do:** `electronics/exercises/03-opamps-adc-sampling.md` — all sections
-
-Go through ALL checkpoint questions from Days 1–8. Mark any you can't answer → re-read.
-
-Draw from memory:
-- [ ] RC low-pass filter with cutoff calculation
-- [ ] NPN BJT switch circuit with base resistor
-- [ ] MOSFET low-side switch
+Draw from memory (paper, no peeking):
+- [ ] RC low-pass filter with cutoff formula
+- [ ] MOSFET low-side switch with gate resistor
 - [ ] Non-inverting op-amp with gain formula
 - [ ] Voltage divider → buffer → ADC chain
 
-**You're ready for Phase 2 when:** You can answer every checkpoint AND complete all Section D exercises from memory.
+**You're ready for Week 2 when:** You can answer every checkpoint AND draw all 4 circuits.
+
+> **Sections D & E** of the exercises are deeper-thinking problems. They're valuable but not blocking.
+> ⏭️ Save them for evening/weekend review if time is tight.
 
 ---
 
-## Phase 2 — Protocol Deep Dives (Week 3–4)
-*Still mostly theory, but connect a logic analyzer if you have one.*
+## Week 2 — SPI-Focused Protocol Deep Dive (5 days)
+*Theory + connect a logic analyzer if you have one.*
 
-### Week 3: UART + SPI
-
-#### Day 10: UART from Electrons to Bytes (3 hrs)
-**Read:** `electronics/04-uart-serial-deep-dive.md` (full)
-**Focus on:**
-- Bit-level frame: IDLE → START (falling edge) → 8 data bits (LSB first!) → STOP
-- Draw the waveform for transmitting 'U' (0x55) — alternating 0/1 pattern
-- Baud rate = bit-times per second. Both sides must match within ±2%
-- RS-232 (±12V) vs TTL (0/3.3V) — why level shifters exist
-- DMA + idle-line interrupt for high-speed UART
-- Ring buffers: why interrupt-per-byte fails at high baud rates
+### Day 6: UART — Quick Essentials 📖 (2 hrs)
+**Read:** `electronics/04-uart-serial-deep-dive.md` — skim (you use UART for Zephyr shell, but it's not the SPI bridge)
+**Focus on the 3 things you'll actually need:**
+- Bit-level frame: IDLE → START → 8 data → STOP. LSB first.
+- Baud rate must match ±2%. 115200 is your debug default.
+- DMA + idle-line interrupt for high-throughput (GPS in Week 4)
 
 **Checkpoint:**
-- [ ] Draw the complete waveform for 'A' (0x41) at 115200-8N1. How many microseconds total?
-- [ ] Two devices at 115200 and 112000. What's the % error? At which byte does corruption start?
-- [ ] Why is TX and RX always crossed? (TX of device A → RX of device B)
-- [ ] What's the advantage of RS-485 over plain UART? (Differential, multi-drop, longer distance)
+- [ ] Draw the waveform for 'A' (0x41) at 115200-8N1.
+- [ ] Why is TX/RX always crossed?
 
 ---
 
-#### Day 11: SPI — The Shift Register Ring (4 hrs)
-**Read:** `electronics/05-spi-deep-dive.md` (full)
+### Day 7: SPI — The Shift Register Ring 🎯 (4 hrs)
+**Read:** `electronics/05-spi-deep-dive.md` (full — read every word, this is your target protocol)
 **Focus on:**
-- Core insight: SPI = two shift registers in a ring. Always full-duplex. Always exchanging data.
+- Core insight: SPI = two shift registers in a ring. Always full-duplex.
 - The 4 modes (CPOL × CPHA) — draw all 4 timing diagrams
 - CS: active-low, pull-up during boot, one per slave
-- SPI master vs slave timing asymmetry — why slave is hard
-- Signal integrity: why 40MHz SPI on 30cm wires fails (ringing)
+- Master vs slave timing asymmetry — why slave is hard
+- Signal integrity: 40MHz SPI on 30cm wires fails (ringing, reflections)
 - Protocol framing: magic byte + length + payload + CRC
 - The "first byte garbage" problem in slave mode
 
 **Checkpoint:**
 - [ ] Master sends 0xA5 in Mode 0. Draw CLK, MOSI with data on each edge.
-- [ ] SPI slave reads 0x52 when master sent 0xA5. What's wrong? (Wrong CPOL/CPHA — bits shifted by 1)
-- [ ] Why is SPI always full-duplex even when you only want to read? (Shift register ring — master must clock out dummy bytes)
-- [ ] Why does SPI need a framing protocol on top? (No inherent message boundaries)
+- [ ] Slave reads 0x52 when master sent 0xA5. What's wrong? (Wrong CPOL/CPHA)
+- [ ] Why is SPI always full-duplex? (Shift register ring)
+- [ ] Why does SPI need a framing protocol? (No message boundaries)
 
 ---
 
-#### Day 12: SPI Slave + DMA — The Hard Part (4 hrs)
-**Do:** `electronics/exercises/04-uart-serial.md` — all sections (while Day 10 is fresh)
-**Do:** `electronics/exercises/05-spi.md` — all sections (while Day 11 is fresh)
+### Day 8: SPI Slave + DMA Concepts 🎯 (3.5 hrs)
+**Do:** `electronics/exercises/05-spi.md` — all sections (while Day 7 is fresh)
 **Read:** `zephyr/study-notes/04-spi-slave-dma.md` — PART 1 only (ELI15 concepts)
 **Focus on:**
-- Why DMA is necessary (CPU can't service SPI fast enough at 100Hz)
-- Double buffering: Buffer A transmitting while Buffer B being filled
+- Why DMA is necessary (CPU can't service SPI at 100Hz)
+- Double buffering: Buffer A transmitting while Buffer B filled
 - The pre-arming race: DMA must be ready BEFORE CS asserts
-- D-cache coherency: GDB lies to you (cache shows correct, DMA sees stale)
-- `SCB_CleanInvalidateDCache_by_Addr()` — clean = write back, invalidate = mark stale
+- D-cache coherency: **TX = Clean before DMA** (write-back dirty lines), **RX = Invalidate after DMA** (discard stale cache). Don't conflate them.
+- `SCB_CleanDCache_by_Addr()` for TX, `SCB_InvalidateDCache_by_Addr()` for RX
 
 **Checkpoint:**
-- [ ] Why can't you arm DMA inside the CS assert interrupt? (Interrupt latency ~1-10µs, CS-to-clock ~100ns)
-- [ ] GDB shows your TX buffer is correct but the Jetson reads garbage. What's wrong? (D-cache not flushed before DMA)
-- [ ] What does `__aligned(32)` do on a buffer and why does DMA need it?
+- [ ] Why can't you arm DMA inside the CS ISR? (ISR latency > CS-to-clock gap)
+- [ ] GDB shows correct TX buffer but Jetson reads garbage. What's wrong? (D-cache not cleaned before DMA TX)
+- [ ] What's `__aligned(32)` for? (Cache line alignment — partial invalidate corrupts adjacent data)
 
 ---
 
-### Week 4: I2C + CAN
-
-#### Day 13: I2C — Open Drain to Transactions (4 hrs)
-**Read:** `electronics/06-i2c-deep-dive.md` (full)
-**Focus on:**
-- Open-drain: MOSFET only pulls LOW, pull-up resistor pulls HIGH. This IS the key to I2C.
-- Wired-AND: any device pulling low = line is low. Multiple devices share safely.
-- Pull-up resistor calculation: R < rise_time / (0.8473 × C_bus)
-- Complete transaction walkthrough: START → address+W → register → REPEATED START → address+R → data → NACK → STOP
-- Bus stuck recovery: 9-clock bit-bang (slave stuck mid-byte, SDA held low)
-- Clock stretching: slave holds SCL low to buy time
+### Day 9: I2C Essentials + CAN Overview 🎯📖 (3.5 hrs)
+**Read:** `electronics/06-i2c-deep-dive.md` (full — you need I2C for the IMU in Week 4)
+**Read:** `electronics/07-can-deep-dive.md` — **skim only** (CAN = 1 project in Week 4, not your main protocol)
+**Focus on I2C:**
+- Open-drain + pull-up. Wired-AND sharing.
+- Complete transaction: START → addr+W → reg → RSTART → addr+R → data → NACK → STOP
+- Bus stuck recovery: 9-clock bit-bang
+**Skim CAN for:**
+- Differential pair, dominant/recessive, 120Ω termination, frame format
 
 **Checkpoint:**
-- [ ] Why does I2C need pull-ups but SPI doesn't? (Open-drain vs push-pull)
-- [ ] Calculate pull-up for 400kHz I2C, 200pF bus capacitance. (< 1.77kΩ, use 2.2kΩ)
-- [ ] Walk through reading register 0x75 from device 0x68: every byte on the wire with R/W bit
-- [ ] Bus is stuck with SDA low. Why does clocking SCL 9 times fix it?
+- [ ] Why does I2C need pull-ups but SPI doesn't?
+- [ ] Walk through reading register 0x75 from device 0x68: every byte on the wire
+- [ ] CAN: what does a multimeter across CANH-CANL read with power off? (60Ω)
 
 ---
 
-#### Day 14: CAN — Differential Signaling + Arbitration (3 hrs)
-**Read:** `electronics/07-can-deep-dive.md` (full)
-**Focus on:**
-- Differential pair: CANH−CANL. Noise on both wires cancels out.
-- Dominant (0) vs Recessive (1): dominant always wins → wired-AND on the bus
-- 120Ω termination at each end (60Ω total). Without it: reflections cause bit errors.
-- Frame format: SOF → ID → RTR → DLC → Data → CRC → ACK → EOF
-- Arbitration: lower ID wins because dominant=0. Bit-by-bit comparison during ID field.
-- Error states: Error Active → Error Passive → Bus Off
-- Bit-stuffing: insert opposite bit after 5 consecutive same bits (for clock recovery)
+### Day 10: Protocol Exercises + Comparison Table (3.5 hrs)
+**Do:** `electronics/exercises/04-uart-serial.md` — Sections A, B only ⏭️ (skip D, E)
+**Do:** `electronics/exercises/06-i2c.md` — Sections A, B, C
+**Do:** `electronics/exercises/07-can-bus.md` — Sections A, B only ⏭️ (skip D, E)
 
-**Checkpoint:**
-- [ ] Node A sends ID 0x100, Node B sends ID 0x080 simultaneously. Who wins and at which bit?
-- [ ] Multimeter across CANH-CANL with power off. What should it read? (60Ω with both terminators)
-- [ ] What happens to a node that keeps getting CRC errors? (TEC/REC increment → Bus Off)
-- [ ] Why does CAN need bit-stuffing? (Receiver recovers clock from edges; 5+ same bits = no edge = clock drift)
+Fill in this table from memory, then check:
 
----
-
-#### Day 15: Exercises + Protocol Comparison + Phase 2 Review (4 hrs)
-**Do:** `electronics/exercises/06-i2c.md` — all sections (while Day 13 is fresh)
-**Do:** `electronics/exercises/07-can-bus.md` — all sections (while Day 14 is fresh)
-
-Fill in this table from memory, then check against the deep-dive docs:
-
-| Feature | UART | SPI | I2C | CAN |
-|---------|------|-----|-----|-----|
-| Wires | ? | ? | ? | ? |
-| Clock | ? | ? | ? | ? |
-| Max speed | ? | ? | ? | ? |
-| Max distance | ? | ? | ? | ? |
-| Multi-device? | ? | ? | ? | ? |
-| Duplex | ? | ? | ? | ? |
-| Best for | ? | ? | ? | ? |
-
-**Answers:**
 | Feature | UART | SPI | I2C | CAN |
 |---------|------|-----|-----|-----|
 | Wires | 2 (TX/RX) | 4+ (CLK/MOSI/MISO/CS) | 2 (SDA/SCL) | 2 (CANH/CANL) |
-| Clock | None (async) | Master provides | Master provides | Embedded in data |
-| Max speed | ~3 Mbaud | ~50 MHz | 3.4 MHz (HS) | 1 Mbps (classic) |
-| Max distance | ~15m (RS-232) | ~30cm at speed | ~1m at 400kHz | ~500m at 125kbps |
-| Multi-device? | Point-to-point | 1 master, N slaves (via CS) | Multi-master, N slaves (via address) | Multi-master, broadcast |
+| Clock | Async | Master provides | Master provides | Embedded in data |
+| Max speed | ~3 Mbaud | ~50 MHz | 3.4 MHz (HS) | 1 Mbps |
 | Duplex | Full | Full | Half | Half |
-| Best for | Debug console, GPS | High-speed chip-to-chip | Config registers, sensors | Automotive, industrial |
+| Best for | Debug/GPS | High-speed chip-to-chip | Config/sensors | Automotive |
 
-Re-do all Week 3–4 checkpoints from memory.
-
-**You're ready for Phase 3 when:** You can draw the timing diagram for ANY of the 4 protocols from memory, and you can calculate I2C pull-up values.
+**You're ready for Week 3 when:** You can draw the SPI timing diagram for all 4 modes AND the I2C read transaction.
 
 ---
 
-## Phase 3 — Zephyr + STM32 Hands-On (Week 5–9)
-*Hardware required: STM32 Nucleo + logic analyzer + sensors*
+### 🔄 RECALL CHECKPOINT #1 (end of Week 2 — 15 min)
+Without opening any file, answer these from Week 1:
+- [ ] Calculate: 3.3V, LED Vf=2.0V, 10mA. Resistor = ? Power = ?
+- [ ] Draw: MOSFET low-side switch
+- [ ] Explain: why does DMA need `__aligned(32)` buffers?
 
-### Week 5: Zephyr Toolchain + Foundations (Projects 1–3)
+*If you miss ≥2: spend 30 min reviewing the relevant sections before starting Week 3.*
 
-#### Day 16–17: Blinky + Shell + 100Hz Timer
+---
+
+## Week 3 — Zephyr Foundations (5 days)
+*Hardware required: STM32 Nucleo + logic analyzer*
+
+### Day 11–12: Blinky + Shell + 100Hz Timer 🎯 (7 hrs)
 **Read:** `zephyr/study-notes/01-foundations.md` (full, 915 lines)
 **Do:** `zephyr/exercises/01-foundations.md` — Sections A through C
 **Build:** Projects 1, 2, 3 from `zephyr/00-mastery-plan.md`
 **Verify:** LED blinks, shell responds, `dt_ms=10` logged at 100Hz
 
 **Checkpoint:**
-- [ ] From memory: write a minimal `CMakeLists.txt`, `prj.conf`, and `main.c` for Zephyr blinky
-- [ ] What's the difference between `k_msleep(10)` and `k_timer` for 100Hz? (msleep drifts, timer doesn't)
-- [ ] Default stack is 1KB. Your thread uses LOG_INF. What happens? (Stack overflow, silent death)
+- [ ] Write a minimal `CMakeLists.txt` + `prj.conf` + `main.c` for Zephyr blinky from memory
+- [ ] `k_msleep(10)` vs `k_timer` for 100Hz — which drifts and why?
+- [ ] Default stack is 1KB. Thread uses LOG_INF. What happens? (Stack overflow, silent death)
 
 ---
 
-### Week 6: Sensor Integration (Projects 4–6)
+### Day 13–15: Foundation Exercises + Hardening (7 hrs)
+**Do:** `zephyr/exercises/01-foundations.md` — Sections D + E
+**Focus on:**
+- Thread stack sizing (use `CONFIG_THREAD_ANALYZER`)
+- Watchdog timer setup (IWDG — add `CONFIG_WDT=y`, feed in main loop, system resets on hang)
+- Zephyr logging levels and `CONFIG_LOG_MODE_DEFERRED` for real-time threads
 
-#### Day 18–19: I2C IMU Read
-**Read:** `zephyr/study-notes/02-sensors.md` — I2C sections
-**Do:** `zephyr/exercises/02-sensors.md` — Sections A through C (I2C questions)
+**Checkpoint:**
+- [ ] How do you detect stack overflow in Zephyr? (CONFIG_THREAD_ANALYZER or CONFIG_MPU_STACK_GUARD)
+- [ ] What happens if your 100Hz thread takes 12ms? (Misses deadline, timer fires again immediately)
+
+---
+
+## Week 4 — Sensors + ZBus + nanopb (5 days)
+*Projects 4–7 in one week — tight but doable because theory is done*
+
+### Day 16–17: I2C IMU + CAN Encoder 🎯 (7 hrs)
+**Read:** `zephyr/study-notes/02-sensors.md` — I2C + CAN sections
+**Do:** `zephyr/exercises/02-sensors.md` — Sections A, B, C
 **Build:** Project 4 (ICM-42688 over I2C at 100Hz)
-**Verify:** `acc_z ≈ 9.81` when board is flat. Logic analyzer shows clean I2C transactions.
-
-#### Day 20: CAN Encoder
-**Read:** `zephyr/study-notes/02-sensors.md` — CAN sections
 **Build:** Project 5 (CAN receive from second node)
-**Verify:** `candump` on USB-CAN shows frames. Zephyr prints parsed velocity.
-
-#### Day 21: UART GPS
-**Read:** `zephyr/study-notes/02-sensors.md` — UART sections
-**Build:** Project 6 (NMEA parser with ring buffer)
-**Verify:** Parses `$GNGGA` correctly. Handles indoor "no fix" without crashing.
-
-#### Day 22: Sensor exercises
-**Do:** `zephyr/exercises/02-sensors.md` — Sections D (lab tasks) + E (deeper thinking)
+**Verify:** `acc_z ≈ 9.81` flat. Logic analyzer shows clean I2C. `candump` shows CAN frames.
 
 ---
 
-### Week 7: ZBus + nanopb (Project 7)
+### Day 18: UART GPS 📖 (3 hrs)
+**Build:** Project 6 (NMEA parser with ring buffer)
+**Verify:** Parses `$GNGGA` correctly. Handles "no fix" without crashing.
 
-#### Day 23–24: Pub/Sub + Protobuf Encoding
+---
+
+### Day 19–20: ZBus + nanopb 🎯 (7 hrs)
 **Read:** `zephyr/study-notes/03-zbus-nanopb.md` (full, 1289 lines)
-**Do:** `zephyr/exercises/03-zbus-nanopb.md` — all sections
+**Do:** `zephyr/exercises/03-zbus-nanopb.md` — Sections A, B, C
 **Build:** Project 7 (ZBus publish all sensors → nanopb encode → round-trip verify)
 **Verify:** `encoded 47 bytes` at 100Hz, size always identical, round-trip decode matches
 
 **Checkpoint:**
-- [ ] What happens if proto3 encodes an all-zero message? (Fewer bytes than max — frame size varies)
+- [ ] proto3 all-zero message — what happens to the size? (Fewer bytes, fields omitted including `payload_length` if zero)
 - [ ] ZBus subscriber vs listener — when to use each?
-- [ ] What does ZBus internally do to protect the channel data? (Mutex around the channel struct)
+- [ ] What protects ZBus channel data from races? (Mutex)
 
 ---
 
-### Week 8–9: SPI Slave DMA (Project 8)
-*Budget 2 weeks — this is the hardest project*
+### 🔄 RECALL CHECKPOINT #2 (end of Week 4 — 15 min)
+Without opening any file, answer from Weeks 1–2:
+- [ ] Draw SPI Mode 0 timing for 0xA5 (CLK, MOSI, CS)
+- [ ] What is D-cache clean vs invalidate? Which for TX? Which for RX?
+- [ ] I2C: read register 0x75 from device 0x68 — all bytes on the wire
 
-#### Day 25–26: Theory + Code
-**Read:** `zephyr/study-notes/04-spi-slave-dma.md` (full, 1231 lines)
+*Miss ≥2: review before the hardest part (Week 5).*
+
+---
+
+## Week 5–6 — SPI Slave DMA (10 days)
+*This is the hardest project. Budget 2 full weeks.*
+
+### Day 21–22: Theory + DMA Deep Dive 🎯 (7 hrs)
+**Read:** `zephyr/study-notes/04-spi-slave-dma.md` (full, 1231 lines — all of it)
 **Do:** `zephyr/exercises/04-spi-slave-dma.md` — Sections A through C
 
-#### Day 27–30: Build + Debug
-**Build:** Project 8 (SPI slave DMA at 100Hz with double-buffering)
-**Verify with logic analyzer:**
-- [ ] 100 CS assertions per second, evenly spaced
-- [ ] No garbage first-bytes (pre-arming race solved)
-- [ ] nanopb decoded correctly by a Python spidev script on second board
+---
 
+### Day 23–28: Build + Debug + Iterate 🎯 (18 hrs)
+**Build:** Project 8 (SPI slave DMA at 100Hz with double-buffering)
+
+**Debug checklist — check these IN ORDER when things break:**
+1. Logic analyzer: is CS asserting at 100Hz? Is CLK present during CS?
+2. Is DMA armed BEFORE CS? (Check pre-arm timing with GPIO toggle)
+3. D-cache: TX cleaned? RX invalidated? Buffer `__aligned(32)` and in D2 SRAM?
+4. Is the `slot` / double-buffer swap atomic? (ISR context vs thread context)
+5. nanopb: does decoded output match? (Round-trip test)
+
+**Verify with logic analyzer:**
+- [ ] 100 CS assertions/sec, evenly spaced (±0.5ms jitter max)
+- [ ] No garbage first-bytes (pre-arming race solved)
+- [ ] nanopb decoded correctly by Python spidev script on second board
+- [ ] Latency from CS assert to first clock edge < 5µs
+
+---
+
+### Day 29–30: Exercises + Edge Cases (6 hrs)
 **Do:** `zephyr/exercises/04-spi-slave-dma.md` — Sections D (lab) + E (timing math)
 
 **Checkpoint:**
 - [ ] Why does arming DMA in the CS ISR fail? (ISR latency > CS-to-clock gap)
-- [ ] Code compiles, GDB shows correct buffer, Jetson reads garbage. What do you check? (D-cache flush)
-- [ ] What memory region must the DMA buffer be in on STM32H7? (D2 SRAM, not DTCM)
+- [ ] GDB shows correct buffer, Jetson reads garbage. Diagnosis? (D-cache not cleaned for TX)
+- [ ] DMA buffer in DTCM — works? (No. STM32H7 DMA can't access DTCM. Must be D2 SRAM.)
+- [ ] What happens if master polls faster than firmware can swap buffers? (Stale data — same frame twice)
 
 ---
 
-## Phase 4 — Jetson + ROS2 Integration (Week 10–12)
-*Hardware required: Jetson Orin + STM32 connected via SPI*
+## Week 7 — Jetson spidev + ROS2 Node (5 days)
+*Hardware: Jetson Orin + STM32 connected via SPI*
 
-### Week 10: spidev + Decode (Project 9)
-
-#### Day 31–32: Python SPI Reader
+### Day 31–32: Python spidev Reader 🎯 (6 hrs)
 **Read:** `zephyr/study-notes/05-jetson-ros2.md` — PART 1 sections 1–6
 **Build:** Project 9 (Python spidev on Jetson reads + decodes at 100Hz)
-**Verify:** `sudo spidev_test` works first, then Python shows sensor values matching STM32
+**Verify:** `sudo spidev_test` works first, then Python shows values matching STM32
 
 ---
 
-### Week 11: ROS2 Publisher (Project 10)
-
-#### Day 33–34: ROS2 Node
+### Day 33–35: ROS2 Publisher Node 🎯 (9 hrs)
 **Read:** `zephyr/study-notes/05-jetson-ros2.md` — PART 1 sections 7–15
-**Do:** `zephyr/exercises/05-jetson-ros2.md` — Sections A through C
+**Do:** `zephyr/exercises/05-jetson-ros2.md` — Sections A, B, C
 **Build:** Project 10 (rclpy node publishing Imu, Odometry, NavSatFix at 100Hz)
 **Verify:** `ros2 topic hz /imu` → ~100Hz. rviz2 shows rotating IMU axes.
 
 **Checkpoint:**
-- [ ] Why does putting `xfer2()` in the timer callback cause 87Hz instead of 100Hz?
-- [ ] What QoS profile for sensor topics and why? (BEST_EFFORT — RELIABLE causes backpressure at 100Hz)
-- [ ] Your EKF diverges. What do you check first? (Timestamp accuracy — must be captured immediately after ioctl)
+- [ ] `xfer2()` in timer callback → 87Hz. Why? (Blocking SPI call + timer jitter)
+- [ ] QoS for sensor topics? (BEST_EFFORT — RELIABLE backpressure kills 100Hz)
+- [ ] Timestamps: use ROS clock (`self.get_clock().now()`), NOT `CLOCK_MONOTONIC_RAW`
 
 ---
 
-### Week 12: EKF + Full Pipeline (Project 11)
+## Week 8 — EKF + Full Pipeline Validation (5 days)
+*The finish line: end-to-end 100Hz sensor fusion*
 
-#### Day 35–37: robot_localization + Validation
+### Day 36–37: robot_localization EKF 🎯 (7 hrs)
 **Read:** `zephyr/study-notes/05-jetson-ros2.md` — PART 2 (code) + PART 3 (gotchas)
 **Do:** `zephyr/exercises/05-jetson-ros2.md` — Sections D (lab) + E (system design)
 **Build:** Project 11 (robot_localization EKF, TF2 frame tree, rviz2 visualization)
-**Verify:**
+
+---
+
+### Day 38–39: Full System Validation 🎯 (6 hrs)
+**Verify the complete pipeline — all of these must pass:**
 - [ ] `ros2 topic hz /odometry/filtered` → 100Hz
 - [ ] `ros2 run tf2_tools view_frames` → complete `map→odom→base_link→imu_frame` tree
-- [ ] Push the board sideways → EKF estimates velocity correctly
+- [ ] Push board sideways → EKF estimates velocity correctly
+- [ ] Logic analyzer: SPI CS at 100Hz ±0.5ms, clean clocking, no first-byte garbage
+- [ ] Run for 10 minutes continuously — no drift, no crashes, no dropped frames
+
+---
+
+### Day 40: Retrospective + What's Next (3 hrs)
+- [ ] Review your notes: what was hardest? What would you do differently?
+- [ ] Document your setup: wiring diagram, Zephyr config, ROS2 launch file
+- [ ] Identify gaps for production: error recovery, power management, OTA updates
+
+---
+
+### 🔄 FINAL RECALL CHECKPOINT (15 min)
+Answer all of these without any files open:
+- [ ] Draw the full SPI slave DMA double-buffer data flow
+- [ ] What's the D-cache rule? (TX: clean before. RX: invalidate after.)
+- [ ] Why D2 SRAM, not DTCM?
+- [ ] I2C read transaction: all bytes for reading reg 0x75 from 0x68
+- [ ] Voltage divider 10k+10k on 5V with 1kΩ load: output = ?
+- [ ] EKF diverges. First thing to check? (Timestamps)
 
 ---
 
@@ -468,10 +423,21 @@ Re-do all Week 3–4 checkpoints from memory.
 
 | After | You Can... |
 |-------|-----------|
-| Phase 1 | Read a schematic, calculate resistor/cap values, understand transistor circuits, design signal conditioning |
-| Phase 2 | Read any SPI/I2C/CAN/UART waveform on a logic analyzer, calculate timing budgets, debug protocol issues from the wire level |
-| Phase 3 | Build Zephyr firmware that reads real sensors at 100Hz, encodes protobuf, and DMA-transfers over SPI slave |
-| Phase 4 | Integrate with ROS2 on Jetson, fuse sensor data in EKF, visualize in rviz2 — end-to-end working pipeline |
+| Week 1–2 | Read a schematic, calculate R/C values, draw SPI/I2C timing, understand D-cache coherency |
+| Week 3–4 | Build Zephyr firmware reading real sensors at 100Hz, encode with nanopb |
+| Week 5–6 | Run SPI slave DMA at 100Hz with double-buffering — the hardest embedded skill |
+| Week 7–8 | Full pipeline: STM32 → SPI → Jetson → ROS2 → EKF at 100Hz |
+
+---
+
+## What Was Trimmed (and where to find it later)
+
+| Trimmed | Why | Where to find it |
+|---------|-----|-------------------|
+| Electronics Sections D, E exercises | Deeper thinking — valuable but not blocking | `electronics/exercises/*.md` Sections D, E |
+| UART deep exercises | You already know serial from ROS2/Python | `electronics/exercises/04-uart-serial.md` D, E |
+| CAN deep exercises | CAN = 1 project, not your main protocol | `electronics/exercises/07-can-bus.md` D, E |
+| C++ Advanced track | Separate 8-week curriculum, run in parallel or after | `cpp-advanced/STUDY-PLAN.md` |
 
 ---
 
@@ -486,8 +452,6 @@ Re-do all Week 3–4 checkpoints from memory.
 | SPI mode timing diagrams | `electronics/05-spi-deep-dive.md` → 4 SPI modes |
 | I2C pull-up calculation | `electronics/06-i2c-deep-dive.md` → Pull-up value section |
 | CAN arbitration rules | `electronics/07-can-deep-dive.md` → Arbitration section |
-| Electronics practice problems | `electronics/exercises/01-07*.md` → Sections A–E per chapter |
 | Zephyr gotcha tables | `zephyr/study-notes/0X-*.md` → PART 3 in each file |
-| Zephyr practice problems | `zephyr/exercises/0X-*.md` → Sections A–E per chapter |
 | Hardware wiring safety | `zephyr/00-mastery-plan.md` → Section 2 |
 | Day-waster failure modes | `zephyr/00-mastery-plan.md` → Section 3 |
