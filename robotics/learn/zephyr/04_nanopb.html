@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nanopb — Protocol Buffers on Bare Metal - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="nanopb-protocol-buffers-on-bare-metal">nanopb — Protocol Buffers on Bare Metal</h1>
+<h2 id="why-not-just-send-raw-c-structs">Why Not Just Send Raw C Structs?</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// Raw struct over SPI — looks simple, breaks in practice:</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w">  </span><span class="n">status</span><span class="p">;</span><span class="w">   </span><span class="c1">// 1 byte</span>
+<span class="w">    </span><span class="c1">// [3 bytes padding inserted by compiler!]</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">    </span><span class="n">accel_x</span><span class="p">;</span><span class="w">  </span><span class="c1">// 4 bytes</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">    </span><span class="n">accel_y</span><span class="p">;</span><span class="w">  </span><span class="c1">// 4 bytes</span>
+<span class="p">};</span>
+
+<span class="c1">// Problems:</span>
+<span class="c1">// 1. Padding:      compiler adds invisible bytes between fields</span>
+<span class="c1">// 2. Endianness:   STM32=LE, some hosts=BE — floats look wrong</span>
+<span class="c1">// 3. Versioning:   add a field → breaks ALL existing receivers</span>
+<span class="c1">// 4. No schema:    receiver must know exact layout via out-of-band agreement</span>
+</code></pre></div>
+
+<p><strong>nanopb</strong> solves all four. It&rsquo;s Google Protocol Buffers compiled for microcontrollers:
+- No heap (no malloc)
+- No dynamic allocation
+- Deterministic encode/decode time
+- Typically 5-15% smaller than raw struct (varint compression for small integers)</p>
+<hr />
+<h2 id="the-proto-file-the-shared-contract">The .proto File — The Shared Contract</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// sensor_frame.proto</span>
+<span class="c1">// This file is shared between STM32 firmware and Jetson software</span>
+<span class="k">syntax</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;proto3&quot;</span><span class="p">;</span>
+
+<span class="kd">message</span><span class="w"> </span><span class="nc">ImuData</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">accel_x</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">   </span><span class="c1">// field number 1</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">accel_y</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">accel_z</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">gyro_x</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">gyro_y</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">gyro_z</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mi">6</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint64</span><span class="w"> </span><span class="na">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">7</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kd">message</span><span class="w"> </span><span class="nc">WheelData</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">speed_fl</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">speed_fr</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">speed_rl</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">speed_rr</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint64</span><span class="w"> </span><span class="na">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kd">message</span><span class="w"> </span><span class="nc">SensorFrame</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint32</span><span class="w">    </span><span class="na">seq</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">    </span><span class="n">ImuData</span><span class="w">   </span><span class="na">imu</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="n">WheelData</span><span class="w"> </span><span class="na">wheel</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Field numbers</strong> (1, 2, 3&hellip;) are what get encoded on the wire — NOT the names.
+This is what makes versioning safe:
+- Field 1 always means <code>accel_x</code> — forever
+- Add field 8 for temperature → old receivers just skip it (unknown fields ignored)
+- Never reuse a retired field number</p>
+<hr />
+<h2 id="wire-format-what-bytes-actually-travel">Wire Format — What Bytes Actually Travel</h2>
+<p>Protobuf uses <strong>TLV encoding</strong> (Tag-Length-Value / Tag-Value):</p>
+<div class="highlight"><pre><span></span><code>Encoding ImuData { accel_x = 1.5, timestamp_us = 1000000 }
+
+Field 1 (accel_x = 1.5f):
+  Byte 0: 0x0D  = tag: (field_number=1 &lt;&lt; 3) | wire_type=5 (32-bit fixed float)
+  Bytes 1-4: 3F C0 00 00  (IEEE 754 little-endian for 1.5)
+  → 5 bytes total
+
+Field 7 (timestamp_us = 1000000):
+  Byte 0: 0x38  = tag: (field_number=7 &lt;&lt; 3) | wire_type=0 (varint)
+  Bytes 1-3: C0 84 3D  (varint encoding of 1000000)
+  → 4 bytes total (NOT 8 bytes like a uint64_t — varint saves space)
+</code></pre></div>
+
+<p><strong>Varint encoding</strong> — small numbers use fewer bytes:</p>
+<div class="highlight"><pre><span></span><code>Value 0-127    → 1 byte
+Value 128-16383 → 2 bytes
+Value 16384-2097151 → 3 bytes
+...
+</code></pre></div>
+
+<p>Timestamps, counters, small integers stay compact.
+Floats always take exactly 5 bytes (tag + 4).</p>
+<p><strong>Missing fields</strong>: fields with default value (0 for numbers, &ldquo;&rdquo; for strings) are NOT encoded at all.</p>
+<div class="highlight"><pre><span></span><code>SensorFrame with seq=5, imu filled, wheel NOT filled:
+→ only encodes seq + imu fields → smaller packet
+</code></pre></div>
+
+<hr />
+<h2 id="code-generation">Code Generation</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install nanopb</span>
+pip<span class="w"> </span>install<span class="w"> </span>nanopb
+
+<span class="c1"># Generate C files from .proto</span>
+python<span class="w"> </span>-m<span class="w"> </span>nanopb_generator<span class="w"> </span>sensor_frame.proto
+
+<span class="c1"># Produces:</span>
+<span class="c1">#   sensor_frame.pb.h    — struct defs + field descriptor refs</span>
+<span class="c1">#   sensor_frame.pb.c    — field tables for encoder/decoder</span>
+</code></pre></div>
+
+<p>Generated <code>sensor_frame.pb.h</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// AUTO-GENERATED — DO NOT EDIT</span>
+<span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">accel_x</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">accel_y</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">accel_z</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">gyro_x</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">gyro_y</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">gyro_z</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">timestamp_us</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="n">ImuData</span><span class="p">;</span>
+
+<span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">seq</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">has_imu</span><span class="p">;</span><span class="w">        </span><span class="c1">// optional field present flag</span>
+<span class="w">    </span><span class="n">ImuData</span><span class="w"> </span><span class="n">imu</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">has_wheel</span><span class="p">;</span>
+<span class="w">    </span><span class="n">WheelData</span><span class="w"> </span><span class="n">wheel</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="n">SensorFrame</span><span class="p">;</span>
+
+<span class="c1">// Field descriptor — tells encoder which offsets map to which field numbers</span>
+<span class="k">extern</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">pb_msgdesc_t</span><span class="w"> </span><span class="n">SensorFrame_msg</span><span class="p">;</span>
+<span class="cp">#define SensorFrame_fields &amp;SensorFrame_msg</span>
+</code></pre></div>
+
+<hr />
+<h2 id="encoding-stm32-zephyr-side">Encoding (STM32 / Zephyr side)</h2>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;pb_encode.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;sensor_frame.pb.h&quot;</span>
+
+<span class="c1">// Returns number of bytes written, or 0 on error</span>
+<span class="kt">uint16_t</span><span class="w"> </span><span class="nf">encode_sensor_frame</span><span class="p">(</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="o">*</span><span class="n">imu</span><span class="p">,</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">wheel_data</span><span class="w"> </span><span class="o">*</span><span class="n">wheel</span><span class="p">,</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">out_buf</span><span class="p">,</span>
+<span class="w">    </span><span class="kt">size_t</span><span class="w"> </span><span class="n">out_buf_size</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="c1">// Create stream — writes into our static buffer</span>
+<span class="w">    </span><span class="n">pb_ostream_t</span><span class="w"> </span><span class="n">stream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_ostream_from_buffer</span><span class="p">(</span><span class="n">out_buf</span><span class="p">,</span><span class="w"> </span><span class="n">out_buf_size</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Fill the generated struct — ALWAYS start with _init_zero</span>
+<span class="w">    </span><span class="c1">// _init_zero zeros all fields + sets has_* = false</span>
+<span class="w">    </span><span class="n">SensorFrame</span><span class="w"> </span><span class="n">frame</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SensorFrame_init_zero</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">seq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">g_seq</span><span class="o">++</span><span class="p">;</span><span class="w">  </span><span class="c1">// monotonically increasing sequence number</span>
+
+<span class="w">    </span><span class="c1">// Fill IMU sub-message</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">has_imu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">accel_x</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">accel_x</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">accel_y</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">accel_y</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">accel_z</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">accel_z</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">gyro_x</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">gyro_x</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">gyro_y</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">gyro_y</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">gyro_z</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">gyro_z</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">timestamp_us</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Fill wheel sub-message</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">has_wheel</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">wheel</span><span class="p">.</span><span class="n">speed_fl</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="n">wheel</span><span class="o">-&gt;</span><span class="n">speed_fl</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">wheel</span><span class="p">.</span><span class="n">speed_fr</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="n">wheel</span><span class="o">-&gt;</span><span class="n">speed_fr</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">wheel</span><span class="p">.</span><span class="n">speed_rl</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="n">wheel</span><span class="o">-&gt;</span><span class="n">speed_rl</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">wheel</span><span class="p">.</span><span class="n">speed_rr</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="n">wheel</span><span class="o">-&gt;</span><span class="n">speed_rr</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">wheel</span><span class="p">.</span><span class="n">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">wheel</span><span class="o">-&gt;</span><span class="n">timestamp_us</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Encode — writes TLV bytes into buffer</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">ok</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_encode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stream</span><span class="p">,</span><span class="w"> </span><span class="n">SensorFrame_fields</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">frame</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">ok</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">printk</span><span class="p">(</span><span class="s">&quot;nanopb encode error: %s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">PB_GET_ERROR</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stream</span><span class="p">));</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="kt">uint16_t</span><span class="p">)</span><span class="n">stream</span><span class="p">.</span><span class="n">bytes_written</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="decoding-jetson-python-side">Decoding (Jetson / Python side)</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Generate Python bindings from same .proto file</span>
+<span class="c1"># protoc --python_out=. sensor_frame.proto</span>
+<span class="c1"># → sensor_frame_pb2.py</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">sensor_frame_pb2</span><span class="w"> </span><span class="kn">import</span> <span class="n">SensorFrame</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">decode_frame</span><span class="p">(</span><span class="n">raw_bytes</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SensorFrame</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">frame</span> <span class="o">=</span> <span class="n">SensorFrame</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">frame</span><span class="o">.</span><span class="n">ParseFromString</span><span class="p">(</span><span class="n">raw_bytes</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Decode error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">frame</span>
+
+<span class="c1"># Usage</span>
+<span class="n">frame</span> <span class="o">=</span> <span class="n">decode_frame</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+<span class="k">if</span> <span class="n">frame</span> <span class="ow">and</span> <span class="n">frame</span><span class="o">.</span><span class="n">HasField</span><span class="p">(</span><span class="s1">&#39;imu&#39;</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;accel_x = </span><span class="si">{</span><span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">accel_x</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;timestamp = </span><span class="si">{</span><span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">timestamp_us</span><span class="si">}</span><span class="s2"> us&quot;</span><span class="p">)</span>
+
+<span class="c1"># Missing fields return defaults (0 for numbers) — never crashes</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">frame</span><span class="o">.</span><span class="n">wheel</span><span class="o">.</span><span class="n">speed_fl</span><span class="p">)</span>  <span class="c1"># 0.0 if wheel not in frame — safe</span>
+</code></pre></div>
+
+<hr />
+<h2 id="versioning-how-it-actually-works">Versioning — How It Actually Works</h2>
+<div class="highlight"><pre><span></span><code>Firmware v1 sends:   SensorFrame { seq, imu }
+Firmware v2 sends:   SensorFrame { seq, imu, wheel, temperature }
+
+Jetson software v1 receives v2 frame:
+  - Decodes seq ✓
+  - Decodes imu ✓
+  - Sees wheel field → unknown → silently skips ✓
+  - Sees temperature field → unknown → silently skips ✓
+  - No crash, no error
+
+Firmware v2 receives from Jetson v1 config command (missing new fields):
+  - Missing fields decoded as zero/default ✓
+</code></pre></div>
+
+<p><strong>Rules:</strong>
+1. Never remove a field from .proto — just stop using it in code
+2. Never reuse a field number
+3. Never change a field&rsquo;s type
+4. Always add new fields with new numbers
+5. Test with old receiver + new sender AND new receiver + old sender</p>
+<hr />
+<h2 id="enabling-nanopb-in-zephyr-cmakeliststxt-kconfig">Enabling nanopb in Zephyr (CMakeLists.txt + Kconfig)</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># prj.conf</span>
+CONFIG_NANOPB=y
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c"># CMakeLists.txt</span>
+<span class="nb">find_package</span><span class="p">(</span><span class="s">Zephyr</span><span class="w"> </span><span class="s">REQUIRED</span><span class="w"> </span><span class="s">HINTS</span><span class="w"> </span><span class="o">$ENV{</span><span class="nv">ZEPHYR_BASE</span><span class="o">}</span><span class="p">)</span>
+<span class="nb">project</span><span class="p">(</span><span class="s">my_app</span><span class="p">)</span>
+
+<span class="c"># Generate nanopb C files from .proto</span>
+<span class="nb">nanopb_generate_cpp</span><span class="p">(</span><span class="s">PROTO_SRCS</span><span class="w"> </span><span class="s">PROTO_HDRS</span><span class="w"> </span><span class="s">proto/sensor_frame.proto</span><span class="p">)</span>
+
+<span class="nb">target_sources</span><span class="p">(</span><span class="s">app</span><span class="w"> </span><span class="s">PRIVATE</span>
+<span class="w">    </span><span class="s">src/main.c</span>
+<span class="w">    </span><span class="s">src/packer.c</span>
+<span class="w">    </span><span class="o">${</span><span class="nv">PROTO_SRCS</span><span class="o">}</span>
+<span class="p">)</span>
+
+<span class="nb">target_include_directories</span><span class="p">(</span><span class="s">app</span><span class="w"> </span><span class="s">PRIVATE</span>
+<span class="w">    </span><span class="o">${</span><span class="nv">CMAKE_CURRENT_BINARY_DIR</span><span class="o">}</span><span class="w">  </span><span class="c"># where generated .pb.h goes</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="sizing-how-big-will-my-packet-be">Sizing — How Big Will My Packet Be?</h2>
+<p>Quick estimate:</p>
+<div class="highlight"><pre><span></span><code>Each float field:    5 bytes (1 tag + 4 value)
+Each uint64 varint:  2-10 bytes (depends on value size)
+Each sub-message:    2 bytes overhead (tag + length) + contents
+Sequence uint32:     1-5 bytes
+
+SensorFrame example:
+  seq (uint32=5):      2 bytes
+  imu (sub-msg):       2 + (6 floats × 5) + timestamp ~= 34 bytes
+  wheel (sub-msg):     2 + (4 floats × 5) + timestamp ~= 26 bytes
+  Total:              ~64 bytes
+</code></pre></div>
+
+<p>For your output buffer size — always allocate <code>1.5× the estimated size</code> plus <code>pb_get_encoded_size()</code> for safety.</p>
+<hr />
+<h2 id="common-mistakes">Common Mistakes</h2>
+<table>
+<thead>
+<tr>
+<th>Mistake</th>
+<th>Symptom</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Forgot <code>_init_zero</code></td>
+<td>Random garbage in unset fields</td>
+<td>Always use <code>SensorFrame frame = SensorFrame_init_zero</code></td>
+</tr>
+<tr>
+<td>Buffer too small</td>
+<td><code>pb_encode</code> returns false</td>
+<td>Increase buffer or check <code>pb_get_encoded_size</code> first</td>
+</tr>
+<tr>
+<td>Wrong .pb.h version</td>
+<td>Decoder crashes with bad access</td>
+<td>Regenerate from same .proto on both sides</td>
+</tr>
+<tr>
+<td>Reused field number</td>
+<td>Old data decoded as new field</td>
+<td>Never reuse — use reserved keyword in proto</td>
+</tr>
+<tr>
+<td>Pointer in message</td>
+<td>Compile error or corrupt data</td>
+<td>nanopb does not support raw pointers; use <code>bytes</code> with callback</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

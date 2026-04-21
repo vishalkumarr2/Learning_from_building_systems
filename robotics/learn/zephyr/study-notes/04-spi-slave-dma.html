@@ -1,0 +1,1271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SPI Slave + DMA + Double Buffering — Study Notes - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="spi-slave-dma-double-buffering-study-notes">SPI Slave + DMA + Double Buffering — Study Notes</h1>
+<h3 id="project-7-100hz-stm32-spi-slave-to-jetson">Project 7: 100Hz STM32 SPI Slave to Jetson</h3>
+<p><strong>Hardware:</strong> STM32 Nucleo-H743ZI2 · Zephyr RTOS · Jetson Orin · Logic Analyzer (essential)</p>
+<blockquote>
+<p><strong>Electronics prerequisite:</strong> If shift registers, CPOL/CPHA modes, or CS timing feel unfamiliar, read first:
+- SPI physics → <code>electronics/05-spi-deep-dive.md</code> (shift register ring, 4 modes, signal integrity)
+- DMA buffers need D-cache awareness → <code>electronics/01-passive-components.md</code> won&rsquo;t help here, but understanding memory-mapped I/O is essential</p>
+</blockquote>
+<hr />
+<h2 id="part-1-eli15-concept-explanations">PART 1 — ELI15 Concept Explanations</h2>
+<hr />
+<h3 id="11-spi-master-vs-slave-the-clock-owner-determines-everything">1.1 SPI master vs slave — the clock owner determines everything</h3>
+<p><strong>The core idea: one side is the boss, one side waits.</strong></p>
+<p>In any SPI conversation, exactly one side controls the clock. That side is the <strong>master</strong>. The other side is the <strong>slave</strong> — it cannot initiate a transfer, cannot decide when to talk, cannot do anything until the master starts clocking.</p>
+<p>In our system:
+- <strong>Jetson = master.</strong> It owns the clock. It decides <em>when</em> to read sensor data.
+- <strong>STM32 = slave.</strong> It can never initiate. It must have data ready and waiting <em>before</em> the Jetson asks.</p>
+<p><strong>Why this is hard:</strong> When you are the master, you are in control. You call <code>spi_transceive()</code> when <em>you</em> are ready. When you are the slave, you have zero control over timing. The Jetson can assert CS and start clocking at any moment — 5ms from now, 10ms from now, 11.3ms from now. You don&rsquo;t know. You just have to always be ready.</p>
+<div class="highlight"><pre><span></span><code>Jetson (master) decides:          STM32 (slave) must:
+  &quot;I want sensor data now&quot;     →   Already have the frame in the DMA buffer
+  CS goes LOW                  →   DMA begins sending immediately (no delay!)
+  Clock starts (10 MHz)        →   SPI hardware shifts bits out one per clock
+  CS goes HIGH                 →   Transfer done. Load new frame before next CS.
+</code></pre></div>
+
+<p><strong>The bus when it&rsquo;s happening at 10 MHz:</strong></p>
+<div class="highlight"><pre><span></span><code>CS:    ────┐                                  ┌────  (LOW = active)
+           └──────────────────────────────────┘
+CLK:           ┌┐ ┌┐ ┌┐ ┌┐ ┌┐ ┌┐ ┌┐ ┌┐ ┌┐ ┌┐
+               └┘ └┘ └┘ └┘ └┘ └┘ └┘ └┘ └┘ └┘
+MISO:   ↑STM32 puts data on this line (1 bit per clock)
+         ^─ data must be valid BEFORE first clock edge ─^
+</code></pre></div>
+
+<p>Each clock cycle transfers 1 bit. At 10 MHz, 1 byte takes 800 ns. A 150-byte frame takes 120 µs.</p>
+<p><strong>Mental model for the rest of this chapter:</strong> You (the STM32) are a waiter at a restaurant. The Jetson is your customer. You don&rsquo;t know when they&rsquo;ll order. If they snap their fingers (assert CS) and you don&rsquo;t already have their plate ready (DMA armed), they get nothing. You cannot start cooking after they snap — it&rsquo;s too late.</p>
+<hr />
+<h3 id="12-the-cs-timing-problem-why-100ns-is-not-enough-time-to-react">1.2 The CS timing problem — why 100ns is not enough time to react</h3>
+<p><strong>The brutal timing reality.</strong></p>
+<p>When the Jetson asserts CS (pulls it LOW), the STM32&rsquo;s SPI hardware immediately starts looking for clock edges. Between CS going low and the first clock edge, there may be as little as 100 nanoseconds to 1 microsecond, depending on the Jetson&rsquo;s spidev configuration.</p>
+<p>Meanwhile, an interrupt takes:
+- ~1–10 µs to fire, depending on what else is running
+- Plus context save/restore time
+- Plus your ISR code execution time
+- Plus DMA arm time</p>
+<p><strong>The math for why you cannot arm DMA in the CS interrupt:</strong></p>
+<div class="highlight"><pre><span></span><code>Timeline with WRONG approach (arm DMA in CS ISR):
+  t=0ns:    CS goes LOW
+  t=100ns:  First clock edge arrives (Jetson starts clocking!)
+  t=0ns to t=1500ns: SPI hardware shifts first 12 bits → 0xFF garbage
+  t=1500ns: Your ISR finally fires
+  t=2000ns: Your ISR calls spi_dma_reload()
+  t=2500ns: DMA armed
+  Result: first 1-2 bytes of EVERY frame are garbage
+</code></pre></div>
+
+<p><strong>The correct approach:</strong> The DMA must already be armed and pointing at a valid buffer <strong>before</strong> CS goes low. This means you arm it in the <em>previous transfer&rsquo;s completion callback</em>, not in the CS interrupt.</p>
+<div class="highlight"><pre><span></span><code>Timeline with CORRECT approach (arm DMA on previous TC):
+  t=-5ms:   Previous transfer completes → DMA immediately re-armed
+  t=0ns:    CS goes LOW
+  t=100ns:  First clock edge arrives
+  t=100ns:  SPI hardware reads from DMA buffer → sends real data
+  Result: all bytes correct, every time
+</code></pre></div>
+
+<p>This is the #1 bug that trips everyone up on SPI slave. You will lose 2 days to this bug if you don&rsquo;t know about it in advance.</p>
+<hr />
+<h3 id="13-what-dma-is-the-post-office-analogy">1.3 What DMA is — the &ldquo;post office&rdquo; analogy</h3>
+<p><strong>The problem without DMA:</strong></p>
+<p>Imagine you need to mail 1,000 letters. The naive approach: you personally walk each letter to the mailbox, one at a time. You insert letter 1. You wait for the mailbox to be empty. You insert letter 2. You wait. You insert letter 3&hellip;</p>
+<p>This is exactly what the CPU does when sending data without DMA:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// CPU manually moves every byte to the SPI hardware register</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">256</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">SPI1</span><span class="o">-&gt;</span><span class="n">DR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">buffer</span><span class="p">[</span><span class="n">i</span><span class="p">];</span><span class="w">           </span><span class="c1">// write byte to SPI hardware</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="p">(</span><span class="n">SPI1</span><span class="o">-&gt;</span><span class="n">SR</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">SPI_SR_TXE</span><span class="p">));</span><span class="w"> </span><span class="c1">// BUSY-WAIT until SPI is ready</span>
+<span class="p">}</span>
+<span class="c1">// CPU is 100% occupied the entire time — doing nothing useful</span>
+</code></pre></div>
+
+<p>At 10 MHz, 256 bytes takes 205 µs. During those 205 µs, the CPU cannot run your sensor thread, cannot update state, cannot do anything. At 100 Hz, this burns 2% of your CPU budget on mailbox trips.</p>
+<p><strong>The post office analogy for DMA:</strong></p>
+<p>DMA is a dedicated post office employee. Instead of you walking each letter to the mailbox:
+1. <strong>You write an address on one envelope</strong> (configure DMA registers: source, destination, count)
+2. <strong>You hand it to the post office</strong> (enable DMA: write CR |= DMA_SxCR_EN)
+3. <strong>The post office handles ALL delivery</strong> (DMA reads bytes from SRAM, writes to SPI_DR, one per clock)
+4. <strong>The post office rings your doorbell when done</strong> (DMA fires an interrupt when all N bytes transferred)
+5. <strong>You go do other things</strong> until the doorbell rings</p>
+<div class="highlight"><pre><span></span><code>WITHOUT DMA (CPU does all work):
+  CPU: moves byte 0 → waits → byte 1 → waits → byte 2 → waits → ... (200µs blocked)
+
+WITH DMA (CPU delegates):
+  CPU: &quot;DMA, copy buffer[0..255] → SPI_DR. Interrupt me when done.&quot; (takes ~200ns)
+  CPU: runs sensor fusion, updates state, services other threads
+  DMA: quietly trickles bytes to SPI at wire speed (no CPU help needed)
+  DMA: fires interrupt
+  CPU: handles completion (~500ns): load next buffer, signal packer thread
+</code></pre></div>
+
+<p><strong>Physical picture of what happens:</strong></p>
+<div class="highlight"><pre><span></span><code>┌─────────────────────┐  AHB bus  ┌──────────────┐  APB bus  ┌────────────────┐
+│  SRAM (tx_buf[])    │ ─────────►│  DMA engine  │ ─────────►│  SPI1-&gt;DR reg  │
+│  (your data here)   │           │  (hardware)  │           │  (shift out)   │──► MISO pin
+└─────────────────────┘           └──────────────┘           └────────────────┘
+         CPU&#39;s involvement: ~200ns to set up. Zero bytes moved by CPU.
+</code></pre></div>
+
+<p>The DMA engine has its own bus master capability — it can read SRAM and write peripheral registers independently, without asking the CPU permission for each byte.</p>
+<hr />
+<h3 id="14-dma-vs-cpu-transfer-comparison-why-dma-is-necessary-at-100-hz">1.4 DMA vs CPU transfer comparison — why DMA is necessary at 100 Hz</h3>
+<p><strong>The numbers argument:</strong></p>
+<p>At 100 Hz, you transfer one frame every 10 ms.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>CPU polling</th>
+<th>DMA</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Frame size</td>
+<td>150 bytes</td>
+<td>150 bytes</td>
+</tr>
+<tr>
+<td>Transfer time (10MHz SPI)</td>
+<td>120 µs actively occupied</td>
+<td>120 µs (DMA working, CPU free)</td>
+</tr>
+<tr>
+<td>CPU cycles consumed</td>
+<td>~34,000 (at 480MHz: 120µs × 480)</td>
+<td>~1,500 (setup + completion ISR)</td>
+</tr>
+<tr>
+<td>CPU budget burned at 100Hz</td>
+<td>~3.4M cycles/sec = <strong>0.7% of 480MHz</strong> per transfer, continuously</td>
+<td>~150K cycles/sec = 0.03%</td>
+</tr>
+<tr>
+<td>Can CPU run other threads?</td>
+<td>No (spinning in loop)</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The real cost is not bytes, it&rsquo;s setup/teardown:</strong></p>
+<p>Even if a 150-byte DMA transfer &ldquo;only&rdquo; costs 0.7% CPU, the <em>mode</em> matters enormously. A CPU spinning in a tight polling loop:
+1. <strong>Locks out all other threads</strong> at the same priority (no preemption during the loop)
+2. <strong>Generates worst-case ISR latency</strong> (other ISRs queue up waiting for the CPU)
+3. <strong>Cannot sleep</strong>, so the CPU is at full power draw the entire transfer</p>
+<p>With DMA:
+1. CPU sets up DMA registers (~200 ns)
+2. CPU does <code>k_sem_take()</code> or just runs other threads
+3. DMA completion fires an interrupt (~500 ns ISR)
+4. Total CPU involvement: ~700 ns per 10 ms frame = 0.007%</p>
+<p>At 100 Hz, DMA isn&rsquo;t optional — it&rsquo;s the only way to have a functional system where other subsystems also get CPU time.</p>
+<hr />
+<h3 id="15-double-buffering-the-two-lane-highway-analogy">1.5 Double buffering — the &ldquo;two-lane highway&rdquo; analogy</h3>
+<p><strong>The problem a single buffer creates:</strong></p>
+<p>Suppose DMA is currently sending <code>buf[0..149]</code> over SPI. Your packer thread finishes encoding the next frame and writes new data into <code>buf[0..149]</code>. What just happened?</p>
+<p>You wrote to a buffer that DMA is actively reading. DMA will now send a mix of old and new bytes — partial corruption, every time. This is a race condition.</p>
+<p><strong>The two-lane highway:</strong></p>
+<p>Imagine a highway with two lanes. Cars (data) always drive in lane A. Workers (your packer thread) always work on lane B. Every 10 ms, there&rsquo;s an instant lane swap: A becomes the work lane, B becomes the driving lane. Traffic never stops; workers never have to dodge cars.</p>
+<div class="highlight"><pre><span></span><code>Two buffers: A and B
+&quot;Active buffer&quot;:  DMA is reading this and sending it → NEVER write here
+&quot;Idle buffer&quot;:    CPU/packer is writing the next frame here → DMA never reads this
+
+State at t=0ms:
+  Buffer A: [frame 1 data] ←── DMA is sending this
+  Buffer B: [empty]        ←── packer is building frame 2
+
+State at t=1ms:
+  Buffer A: [frame 1 data] ←── DMA is sending this
+  Buffer B: [frame 2 data] ←── packer finished building frame 2
+
+State at t=1ms (SWAP happens atomically — one word write):
+  Buffer B: [frame 2 data] ←── DMA will now send this on next CS
+  Buffer A: [frame 1 data] ←── packer will now write frame 3 here
+
+No moment where DMA reads while packer writes: they always operate on different buffers.
+</code></pre></div>
+
+<p><strong>The swap must be atomic.</strong> On ARM32, writing a 32-bit aligned word is atomic (single instruction, cannot be interrupted mid-write). This is why <code>tx_active</code> is an <code>int</code> (32-bit) — the pointer swap <code>tx_active = write;</code> is one MOV instruction.</p>
+<p><strong>Visual timeline at 100 Hz:</strong></p>
+<div class="highlight"><pre><span></span><code>     0ms      1ms      2ms      5ms (CS edge)  10ms     11ms     15ms (CS edge)
+     │        │        │        │              │        │        │
+DMA: ╠═══buff A═══════════════╣ ╠════buff B════════════════════╣
+PKR: ╠═══ building B ═╣       │ ╠══════ building A ═══╣       │
+     │                │        │                        │        │
+     SWAP happens here ────────┘                        SWAP ───┘
+
+PKR never touches buff A when DMA is reading buff A. ✓
+DMA never reads buff B when PKR is writing buff B. ✓
+</code></pre></div>
+
+<hr />
+<h3 id="16-the-pre-arming-problem-why-you-must-arm-dma-before-cs-goes-low">1.6 The pre-arming problem — why you must arm DMA BEFORE CS goes low</h3>
+<p>This is the most important timing rule in this entire project. It deserves its own section.</p>
+<p><strong>The interrupts-are-too-slow argument:</strong></p>
+<div class="highlight"><pre><span></span><code>CS → first clock: 100ns to 1µs (depends on Jetson spidev delay_usecs setting)
+Interrupt latency on STM32H7:
+  - NVIC response time: ~12 CPU cycles at 480MHz = 25ns (fine!)
+  - BUT: IRQ may be masked during critical sections: up to 10µs
+  - BUT: Other ISRs may be running: up to 10µs for each
+  - Realistic worst-case from CS-falling to your ISR code: 1–10µs
+
+Reality: your CS ISR fires AFTER the first 1–4 bytes have already been clocked out.
+</code></pre></div>
+
+<p><strong>Why it feels like it should work (and why it doesn&rsquo;t):</strong></p>
+<p>In testing, you might see it work &ldquo;mostly.&rdquo; The Jetson&rsquo;s default spidev settings often add 10-100µs between CS and first clock (to allow for setup time). Your ISR fires in time. Tests pass.</p>
+<p>Then you reduce the Jetson&rsquo;s SPI delay to production settings (0µs), and the first 2 bytes of every frame become <code>0xFF</code>. You&rsquo;ve been lucky, not correct.</p>
+<p><strong>The correct mental model:</strong></p>
+<p>DMA must be armed and ready at all times, not reactively when CS fires. Think of it like a gun safety: the gun is always loaded and has a round chambered. When you pull the trigger (CS goes low), firing is instantaneous.</p>
+<div class="highlight"><pre><span></span><code>WRONG: arm on CS falling edge
+  CS fires → ISR runs → DMA armed → already missed first bytes
+
+CORRECT: arm on previous transfer complete
+  Previous TX done → ISR: re-arm DMA with new buffer immediately
+  ...time passes (5ms, 10ms, 3ms — doesn&#39;t matter)...
+  CS fires → DMA already armed → first bit sent correctly
+</code></pre></div>
+
+<p><strong>Code implication:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// In the TX complete callback (CORRECT):</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">spi_tx_complete_cb</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="c1">// Immediately re-arm for next transfer</span>
+<span class="w">    </span><span class="n">arm_dma_for_next_frame</span><span class="p">();</span><span class="w">    </span><span class="c1">// ← arm NOW, before CS fires</span>
+<span class="w">    </span><span class="c1">// Signal packer thread that the just-sent buffer is now free</span>
+<span class="w">    </span><span class="n">k_sem_give</span><span class="p">(</span><span class="o">&amp;</span><span class="n">buffer_free_sem</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="c1">// In the CS ISR (WRONG: too late):</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">cs_falling_isr</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">arm_dma_for_next_frame</span><span class="p">();</span><span class="w">    </span><span class="c1">// ← WAY too late, clock already running</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h3 id="17-stm32h7-d-cache-coherency-the-lying-librarian-analogy">1.7 STM32H7 D-cache coherency — the &ldquo;lying librarian&rdquo; analogy</h3>
+<p><strong>This bug will make you feel like you&rsquo;re going insane.</strong> It is responsible for 2+ lost debugging days for most engineers who encounter it. Read this section twice.</p>
+<p><strong>What D-cache is:</strong></p>
+<p>The STM32H7 has a Cortex-M7 core with a 16 KB L1 data cache (D-cache). This cache sits between the CPU and SRAM. When you write to a variable:</p>
+<ol>
+<li>The write goes into the cache (fast — 1 clock)</li>
+<li>The cache will write it back to SRAM later (eventually, when the cache line is evicted)</li>
+</ol>
+<p>When you read a variable that&rsquo;s in the cache, you get the cached value (fast). If it&rsquo;s not in cache, you fetch from SRAM (slower, loads into cache).</p>
+<p><strong>The librarian analogy:</strong></p>
+<p>Imagine a library where you ask the librarian for a book. The librarian has a small office (the cache) where they keep copies of frequently requested books. When you ask for a book, the librarian gives you their cached copy instantly.</p>
+<p>Now someone else (DMA) sneaks into the library stacks and <strong>updates the original book</strong>. But the librarian didn&rsquo;t notice — they still have the old copy in their office. Next time you ask for that book, the librarian confidently hands you the <strong>old version</strong> from their office.</p>
+<div class="highlight"><pre><span></span><code>The bug:
+  1. CPU writes new sensor data to tx_buf[]    → goes into D-cache (SRAM not updated!)
+  2. You call start_dma_tx()                   → DMA reads directly from SRAM
+  3. SRAM still has old/stale data             → DMA sends old data over SPI!
+  4. Jetson receives garbage                   → but no error flag anywhere
+  5. You open GDB and read tx_buf[]            → GDB forces cache fill → shows CORRECT data!
+</code></pre></div>
+
+<p><strong>Why GDB makes it worse:</strong> GDB reads variables by forcing the CPU to load from memory. This fills the cache with the correct data and shows you the right value. But the DMA already ran from the stale SRAM. GDB lies to you by fixing the problem in the act of showing it.</p>
+<p><strong>The tell-tale diagnostic sign:</strong></p>
+<p>If you have a 150-byte frame and the D-cache line size is 32 bytes:
+- First ~32 bytes correct: the first cache line happened to be evicted to SRAM before DMA ran
+- Bytes 32–149: garbage: those cache lines had NOT been written back to SRAM</p>
+<p>This &ldquo;first N bytes correct, rest is garbage&rdquo; pattern WHERE N ≈ 32 (one cache line) is the D-cache coherency fingerprint.</p>
+<p><strong>The fix — SCB_CleanDCache_by_Addr:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Before starting DMA TX:</span>
+<span class="n">SCB_CleanDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write_idx</span><span class="p">],</span><span class="w"> </span><span class="n">frame_len</span><span class="p">);</span>
+<span class="c1">// &quot;Clean&quot; = force CPU cache lines → SRAM (write-back)</span>
+<span class="c1">// Now SRAM has the fresh data that DMA will read</span>
+<span class="n">start_dma_tx</span><span class="p">(</span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write_idx</span><span class="p">],</span><span class="w"> </span><span class="n">frame_len</span><span class="p">);</span>
+</code></pre></div>
+
+<p><strong>For DMA RX (receiving data INTO a buffer):</strong></p>
+<div class="highlight"><pre><span></span><code><span class="n">start_dma_rx</span><span class="p">(</span><span class="n">rx_buf</span><span class="p">,</span><span class="w"> </span><span class="n">rx_len</span><span class="p">);</span>
+<span class="c1">// ... wait for DMA complete ...</span>
+<span class="c1">// DMA wrote to SRAM, but CPU cache might have stale data at those addresses</span>
+<span class="n">SCB_InvalidateDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">rx_buf</span><span class="p">,</span><span class="w"> </span><span class="n">rx_len</span><span class="p">);</span>
+<span class="c1">// &quot;Invalidate&quot; = mark cache lines as stale → force CPU to re-read from SRAM</span>
+<span class="kt">uint8_t</span><span class="w"> </span><span class="n">first_byte</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span><span class="w">  </span><span class="c1">// NOW reads fresh SRAM data</span>
+</code></pre></div>
+
+<p><strong>The M0/M3/M4 exception:</strong> These cores (including STM32F103, F303, F401/F411) have NO D-cache. Cache coherency is only a problem on Cortex-M7 (H7, F7) and Cortex-A (Jetson). If you switch to an F4 in testing and the cache bug disappears, that&rsquo;s why — not because your fix worked.</p>
+<hr />
+<h3 id="18-scb_clean-vs-scb_invalidate-clean-and-invalidate-are-not-the-same">1.8 SCB_Clean vs SCB_Invalidate — &ldquo;clean&rdquo; and &ldquo;invalidate&rdquo; are NOT the same</h3>
+<p>People get these backwards. The confusion causes the wrong operation to be applied and the bug persists.</p>
+<p><strong>Clean = write dirty cache lines BACK to SRAM (push)</strong></p>
+<p>Think: &ldquo;clean up the cache by pushing its contents to memory.&rdquo;</p>
+<ul>
+<li>Use before <strong>DMA reads</strong> from a buffer you just wrote</li>
+<li>Direction: cache → SRAM (writing data OUT of cache into SRAM)</li>
+<li>After Clean: SRAM has fresh data. Cache still has the data too (not evicted).</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1">// I wrote new data into tx_buf. Now DMA will read from SRAM.</span>
+<span class="c1">// Clean pushes my cache writes to SRAM so DMA sees fresh data.</span>
+<span class="n">SCB_CleanDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">tx_buf</span><span class="p">,</span><span class="w"> </span><span class="n">count</span><span class="p">);</span>
+<span class="c1">// DMA TX safe to start</span>
+</code></pre></div>
+
+<p><strong>Invalidate = mark cache lines as stale, force CPU re-read from SRAM (pull)</strong></p>
+<p>Think: &ldquo;invalidate the cache&rsquo;s knowledge, forcing it to go back to source.&rdquo;</p>
+<ul>
+<li>Use after <strong>DMA writes</strong> into a buffer that the CPU will then read</li>
+<li>Direction: SRAM → cache (forcing CPU to re-fetch from SRAM next access)</li>
+<li>After Invalidate: cache has no valid copy of those addresses. Next CPU access fetches from SRAM.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="c1">// DMA RX just filled rx_buf in SRAM. CPU cache may have stale data.</span>
+<span class="c1">// Invalidate forces CPU to re-read from SRAM on next access.</span>
+<span class="n">SCB_InvalidateDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">rx_buf</span><span class="p">,</span><span class="w"> </span><span class="n">count</span><span class="p">);</span>
+<span class="kt">uint8_t</span><span class="w"> </span><span class="n">val</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span><span class="w">  </span><span class="c1">// CPU re-fetches from SRAM — correct!</span>
+</code></pre></div>
+
+<p><strong>CleanInvalidate = both at once (safest, slightly slower):</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Use when you&#39;re not sure which direction is the problem, or for initialization</span>
+<span class="n">SCB_CleanInvalidateDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="n">count</span><span class="p">);</span>
+</code></pre></div>
+
+<p><strong>The alignment constraint (catches people off guard):</strong></p>
+<p>These functions operate on cache lines, which are 32 bytes on Cortex-M7. If your buffer doesn&rsquo;t start on a 32-byte aligned address, the function may clean/invalidate the wrong range — potentially corrupting adjacent data.</p>
+<p><strong>This is why buffers must be <code>__aligned(32)</code>:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// CORRECT: 32-byte aligned → cache line operations work correctly</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="nf">__aligned</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="mi">300</span><span class="p">];</span>
+
+<span class="c1">// WRONG: compiler places at arbitrary alignment → cache ops corrupt neighboring data</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="mi">300</span><span class="p">];</span>
+</code></pre></div>
+
+<hr />
+<h3 id="19-spi-modes-the-cpolcpha-matrix-explained-with-timing-diagrams">1.9 SPI modes — the CPOL/CPHA matrix, explained with timing diagrams</h3>
+<p>Four SPI modes exist. Each device specifies which mode it wants. If your controller and device disagree, every byte reads as garbage — with no error message.</p>
+<p><strong>Two independent settings:</strong></p>
+<ul>
+<li><strong>CPOL</strong> (Clock <strong>Pol</strong>arity): What is the clock doing when idle (between transfers)?</li>
+<li>CPOL=0: clock <strong>idle LOW</strong> (sits at 0 between transfers)</li>
+<li>
+<p>CPOL=1: clock <strong>idle HIGH</strong> (sits at 1 between transfers)</p>
+</li>
+<li>
+<p><strong>CPHA</strong> (Clock <strong>Pha</strong>se): When do you sample the data — on the first edge or the second?</p>
+</li>
+<li>CPHA=0: sample on the <strong>first</strong> edge after CS goes low</li>
+<li>CPHA=1: sample on the <strong>second</strong> edge after CS goes low</li>
+</ul>
+<p><strong>All four modes — ASCII timing diagrams:</strong></p>
+<div class="highlight"><pre><span></span><code>Mode 0 (CPOL=0, CPHA=0) — clock idle LOW, sample on RISING edge:
+  CS:   ──┐                                              ┌──
+          └──────────────────────────────────────────────┘
+  CLK:        ┌──┐  ┌──┐  ┌──┐  ┌──┐  ┌──┐  ┌──┐  ┌──┐  ┌──┐
+              │  │  │  │  │  │  │  │  │  │  │  │  │  │  │  │
+         ─────┘  └──┘  └──┘  └──┘  └──┘  └──┘  └──┘  └──┘  └─────
+  MOSI: ──[D7]───[D6]──[D5]──[D4]──[D3]──[D2]──[D1]──[D0]──
+                ↑     ↑     ↑     ↑     ↑     ↑     ↑     ↑
+                SAMPLE on RISING edge (first edge of each bit)
+  Use for: ICM-42688 IMU, W25Q flash, SD cards, most sensors
+
+Mode 1 (CPOL=0, CPHA=1) — clock idle LOW, sample on FALLING edge:
+  CLK:        ┌──┐  ┌──┐  ┌──┐  ┌──┐
+         ─────┘  └──┘  └──┘  └──┘  └─────
+  MOSI: ──────[D7]──[D6]──[D5]──[D4]──
+                   ↑     ↑     ↑     ↑
+              SAMPLE on FALLING edge (second edge of each bit)
+  Use for: some ADCs, AT45DB flash
+
+Mode 2 (CPOL=1, CPHA=0) — clock idle HIGH, sample on FALLING edge:
+  CLK:   ──────┐  ┌──┐  ┌──┐  ┌──┐  ┌──────
+               └──┘  └──┘  └──┘  └──┘
+  MOSI: ──[D7]──[D6]──[D5]──[D4]──[D3]──
+              ↑     ↑     ↑     ↑     ↑
+         SAMPLE on FALLING edge (first edge when CPOL=1)
+  Use for: some DACs, MPU-9250 in CPOL=1 mode
+
+Mode 3 (CPOL=1, CPHA=1) — clock idle HIGH, sample on RISING edge:
+  CLK:   ──────┐  ┌──┐  ┌──┐  ┌──┐  ┌──────
+               └──┘  └──┘  └──┘  └──┘
+  MOSI: ───────[D7]──[D6]──[D5]──[D4]──
+                    ↑     ↑     ↑     ↑
+                SAMPLE on RISING edge (second edge when CPOL=1)
+  Use for: ICM-42688 also supports this; some EEPROMs
+</code></pre></div>
+
+<p><strong>The practical checker before starting any SPI project:</strong>
+1. Open the device datasheet
+2. Find the table labeled &ldquo;SPI Mode&rdquo; or &ldquo;CPOL/CPHA&rdquo;
+3. Set your controller&rsquo;s <code>operation</code> field to match</p>
+<p>In Zephyr:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Mode 0:</span>
+<span class="p">.</span><span class="n">operation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SPI_WORD_SET</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">SPI_OP_MODE_SLAVE</span><span class="w">   </span><span class="c1">// default CPOL=0, CPHA=0</span>
+
+<span class="c1">// Mode 3:</span>
+<span class="p">.</span><span class="n">operation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SPI_WORD_SET</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">SPI_OP_MODE_SLAVE</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">SPI_MODE_CPOL</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">SPI_MODE_CPHA</span>
+</code></pre></div>
+
+<hr />
+<h3 id="110-crc16-framing-why-a-magic-header-alone-isnt-enough">1.10 CRC16 framing — why a magic header alone isn&rsquo;t enough</h3>
+<p><strong>The &ldquo;false start byte&rdquo; problem:</strong></p>
+<p>Suppose your frame starts with sync byte <code>0xAA</code>. Your Jetson reads bytes until it sees <code>0xAA</code>, then reads the next N bytes as a frame. Simple and fast.</p>
+<p>What if byte 73 of your sensor payload happens to be <code>0xAA</code>? The Jetson is in sync now, reads normally. But one packet later, it misses the real <code>0xAA</code> (e.g., due to a brief power glitch). Now it finds the <code>0xAA</code> inside the previous frame&rsquo;s payload. It starts reading from the <em>middle</em> of a frame, treating everything as a new frame. Your nav stack is now running on corrupted data.</p>
+<p><strong>What CRC adds:</strong></p>
+<p>CRC (Cyclic Redundancy Check) is a mathematical checksum. The sender runs all payload bytes through a polynomial calculation and appends a 2-byte result. The receiver runs the same calculation and compares. If they disagree, the frame is discarded.</p>
+<div class="highlight"><pre><span></span><code>Frame layout:
+  [0xAA] [len_hi] [len_lo] [.... payload bytes ....] [crc_hi] [crc_lo]
+     1       1        1         len bytes                    2
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>Desync scenario:
+  Jetson misses real 0xAA → starts reading mid-stream
+  Sees 0xAA in payload at byte 73 → thinks it&#39;s a new frame start
+  Reads next 2 bytes as length → gets nonsense (e.g. len=37543)
+  Tries to read 37543 bytes → observes rubbish CRC
+  CRC check fails → frame discarded (not passed to navigation!)
+  Sequence number jump detected → Jetson logs desync event
+  Next real 0xAA encountered → re-sync complete
+</code></pre></div>
+
+<p>Without CRC, the Jetson would have processed 37543 bytes of garbage sensor data — undetected.</p>
+<p><strong>CRC16-CCITT is used (not CRC32) because:</strong>
+- 2 bytes of overhead (vs 4 for CRC32) — frame efficiency matters at 100 Hz
+- Catches all 1, 2, 3-bit errors and most burst errors
+- Fast to compute in C: single-pass table lookup, ~0.3 µs for 150 bytes
+- Good enough for SPI distances (&lt; 1m, low noise)</p>
+<hr />
+<h3 id="111-frame-desync-and-recovery-what-happens-when-jetson-reboots-mid-transfer">1.11 Frame desync and recovery — what happens when Jetson reboots mid-transfer</h3>
+<p><strong>The problem:</strong> When the Jetson reboots or its spidev reader crashes, the STM32 just keeps filling buffers and swapping them. When the Jetson comes back, it starts reading SPI mid-cycle — it might be in the middle of byte 47 of a 150-byte frame.</p>
+<p><strong>Three-layer recovery design:</strong></p>
+<div class="highlight"><pre><span></span><code>Layer 1: Sync byte (0xAA) — re-lock at frame boundary
+  Jetson code: scan incoming bytes until 0xAA seen, then read header
+  Handles: Jetson reconnect mid-stream, SPI framing drift
+
+Layer 2: CRC16 — detect mid-frame garbage
+  Jetson code: re-seek if CRC fails
+  Handles: Partial frames, bit errors, length corruption
+
+Layer 3: Sequence number — count dropped frames
+  STM32: increments seq counter in header every frame
+  Jetson: checks seq, logs drops (NOT an error if it&#39;s just 1-2 missed; IS an error if continuous)
+  Handles: Performance monitoring, helps distinguish &quot;Jetson missing frames&quot; from &quot;STM32 not sending&quot;
+</code></pre></div>
+
+<p><strong>The sequence number is critical for OKS debugging.</strong> When the Jetson&rsquo;s navigation stack misbehaves, you want to know: &ldquo;Is the IMU data arriving intact?&rdquo; A seq counter lets you answer &ldquo;we dropped 0 frames&rdquo; or &ldquo;we dropped 3 frames per second&rdquo; — immediately distinguishing SPI transport problems from nav algorithm problems.</p>
+<hr />
+<h3 id="112-dma-completion-callback-execution-context-it-runs-as-an-isr">1.12 DMA completion callback execution context — it runs as an ISR</h3>
+<p><strong>This is the source of subtle, hard-to-reproduce bugs.</strong></p>
+<p>In Zephyr, the <code>spi_transceive_async()</code> callback fires from interrupt context. This means it is an ISR (Interrupt Service Routine), NOT a regular thread.</p>
+<p><strong>ISR rules you must never break:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>In thread</th>
+<th>In ISR</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>k_sem_give()</code></td>
+<td>✓ Legal</td>
+<td>✓ Legal (this is how ISR notifies thread)</td>
+</tr>
+<tr>
+<td><code>k_sem_take()</code></td>
+<td>✓ Legal</td>
+<td>✗ ILLEGAL — never blocks in ISR</td>
+</tr>
+<tr>
+<td><code>k_msleep()</code></td>
+<td>✓ Legal</td>
+<td>✗ ILLEGAL — scheduling requires thread context</td>
+</tr>
+<tr>
+<td><code>LOG_INF()</code></td>
+<td>✓ Legal</td>
+<td>✗ ILLEGAL — LOG uses a work queue (allocates, sleeps)</td>
+</tr>
+<tr>
+<td><code>printk()</code></td>
+<td>✓ Legal</td>
+<td>✓ Legal (direct UART write, but slow)</td>
+</tr>
+<tr>
+<td>Call <code>malloc()</code></td>
+<td>✓ Legal</td>
+<td>✗ ILLEGAL — heap operations can block</td>
+</tr>
+<tr>
+<td>Read/write global atomics</td>
+<td>✓ Legal</td>
+<td>✓ Legal</td>
+</tr>
+<tr>
+<td>Update sequence counter</td>
+<td>✓ Legal</td>
+<td>✓ Legal</td>
+</tr>
+<tr>
+<td><code>k_work_submit()</code></td>
+<td>✓ Legal</td>
+<td>✓ Legal (posts to work queue for later)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The pattern to follow:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// DMA complete callback — ISR CONTEXT</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">spi_async_callback</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">result</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">userdata</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="c1">// DO: advance the active buffer index (atomic write)</span>
+<span class="w">    </span><span class="n">tx_active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">tx_active</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// DO: increment sequence counter (for desync detection)</span>
+<span class="w">    </span><span class="n">frame_seq</span><span class="o">++</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// DO: signal the packer thread that buffer is now free</span>
+<span class="w">    </span><span class="n">k_sem_give</span><span class="p">(</span><span class="o">&amp;</span><span class="n">frame_done_sem</span><span class="p">);</span><span class="w">  </span><span class="c1">// ← this wakes up the thread, legally</span>
+
+<span class="w">    </span><span class="c1">// DO NOT: call LOG_INF() ← ILLEGAL, will crash or corrupt log subsystem</span>
+<span class="w">    </span><span class="c1">// DO NOT: call spi_transceive() ← ILLEGAL, will deadlock</span>
+<span class="w">    </span><span class="c1">// DO NOT: call k_sleep() ← ILLEGAL, scheduling in ISR = undefined behavior</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Why does LOG_INF() crash in an ISR?</strong> Zephyr&rsquo;s log subsystem routes messages through a work queue, which involves allocating a log message buffer and potentially blocking. In ISR context, blocking is illegal because the scheduler cannot preempt an ISR. The system will either hard fault or silently discard the log message and corrupt internal state.</p>
+<hr />
+<h2 id="part-2-annotated-code-reference">PART 2 — Annotated Code Reference</h2>
+<hr />
+<h3 id="21-buffer-definitions-alignment-and-placement">2.1 Buffer definitions — alignment and placement</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// comms/spi_slave.c</span>
+
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/kernel.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/spi.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/gpio.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/cache.h&gt;</span><span class="c1">          // SCB_CleanDCache_by_Addr etc.</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;crc16.h&quot;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;proto/sensor_frame.pb.h&quot;</span>
+
+<span class="c1">// ────────────────────────────────────────────────────────────────────────────</span>
+<span class="c1">// BUFFER SIZING</span>
+<span class="c1">// Maximum frame: nanopb-encoded SensorFrame (varies) + 5 byte framing overhead</span>
+<span class="c1">//   (0xAA + 2-byte len + 2-byte CRC)</span>
+<span class="cp">#define FRAME_MAX_PAYLOAD  256</span>
+<span class="cp">#define FRAME_OVERHEAD     5    </span><span class="c1">// header 3 + CRC 2</span>
+<span class="cp">#define FRAME_MAX_BYTES    (FRAME_MAX_PAYLOAD + FRAME_OVERHEAD)</span>
+
+<span class="c1">// ────────────────────────────────────────────────────────────────────────────</span>
+<span class="c1">// DMA BUFFERS — must satisfy three constraints:</span>
+<span class="c1">//</span>
+<span class="c1">// 1. __aligned(32): Cortex-M7 cache line = 32 bytes.</span>
+<span class="c1">//    SCB_CleanDCache_by_Addr() rounds DOWN to cache line boundary and rounds UP</span>
+<span class="c1">//    to the next cache line. If your buffer starts at offset +4 within a cache</span>
+<span class="c1">//    line, the flush may miss the first 4 bytes AND flush 28 bytes of the</span>
+<span class="c1">//    *previous* struct (corrupting it). Always align to 32.</span>
+<span class="c1">//</span>
+<span class="c1">// 2. Placed in DMA-accessible SRAM: On STM32H7, DMA1/2 can only access D2</span>
+<span class="c1">//    SRAM (AHB SRAM, addresses 0x30000000–0x3007FFFF).</span>
+<span class="c1">//    D1 SRAM (DTCM, 0x20000000) is fast but NOT accessible by DMA1/2 — only</span>
+<span class="c1">//    by MDMA or BDMA. Placing buffers in DTCM + using DMA1 = silent failure.</span>
+<span class="c1">//    The .noinit_d2 section below tells the linker to place these in D2 SRAM.</span>
+<span class="c1">//</span>
+<span class="c1">// 3. Double-buffered: one buffer always under DMA ownership, one always</span>
+<span class="c1">//    under CPU/packer ownership. They never overlap.</span>
+<span class="c1">//</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">__aligned</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">section</span><span class="p">(</span><span class="s">&quot;.noinit_d2&quot;</span><span class="p">)))</span>
+<span class="w">    </span><span class="n">tx_buf</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="n">FRAME_MAX_BYTES</span><span class="p">];</span>
+
+<span class="c1">// tx_active: index (0 or 1) of the buffer DMA is currently SENDING from.</span>
+<span class="c1">// The OTHER index (1 - tx_active) is the idle buffer the packer writes into.</span>
+<span class="c1">// Must be volatile: both the ISR and the packer thread read/write this.</span>
+<span class="c1">// Atomic on ARM32: single 32-bit aligned word write is one STR instruction.</span>
+<span class="k">static</span><span class="w"> </span><span class="k">volatile</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">tx_active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="c1">// tx_len: byte count of the frame currently in the active buffer.</span>
+<span class="c1">// Updated before tx_active swap so the CS ISR always reads a consistent length.</span>
+<span class="k">static</span><span class="w"> </span><span class="k">volatile</span><span class="w"> </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">tx_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="c1">// Semaphore signaling the packer thread that a DMA transfer completed.</span>
+<span class="c1">// ISR calls k_sem_give() (legal from ISR). Packer thread calls k_sem_take().</span>
+<span class="k">static</span><span class="w"> </span><span class="n">K_SEM_DEFINE</span><span class="p">(</span><span class="n">frame_done_sem</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+
+<span class="c1">// Frame sequence counter — incremented on every successful TX.</span>
+<span class="c1">// Jetson monitors this to detect dropped frames.</span>
+<span class="k">static</span><span class="w"> </span><span class="k">volatile</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">frame_seq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+</code></pre></div>
+
+<hr />
+<h3 id="22-the-cs-gpio-interrupt-handler-what-to-do-and-what-not-to-do">2.2 The CS GPIO interrupt handler — what to do and what NOT to do</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// GPIO spec for CS pin — obtained from devicetree at compile time</span>
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_dt_spec</span><span class="w"> </span><span class="n">cs_gpio</span><span class="w"> </span><span class="o">=</span>
+<span class="w">    </span><span class="n">GPIO_DT_SPEC_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">spi1_cs_mon</span><span class="p">),</span><span class="w"> </span><span class="n">gpios</span><span class="p">);</span>
+<span class="w">    </span><span class="c1">// spi1_cs_mon: a gpio-keys node exposing the CS line as a monitorable GPIO.</span>
+<span class="w">    </span><span class="c1">// Separate from the SPI controller&#39;s NSS pin — we wire it to both the SPI</span>
+<span class="w">    </span><span class="c1">// hardware AND a GPIO input so we can get an edge interrupt.</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_callback</span><span class="w"> </span><span class="n">cs_cb_data</span><span class="p">;</span><span class="w">  </span><span class="c1">// Zephyr callback state struct</span>
+
+<span class="c1">// ────────────────────────────────────────────────────────────────────────────</span>
+<span class="c1">// CS FALLING EDGE ISR</span>
+<span class="c1">// This fires when Jetson asserts CS (pulls it LOW).</span>
+<span class="c1">//</span>
+<span class="c1">// TIMING CONSTRAINT: the first SPI clock edge arrives 100ns–1µs after CS.</span>
+<span class="c1">// You have approximately 0 useful time here.</span>
+<span class="c1">//</span>
+<span class="c1">// CORRECT behavior: do nothing meaningful. DMA was already armed in the</span>
+<span class="c1">//   previous TX-complete callback. Just validate and return.</span>
+<span class="c1">//</span>
+<span class="c1">// WRONG behavior: arm DMA here. By the time your ISR body runs, the SPI</span>
+<span class="c1">//   hardware has already sent the first 1–4 bytes as 0xFF.</span>
+<span class="c1">//</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">cs_falling_isr</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span>
+<span class="w">                            </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_callback</span><span class="w"> </span><span class="o">*</span><span class="n">cb</span><span class="p">,</span>
+<span class="w">                            </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="c1">// OPTIONAL: sanity check — if DMA is somehow not armed, we can log a</span>
+<span class="w">    </span><span class="c1">// counter to track pre-arm failures. But do NOT try to arm DMA here.</span>
+<span class="w">    </span><span class="c1">// Arming takes &gt;1µs and the SPI clock is already running.</span>
+
+<span class="w">    </span><span class="c1">// This ISR&#39;s real job: detect CS falling so we know a transfer started.</span>
+<span class="w">    </span><span class="c1">// Use this signal for watchdog reset or &quot;host is alive&quot; detection.</span>
+<span class="w">    </span><span class="c1">// Otherwise: just return immediately.</span>
+<span class="w">    </span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="n">dev</span><span class="p">;</span>
+<span class="w">    </span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="n">cb</span><span class="p">;</span>
+<span class="w">    </span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="n">pins</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// ────────────────────────────────────────────────────────────────────────────</span>
+<span class="c1">// CS RISING EDGE ISR (optional but useful)</span>
+<span class="c1">// Fires when Jetson deasserts CS — transfer is over.</span>
+<span class="c1">// Ideal place to count completed transfers for throughput monitoring.</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">cs_rising_isr</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span>
+<span class="w">                           </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_callback</span><span class="w"> </span><span class="o">*</span><span class="n">cb</span><span class="p">,</span>
+<span class="w">                           </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="n">dev</span><span class="p">;</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="n">cb</span><span class="p">;</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="n">pins</span><span class="p">;</span>
+<span class="w">    </span><span class="c1">// Just a counter increment — purely diagnostic, not in critical path.</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">spi_slave_gpio_init</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">gpio_pin_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cs_gpio</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_INPUT</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">gpio_init_callback</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cs_cb_data</span><span class="p">,</span><span class="w"> </span><span class="n">cs_falling_isr</span><span class="p">,</span><span class="w"> </span><span class="n">BIT</span><span class="p">(</span><span class="n">cs_gpio</span><span class="p">.</span><span class="n">pin</span><span class="p">));</span>
+<span class="w">    </span><span class="n">gpio_add_callback</span><span class="p">(</span><span class="n">cs_gpio</span><span class="p">.</span><span class="n">port</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">cs_cb_data</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Trigger on BOTH edges: falling = transfer start, rising = transfer end</span>
+<span class="w">    </span><span class="n">gpio_pin_interrupt_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cs_gpio</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_INT_EDGE_BOTH</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h3 id="23-spi_transceive_async-every-parameter-explained">2.3 <code>spi_transceive_async()</code> — every parameter explained</h3>
+<div class="highlight"><pre><span></span><code><span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">spi_dev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">spi1</span><span class="p">));</span>
+
+<span class="c1">// SPI slave configuration — note key differences from master config</span>
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_config</span><span class="w"> </span><span class="n">slave_cfg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">frequency</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="c1">// ↑ SLAVE SETS FREQUENCY TO 0: the slave does NOT generate the clock.</span>
+<span class="w">    </span><span class="c1">//   Setting a non-zero frequency is ignored in slave mode, but 0 makes</span>
+<span class="w">    </span><span class="c1">//   the intent explicit. (Putting 10000000 here does nothing harmful but</span>
+<span class="w">    </span><span class="c1">//   is misleading to readers.)</span>
+
+<span class="w">    </span><span class="p">.</span><span class="n">operation</span><span class="w"> </span><span class="o">=</span>
+<span class="w">        </span><span class="n">SPI_WORD_SET</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="w">         </span><span class="o">|</span><span class="w">   </span><span class="c1">// 8-bit words (standard)</span>
+<span class="w">        </span><span class="n">SPI_OP_MODE_SLAVE</span><span class="w">       </span><span class="o">|</span><span class="w">   </span><span class="c1">// ← slave mode: wait for master clock</span>
+<span class="w">        </span><span class="n">SPI_TRANSFER_MSB</span><span class="w">        </span><span class="o">|</span><span class="w">   </span><span class="c1">// MSB first (check with Jetson spidev config!)</span>
+<span class="w">        </span><span class="n">SPI_MODE_CPOL</span><span class="w">           </span><span class="o">|</span><span class="w">   </span><span class="c1">// CPOL=1: clock idle HIGH</span>
+<span class="w">        </span><span class="n">SPI_MODE_CPHA</span><span class="p">,</span><span class="w">              </span><span class="c1">// CPHA=1: sample on second edge</span>
+<span class="w">        </span><span class="c1">// ↑ Mode 3 (CPOL=1, CPHA=1): common choice matching Jetson default.</span>
+<span class="w">        </span><span class="c1">//   Check your Jetson spidev mode with: cat /sys/bus/spi/.../of_node/mode</span>
+<span class="w">        </span><span class="c1">//   Both sides must agree or every byte is bit-rotated garbage.</span>
+
+<span class="w">    </span><span class="p">.</span><span class="n">cs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w">                         </span><span class="c1">// Slave does not control CS gpio —</span>
+<span class="w">        </span><span class="p">.</span><span class="n">gpio</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">NULL</span><span class="w"> </span><span class="p">},</span><span class="w">   </span><span class="c1">// leave NULL here. Master controls CS.</span>
+<span class="w">        </span><span class="p">.</span><span class="n">delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">.</span><span class="n">slave</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">                     </span><span class="c1">// slave index (for multi-slave, usually 0)</span>
+<span class="p">};</span>
+
+<span class="c1">// Buffer descriptors — Zephyr SPI API uses scatter/gather list</span>
+<span class="k">static</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf</span><span class="w"> </span><span class="n">tx_spi_buf</span><span class="p">;</span><span class="w">   </span><span class="c1">// points to tx_buf[tx_active]</span>
+<span class="k">static</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf</span><span class="w"> </span><span class="n">rx_spi_buf</span><span class="p">;</span><span class="w">   </span><span class="c1">// receive buffer (we usually don&#39;t care about RX)</span>
+<span class="k">static</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf_set</span><span class="w"> </span><span class="n">tx_set</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buffers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx_spi_buf</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+<span class="k">static</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf_set</span><span class="w"> </span><span class="n">rx_set</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buffers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rx_spi_buf</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+
+<span class="c1">// RX buffer — we need one even if we don&#39;t care about incoming bytes.</span>
+<span class="c1">// The SPI hardware is always full-duplex. We just ignore the received data.</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="nf">__aligned</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span><span class="w"> </span><span class="n">rx_discard_buf</span><span class="p">[</span><span class="n">FRAME_MAX_BYTES</span><span class="p">];</span>
+
+<span class="c1">// ────────────────────────────────────────────────────────────────────────────</span>
+<span class="c1">// ARM DMA FOR NEXT TRANSFER</span>
+<span class="c1">// Call this from the TX-complete callback (NOT from CS ISR).</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">arm_spi_dma</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="c1">// Point TX buffer at the currently active frame</span>
+<span class="w">    </span><span class="n">tx_spi_buf</span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">[</span><span class="n">tx_active</span><span class="p">];</span>
+<span class="w">    </span><span class="n">tx_spi_buf</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tx_len</span><span class="p">;</span><span class="w">        </span><span class="c1">// exact byte count</span>
+
+<span class="w">    </span><span class="c1">// Point RX buffer at the discard area</span>
+<span class="w">    </span><span class="n">rx_spi_buf</span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">rx_discard_buf</span><span class="p">;</span>
+<span class="w">    </span><span class="n">rx_spi_buf</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tx_len</span><span class="p">;</span><span class="w">        </span><span class="c1">// RX and TX must be same length for SPI</span>
+
+<span class="w">    </span><span class="c1">// Flush D-cache BEFORE arming DMA</span>
+<span class="w">    </span><span class="c1">// ↓ This is the critical line. Without it: DMA reads stale SRAM → Jetson</span>
+<span class="w">    </span><span class="c1">//   receives garbage while GDB shows perfect data (the lying librarian).</span>
+<span class="w">    </span><span class="n">sys_cache_data_flush_range</span><span class="p">(</span><span class="n">tx_buf</span><span class="p">[</span><span class="n">tx_active</span><span class="p">],</span><span class="w"> </span><span class="n">tx_len</span><span class="p">);</span>
+<span class="w">    </span><span class="c1">// ↑ Zephyr 3.x abstraction for SCB_CleanDCache_by_Addr.</span>
+<span class="w">    </span><span class="c1">//   On M0/M3/M4 this is a no-op (no D-cache) — safe on all targets.</span>
+
+<span class="w">    </span><span class="c1">// Launch async SPI transfer — this call is non-blocking</span>
+<span class="w">    </span><span class="c1">// Returns immediately; callback fires when Jetson completes the transfer.</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">ret</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">spi_transceive_async</span><span class="p">(</span>
+<span class="w">        </span><span class="n">spi_dev</span><span class="p">,</span><span class="w">                </span><span class="c1">// device: obtained from devicetree</span>
+<span class="w">        </span><span class="o">&amp;</span><span class="n">slave_cfg</span><span class="p">,</span><span class="w">             </span><span class="c1">// config: slave mode, mode 3, etc.</span>
+<span class="w">        </span><span class="o">&amp;</span><span class="n">tx_set</span><span class="p">,</span><span class="w">                </span><span class="c1">// TX buffer set: what we send</span>
+<span class="w">        </span><span class="o">&amp;</span><span class="n">rx_set</span><span class="p">,</span><span class="w">                </span><span class="c1">// RX buffer set: where incoming bytes go (discard)</span>
+<span class="w">        </span><span class="o">&amp;</span><span class="n">spi_async_cb</span><span class="p">,</span><span class="w">          </span><span class="c1">// callback: fired from ISR when transfer completes</span>
+<span class="w">        </span><span class="nb">NULL</span><span class="w">                    </span><span class="c1">// userdata: passed to callback (NULL here)</span>
+<span class="w">    </span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ret</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// arm failed — this is serious. Increment error counter.</span>
+<span class="w">        </span><span class="c1">// Do NOT call LOG_ERR here if called from ISR context.</span>
+<span class="w">        </span><span class="c1">// If called from thread context: LOG_ERR(&quot;SPI arm failed: %d&quot;, ret);</span>
+<span class="w">        </span><span class="n">arm_error_count</span><span class="o">++</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h3 id="24-the-dma-complete-callback-legal-operations-only">2.4 The DMA complete callback — legal operations only</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// ────────────────────────────────────────────────────────────────────────────</span>
+<span class="c1">// SPI ASYNC COMPLETION CALLBACK</span>
+<span class="c1">//</span>
+<span class="c1">// EXECUTION CONTEXT: ISR — called from hardware interrupt, not a thread.</span>
+<span class="c1">// Rules: no blocking, no LOG_INF, no malloc, no k_sleep, no k_sem_take.</span>
+<span class="c1">// Allowed: k_sem_give, atomic writes, increment counters, k_work_submit.</span>
+<span class="c1">//</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">spi_async_cb</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span>
+<span class="w">                         </span><span class="kt">int</span><span class="w"> </span><span class="n">result</span><span class="p">,</span>
+<span class="w">                         </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">userdata</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="n">dev</span><span class="p">;</span>
+<span class="w">    </span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="n">userdata</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">result</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// SPI transfer error (cable unplugged, invalid state, etc.)</span>
+<span class="w">        </span><span class="n">tx_error_count</span><span class="o">++</span><span class="p">;</span><span class="w">           </span><span class="c1">// ← atomic (single 32-bit write on ARM32)</span>
+<span class="w">        </span><span class="c1">// Re-arm anyway — keep trying. The next transfer may succeed.</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">frame_seq</span><span class="o">++</span><span class="p">;</span><span class="w">                </span><span class="c1">// ← count successful frames sent</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Immediately re-arm DMA for the NEXT transfer.</span>
+<span class="w">    </span><span class="c1">// This is the critical moment: DMA is now armed and waiting.</span>
+<span class="w">    </span><span class="c1">// CS can fire any time after this returns — and we&#39;ll be ready.</span>
+<span class="w">    </span><span class="n">arm_spi_dma</span><span class="p">();</span><span class="w">                  </span><span class="c1">// ← points DMA at tx_buf[tx_active]</span>
+
+<span class="w">    </span><span class="c1">// Signal the packer thread that a transfer completed.</span>
+<span class="w">    </span><span class="c1">// The packer thread blocks on this semaphore, then:</span>
+<span class="w">    </span><span class="c1">//   1. Reads tx_active to know which buffer DMA is CURRENTLY using</span>
+<span class="w">    </span><span class="c1">//   2. Writes new frame into the OTHER buffer</span>
+<span class="w">    </span><span class="c1">//   3. Swaps tx_active pointer</span>
+<span class="w">    </span><span class="n">k_sem_give</span><span class="p">(</span><span class="o">&amp;</span><span class="n">frame_done_sem</span><span class="p">);</span><span class="w">    </span><span class="c1">// ← legal from ISR: unblocks thread</span>
+
+<span class="w">    </span><span class="c1">// DO NOT:</span>
+<span class="w">    </span><span class="c1">//   LOG_INF(&quot;frame sent&quot;);     ← ILLEGAL: work queue, alloc, potential block</span>
+<span class="w">    </span><span class="c1">//   spi_transceive(spi_dev,…); ← ILLEGAL: blocking API in ISR</span>
+<span class="w">    </span><span class="c1">//   k_sleep(K_MSEC(1));        ← ILLEGAL: no scheduling in ISR</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h3 id="25-the-packer-thread-main-loop-encode-flush-cache-swap-signal">2.5 The packer thread main loop — encode → flush cache → swap → signal</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// ────────────────────────────────────────────────────────────────────────────</span>
+<span class="c1">// PACKER THREAD</span>
+<span class="c1">// Runs at priority 3 (below main thread, above idle).</span>
+<span class="c1">// Wakes when DMA signals frame_done_sem. Encodes next frame into idle buffer.</span>
+<span class="c1">// This is the only thread that writes to tx_buf — no locking needed.</span>
+<span class="c1">//</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">spi_packer_thread</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">arg1</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">arg2</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">arg3</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">ARG_UNUSED</span><span class="p">(</span><span class="n">arg1</span><span class="p">);</span><span class="w"> </span><span class="n">ARG_UNUSED</span><span class="p">(</span><span class="n">arg2</span><span class="p">);</span><span class="w"> </span><span class="n">ARG_UNUSED</span><span class="p">(</span><span class="n">arg3</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Arm DMA once at startup — before first CS edge arrives</span>
+<span class="w">    </span><span class="n">tx_active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx_len</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">memset</span><span class="p">(</span><span class="n">tx_buf</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="w"> </span><span class="mh">0x00</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">tx_buf</span><span class="p">[</span><span class="mi">0</span><span class="p">]));</span><span class="w">  </span><span class="c1">// zero initial frame</span>
+<span class="w">    </span><span class="n">arm_spi_dma</span><span class="p">();</span><span class="w">                                </span><span class="c1">// DMA armed; waiting for CS</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// ── Step 1: wait for previous DMA transfer to complete ──────────────</span>
+<span class="w">        </span><span class="c1">// This blocks until the ISR calls k_sem_give(&amp;frame_done_sem).</span>
+<span class="w">        </span><span class="c1">// Thread switches to sleeping — CPU free for other threads.</span>
+<span class="w">        </span><span class="n">k_sem_take</span><span class="p">(</span><span class="o">&amp;</span><span class="n">frame_done_sem</span><span class="p">,</span><span class="w"> </span><span class="n">K_FOREVER</span><span class="p">);</span>
+<span class="w">        </span><span class="c1">// ↑ K_FOREVER: if DMA never completes (STM32 bug, Jetson not polling),</span>
+<span class="w">        </span><span class="c1">//   thread blocks forever. If this is a concern, use K_MSEC(50) and</span>
+<span class="w">        </span><span class="c1">//   log a watchdog warning.</span>
+
+<span class="w">        </span><span class="c1">// ── Step 2: determine idle buffer index ─────────────────────────────</span>
+<span class="w">        </span><span class="c1">// tx_active is the buffer DMA is currently pointing at (just re-armed).</span>
+<span class="w">        </span><span class="c1">// We write into the OTHER buffer — the one DMA is NOT reading.</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">write_idx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">tx_active</span><span class="p">;</span>
+<span class="w">        </span><span class="c1">// ↑ On ARM32, reading tx_active is atomic (one LDR instruction).</span>
+<span class="w">        </span><span class="c1">//   write_idx is stable: arm_spi_dma() inside the ISR cannot change</span>
+<span class="w">        </span><span class="c1">//   tx_active between this read and when we finish writing write_idx.</span>
+
+<span class="w">        </span><span class="c1">// ── Step 3: encode nanopb payload into idle buffer (after framing) ──</span>
+<span class="w">        </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">payload_start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write_idx</span><span class="p">][</span><span class="mi">3</span><span class="p">];</span><span class="w"> </span><span class="c1">// skip 3-byte header</span>
+<span class="w">        </span><span class="n">pb_ostream_t</span><span class="w"> </span><span class="n">stream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_ostream_from_buffer</span><span class="p">(</span>
+<span class="w">            </span><span class="n">payload_start</span><span class="p">,</span><span class="w"> </span><span class="n">FRAME_MAX_PAYLOAD</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">SensorFrame</span><span class="w"> </span><span class="n">frame</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">get_latest_sensor_frame</span><span class="p">();</span><span class="w">  </span><span class="c1">// reads shared data</span>
+<span class="w">        </span><span class="kt">bool</span><span class="w"> </span><span class="n">encode_ok</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_encode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stream</span><span class="p">,</span><span class="w"> </span><span class="n">SensorFrame_fields</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">frame</span><span class="p">);</span>
+
+<span class="w">        </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">payload_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint16_t</span><span class="p">)</span><span class="n">stream</span><span class="p">.</span><span class="n">bytes_written</span><span class="p">;</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">encode_ok</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">payload_len</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// Encoding failed — send a zero-length frame with error flag set</span>
+<span class="w">            </span><span class="n">payload_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="c1">// ── Step 4: build frame header ──────────────────────────────────────</span>
+<span class="w">        </span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write_idx</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0xAA</span><span class="p">;</span><span class="w">                    </span><span class="c1">// sync byte</span>
+<span class="w">        </span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write_idx</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">payload_len</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">        </span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write_idx</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w">  </span><span class="n">payload_len</span><span class="w">       </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+
+<span class="w">        </span><span class="c1">// ── Step 5: append CRC16 ─────────────────────────────────────────────</span>
+<span class="w">        </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">crc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">crc16_ccitt</span><span class="p">(</span><span class="n">payload_start</span><span class="p">,</span><span class="w"> </span><span class="n">payload_len</span><span class="p">);</span>
+<span class="w">        </span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write_idx</span><span class="p">][</span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">payload_len</span><span class="p">]</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">crc</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">        </span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write_idx</span><span class="p">][</span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">payload_len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w">  </span><span class="n">crc</span><span class="w">       </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+
+<span class="w">        </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">total_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">payload_len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w">  </span><span class="c1">// header + payload + CRC</span>
+
+<span class="w">        </span><span class="c1">// ── Step 6: flush D-cache for entire frame ───────────────────────────</span>
+<span class="w">        </span><span class="c1">// This is the cache coherency fix. Write CPU cache → SRAM so DMA</span>
+<span class="w">        </span><span class="c1">// sees fresh data when it reads this buffer next transfer.</span>
+<span class="w">        </span><span class="c1">// Must happen BEFORE tx_len and tx_active are updated.</span>
+<span class="w">        </span><span class="n">sys_cache_data_flush_range</span><span class="p">(</span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write_idx</span><span class="p">],</span><span class="w"> </span><span class="n">total_len</span><span class="p">);</span>
+<span class="w">        </span><span class="c1">// Align consideration: tx_buf[write_idx] is __aligned(32) so the</span>
+<span class="w">        </span><span class="c1">// flush covers exactly the right range with no off-by-32 errors.</span>
+
+<span class="w">        </span><span class="c1">// ── Step 7: atomic buffer swap ───────────────────────────────────────</span>
+<span class="w">        </span><span class="c1">// Update tx_len first, then tx_active.</span>
+<span class="w">        </span><span class="c1">// Order matters: arm_spi_dma() in the ISR reads tx_active to find the</span>
+<span class="w">        </span><span class="c1">// buffer, then reads tx_len for the byte count. If we set tx_active</span>
+<span class="w">        </span><span class="c1">// first, the ISR might catch a stale tx_len value.</span>
+<span class="w">        </span><span class="n">tx_len</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">total_len</span><span class="p">;</span><span class="w">   </span><span class="c1">// set length before making buffer active</span>
+<span class="w">        </span><span class="n">tx_active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">write_idx</span><span class="p">;</span><span class="w">  </span><span class="c1">// ← ATOMIC: single 32-bit write (one STR)</span>
+<span class="w">        </span><span class="c1">// After this write, the next arm_spi_dma() call in the ISR will use</span>
+<span class="w">        </span><span class="c1">// the new buffer and new length. The previous buffer is now &quot;idle&quot;</span>
+<span class="w">        </span><span class="c1">// and safe for us to overwrite in the next iteration.</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// Static thread definition</span>
+<span class="n">K_THREAD_DEFINE</span><span class="p">(</span><span class="n">spi_packer</span><span class="p">,</span><span class="w"> </span><span class="mi">2048</span><span class="p">,</span><span class="w"> </span><span class="n">spi_packer_thread</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+<span class="c1">//                           ↑     ↑                             ↑</span>
+<span class="c1">//                   stack bytes  entry fn                  priority 3</span>
+<span class="c1">// Stack 2048: nanopb encoding can use 400–600 bytes for message struct + stream.</span>
+<span class="c1">// CRC + framing + memcpy uses another ~100 bytes.</span>
+<span class="c1">// 2048 gives ~1000 bytes headroom — check with k_thread_stack_space_get() in dev.</span>
+</code></pre></div>
+
+<hr />
+<h3 id="26-the-double-buffer-swap-why-atomicity-matters">2.6 The double-buffer swap — why atomicity matters</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// ── CORRECT: update length before pointer swap ──────────────────────────────</span>
+<span class="n">tx_len</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">total_len</span><span class="p">;</span><span class="w">    </span><span class="c1">// Step A: length for new buffer</span>
+<span class="n">tx_active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">write_idx</span><span class="p">;</span><span class="w">   </span><span class="c1">// Step B: NOW make it active (ISR sees consistent state)</span>
+
+<span class="c1">// WHY the order matters:</span>
+<span class="c1">// ISR calls arm_spi_dma() which does:</span>
+<span class="c1">//   tx_spi_buf.buf = tx_buf[tx_active];      ← reads tx_active (A = write_idx now)</span>
+<span class="c1">//   tx_spi_buf.len = tx_len;                 ← reads tx_len</span>
+<span class="c1">//</span>
+<span class="c1">// If you set tx_active BEFORE tx_len:</span>
+<span class="c1">//   ISR reads tx_active = write_idx   ← correct new buffer</span>
+<span class="c1">//   ISR reads tx_len    = OLD_LEN     ← stale length! Sends too many/few bytes!</span>
+<span class="c1">//</span>
+<span class="c1">// If you set tx_len BEFORE tx_active:</span>
+<span class="c1">//   ISR reads tx_active = OLD_IDX     ← points to old buffer (who cares, it&#39;s armed)</span>
+<span class="c1">//   ISR reads tx_len    = NEW_LEN     ← new length for old buffer (wrong but harmless)</span>
+<span class="c1">//   Next ISR call will get both new   ← correct by next transfer (one frame error max)</span>
+<span class="c1">//</span>
+<span class="c1">// The safest invariant: always write the length before swapping the pointer.</span>
+
+
+<span class="c1">// ── WRONG: naive Python-like swap ───────────────────────────────────────────</span>
+<span class="c1">// This would be wrong because there&#39;s no &quot;atomic pair&quot; swap on ARM32:</span>
+<span class="c1">//</span>
+<span class="c1">// tx_active = write_idx;   ← ISR could read tx_active here (sees new idx)</span>
+<span class="c1">// tx_len = total_len;      ← ISR also reads tx_len here (sees old len) = CORRUPT FRAME</span>
+<span class="c1">//</span>
+<span class="c1">// Always update length first, then pointer.</span>
+</code></pre></div>
+
+<hr />
+<h3 id="27-wrong-vs-correct-arm-dma-in-cs-isr-vs-arm-in-tx-complete-callback">2.7 Wrong vs correct: arm DMA in CS ISR vs arm in TX-complete callback</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// ══════════════════════════════════════════════════════════════════════════</span>
+<span class="c1">// WRONG APPROACH — Arm DMA inside the CS falling-edge interrupt</span>
+<span class="c1">// ══════════════════════════════════════════════════════════════════════════</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">cs_falling_isr_WRONG</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span>
+<span class="w">                                  </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_callback</span><span class="w"> </span><span class="o">*</span><span class="n">cb</span><span class="p">,</span>
+<span class="w">                                  </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="c1">// ← You are here at t=0ns (CS just went low)</span>
+<span class="w">    </span><span class="c1">// ← First SPI clock edge arrives at t=100ns to t=1000ns</span>
+<span class="w">    </span><span class="c1">//</span>
+<span class="w">    </span><span class="c1">// This function body takes:</span>
+<span class="w">    </span><span class="c1">//   - IRQ entry overhead:               ~25 ns</span>
+<span class="w">    </span><span class="c1">//   - Possible IRQ masking delay:       0–10,000 ns (if critical section active)</span>
+<span class="w">    </span><span class="c1">//   - arm_spi_dma() execution:          ~500–2000 ns</span>
+<span class="w">    </span><span class="c1">//</span>
+<span class="w">    </span><span class="c1">// Total: 525–12,025 ns</span>
+<span class="w">    </span><span class="c1">//</span>
+<span class="w">    </span><span class="c1">// At 10 MHz: 1 bit = 100ns, 1 byte = 800ns</span>
+<span class="w">    </span><span class="c1">// If arm takes 1600ns: first 2 bytes already sent as 0xFF before DMA is armed</span>
+<span class="w">    </span><span class="c1">//</span>
+<span class="w">    </span><span class="n">arm_spi_dma</span><span class="p">();</span><span class="w">  </span><span class="c1">// ← RACE: SPI clock may already be running!</span>
+
+<span class="w">    </span><span class="c1">// SYMPTOM: First 1–4 bytes of every frame are 0xFF (or 0x00)</span>
+<span class="w">    </span><span class="c1">//          Rest of frame is correct</span>
+<span class="w">    </span><span class="c1">//          Error is CONSISTENT (not intermittent)</span>
+<span class="w">    </span><span class="c1">//          No error flags from SPI hardware</span>
+<span class="w">    </span><span class="c1">//          Adding LOG_INF here makes bug WORSE (ISR takes longer → more 0xFF bytes)</span>
+<span class="p">}</span>
+
+<span class="c1">// ══════════════════════════════════════════════════════════════════════════</span>
+<span class="c1">// CORRECT APPROACH — Arm DMA when PREVIOUS transfer completes</span>
+<span class="c1">// ══════════════════════════════════════════════════════════════════════════</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">spi_async_cb_CORRECT</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span>
+<span class="w">                                  </span><span class="kt">int</span><span class="w"> </span><span class="n">result</span><span class="p">,</span>
+<span class="w">                                  </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">userdata</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="c1">// ← You are here when the PREVIOUS transfer just finished (CS went HIGH)</span>
+<span class="w">    </span><span class="c1">// ← Next CS edge could arrive in 1ms, 5ms, 10ms — we don&#39;t know</span>
+<span class="w">    </span><span class="c1">//</span>
+<span class="w">    </span><span class="c1">// This is the RIGHT time to arm. We have microseconds to milliseconds of</span>
+<span class="w">    </span><span class="c1">// margin. The DMA will be armed and waiting well before CS fires again.</span>
+<span class="w">    </span><span class="c1">//</span>
+<span class="w">    </span><span class="n">frame_seq</span><span class="o">++</span><span class="p">;</span>
+<span class="w">    </span><span class="n">arm_spi_dma</span><span class="p">();</span><span class="w">      </span><span class="c1">// ← re-arm immediately after previous TX completes</span>
+<span class="w">    </span><span class="n">k_sem_give</span><span class="p">(</span><span class="o">&amp;</span><span class="n">frame_done_sem</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// TIMING: arm_spi_dma() is called here at t=T_prev_complete</span>
+<span class="w">    </span><span class="c1">//         CS fires at t=T_prev_complete + (some interval, often 10ms)</span>
+<span class="w">    </span><span class="c1">//         DMA is armed for 10ms before it needs to respond</span>
+<span class="w">    </span><span class="c1">//         First byte sent correctly: guaranteed</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h3 id="28-crc16-framing-complete-frame-assembly">2.8 CRC16 framing — complete frame assembly</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// ────────────────────────────────────────────────────────────────────────────</span>
+<span class="c1">// FRAME FORMAT:</span>
+<span class="c1">//   Byte 0:     0xAA (sync)</span>
+<span class="c1">//   Bytes 1–2:  payload length, big-endian uint16</span>
+<span class="c1">//   Bytes 3..N: nanopb payload</span>
+<span class="c1">//   Bytes N+1, N+2: CRC16-CCITT over bytes 3..N (payload only, not header)</span>
+<span class="c1">//</span>
+<span class="c1">// CRC is computed over payload only (not the 3-byte header).</span>
+<span class="c1">// This simplifies resync: Jetson finds 0xAA, reads 2 bytes for length,</span>
+<span class="c1">// reads `length` bytes, verifies CRC. No need to include header in CRC</span>
+<span class="c1">// because the length field is self-consistent (a corrupted length will</span>
+<span class="c1">// produce a wrong byte count which CRC will catch anyway).</span>
+<span class="c1">//</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">build_spi_frame</span><span class="p">(</span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">frame_buf</span><span class="p">,</span>
+<span class="w">                     </span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">payload</span><span class="p">,</span>
+<span class="w">                     </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">payload_len</span><span class="p">,</span>
+<span class="w">                     </span><span class="kt">uint16_t</span><span class="w"> </span><span class="o">*</span><span class="n">total_len_out</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="c1">// ── Header ────────────────────────────────────────────────────────────</span>
+<span class="w">    </span><span class="n">frame_buf</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0xAA</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame_buf</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">payload_len</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span><span class="w">  </span><span class="c1">// length high byte</span>
+<span class="w">    </span><span class="n">frame_buf</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w">  </span><span class="n">payload_len</span><span class="w">       </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span><span class="w">  </span><span class="c1">// length low byte</span>
+
+<span class="w">    </span><span class="c1">// ── Payload ───────────────────────────────────────────────────────────</span>
+<span class="w">    </span><span class="n">memcpy</span><span class="p">(</span><span class="o">&amp;</span><span class="n">frame_buf</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span><span class="w"> </span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="n">payload_len</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// ── CRC16-CCITT ───────────────────────────────────────────────────────</span>
+<span class="w">    </span><span class="c1">// Initial value 0xFFFF, polynomial 0x1021, no final XOR — standard CCITT</span>
+<span class="w">    </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">crc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">crc16_ccitt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">frame_buf</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span><span class="w"> </span><span class="n">payload_len</span><span class="p">);</span>
+<span class="w">    </span><span class="c1">// ↑ crc16_ccitt() from Zephyr&#39;s &lt;zephyr/sys/crc.h&gt;:</span>
+<span class="w">    </span><span class="c1">//   uint16_t crc16_ccitt(uint16_t seed, const uint8_t *src, size_t len);</span>
+<span class="w">    </span><span class="c1">//   Call as: crc16_ccitt(0xFFFF, payload_ptr, len)</span>
+<span class="w">    </span><span class="c1">//   Or implement with a 256-entry lookup table for ~0.3µs per frame.</span>
+
+<span class="w">    </span><span class="n">frame_buf</span><span class="p">[</span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">payload_len</span><span class="p">]</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">crc</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span><span class="w">  </span><span class="c1">// CRC high byte</span>
+<span class="w">    </span><span class="n">frame_buf</span><span class="p">[</span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">payload_len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w">  </span><span class="n">crc</span><span class="w">       </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span><span class="w">  </span><span class="c1">// CRC low byte</span>
+
+<span class="w">    </span><span class="o">*</span><span class="n">total_len_out</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">payload_len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w">  </span><span class="c1">// total frame size</span>
+
+<span class="w">    </span><span class="c1">// Bounds check — defensive, should never trigger if caller is correct</span>
+<span class="w">    </span><span class="n">__ASSERT</span><span class="p">(</span><span class="o">*</span><span class="n">total_len_out</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">FRAME_MAX_BYTES</span><span class="p">,</span>
+<span class="w">             </span><span class="s">&quot;Frame too large: %u bytes (max %u)&quot;</span><span class="p">,</span>
+<span class="w">             </span><span class="o">*</span><span class="n">total_len_out</span><span class="p">,</span><span class="w"> </span><span class="n">FRAME_MAX_BYTES</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h3 id="29-frame-counter-and-error-counter-layout-in-the-header">2.9 Frame counter and error counter layout in the header</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// ────────────────────────────────────────────────────────────────────────────</span>
+<span class="c1">// Extended frame header layout (recommended for production):</span>
+<span class="c1">//</span>
+<span class="c1">//   Byte 0:     0xAA (sync byte)</span>
+<span class="c1">//   Bytes 1–2:  payload length, big-endian uint16</span>
+<span class="c1">//   Bytes 3–6:  sequence number, big-endian uint32 (Jetson detects dropped frames)</span>
+<span class="c1">//   Bytes 7–8:  error flags (DMA errors, encode failures, watchdog timeouts)</span>
+<span class="c1">//   Bytes 9..N: nanopb payload</span>
+<span class="c1">//   Bytes N+1, N+2: CRC16 over all bytes from 3 to N (seq + flags + payload)</span>
+<span class="c1">//</span>
+<span class="c1">// Error flag bits (bytes 7–8):</span>
+<span class="cp">#define ERR_DMA_ARM_FAIL     BIT(0)  </span><span class="c1">// arm_spi_dma() returned non-zero</span>
+<span class="cp">#define ERR_ENCODE_FAIL      BIT(1)  </span><span class="c1">// pb_encode() returned false</span>
+<span class="cp">#define ERR_WATCHDOG         BIT(2)  </span><span class="c1">// packer took &gt;15ms (missed a cycle)</span>
+<span class="cp">#define ERR_CACHE_SKIP       BIT(3)  </span><span class="c1">// cache flush was skipped (shouldn&#39;t happen)</span>
+
+<span class="c1">// Writing the extended header:</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">build_extended_header</span><span class="p">(</span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">payload_len</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">seq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">frame_seq</span><span class="p">;</span><span class="w">  </span><span class="c1">// snapshot before encoding (ISR might increment)</span>
+<span class="w">    </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">errs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pending_error_flags</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pending_error_flags</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">   </span><span class="c1">// clear for next frame</span>
+
+<span class="w">    </span><span class="n">buf</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0xAA</span><span class="p">;</span>
+<span class="w">    </span><span class="n">buf</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">payload_len</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">    </span><span class="n">buf</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w">  </span><span class="n">payload_len</span><span class="w">       </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">    </span><span class="n">buf</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">seq</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">24</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">    </span><span class="n">buf</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">seq</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">16</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">    </span><span class="n">buf</span><span class="p">[</span><span class="mi">5</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">seq</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w">  </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">    </span><span class="n">buf</span><span class="p">[</span><span class="mi">6</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w">  </span><span class="n">seq</span><span class="w">        </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">    </span><span class="n">buf</span><span class="p">[</span><span class="mi">7</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">errs</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">    </span><span class="n">buf</span><span class="p">[</span><span class="mi">8</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w">  </span><span class="n">errs</span><span class="w">       </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="part-3-gotcha-table">PART 3 — Gotcha Table</h2>
+<hr />
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely Cause</th>
+<th>How to Diagnose</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>First 1–4 bytes of every frame are 0xFF or 0x00, rest is correct</strong></td>
+<td>DMA armed inside CS falling-edge ISR — too late, SPI clock already running when DMA is configured</td>
+<td>Logic analyzer: measure time from CS falling edge to first incorrect byte. If always ≤ 4 bytes wrong, this is timing. Scope DMA_TC interrupt pin: fires AFTER CS? Wrong.</td>
+<td>Arm DMA in the TX-complete callback (<code>spi_async_cb</code>), not in <code>cs_falling_isr</code>. DMA must be pre-armed before CS fires.</td>
+</tr>
+<tr>
+<td><strong>GDB shows correct values in tx_buf[], but Jetson receives garbage. &ldquo;Correct&rdquo; in GDB, wrong over wire.</strong></td>
+<td>D-cache coherency: CPU writes went to D-cache only; SRAM (which DMA reads) still has stale data. GDB forces a cache line fill when it reads, hiding the bug.</td>
+<td>Pattern: first 32 bytes correct (one cache line was evicted), bytes 32+ garbage. Toggle a GPIO before and after <code>SCB_CleanDCache_by_Addr</code> to confirm the flush call exists. Put a <code>__asm__ volatile("dsb sy")</code> before DMA start; if that fixes it, it was a cache issue.</td>
+<td>Add <code>sys_cache_data_flush_range(tx_buf[idx], len)</code> BEFORE <code>spi_transceive_async()</code>. Ensure buffers are <code>__aligned(32)</code>. Consider non-cacheable SRAM section for permanent fix.</td>
+</tr>
+<tr>
+<td><strong>Bytes are correct but in the WRONG buffer (neighbors corrupted)</strong>. Random bytes appearing in adjacent structs.</td>
+<td>Buffer not <code>__aligned(32)</code>. <code>SCB_CleanDCache_by_Addr</code> rounds addresses to 32-byte boundaries. An unaligned buffer causes the flush to cover the wrong range — including adjacent memory.</td>
+<td>Add <code>static_assert(sizeof(tx_buf[0]) % 32 == 0, "not cache-line aligned")</code>. Print <code>(uint32_t)tx_buf[0] % 32</code> at startup — should be 0.</td>
+<td>Declare buffers with <code>__aligned(32)</code>. Also round up buffer size to multiple of 32: <code>(FRAME_MAX_BYTES + 31) &amp; ~31</code>.</td>
+</tr>
+<tr>
+<td><strong>All bytes wrong — MISO shows bit-pattern that looks like a shift of the correct data</strong></td>
+<td>Wrong SPI mode (CPOL/CPHA mismatch). When modes differ, bits are sampled at the wrong clock edge, rotating or inverting the bit stream.</td>
+<td>Logic analyzer: capture raw MISO. Compare bit pattern to expected. The bits are almost all there but shifted by half a clock cycle. Try all 4 SPI modes systematically.</td>
+<td>Match CPOL/CPHA to what Jetson expects. On Jetson Orin, default is Mode 0. Set <code>SPI_MODE_CPOL | SPI_MODE_CPHA</code> in slave config only if Jetson explicitly uses Mode 3.</td>
+</tr>
+<tr>
+<td><strong>DMA works but is extremely slow (CPU usage 80%+)</strong></td>
+<td><code>CONFIG_SPI_STM32_DMA=y</code> missing from prj.conf. SPI driver fell back to CPU polling mode silently.</td>
+<td>Add <code>printk("SPI DMA enabled: %d\n", IS_ENABLED(CONFIG_SPI_STM32_DMA))</code> at startup. Use <code>perf stat</code> equivalent: toggle GPIO in packer loop, measure pulse width with logic analyzer. Should be &lt;500µs with DMA.</td>
+<td>Add <code>CONFIG_SPI_STM32_DMA=y</code> to prj.conf. Also needs <code>CONFIG_DMA=y</code>. Rebuild.</td>
+</tr>
+<tr>
+<td><strong>SPI transfers work in testing, fail intermittently with nanopb message that has many zero fields</strong></td>
+<td>nanopb / proto3 omits default-value (zero) fields during encode. Message encodes to fewer bytes when GPS drops fix or all floats are 0. If your Jetson expects fixed-length frames, it over-reads the frame boundary.</td>
+<td>Add <code>LOG_DBG("encoded %u bytes", stream.bytes_written)</code> in packer. Send artificial all-zero sensor data and check if Jetson frame length errors spike.</td>
+<td>Use explicit <code>payload_len</code> field in proto header. Jetson reads exactly <code>payload_len</code> bytes from after the sync header, not a fixed size.</td>
+</tr>
+<tr>
+<td><strong>DMA works once, then all subsequent transfers send 0xFF</strong></td>
+<td>Buffer placed in DTCM (D1 CPU-local SRAM, address 0x20000000). DMA1/2 cannot access DTCM on STM32H7. First transfer may succeed by accident or from cache; thereafter DMA reads a region it has no physical path to.</td>
+<td>Check linker map: if tx_buf lands near 0x20000000, it&rsquo;s in DTCM. DMA for SPI on STM32H7 needs D2 SRAM (~0x30000000).</td>
+<td>Add <code>__attribute__((section(".noinit_d2")))</code> to buffer declarations. Add custom linker section for D2 SRAM in your linker script or board definition: <code>.noinit_d2 (NOLOAD) : { *(.noinit_d2) } &gt; SRAM2</code></td>
+</tr>
+<tr>
+<td><strong>SPI transfer never completes (spi_transceive_async() callback never fires)</strong></td>
+<td>Jetson never asserts CS, OR SPI slave configured as master by mistake, OR <code>CONFIG_SPI_SLAVE=y</code> missing. For slave mode to work, Zephyr needs the slave API enabled.</td>
+<td>Check prj.conf for <code>CONFIG_SPI_SLAVE=y</code>. Check slave_cfg: <code>.operation</code> must include <code>SPI_OP_MODE_SLAVE</code>. Verify CS GPIO wired correctly (use logic analyzer to confirm Jetson is asserting CS).</td>
+<td>Add <code>CONFIG_SPI_SLAVE=y</code> to prj.conf. Verify <code>SPI_OP_MODE_SLAVE</code> in config. Check CS polarity (should be active-low on STM32: <code>GPIO_ACTIVE_LOW</code>).</td>
+</tr>
+<tr>
+<td><strong>nanopb encoded into a local stack variable, then that address passed to DMA</strong></td>
+<td>Stack is in DTCM (fast CPU-local SRAM, not DMA-accessible on H7). DMA will read from an inaccessible address, causing a bus error or silent garbage.</td>
+<td>Run under GDB: <code>info frame</code> during encoding shows local buffer at an address starting with 0x20xxxxxx = DTCM.</td>
+<td>Always encode into <code>tx_buf[]</code> (the DMA-accessible buffer in D2 SRAM), never into a local stack variable first.</td>
+</tr>
+<tr>
+<td><strong>CRC passes but Jetson nav stack drifts over time (subtle errors)</strong></td>
+<td>LSB/MSB byte order mismatch between STM32 CRC16 and Jetson CRC16 implementations. Some libraries swap the byte order; CRC happens to match on uniform bytes but fails on others.</td>
+<td>Log raw frame bytes in hex on both sides for the same transfer. Compute CRC manually. If Jetson CRC starts at seed=0x0000 and STM32 at seed=0xFFFF, they will always disagree.</td>
+<td>Standardize on CRC16-CCITT with seed=0xFFFF (standard CCITT). Verify both implementations: <code>crc16([0x01, 0x02, 0x03, 0x04])</code> should give the same hex value on both sides.</td>
+</tr>
+<tr>
+<td><strong><code>spi_transceive_async()</code> returns -ENOTSUP or -EINVAL</strong></td>
+<td>Async SPI API not supported for this SPI instance, OR missing DMA channels in devicetree, OR <code>dmas =</code> and <code>dma-names =</code> not configured for the SPI node.</td>
+<td><code>west build</code> with <code>CONFIG_SPI_LOG_LEVEL_DBG=y</code>. Check build output for DMA init messages. Check if <code>dmas = &lt;&amp;dma1 3 ...&gt;</code> is in your .overlay.</td>
+<td>Add <code>dmas = &lt;&amp;dma1 3 3 0x0&gt;, &lt;&amp;dma1 2 3 0x0&gt;; dma-names = "tx", "rx";</code> to your SPI node in the overlay. Values depend on your STM32H7 DMA request mapping table (RM0433).</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="quick-reference-card">Quick Reference Card</h2>
+<hr />
+<div class="highlight"><pre><span></span><code>SPI SLAVE + DMA + DOUBLE BUFFER — Critical Rules
+
+1. PRE-ARM DMA, NEVER RE-ARM IN CS ISR
+   • Arm DMA in TX-complete callback (arm on previous done)
+   • CS ISR must be a no-op (too late to arm)
+   • Test: logic analyzer — DMA TC interrupt should fire BEFORE CS goes high
+
+2. D-CACHE FLUSH BEFORE EVERY TX
+   • sys_cache_data_flush_range(buf, len) BEFORE spi_transceive_async()
+   • &quot;GDB shows correct, Jetson gets garbage&quot; = ALWAYS this bug
+   • Symptom fingerprint: first 32 bytes OK, rest garbage (= one cache line correct)
+
+3. BUFFER MUST BE __aligned(32)
+   • Cache line = 32 bytes on Cortex-M7
+   • Misalignment → flush covers wrong range → adjacent memory corrupted
+   • Static assert: _Static_assert((uintptr_t)tx_buf % 32 == 0, &quot;align!&quot;)
+
+4. BUFFER MUST BE IN DMA-ACCESSIBLE SRAM (STM32H7)
+   • DTCM (0x20000000): CPU-only, DMA1/2 CANNOT access → silent failure
+   • D2 SRAM (0x30000000): DMA-accessible → use section(&quot;.noinit_d2&quot;)
+
+5. DMA CALLBACK IS AN ISR — NO BLOCKING
+   • k_sem_give()   ✓    LOG_INF()       ✗
+   • counter++      ✓    k_sem_take()    ✗
+   • arm_spi_dma()  ✓    spi_transceive() ✗
+
+6. DOUBLE BUFFER SWAP: LENGTH BEFORE POINTER
+   • tx_len = new_len;       ← first
+   • tx_active = write_idx;  ← second (atomic)
+   • Reversing this risks ISR catching new pointer with old length
+
+7. SPI MODE MUST MATCH JETSON
+   • Check with: cat /sys/kernel/debug/spi0/... or spidev test
+   • Default Jetson: Mode 0 (CPOL=0, CPHA=0)
+   • Wrong mode: all bits wrong, no errors reported
+
+8. KCONFIG CHECKLIST
+   CONFIG_SPI=y
+   CONFIG_SPI_SLAVE=y
+   CONFIG_SPI_STM32_DMA=y   ← SPI WITHOUT THIS = CPU polling (slow)
+   CONFIG_DMA=y
+   CONFIG_CACHE=y            ← for sys_cache_data_flush_range on M7
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>TIMING BUDGET @ 100Hz (10ms frame interval)
+  SPI transfer (150 bytes @ 10MHz):   120 µs  (12% of 1ms)
+  DMA setup overhead:                   1 µs
+  Cache flush (150 bytes):              0.5 µs
+  nanopb encode:                       10–50 µs
+  packer thread overhead:              ~100 µs total
+  ────────────────────────────────────────────
+  Budget used:                        ~200 µs / 10,000 µs = 2%
+  DMA active time DMA in ISR:          ~1.5 µs (arm + callback)
+  Leaves 9.8ms for IMU read, fusion, CAN, shell, etc.
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>FRAME LAYOUT (wire format, byte-exact)
+  [0xAA][LEN_HI][LEN_LO][SEQ_3][SEQ_2][SEQ_1][SEQ_0][ERR_HI][ERR_LO][...payload...][CRC_HI][CRC_LO]
+     1      1       1       1      1      1       1      1       1      0..256            1       1
+  Header = 9 bytes   │   Payload = 0..256 bytes   │   Footer = 2 bytes
+  CRC covers bytes 3..N (seq + flags + payload). Does NOT cover first 3 bytes.
+  Total frame: 11 + payload_len bytes. Max = 267 bytes.
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>DIAGNOSTIC COMMANDS (logic analyzer + GDB)
+
+Logic analyzer: trigger = CS falling, decode = SPI
+  • Channel 0: CS
+  • Channel 1: CLK (set speed &gt; 2× SPI frequency)
+  • Channel 2: MISO (STM32 TX to Jetson)
+  • Channel 3: DMA TC GPIO toggle (optional: tog pin at callback start/end)
+
+GDB (JLink/OpenOCD):
+  (gdb) p tx_buf[0]          ← reads via CPU (fills cache, shows cache value)
+  (gdb) x/64xb tx_buf[0]    ← same issue: GDB uses CPU reads
+  (gdb) monitor halt
+  (gdb) set $addr = &amp;tx_buf[0]
+        Check SRAM directly via memory-mapped access with DMA active for truth
+
+Jetson (spidev_test):
+  spidev_test -D /dev/spidev0.0 -s 10000000 -v -p &#39;\xAA\x00\x00&#39;
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

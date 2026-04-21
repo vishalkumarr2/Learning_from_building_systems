@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Week 4: Safety-Critical Patterns &amp; JPL Rules - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-indigo-600 hover:text-indigo-800 mb-4 inline-block">&larr; Back to C++ Advanced</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="week-4-safety-critical-patterns-jpl-rules">Week 4: Safety-Critical Patterns &amp; JPL Rules</h1>
+<h2 id="overview">Overview</h2>
+<p>Safety-critical software is code where failure means loss of life, destruction of expensive hardware, or catastrophic environmental damage. This week we study the patterns, rules, and disciplines that make C++ viable in these domains — and the disasters that happen when they&rsquo;re ignored.</p>
+<p>The key insight: <strong>safety-critical code is not about being clever. It&rsquo;s about being provably boring.</strong></p>
+<hr />
+<h2 id="1-jpl-power-of-10-rules-applied-to-c">1. JPL Power of 10 Rules — Applied to C++</h2>
+<p>Gerard Holzmann at NASA&rsquo;s Jet Propulsion Laboratory distilled decades of flight software experience into 10 rules. These rules are deliberately restrictive — they trade expressiveness for verifiability.</p>
+<h3 id="rule-1-restrict-all-code-to-very-simple-control-flow-no-goto-no-recursion">Rule 1: Restrict All Code to Very Simple Control Flow — No Goto, No Recursion</h3>
+<p><strong>What it prevents:</strong> Unbounded stack growth, inability to prove termination, difficulty in static analysis.</p>
+<p><strong>C++ application:</strong> Ban <code>goto</code>, <code>longjmp</code>, and all recursive functions. Every call graph must be a DAG. Convert recursive algorithms to iterative versions using explicit stacks.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// BANNED: recursive fibonacci</span>
+<span class="kt">int</span><span class="w"> </span><span class="nf">fib</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">fib</span><span class="p">(</span><span class="n">n</span><span class="mi">-1</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">fib</span><span class="p">(</span><span class="n">n</span><span class="mi">-2</span><span class="p">);</span><span class="w"> </span><span class="p">}</span>
+
+<span class="c1">// COMPLIANT: iterative with bounded loop</span>
+<span class="kt">int</span><span class="w"> </span><span class="nf">fib</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">assert</span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mi">46</span><span class="p">);</span><span class="w"> </span><span class="c1">// prevent overflow in int32</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">tmp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="p">;</span>
+<span class="w">        </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">b</span><span class="p">;</span>
+<span class="w">        </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tmp</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">a</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Why recursion kills:</strong> In the Mars Pathfinder mission (1997), a priority inversion bug led to unexpected stack depths. JPL&rsquo;s rule exists because you cannot bound stack usage when recursion depth depends on runtime data.</p>
+<h3 id="rule-2-all-loops-must-have-fixed-upper-bounds">Rule 2: All Loops Must Have Fixed Upper Bounds</h3>
+<p><strong>What it prevents:</strong> Infinite loops, livelock, inability to compute WCET (Worst Case Execution Time).</p>
+<p><strong>C++ application:</strong> Every <code>for</code> and <code>while</code> must have a provable upper bound. Use countdown variables or explicit iteration limits.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// BANNED: unbounded retry</span>
+<span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">device</span><span class="p">.</span><span class="n">ready</span><span class="p">())</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* spin forever? */</span><span class="w"> </span><span class="p">}</span>
+
+<span class="c1">// COMPLIANT: bounded retry</span>
+<span class="k">constexpr</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">MAX_RETRIES</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1000</span><span class="p">;</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">attempt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">attempt</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">MAX_RETRIES</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">attempt</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">device</span><span class="p">.</span><span class="n">ready</span><span class="p">())</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="rule-3-no-dynamic-memory-allocation-after-initialization">Rule 3: No Dynamic Memory Allocation After Initialization</h3>
+<p><strong>What it prevents:</strong> Heap fragmentation, out-of-memory in long-running systems, non-deterministic allocation time.</p>
+<p><strong>C++ application:</strong> All <code>new</code>/<code>malloc</code> must happen during startup. After init completes, use PMR (polymorphic memory resources) with monotonic or pool allocators backed by pre-allocated buffers.</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;memory_resource&gt;</span>
+<span class="k">alignas</span><span class="p">(</span><span class="mi">64</span><span class="p">)</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">byte</span><span class="w"> </span><span class="n">buffer</span><span class="p">[</span><span class="mi">65536</span><span class="p">];</span><span class="w"> </span><span class="c1">// pre-allocated at startup</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">monotonic_buffer_resource</span><span class="w"> </span><span class="nf">pool</span><span class="p">(</span><span class="n">buffer</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">buffer</span><span class="p">));</span>
+<span class="c1">// After init: all allocations come from pool, never from heap</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">SensorReading</span><span class="o">&gt;</span><span class="w"> </span><span class="n">readings</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pool</span><span class="p">);</span>
+</code></pre></div>
+
+<h3 id="rule-4-no-function-should-be-longer-than-60-lines-printed-on-paper">Rule 4: No Function Should Be Longer Than 60 Lines (Printed on Paper)</h3>
+<p><strong>What it prevents:</strong> Functions too complex to review, test, or reason about.</p>
+<p><strong>C++ application:</strong> Strict limit. One function = one responsibility. If you need a scroll bar to read it, it&rsquo;s too long.</p>
+<h3 id="rule-5-use-a-minimum-of-two-runtime-assertions-per-function-on-average">Rule 5: Use a Minimum of Two Runtime Assertions Per Function (On Average)</h3>
+<p><strong>What it prevents:</strong> Silent corruption, undefined behavior propagating silently.</p>
+<p><strong>C++ application:</strong> Assertions are <strong>executable specifications</strong>, not debug aids. They document what must be true and crash loudly when violated. Use <code>assert()</code> for debug, <code>static_assert</code> for compile-time, and custom <code>ENSURE</code>/<code>REQUIRE</code> macros for production.</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">set_motor_speed</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">rpm</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">assert</span><span class="p">(</span><span class="n">rpm</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="o">-</span><span class="n">MAX_RPM</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">rpm</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">MAX_RPM</span><span class="p">);</span><span class="w">  </span><span class="c1">// precondition</span>
+<span class="w">    </span><span class="c1">// ... implementation ...</span>
+<span class="w">    </span><span class="n">assert</span><span class="p">(</span><span class="n">actual_rpm_within_tolerance</span><span class="p">(</span><span class="n">rpm</span><span class="p">));</span><span class="w">     </span><span class="c1">// postcondition</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="rule-6-restrict-the-scope-of-data-to-the-smallest-possible">Rule 6: Restrict the Scope of Data to the Smallest Possible</h3>
+<p><strong>What it prevents:</strong> Unexpected aliasing, action at a distance, globals causing untraceable state changes.</p>
+<p><strong>C++ application:</strong> No global mutable state. Period. Pass dependencies explicitly. Use <code>const</code> everywhere possible. Prefer value semantics.</p>
+<p><strong>Toyota case study connection:</strong> The Toyota unintended acceleration code had <strong>7,134 global variables</strong>. Any function could modify any of them at any time, making reasoning about system state impossible.</p>
+<h3 id="rule-7-check-return-values-of-all-non-void-functions-or-cast-to-void">Rule 7: Check Return Values of All Non-Void Functions, or Cast to Void</h3>
+<p><strong>What it prevents:</strong> Silently ignored errors, resource leaks, missed failure conditions.</p>
+<p><strong>C++ application:</strong> Every return value must be checked. In C++17, use <code>[[nodiscard]]</code> attribute. If you genuinely don&rsquo;t care, explicitly cast to <code>(void)</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="p">[[</span><span class="n">nodiscard</span><span class="p">]]</span><span class="w"> </span><span class="n">ErrorCode</span><span class="w"> </span><span class="n">init_sensor</span><span class="p">();</span>
+
+<span class="c1">// BANNED: ignoring return value</span>
+<span class="n">init_sensor</span><span class="p">();</span>
+
+<span class="c1">// COMPLIANT:</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">init_sensor</span><span class="p">();</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">ErrorCode</span><span class="o">::</span><span class="n">OK</span><span class="p">)</span><span class="w"> </span><span class="n">handle_error</span><span class="p">(</span><span class="n">err</span><span class="p">);</span>
+</code></pre></div>
+
+<h3 id="rule-8-limit-preprocessor-use-to-file-inclusion-and-simple-macros">Rule 8: Limit Preprocessor Use to File Inclusion and Simple Macros</h3>
+<p><strong>What it prevents:</strong> Macro side effects, textual substitution bugs, inability to parse code statically.</p>
+<p><strong>C++ application:</strong> Use <code>constexpr</code>, <code>consteval</code>, <code>inline</code>, templates, and <code>if constexpr</code> instead of macros. The only acceptable macros: include guards, logging macros with <code>__FILE__</code> and <code>__LINE__</code>, and assertion macros.</p>
+<h3 id="rule-9-restrict-pointer-use-no-more-than-one-level-of-dereferencing">Rule 9: Restrict Pointer Use — No More Than One Level of Dereferencing</h3>
+<p><strong>What it prevents:</strong> Pointer arithmetic bugs, aliasing violations, null dereference chains.</p>
+<p><strong>C++ application:</strong> Prefer references over pointers. No <code>**ptr</code>. Use <code>std::span</code> for arrays, <code>std::optional</code> for nullable values, <code>std::variant</code> for unions.</p>
+<h3 id="rule-10-compile-with-all-warnings-enabled-use-static-analysis-on-day-one">Rule 10: Compile with All Warnings Enabled; Use Static Analysis on Day One</h3>
+<p><strong>What it prevents:</strong> Entire categories of bugs caught before they ever run.</p>
+<p><strong>C++ application:</strong></p>
+<div class="highlight"><pre><span></span><code>-Wall<span class="w"> </span>-Wextra<span class="w"> </span>-Wpedantic<span class="w"> </span>-Werror<span class="w"> </span>-Wshadow<span class="w"> </span>-Wconversion
+-Wdouble-promotion<span class="w"> </span>-Wformat<span class="o">=</span><span class="m">2</span><span class="w"> </span>-Wnull-dereference
+-fstack-protector-strong<span class="w"> </span>-D_FORTIFY_SOURCE<span class="o">=</span><span class="m">2</span>
+</code></pre></div>
+
+<hr />
+<h2 id="2-toyota-unintended-acceleration-a-case-study-in-everything-wrong">2. Toyota Unintended Acceleration — A Case Study in Everything Wrong</h2>
+<p>In 2009–2010, Toyota vehicles accelerated uncontrollably, killing people. NASA and embedded systems expert Michael Barr investigated. The findings are a catalog of safety-critical anti-patterns:</p>
+<h3 id="the-code">The Code</h3>
+<ul>
+<li><strong>7,134 global variables</strong> — any function could mutate shared state with no synchronization</li>
+<li><strong>Stack overflow undetected</strong> — the stack and heap grew toward each other with no guard page. Stack corruption silently overwrote heap data, including the throttle control variable</li>
+<li><strong>Single-bit errors unprotected</strong> — critical variables like <code>targetThrottleAngle</code> were stored in a single memory location with no redundancy (no CRC, no triple-modular redundancy, no safety variable pattern)</li>
+<li><strong>Repurposed watchdog</strong> — the watchdog timer existed but was fed (&ldquo;petted&rdquo;) by a low-priority background task that only proved the RTOS scheduler was running, not that the throttle control task was executing correctly</li>
+<li><strong>No MISRA compliance</strong> — Toyota claimed MISRA compliance but the code violated rules extensively</li>
+<li><strong>Spaghetti code</strong> — deeply nested functions, 9000+ line files, no clear module boundaries</li>
+</ul>
+<h3 id="lessons">Lessons</h3>
+<ol>
+<li><strong>A watchdog that doesn&rsquo;t verify actual work is worthless</strong> — Toyota&rsquo;s watchdog proved the scheduler ran, not that the throttle task executed</li>
+<li><strong>Global state is the enemy</strong> — 7134 globals made formal verification impossible</li>
+<li><strong>Stack must be bounded and monitored</strong> — use MPU/MMU guard pages, paint the stack, check high-water mark</li>
+<li><strong>Critical variables must be redundant</strong> — store in 2+ locations, compare before use</li>
+</ol>
+<hr />
+<h2 id="3-defensive-programming-design-by-contract">3. Defensive Programming — Design by Contract</h2>
+<p>Bertrand Meyer&rsquo;s Design by Contract (DBC) formalizes the relationship between caller and callee:</p>
+<ul>
+<li><strong>Precondition (requires):</strong> What the caller guarantees before the call</li>
+<li><strong>Postcondition (ensures):</strong> What the callee guarantees after the call</li>
+<li><strong>Class invariant:</strong> What must be true before and after every public method</li>
+</ul>
+<h3 id="c-implementation">C++ Implementation</h3>
+<p>C++ doesn&rsquo;t have native DBC (C++20 contracts were removed, C++26 may reintroduce them). We build our own:</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#define REQUIRE(cond) do { if (!(cond)) { \</span>
+<span class="cp">    std::cerr &lt;&lt; &quot;PRECONDITION FAILED: &quot; #cond \</span>
+<span class="cp">              &lt;&lt; &quot; at &quot; &lt;&lt; __FILE__ &lt;&lt; &quot;:&quot; &lt;&lt; __LINE__ &lt;&lt; &quot;\n&quot;; \</span>
+<span class="cp">    std::abort(); }} while(0)</span>
+
+<span class="cp">#define ENSURE(cond) do { if (!(cond)) { \</span>
+<span class="cp">    std::cerr &lt;&lt; &quot;POSTCONDITION FAILED: &quot; #cond \</span>
+<span class="cp">              &lt;&lt; &quot; at &quot; &lt;&lt; __FILE__ &lt;&lt; &quot;:&quot; &lt;&lt; __LINE__ &lt;&lt; &quot;\n&quot;; \</span>
+<span class="cp">    std::abort(); }} while(0)</span>
+</code></pre></div>
+
+<p><strong>Key principle:</strong> Assertions are not error handling. They catch programmer mistakes, not runtime errors. A failed assertion means a bug exists in the code. The correct response is to crash loudly and fix the bug, not to &ldquo;handle&rdquo; it gracefully.</p>
+<h3 id="saturating-arithmetic">Saturating Arithmetic</h3>
+<p>In safety-critical code, integer overflow is undefined behavior that has killed people (Ariane 5). Saturating arithmetic clamps results to the representable range:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">int32_t</span><span class="w"> </span><span class="nf">sat_add</span><span class="p">(</span><span class="kt">int32_t</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">int32_t</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int64_t</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">int64_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">a</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">result</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">INT32_MAX</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">INT32_MAX</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">result</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">INT32_MIN</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">INT32_MIN</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">int32_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">result</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="4-static-analysis-tools-for-c">4. Static Analysis Tools for C++</h2>
+<h3 id="compiler-flags-that-matter">Compiler Flags That Matter</h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>What It Catches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-Wall -Wextra</code></td>
+<td>Basic warnings: unused vars, implicit conversions, missing returns</td>
+</tr>
+<tr>
+<td><code>-Wshadow</code></td>
+<td>Variable shadowing — a frequent source of subtle bugs</td>
+</tr>
+<tr>
+<td><code>-Wconversion</code></td>
+<td>Implicit narrowing conversions (int→short, double→float)</td>
+</tr>
+<tr>
+<td><code>-Wformat=2</code></td>
+<td>Format string mismatches (printf family)</td>
+</tr>
+<tr>
+<td><code>-Werror</code></td>
+<td>Treat warnings as errors — forces clean builds</td>
+</tr>
+<tr>
+<td><code>-fstack-protector-strong</code></td>
+<td>Stack canaries on functions with local arrays or address-taken vars</td>
+</tr>
+<tr>
+<td><code>-D_FORTIFY_SOURCE=2</code></td>
+<td>Compile-time and runtime buffer overflow checks for libc functions</td>
+</tr>
+<tr>
+<td><code>-fsanitize=address,undefined</code></td>
+<td>Runtime detection of memory errors and UB</td>
+</tr>
+</tbody>
+</table>
+<h3 id="clang-tidy-checks-for-safety">clang-tidy Checks for Safety</h3>
+<div class="highlight"><pre><span></span><code><span class="nt">Checks</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">&gt;</span>
+<span class="w">  </span><span class="no">bugprone-*,</span>
+<span class="w">  </span><span class="no">cert-*,</span>
+<span class="w">  </span><span class="no">cppcoreguidelines-*,</span>
+<span class="w">  </span><span class="no">misc-*,</span>
+<span class="w">  </span><span class="no">modernize-*,</span>
+<span class="w">  </span><span class="no">performance-*,</span>
+<span class="w">  </span><span class="no">readability-*,</span>
+<span class="w">  </span><span class="no">-modernize-use-trailing-return-type,</span>
+<span class="w">  </span><span class="no">-readability-magic-numbers</span>
+</code></pre></div>
+
+<p>Critical checks:
+- <code>bugprone-use-after-move</code> — catches moved-from access
+- <code>bugprone-dangling-handle</code> — string_view/span pointing to destroyed temporary
+- <code>cppcoreguidelines-pro-bounds-*</code> — array bounds violations
+- <code>cert-err58-cpp</code> — static object exceptions during init
+- <code>misc-redundant-expression</code> — <code>x == x</code> (often a typo for <code>x == y</code>)</p>
+<hr />
+<h2 id="5-watchdog-patterns">5. Watchdog Patterns</h2>
+<p>A watchdog timer (WDT) is a hardware or software timer that must be periodically reset (&ldquo;petted&rdquo; or &ldquo;kicked&rdquo;). If the timer expires, it means the system is stuck and the watchdog takes corrective action (reset, safe mode, shutdown).</p>
+<h3 id="hardware-watchdog">Hardware Watchdog</h3>
+<p>Built into the MCU. Cannot be disabled by software (if configured correctly). The most reliable last resort.</p>
+<div class="highlight"><pre><span></span><code>Timeline:
+[pet]---[pet]---[pet]---[HANG]---timeout---[HARDWARE RESET]
+</code></pre></div>
+
+<h3 id="software-watchdog">Software Watchdog</h3>
+<p>Implemented in a high-priority timer ISR. Checks that the main application loop completes within a deadline.</p>
+<p><strong>Critical requirement:</strong> The watchdog must verify that <strong>meaningful work</strong> was done, not just that a pet function was called. This is the Toyota lesson.</p>
+<h3 id="heartbeat-pattern">Heartbeat Pattern</h3>
+<p>Each subsystem sends periodic heartbeats. A health monitor checks that all heartbeats arrive within deadlines. If a subsystem misses its deadline:</p>
+<ol>
+<li><strong>Warning phase</strong> — log the miss, increment counter</li>
+<li><strong>Degraded mode</strong> — disable the failing subsystem, continue with reduced capability</li>
+<li><strong>Shutdown</strong> — if too many subsystems fail, enter safe state</li>
+</ol>
+<div class="highlight"><pre><span></span><code>SubsystemA: [♥]--[♥]--[♥]--[♥]--...                    (healthy)
+SubsystemB: [♥]--[♥]--[♥]--[MISS]--[MISS]--[SHUTDOWN]  (failed)
+SubsystemC: [♥]--[♥]--[♥]--[♥]--[♥]--...              (healthy)
+</code></pre></div>
+
+<h3 id="the-dead-mans-switch">The Dead Man&rsquo;s Switch</h3>
+<p>A system must actively prove it&rsquo;s alive. Silence is interpreted as failure. This is the fundamental watchdog principle:</p>
+<ul>
+<li><strong>Active proof of liveness:</strong> The monitored task must perform a sequence of checks and only then pet the watchdog</li>
+<li><strong>Verification of progress:</strong> The pet must include evidence of forward progress (e.g., incrementing a work counter)</li>
+<li><strong>Multiple checkpoint verification:</strong> The watchdog check requires that multiple stages of the processing pipeline have executed</li>
+</ul>
+<hr />
+<h2 id="6-misra-c-overview">6. MISRA C++ Overview</h2>
+<p>MISRA (Motor Industry Software Reliability Association) defines coding rules for safety-critical C/C++. MISRA C++:2023 is the current edition.</p>
+<h3 id="whats-banned-and-why">What&rsquo;s Banned and Why</h3>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Banned</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Exceptions</td>
+<td><code>throw</code>/<code>catch</code> in safety code</td>
+<td>Non-deterministic control flow, stack unwinding cost unknown</td>
+</tr>
+<tr>
+<td>Dynamic allocation</td>
+<td><code>new</code>/<code>delete</code> after init</td>
+<td>Fragmentation, OOM unpredictable</td>
+</tr>
+<tr>
+<td>RTTI</td>
+<td><code>dynamic_cast</code>, <code>typeid</code></td>
+<td>Runtime overhead, implementation-defined behavior</td>
+</tr>
+<tr>
+<td>Multiple inheritance</td>
+<td>Diamond inheritance</td>
+<td>Ambiguity, layout complexity</td>
+</tr>
+<tr>
+<td>Union type punning</td>
+<td><code>union</code> for type conversion</td>
+<td>UB if wrong member read</td>
+</tr>
+<tr>
+<td><code>goto</code></td>
+<td>All uses</td>
+<td>Spaghetti control flow</td>
+</tr>
+<tr>
+<td>Implicit conversions</td>
+<td>Narrowing, sign changes</td>
+<td>Silent data loss</td>
+</tr>
+<tr>
+<td>C-style casts</td>
+<td><code>(int)x</code></td>
+<td>Hides dangerous conversions</td>
+</tr>
+<tr>
+<td><code>#define</code> for constants</td>
+<td>Macros vs constexpr</td>
+<td>No scope, no type, textual replacement bugs</td>
+</tr>
+</tbody>
+</table>
+<h3 id="whats-required">What&rsquo;s Required</h3>
+<ul>
+<li>Every <code>switch</code> must have a <code>default</code> case</li>
+<li>Every non-void function must have a <code>return</code> on all paths</li>
+<li>All variables must be initialized at declaration</li>
+<li>Pointer arithmetic is prohibited (use array indexing)</li>
+<li>All loops must have a single exit point (controversial but enforced)</li>
+</ul>
+<hr />
+<h2 id="7-safety-variable-pattern">7. Safety Variable Pattern</h2>
+<p>For critical control variables, store the value and its bitwise complement:</p>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">SafeVar</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int32_t</span><span class="w"> </span><span class="n">value</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int32_t</span><span class="w"> </span><span class="n">complement</span><span class="p">;</span><span class="w"> </span><span class="c1">// must equal ~value</span>
+
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="nf">set</span><span class="p">(</span><span class="kt">int32_t</span><span class="w"> </span><span class="n">v</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">v</span><span class="p">;</span>
+<span class="w">        </span><span class="n">complement</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">~</span><span class="n">v</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="nf">is_valid</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">complement</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">~</span><span class="n">value</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kt">int32_t</span><span class="w"> </span><span class="nf">get</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">assert</span><span class="p">(</span><span class="n">is_valid</span><span class="p">());</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">value</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p>If a single-bit flip corrupts <code>value</code>, <code>is_valid()</code> will detect it. This is what Toyota should have used for <code>targetThrottleAngle</code>.</p>
+<hr />
+<h2 id="8-putting-it-all-together">8. Putting It All Together</h2>
+<p>Safety-critical C++ is about layers of defense:</p>
+<ol>
+<li><strong>Coding rules</strong> (JPL/MISRA) — prevent entire categories of bugs at the source</li>
+<li><strong>Static analysis</strong> (clang-tidy, compiler warnings) — catch at compile time what rules miss</li>
+<li><strong>Runtime assertions</strong> (DBC) — catch at runtime what static analysis misses</li>
+<li><strong>Watchdog monitoring</strong> — detect at system level when a component fails</li>
+<li><strong>Safe mode / graceful degradation</strong> — when failure is detected, fail safely</li>
+</ol>
+<p>No single layer is sufficient. The Swiss cheese model applies: each layer has holes, but stacking them makes it unlikely a bug passes through all layers.</p>
+<h3 id="the-discipline">The Discipline</h3>
+<p>Writing safety-critical code is not about talent or cleverness. It&rsquo;s about discipline:
+- Follow the rules even when they feel restrictive
+- Run the tools even when you&rsquo;re confident
+- Add the assertions even when they seem obvious
+- Test the failure paths even when they seem unlikely</p>
+<p>Because in safety-critical systems, &ldquo;unlikely&rdquo; is not &ldquo;impossible,&rdquo; and impossible is the only acceptable failure rate.</p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

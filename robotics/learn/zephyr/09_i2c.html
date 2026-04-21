@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>I2C — Inter-Integrated Circuit - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="i2c-inter-integrated-circuit">I2C — Inter-Integrated Circuit</h1>
+<h2 id="what-is-i2c">What Is I2C?</h2>
+<p>I2C is a <strong>two-wire, multi-master, multi-slave serial protocol</strong> invented by Philips in 1982.
+&ldquo;Inter-Integrated Circuit&rdquo; — designed for chips communicating on the same PCB.</p>
+<p>Used for: IMUs, temperature sensors, magnetometers, barometers, OLEDs, EEPROMs, real-time clocks — anything that doesn&rsquo;t need high speed but benefits from simplicity (only 2 wires).</p>
+<hr />
+<h2 id="physical-wires-just-2">Physical Wires — Just 2</h2>
+<div class="highlight"><pre><span></span><code>Master (STM32)                     Slaves
+──────────────────────────────────────────────────────────
+SDA ─────┬─────────────────────────  SDA  SDA  SDA   (data)
+         │ pull-up to VCC (4.7kΩ)   [A]  [B]  [C]
+SCL ─────┴─────────────────────────  SCL  SCL  SCL   (clock)
+         │ pull-up to VCC (4.7kΩ)
+</code></pre></div>
+
+<p><strong>SDA</strong>: bidirectional data line — both master and slaves share this wire
+<strong>SCL</strong>: clock, driven by master</p>
+<p>The <strong>pull-up resistors</strong> are essential. Both lines are <strong>open-drain</strong> — devices can only pull line LOW. The resistors pull the line HIGH when nobody is pulling it low. Without pull-ups, nothing works.</p>
+<p>Typical pull-up: <strong>4.7 kΩ</strong> at 100kHz/400kHz, <strong>2.2 kΩ</strong> at 1MHz (Fast-mode+).</p>
+<hr />
+<h2 id="addressing-how-slaves-are-identified">Addressing — How Slaves Are Identified</h2>
+<p>Unlike SPI (which uses a dedicated CS wire per slave), I2C identifies slaves by <strong>address</strong>.</p>
+<p>Each slave has a <strong>7-bit address</strong> (0x00-0x7F) — up to <strong>127 slaves on one bus</strong>.
+Some devices use 10-bit addresses for up to 1023 slaves.</p>
+<div class="highlight"><pre><span></span><code>Common I2C addresses:
+ICM-42688 IMU:         0x68 (AD0 low)  or 0x69 (AD0 high)
+MPU-6050 IMU:          0x68 or 0x69
+BMP280 pressure:       0x76 or 0x77
+ADS1115 ADC:           0x48, 0x49, 0x4A, or 0x4B
+OLED SSD1306:          0x3C or 0x3D
+AT24C EEPROM:          0x50-0x57
+</code></pre></div>
+
+<p>Many devices have 1-2 address pins (ADDRx) so you can configure the address and put 2-4 of the same chip on one bus.</p>
+<hr />
+<h2 id="how-a-transfer-works">How a Transfer Works</h2>
+<h3 id="start-condition">Start condition</h3>
+<div class="highlight"><pre><span></span><code>Master pulls SDA LOW while SCL is HIGH (special &quot;start&quot; signal)
+  SCL: ─────┐         ...
+  SDA: ──┐  └─ ...
+         └── transition while SCL high = START
+</code></pre></div>
+
+<h3 id="data-frame-8-bits-1-ack-bit">Data frame: 8 bits + 1 ACK bit</h3>
+<div class="highlight"><pre><span></span><code>Master sends 7-bit address + R/W bit:
+
+SCL:  ─┐ ┌┐ ┌┐ ┌┐ ┌┐ ┌┐ ┌┐ ┌┐ ┌────
+       └─┘└─┘└─┘└─┘└─┘└─┘└─┘└─┘└
+SDA:  ─A6─A5─A4─A3─A2─A1─A0─R/W─ACK
+                               ↑          ↑
+                      0=Write  slave pulls SDA LOW
+                      1=Read   to acknowledge
+
+If slave present and ready: pulls SDA LOW (ACK = 0)
+If slave absent or busy:    SDA stays HIGH (NACK = 1 → master gets error)
+</code></pre></div>
+
+<h3 id="write-sequence-master-writes-register-to-slave">Write sequence (master writes register to slave)</h3>
+<div class="highlight"><pre><span></span><code>[START] [ADDR+W] [ACK] [REG] [ACK] [DATA0] [ACK] [DATA1] [ACK] [STOP]
+   ↑        ↑      ↑     ↑     ↑      ↑      ↑              ↑      ↑
+master   master  slave master slave  master slave  ...     slave  master
+</code></pre></div>
+
+<h3 id="read-sequence-master-reads-register-from-slave">Read sequence (master reads register from slave)</h3>
+<div class="highlight"><pre><span></span><code>[START] [ADDR+W] [ACK] [REG] [ACK] [RESTART] [ADDR+R] [ACK] [DATA0] [NACK] [STOP]
+                                        ↑          ↑      ↑      ↑      ↑
+                                   master sets     master slave  slave  master NACK
+                                   read direction          drives SDA   = &quot;I&#39;m done reading&quot;
+</code></pre></div>
+
+<p>The <strong>repeated start</strong> (restart) is key — master switches from write (sending register address) to read (receiving data) without releasing the bus.</p>
+<hr />
+<h2 id="i2c-speeds">I2C Speeds</h2>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Speed</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Standard</td>
+<td>100 kHz</td>
+<td>Old sensors, EEPROMs</td>
+</tr>
+<tr>
+<td>Fast</td>
+<td>400 kHz</td>
+<td>Most modern sensors ← default for IMUs</td>
+</tr>
+<tr>
+<td>Fast-mode+</td>
+<td>1 MHz</td>
+<td>High-speed sensors, displays</td>
+</tr>
+<tr>
+<td>High-speed</td>
+<td>3.4 MHz</td>
+<td>Rare, needs special hardware</td>
+</tr>
+</tbody>
+</table>
+<p>At 400kHz: 1 byte ≈ 25µs. Reading a 12-byte IMU frame = ~300µs.
+That&rsquo;s 3% of our 10ms 100Hz budget — acceptable.</p>
+<hr />
+<h2 id="i2c-in-zephyr">I2C in Zephyr</h2>
+<h3 id="devicetree">Devicetree</h3>
+<div class="highlight"><pre><span></span><code><span class="cm">/* app.overlay */</span>
+<span class="o">&amp;</span><span class="na">i2c1</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kr">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;okay&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">i2c1_default</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;default&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">clock-frequency</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="na">I2C_BITRATE_FAST</span><span class="o">&gt;</span><span class="p">;</span><span class="w">  </span><span class="cm">/* 400kHz */</span>
+
+<span class="w">    </span><span class="cm">/* IMU at address 0x68 */</span>
+<span class="w">    </span><span class="nl">imu</span><span class="p">:</span><span class="w"> </span><span class="nf">icm42688</span><span class="o">@</span><span class="mi">68</span><span class="cm"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kr">compatible</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;invensense,icm42688p&quot;</span><span class="p">;</span>
+<span class="w">        </span><span class="kr">reg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mh">0x68</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">        </span><span class="n">int-gpios</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">gpiob</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="na">GPIO_ACTIVE_HIGH</span><span class="o">&gt;</span><span class="p">;</span><span class="w">  </span><span class="cm">/* data-ready interrupt */</span>
+<span class="w">    </span><span class="p">};</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<h3 id="basic-readwrite-api">Basic read/write API</h3>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/i2c.h&gt;</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">i2c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">i2c1</span><span class="p">));</span>
+<span class="cp">#define IMU_ADDR 0x68</span>
+
+<span class="cm">/* Write a single register */</span>
+<span class="kt">int</span><span class="w"> </span><span class="nf">imu_write_reg</span><span class="p">(</span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">reg</span><span class="p">,</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">val</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">buf</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">reg</span><span class="p">,</span><span class="w"> </span><span class="n">val</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">i2c_write</span><span class="p">(</span><span class="n">i2c</span><span class="p">,</span><span class="w"> </span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="n">IMU_ADDR</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="cm">/* Read a single register */</span>
+<span class="kt">int</span><span class="w"> </span><span class="nf">imu_read_reg</span><span class="p">(</span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">reg</span><span class="p">,</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">out</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">i2c_write_read</span><span class="p">(</span><span class="n">i2c</span><span class="p">,</span><span class="w"> </span><span class="n">IMU_ADDR</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">reg</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">out</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="w">    </span><span class="cm">/* i2c_write_read: writes reg addr then issues RESTART + read */</span>
+<span class="p">}</span>
+
+<span class="cm">/* Read multiple consecutive registers (burst read — most efficient) */</span>
+<span class="kt">int</span><span class="w"> </span><span class="nf">imu_burst_read</span><span class="p">(</span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">start_reg</span><span class="p">,</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">out</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">len</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">i2c_write_read</span><span class="p">(</span><span class="n">i2c</span><span class="p">,</span><span class="w"> </span><span class="n">IMU_ADDR</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">start_reg</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">out</span><span class="p">,</span><span class="w"> </span><span class="n">len</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="reading-imu-at-100hz">Reading IMU at 100Hz</h3>
+<div class="highlight"><pre><span></span><code><span class="cp">#define ACCEL_XOUT_H 0x1F   </span><span class="cm">/* ICM-42688 register map */</span>
+<span class="cp">#define GYRO_XOUT_H  0x25</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">imu_thread_fn</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">i2c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">i2c1</span><span class="p">));</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">12</span><span class="p">];</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">msg</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/* One-time: wake IMU from sleep */</span>
+<span class="w">    </span><span class="n">imu_write_reg</span><span class="p">(</span><span class="mh">0x4E</span><span class="w"> </span><span class="cm">/* PWR_MGMT0 */</span><span class="p">,</span><span class="w"> </span><span class="mh">0x0F</span><span class="p">);</span><span class="w">  </span><span class="cm">/* accel+gyro = low noise mode */</span>
+<span class="w">    </span><span class="n">k_msleep</span><span class="p">(</span><span class="mi">10</span><span class="p">);</span><span class="w">  </span><span class="cm">/* wait for startup */</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="cm">/* Burst read: 6 bytes accel + 6 bytes gyro in one I2C transaction */</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">imu_burst_read</span><span class="p">(</span><span class="n">ACCEL_XOUT_H</span><span class="p">,</span><span class="w"> </span><span class="n">raw</span><span class="p">,</span><span class="w"> </span><span class="mi">12</span><span class="p">);</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">rc</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;I2C read failed: %d&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">rc</span><span class="p">);</span>
+<span class="w">            </span><span class="n">k_msleep</span><span class="p">(</span><span class="mi">10</span><span class="p">);</span>
+<span class="w">            </span><span class="k">continue</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="cm">/* Parse big-endian int16 → float */</span>
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">accel_x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">2048.0f</span><span class="p">;</span>
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">accel_y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">3</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">2048.0f</span><span class="p">;</span>
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">accel_z</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">5</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">2048.0f</span><span class="p">;</span>
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">gyro_x</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">6</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">7</span><span class="p">])</span><span class="w">  </span><span class="o">/</span><span class="w"> </span><span class="mf">16.4f</span><span class="p">;</span>
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">gyro_y</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">8</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">9</span><span class="p">])</span><span class="w">  </span><span class="o">/</span><span class="w"> </span><span class="mf">16.4f</span><span class="p">;</span>
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">gyro_z</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">10</span><span class="p">]</span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">11</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">16.4f</span><span class="p">;</span>
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k_ticks_to_us_near64</span><span class="p">(</span><span class="n">k_uptime_ticks</span><span class="p">());</span>
+
+<span class="w">        </span><span class="n">zbus_chan_pub</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">k_msleep</span><span class="p">(</span><span class="mi">10</span><span class="p">);</span><span class="w">  </span><span class="cm">/* 100Hz */</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="interrupt-driven-more-efficient-than-polling">Interrupt-driven (more efficient than polling)</h3>
+<p>Many sensors have a data-ready (DRDY) interrupt pin. Instead of polling every 10ms, the IMU tells you &ldquo;new data ready&rdquo;:</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/gpio.h&gt;</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_dt_spec</span><span class="w"> </span><span class="n">drdy_gpio</span><span class="w"> </span><span class="o">=</span>
+<span class="w">    </span><span class="n">GPIO_DT_SPEC_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">imu</span><span class="p">),</span><span class="w"> </span><span class="n">int_gpios</span><span class="p">);</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_callback</span><span class="w"> </span><span class="n">drdy_cb_data</span><span class="p">;</span>
+<span class="k">static</span><span class="w"> </span><span class="n">K_SEM_DEFINE</span><span class="p">(</span><span class="n">imu_drdy_sem</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">drdy_isr</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span>
+<span class="w">                     </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_callback</span><span class="w"> </span><span class="o">*</span><span class="n">cb</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">k_sem_give</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_drdy_sem</span><span class="p">);</span><span class="w">  </span><span class="cm">/* wake up reader thread */</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">imu_thread_fn</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Setup DRDY interrupt */</span>
+<span class="w">    </span><span class="n">gpio_pin_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">drdy_gpio</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_INPUT</span><span class="p">);</span>
+<span class="w">    </span><span class="n">gpio_init_callback</span><span class="p">(</span><span class="o">&amp;</span><span class="n">drdy_cb_data</span><span class="p">,</span><span class="w"> </span><span class="n">drdy_isr</span><span class="p">,</span><span class="w"> </span><span class="n">BIT</span><span class="p">(</span><span class="n">drdy_gpio</span><span class="p">.</span><span class="n">pin</span><span class="p">));</span>
+<span class="w">    </span><span class="n">gpio_add_callback</span><span class="p">(</span><span class="n">drdy_gpio</span><span class="p">.</span><span class="n">port</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">drdy_cb_data</span><span class="p">);</span>
+<span class="w">    </span><span class="n">gpio_pin_interrupt_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">drdy_gpio</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_INT_EDGE_RISING</span><span class="p">);</span>
+
+<span class="w">    </span><span class="cm">/* Configure IMU to assert INT1 when data ready */</span>
+<span class="w">    </span><span class="n">imu_write_reg</span><span class="p">(</span><span class="mh">0x14</span><span class="w"> </span><span class="cm">/* INT_CONFIG */</span><span class="p">,</span><span class="w"> </span><span class="mh">0x02</span><span class="p">);</span><span class="w">  </span><span class="cm">/* INT1 = data-ready */</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="cm">/* Block until IMU says &quot;new data&quot; */</span>
+<span class="w">        </span><span class="n">k_sem_take</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_drdy_sem</span><span class="p">,</span><span class="w"> </span><span class="n">K_FOREVER</span><span class="p">);</span>
+
+<span class="w">        </span><span class="cm">/* Read immediately — data is guaranteed fresh */</span>
+<span class="w">        </span><span class="n">imu_burst_read</span><span class="p">(</span><span class="n">ACCEL_XOUT_H</span><span class="p">,</span><span class="w"> </span><span class="n">raw</span><span class="p">,</span><span class="w"> </span><span class="mi">12</span><span class="p">);</span>
+<span class="w">        </span><span class="cm">/* ... parse and publish ... */</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Why interrupt-driven is better</strong>: sleep exactly until data is ready → lower CPU load, more precise timing, no polling jitter.</p>
+<hr />
+<h2 id="i2c-bus-errors-and-recovery">I2C Bus Errors and Recovery</h2>
+<p>I2C can get stuck if a transfer is interrupted (power glitch, software reset mid-transfer):</p>
+<div class="highlight"><pre><span></span><code>Symptom: slave is holding SDA LOW (it thinks a transfer is in progress)
+         master cannot send START condition
+         all subsequent reads return -EIO
+
+Fix: send 9 clock pulses on SCL (enough to complete any stuck byte + ACK)
+     then send STOP condition
+</code></pre></div>
+
+<p>Zephyr handles this automatically with <code>i2c_recover_bus()</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">int</span><span class="w"> </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i2c_write_read</span><span class="p">(</span><span class="n">i2c</span><span class="p">,</span><span class="w"> </span><span class="n">IMU_ADDR</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">reg</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">out</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">rc</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">-</span><span class="n">EIO</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">LOG_WRN</span><span class="p">(</span><span class="s">&quot;I2C stuck, recovering...&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="n">i2c_recover_bus</span><span class="p">(</span><span class="n">i2c</span><span class="p">);</span>
+<span class="w">    </span><span class="cm">/* retry once */</span>
+<span class="w">    </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i2c_write_read</span><span class="p">(</span><span class="n">i2c</span><span class="p">,</span><span class="w"> </span><span class="n">IMU_ADDR</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">reg</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">out</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="i2c-vs-spi-summary">I2C vs SPI Summary</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>I2C</th>
+<th>SPI</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Wires</td>
+<td>2 (shared, pulled high)</td>
+<td>4+ (one CS per slave)</td>
+</tr>
+<tr>
+<td>Speed</td>
+<td>Up to 3.4 MHz</td>
+<td>Up to 50+ MHz</td>
+</tr>
+<tr>
+<td>Slaves</td>
+<td>Up to 127 (by address)</td>
+<td>Unlimited (by CS lines)</td>
+</tr>
+<tr>
+<td>Full duplex</td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Error detection</td>
+<td>ACK/NACK</td>
+<td>None (need CRC in application)</td>
+</tr>
+<tr>
+<td>Cable length</td>
+<td>&lt;30cm</td>
+<td>&lt;100cm</td>
+</tr>
+<tr>
+<td>Use for IMU</td>
+<td>Yes (convenient)</td>
+<td>Yes (faster, better for high-rate)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>For our 100Hz IMU</strong>: I2C works fine. If you need 1000Hz+, switch to SPI.</p>
+<hr />
+<h2 id="common-mistakes">Common Mistakes</h2>
+<table>
+<thead>
+<tr>
+<th>Mistake</th>
+<th>Symptom</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Missing pull-up resistors</td>
+<td>Nothing works, all reads fail</td>
+<td>Add 4.7kΩ to VCC on SDA and SCL</td>
+</tr>
+<tr>
+<td>Wrong I2C address</td>
+<td><code>-ENXIO</code> error</td>
+<td>Scan with <code>i2c_scan</code> or check AD0/AD1 pin</td>
+</tr>
+<tr>
+<td>Too many slaves → pull-up too weak</td>
+<td>Works at low speed, fails at fast</td>
+<td>Use lower pull-up value (1kΩ), use buffer/mux</td>
+</tr>
+<tr>
+<td>Polling too slowly</td>
+<td>Miss first data, stale reads</td>
+<td>Use DRDY interrupt</td>
+</tr>
+<tr>
+<td>Not waiting for sensor startup</td>
+<td>First read returns zeros</td>
+<td>Add <code>k_msleep(20)</code> after power-on</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

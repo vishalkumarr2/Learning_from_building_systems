@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>05 — SPI Deep Dive - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-amber-600 hover:text-amber-800 mb-4 inline-block">&larr; Back to Electronics</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="05-spi-deep-dive">05 — SPI Deep Dive</h1>
+<h3 id="from-shift-registers-to-frames-the-protocol-your-bridge-uses">From shift registers to frames: the protocol YOUR bridge uses</h3>
+<p><strong>Prerequisites:</strong> Chapter 01 (RC, decoupling), Chapter 02 (MOSFETs)
+<strong>Unlocks:</strong> 100Hz STM32↔Jetson bridge, IMU reads, flash memory, display drivers</p>
+<hr />
+<h2 id="why-should-i-care-stm32jetson-project-context">Why Should I Care? (STM32/Jetson Project Context)</h2>
+<p>SPI is the CORE protocol of your project. The STM32 Zephyr firmware reads the ICM-42688 IMU via SPI, and sends data to the Jetson Orin via another SPI bus. Understanding SPI at the shift-register level lets you:
+- Debug the &ldquo;first byte garbage&rdquo; problem when the slave DMA isn&rsquo;t armed in time
+- Choose the correct CPOL/CPHA mode for your IMU (Mode 3 for ICM-42688)
+- Understand why 40MHz SPI on long jumper wires produces corrupted data
+- Design the framing protocol (header + length + CRC) that rides on top of raw SPI bytes
+- Know why SPI slave mode is fundamentally harder than master mode</p>
+<hr />
+<h1 id="part-1-what-spi-is-shift-registers-in-a-ring">PART 1 — WHAT SPI IS: SHIFT REGISTERS IN A RING</h1>
+<hr />
+<h2 id="11-the-core-insight-two-shift-registers">1.1 The Core Insight — Two Shift Registers</h2>
+<p>Forget everything you think you know about SPI &ldquo;sending&rdquo; and &ldquo;receiving.&rdquo; SPI is much simpler and more elegant:</p>
+<p><strong>Master and Slave each have a shift register. They are connected in a ring. On every clock edge, they exchange one bit. After 8 clocks, they have exchanged one byte. That&rsquo;s it. That&rsquo;s all SPI is.</strong></p>
+<div class="highlight"><pre><span></span><code>    MASTER                                      SLAVE
+    ┌──────────────────────┐     MOSI      ┌──────────────────────┐
+    │ MSB → [7][6][5][4]   │──────────────→│ → [7][6][5][4]  MSB │
+    │       [3][2][1][0]   │               │   [3][2][1][0]      │
+    │               ↑  MSB │     MISO      │       ↑             │
+    │               └──────│←──────────────│───────┘ shift out   │
+    └──────────────────────┘               └──────────────────────┘
+               │                                      │
+              SCLK ──────────────────────────────────→│
+               │                                      │
+              CS̄  ──────────────────────────────────→│
+</code></pre></div>
+
+<p><strong>One clock cycle:</strong>
+1. Master shifts its MSB out onto MOSI wire
+2. Slave shifts its MSB out onto MISO wire
+3. Master shifts the MISO bit into its LSB position
+4. Slave shifts the MOSI bit into its LSB position
+5. Both shift registers advance by one position</p>
+<p>After 8 clocks: <strong>the master has the slave&rsquo;s original byte, and the slave has the master&rsquo;s original byte.</strong> This is a physical EXCHANGE, not a &ldquo;send&rdquo; or &ldquo;receive.&rdquo;</p>
+<p><strong>ELI15 — the conveyor belt of sushi:</strong></p>
+<p>Imagine a circular conveyor belt connecting two chefs. Each has 8 plates. On every tick of a timer:
+- Each chef pushes their next plate onto the belt (from their end)
+- Each chef receives the other&rsquo;s plate (arriving at their end)
+- After 8 ticks, all 8 plates have been swapped</p>
+<p>The belt runs continuously — you ALWAYS send AND receive simultaneously. If you only want to send, the received data is garbage (you ignore it). If you only want to receive, you must send something (usually 0x00 or 0xFF as &ldquo;dummy bytes&rdquo;) to generate the clock that moves the slave&rsquo;s data out.</p>
+<p><strong>This is why SPI is always full-duplex</strong> — it&rsquo;s physically impossible for it NOT to be. The ring topology means every bit sent is simultaneously a bit received.</p>
+<hr />
+<h2 id="12-the-4-spi-wires">1.2 The 4 SPI Wires</h2>
+<table>
+<thead>
+<tr>
+<th>Wire</th>
+<th>Full Name</th>
+<th>Direction</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SCLK</td>
+<td>Serial Clock</td>
+<td>Master → Slave</td>
+<td>Timing reference for bit shifting</td>
+</tr>
+<tr>
+<td>MOSI</td>
+<td>Master Out, Slave In</td>
+<td>Master → Slave</td>
+<td>Data from master to slave</td>
+</tr>
+<tr>
+<td>MISO</td>
+<td>Master In, Slave Out</td>
+<td>Slave → Master</td>
+<td>Data from slave to master</td>
+</tr>
+<tr>
+<td>CS̄</td>
+<td>Chip Select (active low)</td>
+<td>Master → Slave</td>
+<td>&ldquo;Hey you, I&rsquo;m talking to you&rdquo;</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Modern naming:</strong> MOSI/MISO are being replaced by SDO/SDI (Serial Data Out/In) or COPI/CIPO (Controller Out/Peripheral In) in newer datasheets. The function is identical.</p>
+<hr />
+<h1 id="part-2-the-4-spi-modes">PART 2 — THE 4 SPI MODES</h1>
+<hr />
+<h2 id="21-cpol-and-cpha-what-they-mean">2.1 CPOL and CPHA — What They Mean</h2>
+<p>SPI has two parameters that define when data is shifted and sampled:</p>
+<ul>
+<li><strong>CPOL (Clock Polarity):</strong> What is the clock level when idle?</li>
+<li>CPOL=0: Clock idles LOW</li>
+<li>
+<p>CPOL=1: Clock idles HIGH</p>
+</li>
+<li>
+<p><strong>CPHA (Clock Phase):</strong> When is data sampled relative to clock edges?</p>
+</li>
+<li>CPHA=0: Data sampled on the FIRST clock transition (leading edge)</li>
+<li>CPHA=1: Data sampled on the SECOND clock transition (trailing edge)</li>
+</ul>
+<p><strong>The 4 combinations:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>CPOL</th>
+<th>CPHA</th>
+<th>Clock Idle</th>
+<th>Sample Edge</th>
+<th>Shift Edge</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>LOW</td>
+<td>Rising ↑</td>
+<td>Falling ↓</td>
+</tr>
+<tr>
+<td>1</td>
+<td>0</td>
+<td>1</td>
+<td>LOW</td>
+<td>Falling ↓</td>
+<td>Rising ↑</td>
+</tr>
+<tr>
+<td>2</td>
+<td>1</td>
+<td>0</td>
+<td>HIGH</td>
+<td>Falling ↓</td>
+<td>Rising ↑</td>
+</tr>
+<tr>
+<td>3</td>
+<td>1</td>
+<td>1</td>
+<td>HIGH</td>
+<td>Rising ↑</td>
+<td>Falling ↓</td>
+</tr>
+</tbody>
+</table>
+<h2 id="22-ascii-timing-diagrams">2.2 ASCII Timing Diagrams</h2>
+<h3 id="mode-0-cpol0-cpha0-most-common">Mode 0 (CPOL=0, CPHA=0) — Most Common</h3>
+<p>Data is set up BEFORE the first clock edge. Sampled on rising edges.</p>
+<div class="highlight"><pre><span></span><code>    Transmitting 0xA5 = 1010_0101 (MSB first)
+
+    CS̄:   ‾‾‾‾|_______________________________________________|‾‾‾‾
+
+    SCLK:      _|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_
+               idle  ↑   ↑   ↑   ↑   ↑   ↑   ↑   ↑  idle
+                    sample on rising edges
+
+    MOSI:  ‾‾‾|1   |0   |1   |0   |0   |1   |0   |1   |‾‾‾
+               D7    D6    D5    D4    D3    D2    D1    D0
+               MSB                                      LSB
+
+    MISO:  ‾‾‾|x   |x   |x   |x   |x   |x   |x   |x   |‾‾‾
+              (slave data comes out simultaneously)
+</code></pre></div>
+
+<p>Data setup: MOSI changes on FALLING edge (or before first clock), sampled on RISING edge.</p>
+<h3 id="mode-3-cpol1-cpha1-used-by-icm-42688">Mode 3 (CPOL=1, CPHA=1) — Used by ICM-42688</h3>
+<p>Clock idles HIGH. Data sampled on rising edges (same as Mode 0 sampling, but clock polarity is inverted).</p>
+<div class="highlight"><pre><span></span><code>    CS̄:   ‾‾‾‾|_______________________________________________|‾‾‾‾
+
+    SCLK:  ‾‾‾‾‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾‾‾‾
+               idle  ↑   ↑   ↑   ↑   ↑   ↑   ↑   ↑  idle
+                    sample on rising edges
+                    (same as Mode 0!)
+
+    MOSI:  ‾‾‾‾|1   |0   |1   |0   |0   |1   |0   |1   |‾‾‾
+               D7    D6    D5    D4    D3    D2    D1    D0
+</code></pre></div>
+
+<p><strong>Key insight:</strong> Mode 0 and Mode 3 both sample on rising edges. The ONLY difference is the idle clock level. Many devices (including ICM-42688) support both Mode 0 and Mode 3.</p>
+<h3 id="mode-1-and-mode-2">Mode 1 and Mode 2</h3>
+<div class="highlight"><pre><span></span><code>    Mode 1 (CPOL=0, CPHA=1): Idle LOW, sample on FALLING edge
+    Mode 2 (CPOL=1, CPHA=0): Idle HIGH, sample on FALLING edge
+
+    These are less common. Mode 1 is used by some ADCs and DACs.
+</code></pre></div>
+
+<h2 id="23-what-happens-with-the-wrong-mode">2.3 What Happens with the Wrong Mode</h2>
+<p>If master is Mode 0 and slave is Mode 1:</p>
+<div class="highlight"><pre><span></span><code>    Master sends 0xA5 = 1010_0101
+    Slave samples on opposite edge → sees bits shifted by half a period
+    Slave reads:  0x4B or 0x52 or something else entirely
+
+    The byte is WRONG, typically by 1 bit shift or complemented bits
+</code></pre></div>
+
+<p><strong>Diagnosis:</strong> If the byte received is &ldquo;close but wrong&rdquo; (e.g., 0x4A instead of 0xA5), it&rsquo;s almost certainly a CPOL/CPHA mismatch. Check the slave device datasheet for the correct mode.</p>
+<hr />
+<h1 id="part-3-chip-select-cs">PART 3 — CHIP SELECT (CS̄)</h1>
+<hr />
+<h2 id="31-active-low-convention">3.1 Active-Low Convention</h2>
+<p>CS̄ is active-LOW: the slave is selected (listening) when CS̄ = 0V, and deselected (ignoring the bus) when CS̄ = 3.3V.</p>
+<p><strong>Why active-low?</strong> Historical: early TTL logic consumed less power when outputs were LOW. Also, open-drain outputs naturally idle HIGH (pull-up) and must be actively driven LOW — matching the active-low convention.</p>
+<h3 id="32-pull-up-during-boot">3.2 Pull-Up During Boot</h3>
+<p><strong>Why should I care?</strong> During MCU boot, GPIO pins are in a high-impedance state. If CS̄ floats LOW, the slave thinks it&rsquo;s selected and starts responding to noise on SCLK → corrupt data, confused slave state.</p>
+<div class="highlight"><pre><span></span><code>    VCC ──┤ 10kΩ ├── CS̄ pin ── MCU GPIO
+                     │
+                     └── To slave CS̄ input
+
+    Pull-up ensures CS̄ = HIGH (slave deselected) during boot.
+    MCU drives it LOW when ready to communicate.
+</code></pre></div>
+
+<h3 id="33-multi-slave-spi">3.3 Multi-Slave SPI</h3>
+<p><strong>Option 1: Separate CS̄ per slave (most common)</strong></p>
+<div class="highlight"><pre><span></span><code>    SCLK ──────────→ Slave 1 SCLK ──→ Slave 2 SCLK ──→ Slave 3 SCLK
+    MOSI ──────────→ Slave 1 MOSI ──→ Slave 2 MOSI ──→ Slave 3 MOSI
+    MISO ←── Slave 1 MISO
+         ←── Slave 2 MISO     (directly connected — tri-state when not selected)
+         ←── Slave 3 MISO
+
+    CS1̄  ──────────→ Slave 1 CS̄
+    CS2̄  ──────────→ Slave 2 CS̄
+    CS3̄  ──────────→ Slave 3 CS̄
+</code></pre></div>
+
+<p>Only one CS̄ is LOW at a time. Non-selected slaves tri-state (high-impedance) their MISO output so they don&rsquo;t conflict.</p>
+<p><strong>Option 2: Daisy-chain</strong></p>
+<p>Slaves are chained: MISO of Slave 1 → MOSI of Slave 2 → etc. All slaves share one CS̄. Data shifts through ALL slaves in the chain. Less common, used by LED drivers (WS2812&rsquo;s SPI cousin) and some DAC chains.</p>
+<hr />
+<h1 id="part-4-signal-integrity-and-clock-speed">PART 4 — SIGNAL INTEGRITY AND CLOCK SPEED</h1>
+<hr />
+<h2 id="41-why-40mhz-spi-on-30cm-jumper-wires-fails">4.1 Why 40MHz SPI on 30cm Jumper Wires Fails</h2>
+<p><strong>The short version:</strong> At 40MHz, the clock period is 25ns. At the speed of light in copper (~2/3 c), a signal travels about 20cm in 1ns. A 30cm wire introduces ~1.5ns of propagation delay — that&rsquo;s 6% of a bit period. Add reflections from impedance mismatches, and the signal at the slave looks nothing like what the master sent.</p>
+<p><strong>The longer version:</strong></p>
+<p>At low frequencies, wires behave like ideal conductors. At high frequencies, wires become <strong>transmission lines</strong> with characteristic impedance (~50-120Ω depending on geometry). If the line impedance doesn&rsquo;t match the source/load impedance, the signal partially reflects at the far end, bouncing back and forth and creating ringing:</p>
+<div class="highlight"><pre><span></span><code>    What master sends (clean):        What slave sees (on 30cm jumper):
+
+    ‾‾‾|     |‾‾‾|     |‾‾‾          ‾‾╱╲  ╱╲|‾‾╱╲ ╱╲|‾‾‾
+        |     |   |     |                ╲╱╲╱  |  ╲╱╲╱ |
+        |_____|   |_____|                 |‾‾‾‾|   |‾‾|
+                                          ↑
+                                      Ringing! Crosses threshold
+                                      multiple times → extra clock edges
+                                      → corrupted data
+</code></pre></div>
+
+<h3 id="42-rules-of-thumb-for-spi-signal-integrity">4.2 Rules of Thumb for SPI Signal Integrity</h3>
+<table>
+<thead>
+<tr>
+<th>SPI Speed</th>
+<th>Max Wire Length</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>≤1 MHz</td>
+<td>1 meter</td>
+<td>Anything works (jumper wires, breadboard)</td>
+</tr>
+<tr>
+<td>1-10 MHz</td>
+<td>30cm</td>
+<td>Short wires, keep GND close to SCLK</td>
+</tr>
+<tr>
+<td>10-20 MHz</td>
+<td>10cm</td>
+<td>PCB traces preferred, ground plane</td>
+</tr>
+<tr>
+<td>20-50 MHz</td>
+<td>5cm</td>
+<td>PCB only, impedance-matched traces, series termination</td>
+</tr>
+<tr>
+<td>&gt;50 MHz</td>
+<td>&lt;3cm</td>
+<td>Tight PCB layout, matched length, microstrip calculations</td>
+</tr>
+</tbody>
+</table>
+<p><strong>For your 100Hz bridge at 10MHz SPI:</strong> Keep wires under 15cm, ensure GND wire runs alongside SCLK, and you&rsquo;ll be fine.</p>
+<h3 id="43-why-a-gnd-wire-alongside-sclk-helps">4.3 Why a GND Wire Alongside SCLK Helps</h3>
+<p>The return current for the SCLK signal needs a path back. If the nearest GND wire is 10cm away, the return current loop is large → more inductance → more EMI radiation → more ringing.</p>
+<p>Place a GND wire physically adjacent to (or twisted with) the SCLK wire. This minimizes the loop area and reduces ringing.</p>
+<div class="highlight"><pre><span></span><code>    GOOD:                           BAD:
+    SCLK ════════════════          SCLK ════════════════
+    GND  ════════════════          
+    MOSI ════════════════          MOSI ════════════════
+    GND  ════════════════          
+    MISO ════════════════          MISO ════════════════
+    CS̄   ════════════════          CS̄   ════════════════
+                                   GND  ════════════════ (far away!)
+    (signal-ground-signal          (all signals far from ground)
+     sandwich → low loop area)
+</code></pre></div>
+
+<p>On a PCB, this is achieved with a continuous ground plane on the layer beneath the signal traces.</p>
+<hr />
+<h1 id="part-5-spi-master-vs-slave-timing">PART 5 — SPI MASTER vs SLAVE TIMING</h1>
+<hr />
+<h2 id="51-why-master-mode-is-easy">5.1 Why Master Mode is Easy</h2>
+<p>The master generates the clock. It knows exactly when each bit will be sampled. It can set up data on MOSI well before the clock edge, and sample MISO well after the clock edge. The master is always in control.</p>
+<h2 id="52-why-slave-mode-is-hard">5.2 Why Slave Mode is HARD</h2>
+<p>The slave doesn&rsquo;t control the clock. It must:</p>
+<ol>
+<li><strong>Detect CS̄ going LOW</strong> (interrupt or DMA trigger)</li>
+<li><strong>Arm the shift register with data to send</strong> (load the first byte into the TX register)</li>
+<li><strong>Be ready before the first SCLK edge arrives</strong></li>
+</ol>
+<p>Step 3 is the problem. If the master asserts CS̄ and starts clocking within nanoseconds, the slave may not have armed its DMA in time.</p>
+<div class="highlight"><pre><span></span><code>    TIMELINE:
+
+    CS̄ asserts ──→ Slave interrupt fires ──→ ISR runs ──→ DMA armed ──→ Ready!
+    |              |                          |             |
+    |  ~50ns       |  ~200ns (interrupt       |  ~500ns     |
+    |  (wire       |   latency on CM7)        |  (DMA       |
+    |  propagation |                          |  setup)     |
+    |              |                          |             |
+    ↓              ↓                          ↓             ↓
+    Meanwhile, master starts clocking...
+    |  1st SCLK edge at ~100ns after CS̄
+    |
+    PROBLEM: Slave DMA not armed yet!
+    First byte sent by slave = whatever was left in the shift register = GARBAGE
+</code></pre></div>
+
+<h3 id="the-first-byte-garbage-problem">The &ldquo;First Byte Garbage&rdquo; Problem</h3>
+<p>This is the most common SPI slave bug. The slave&rsquo;s first byte is wrong because the shift register wasn&rsquo;t loaded with valid data before the master started clocking.</p>
+<p><strong>Fixes:</strong>
+1. <strong>Master waits:</strong> Insert a delay (1-10µs) between CS̄ assertion and first clock edge. Simple but wastes time.
+2. <strong>Pre-arm the DMA:</strong> Keep the slave DMA perpetually armed with a transmit buffer. When CS̄ asserts, data is already in the shift register.
+3. <strong>Use a protocol with a sychonization byte:</strong> The master sends a &ldquo;wake up&rdquo; byte (0x00) first, which the slave echoes back as junk. Real data starts from byte 2.
+4. <strong>NSS hardware management:</strong> STM32 SPI slave can detect CS̄ assertion in hardware and auto-load the shift register from the TX FIFO — faster than software interrupt.</p>
+<hr />
+<h2 id="53-spi-dma-essential-for-slave-at-high-speed">5.3 SPI DMA — Essential for Slave at High Speed</h2>
+<p>Without DMA, the CPU must load each byte into the TX register and read each byte from the RX register. At 10MHz SPI, that&rsquo;s a new byte every 800ns. The CPU can barely keep up (especially with other interrupts).</p>
+<p>With DMA: the DMA controller moves bytes between RAM and the SPI peripheral automatically. The CPU is only interrupted when the entire buffer is complete.</p>
+<div class="highlight"><pre><span></span><code><span class="cm">/* Zephyr SPI slave with DMA (conceptual): */</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">spi_config</span><span class="w"> </span><span class="n">slave_cfg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">frequency</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10000000</span><span class="p">,</span><span class="w">  </span><span class="cm">/* 10MHz */</span>
+<span class="w">    </span><span class="p">.</span><span class="n">operation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SPI_OP_MODE_SLAVE</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">SPI_WORD_SET</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span>
+<span class="w">                 </span><span class="n">SPI_TRANSFER_MSB</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">SPI_MODE_CPOL</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">SPI_MODE_CPHA</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">cs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w">  </span><span class="cm">/* CS managed by hardware in slave mode */</span>
+<span class="p">};</span>
+
+<span class="kt">uint8_t</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">[</span><span class="mi">64</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* sensor data */</span><span class="w"> </span><span class="p">};</span>
+<span class="kt">uint8_t</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">[</span><span class="mi">64</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">};</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf</span><span class="w"> </span><span class="n">tx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">64</span><span class="w"> </span><span class="p">};</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf</span><span class="w"> </span><span class="n">rx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">64</span><span class="w"> </span><span class="p">};</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf_set</span><span class="w"> </span><span class="n">tx_set</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buffers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf_set</span><span class="w"> </span><span class="n">rx_set</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buffers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rx</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+
+<span class="cm">/* This blocks until CS̄ asserts and 64 bytes are exchanged */</span>
+<span class="n">spi_transceive</span><span class="p">(</span><span class="n">spi_dev</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">slave_cfg</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx_set</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rx_set</span><span class="p">);</span>
+</code></pre></div>
+
+<hr />
+<h2 id="54-stm32h7-spi-specifics">5.4 STM32H7 SPI Specifics</h2>
+<p>The STM32H7 SPI peripheral has:
+- <strong>32-byte FIFO</strong> for TX and RX
+- <strong>DMA support</strong> with configurable threshold
+- <strong>Hardware NSS management</strong> for slave mode
+- <strong>16/32-bit word width</strong> for efficient data transfer
+- <strong>Kernel clock</strong> up to 150MHz → max SPI clock ~75MHz (ƒ_pclk/2)</p>
+<p><strong>D-Cache trap (critical for Cortex-M7!):</strong></p>
+<p>The STM32H7 has an L1 data cache. DMA operates on physical memory, NOT through the cache. If the CPU writes to a buffer that&rsquo;s cached, the DMA reads stale data from physical RAM.</p>
+<div class="highlight"><pre><span></span><code>    CPU writes to tx_buf:  CPU cache has new data, RAM has OLD data
+    DMA reads from RAM:    DMA sends OLD data on SPI ← BUG!
+
+    Fix options:
+    1. Place DMA buffers in non-cacheable memory region (MPU configuration)
+    2. Clean (flush) the cache before DMA TX: SCB_CleanDCache_by_Addr(tx_buf, len)
+    3. Invalidate the cache after DMA RX: SCB_InvalidateDCache_by_Addr(rx_buf, len)
+    4. Use DTCM RAM for DMA buffers (not cached, directly connected to bus)
+</code></pre></div>
+
+<p>This is the #1 source of &ldquo;SPI works in debug mode but fails at speed&rdquo; on STM32H7.</p>
+<hr />
+<h1 id="part-6-spi-protocol-framing">PART 6 — SPI PROTOCOL FRAMING</h1>
+<hr />
+<h2 id="61-why-you-need-a-protocol-on-top-of-spi">6.1 Why You Need a Protocol on Top of SPI</h2>
+<p>Raw SPI is just byte exchange. It has no concept of:
+- Message boundaries (where does one message end and the next begin?)
+- Error detection (was the byte corrupted?)
+- Sequence tracking (did we miss a message?)
+- Synchronization (if the slave starts mid-byte, everything is shifted)</p>
+<p>You must build ALL of this in software.</p>
+<h2 id="62-basic-framing-protocol">6.2 Basic Framing Protocol</h2>
+<div class="highlight"><pre><span></span><code>    ┌────────┬────────┬──────────────────────┬────────┐
+    │ MAGIC  │ LENGTH │      PAYLOAD         │  CRC   │
+    │ 0xAA55 │ 1 byte │   LENGTH bytes       │ 2 bytes│
+    │ 2 bytes│        │                      │ CRC-16 │
+    └────────┴────────┴──────────────────────┴────────┘
+</code></pre></div>
+
+<p><strong>Magic bytes (0xAA55):</strong> The receiver scans for this pattern to find the start of a frame. Chosen because the bit pattern 10101010_01010101 is distinctive and unlikely to appear randomly in data.</p>
+<p><strong>Length:</strong> Number of bytes in the payload (0-255 for 1-byte length, or 0-65535 for 2-byte length).</p>
+<p><strong>CRC:</strong> Cyclic Redundancy Check over the entire frame (magic + length + payload). CRC-16-CCITT is common. If the CRC doesn&rsquo;t match, the frame is corrupted → discard it.</p>
+<p><strong>Sequence numbers:</strong> Add a 1-byte incrementing counter in the header. If the receiver sees seq=5, then seq=7, it knows frame 6 was dropped. Essential for your 100Hz bridge — the Jetson needs to know if it missed an IMU sample.</p>
+<div class="highlight"><pre><span></span><code>    Extended frame with sequence number:
+
+    ┌────────┬────────┬───────┬──────────────────┬────────┐
+    │ MAGIC  │  SEQ   │  LEN  │    PAYLOAD       │  CRC   │
+    │ 0xAA55 │ 1 byte │1 byte │   LEN bytes      │ 2 bytes│
+    └────────┴────────┴───────┴──────────────────┴────────┘
+
+    Total overhead: 2 + 1 + 1 + 2 = 6 bytes per frame
+    For 52-byte IMU packet: 6/58 = 10.3% overhead — acceptable
+</code></pre></div>
+
+<h2 id="63-the-slave-re-sync-problem">6.3 The Slave Re-Sync Problem</h2>
+<p>If the slave DMA de-synchronizes (e.g., missed a CS̄ edge, noise triggered extra clock), the slave may start reading mid-frame. Everything is shifted by N bytes → all subsequent frames are corrupted.</p>
+<p><strong>Recovery protocol:</strong>
+1. Master detects CRC failures (slave sends bad data)
+2. Master sends a &ldquo;re-sync&rdquo; command: 10× 0xFF followed by the magic bytes
+3. Slave receives 0xFF stream, recognizes it as &ldquo;reset,&rdquo; re-arms its DMA
+4. Slave detects magic bytes in the next frame → synchronized again</p>
+<hr />
+<h1 id="part-7-spi-vs-i2c-vs-uart-comparison">PART 7 — SPI vs I2C vs UART COMPARISON</h1>
+<hr />
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>SPI</th>
+<th>I2C</th>
+<th>UART</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Wires</strong></td>
+<td>4+ (SCLK, MOSI, MISO, CS̄ per slave)</td>
+<td>2 (SDA, SCL) + pull-ups</td>
+<td>2 (TX, RX) + GND</td>
+</tr>
+<tr>
+<td><strong>Speed</strong></td>
+<td>≤100MHz (typically ≤50MHz)</td>
+<td>100kHz – 3.4MHz</td>
+<td>9600 – 3Mbaud</td>
+</tr>
+<tr>
+<td><strong>Duplex</strong></td>
+<td>Full duplex (always)</td>
+<td>Half duplex</td>
+<td>Full duplex</td>
+</tr>
+<tr>
+<td><strong>Addressing</strong></td>
+<td>CS̄ pin per slave</td>
+<td>7-bit address in protocol</td>
+<td>Point-to-point (no addressing)</td>
+</tr>
+<tr>
+<td><strong>Max slaves</strong></td>
+<td>Limited by CS̄ pins</td>
+<td>127 (7-bit address)</td>
+<td>1 (point-to-point)</td>
+</tr>
+<tr>
+<td><strong>Clock</strong></td>
+<td>Master provides</td>
+<td>Master provides</td>
+<td>No clock (asynchronous)</td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td>Simple hardware, complex slave DMA</td>
+<td>Complex protocol, simple hardware</td>
+<td>Simple everything</td>
+</tr>
+<tr>
+<td><strong>Distance</strong></td>
+<td>&lt;30cm at high speed</td>
+<td>&lt;1m with proper pull-ups</td>
+<td>&gt;10m (RS-485: 1200m)</td>
+</tr>
+<tr>
+<td><strong>Error detection</strong></td>
+<td>None built-in (add CRC in protocol)</td>
+<td>ACK/NACK per byte</td>
+<td>None built-in (add parity)</td>
+</tr>
+<tr>
+<td><strong>Typical use</strong></td>
+<td>IMU, flash, display, high-speed sensor</td>
+<td>EEPROM, temp sensor, IO expander</td>
+<td>Debug console, GPS, RS-485</td>
+</tr>
+<tr>
+<td><strong>CPU overhead</strong></td>
+<td>Low (DMA-friendly)</td>
+<td>Moderate (bit-level protocol)</td>
+<td>Low (DMA-friendly)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>When to use each:</strong>
+- <strong>SPI:</strong> When you need SPEED (&gt;400kHz) or periodic polling at fixed rates (your 100Hz bridge)
+- <strong>I2C:</strong> When you need many slow sensors on one bus with minimal wires
+- <strong>UART:</strong> When you need point-to-point communication, especially over long distances (RS-485)</p>
+<hr />
+<h1 id="gotcha-table">GOTCHA TABLE</h1>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely Cause</th>
+<th>How to Diagnose</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All bytes read as 0xFF</td>
+<td>CS̄ not going LOW, or MISO pull-up keeping line high</td>
+<td>Scope CS̄ during transaction. Check wiring.</td>
+<td>Fix CS̄ wiring. GPIO configured as output?</td>
+</tr>
+<tr>
+<td>Bytes are shifted by 1 bit</td>
+<td>Wrong CPOL/CPHA mode</td>
+<td>Scope MOSI/MISO + SCLK. Check which edge data changes on.</td>
+<td>Match mode to device datasheet</td>
+</tr>
+<tr>
+<td>First byte from slave is garbage</td>
+<td>Slave DMA not armed before master clocks</td>
+<td>Known issue — see Section 5.2</td>
+<td>Pre-arm DMA, or add CS̄-to-SCLK delay</td>
+</tr>
+<tr>
+<td>Works at 1MHz, fails at 10MHz</td>
+<td>Signal integrity — ringing on long wires</td>
+<td>Scope SCLK at slave end — look for overshoot/ringing</td>
+<td>Shorter wires, series termination (33Ω on SCLK), ground plane</td>
+</tr>
+<tr>
+<td>Data correct sometimes, corrupt other times</td>
+<td>D-Cache coherency (STM32H7)</td>
+<td>Works in debug (slow), fails at speed</td>
+<td>Place buffers in non-cacheable RAM, or SCB_CleanDCache/InvalidateDCache</td>
+</tr>
+<tr>
+<td>Wrong byte order</td>
+<td>MSB vs LSB setting mismatch</td>
+<td>Compare first byte expected vs received. Are they bit-reversed?</td>
+<td>Match SPI_TRANSFER_MSB / SPI_TRANSFER_LSB to device</td>
+</tr>
+<tr>
+<td>Slave stops responding</td>
+<td>CS̄ de-glitched (noise), slave thinks transaction ended</td>
+<td>Scope CS̄ — look for brief HIGH glitches during transaction</td>
+<td>Add 100pF cap on CS̄ line, reduce CS̄ trace length</td>
+</tr>
+<tr>
+<td>MISO floating when slave not selected</td>
+<td>Slave doesn&rsquo;t tri-state MISO when CS̄ = HIGH</td>
+<td>Measure MISO voltage when no slave selected — should be indeterminate</td>
+<td>Normal for single-slave. For multi-slave, check slave tri-state spec</td>
+</tr>
+<tr>
+<td>DMA transfer size wrong</td>
+<td>FIFO threshold misconfigured (STM32H7)</td>
+<td>HAL SPI FIFO threshold must match transfer word size</td>
+<td>Set FIFO threshold to match SPI data width</td>
+</tr>
+<tr>
+<td>Slave receives all zeros</td>
+<td>MOSI wire broken or not connected</td>
+<td>Scope MOSI at slave — should see data during SCLK</td>
+<td>Check physical connection</td>
+</tr>
+<tr>
+<td>Intermittent CRC failures in protocol</td>
+<td>EMI, ground noise, or slight timing margin</td>
+<td>Increase CRC check. Retry once. Monitor error rate.</td>
+<td>Reduce SPI speed, improve grounding, add decoupling</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="quick-reference-card">QUICK REFERENCE CARD</h1>
+<div class="highlight"><pre><span></span><code>┌──────────────────────────────── SPI CHEAT SHEET ────────────────────────────────────────────┐
+│                                                                                              │
+│  CORE CONCEPT: Two shift registers in a ring. 8 clocks = 1 byte exchanged. Always FULL DX. │
+│                                                                                              │
+│  WIRES:   SCLK (Master→Slave)   MOSI (M→S)   MISO (S→M)   CS̄ (M→S, active LOW)          │
+│                                                                                              │
+│  MODES:   Mode 0 (0,0)  idle LOW,  sample ↑     ← most common                              │
+│           Mode 1 (0,1)  idle LOW,  sample ↓                                                 │
+│           Mode 2 (1,0)  idle HIGH, sample ↓                                                 │
+│           Mode 3 (1,1)  idle HIGH, sample ↑     ← ICM-42688 uses this                      │
+│                                                                                              │
+│  CLOCK RATES:                                                                                │
+│    ≤1MHz:  breadboard OK            10-20MHz: short wires, GND nearby                       │
+│    1-10MHz: jumpers &lt;15cm           &gt;20MHz: PCB only, impedance match                       │
+│                                                                                              │
+│  FRAMING:  [MAGIC 0xAA55] [SEQ] [LEN] [PAYLOAD] [CRC-16]                                  │
+│                                                                                              │
+│  STM32H7 TRAPS:                                                                             │
+│    1. D-Cache vs DMA → use non-cacheable memory or flush/invalidate                         │
+│    2. FIFO threshold must match word size                                                    │
+│    3. Slave first-byte-garbage → pre-arm DMA or add CS̄ delay                               │
+│                                                                                              │
+│  SLAVE MODE CHECKLIST:                                                                       │
+│    □ CS̄ pull-up during boot (10kΩ)                                                          │
+│    □ DMA for both TX and RX                                                                  │
+│    □ Pre-arm DMA before master starts                                                        │
+│    □ Protocol with magic bytes for re-sync                                                   │
+│    □ CRC for error detection                                                                 │
+│    □ Sequence numbers for drop detection                                                     │
+│                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

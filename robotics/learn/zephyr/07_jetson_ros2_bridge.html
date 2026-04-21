@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jetson Orin — SPI Master + ROS2 Bridge - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="jetson-orin-spi-master-ros2-bridge">Jetson Orin — SPI Master + ROS2 Bridge</h1>
+<h2 id="role-in-the-pipeline">Role in the Pipeline</h2>
+<p>The Jetson is the <strong>SPI master</strong> — it drives the clock and decides exactly when each
+100Hz transfer happens. This gives deterministic timing on the ROS2 side regardless
+of any jitter in the STM32 sensor reading or packing.</p>
+<div class="highlight"><pre><span></span><code>ROS2 Timer (100Hz)
+       │
+       ▼
+spidev.xfer2()  ──SPI──►  STM32 sends pre-built frame
+       │
+       ▼
+nanopb decode
+       │
+       ▼
+rclpy publish()  ──►  /imu/raw, /wheel_speed, ...
+</code></pre></div>
+
+<hr />
+<h2 id="why-jetson-as-master-not-stm32">Why Jetson as Master (Not STM32)?</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Pro</th>
+<th>Con</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Jetson = master</td>
+<td>Deterministic ROS2 publish rate, no handshake needed</td>
+<td>Jetson must be running before STM32 is useful</td>
+</tr>
+<tr>
+<td>STM32 = master</td>
+<td>STM32 controls exact sensor timing</td>
+<td>Needs GPIO &ldquo;ready&rdquo; handshake with Jetson, adds 2-way complexity</td>
+</tr>
+</tbody>
+</table>
+<p>Determinism wins for robotics — ROS2 expects consistent 100Hz, not &ldquo;whenever the MCU is ready.&rdquo;</p>
+<hr />
+<h2 id="linux-spi-interface-spidev">Linux SPI Interface: spidev</h2>
+<p>On Linux, SPI is exposed as <code>/dev/spidev&lt;bus&gt;.&lt;cs&gt;</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># List available SPI devices</span>
+ls<span class="w"> </span>/dev/spidev*
+<span class="c1"># /dev/spidev0.0   → bus 0, chip select 0</span>
+<span class="c1"># /dev/spidev0.1   → bus 0, chip select 1</span>
+
+<span class="c1"># Check SPI device tree on Jetson Orin</span>
+cat<span class="w"> </span>/proc/device-tree/spi@3250000/status
+</code></pre></div>
+
+<p>Python <code>spidev</code> library talks to this device:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">spidev</span>
+
+<span class="n">spi</span> <span class="o">=</span> <span class="n">spidev</span><span class="o">.</span><span class="n">SpiDev</span><span class="p">()</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>                    <span class="c1"># bus=0, cs=0 → /dev/spidev0.0</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">max_speed_hz</span> <span class="o">=</span> <span class="mi">10_000_000</span>     <span class="c1"># 10 MHz</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">mode</span> <span class="o">=</span> <span class="mb">0b00</span>                   <span class="c1"># CPOL=0 CPHA=0: idle low, sample rising edge</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">bits_per_word</span> <span class="o">=</span> <span class="mi">8</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">no_cs</span> <span class="o">=</span> <span class="kc">False</span>                 <span class="c1"># let spidev manage CS automatically</span>
+
+<span class="c1"># Full-duplex transfer: sends tx bytes, receives same number of bytes</span>
+<span class="n">rx</span> <span class="o">=</span> <span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">([</span><span class="mh">0x00</span><span class="p">]</span> <span class="o">*</span> <span class="mi">64</span><span class="p">)</span>      <span class="c1"># send 64 dummy bytes, get 64 back</span>
+</code></pre></div>
+
+<p><strong><code>xfer2</code> vs <code>xfer</code></strong>:
+- <code>xfer2</code>: CS stays asserted for entire transfer ← use this
+- <code>xfer</code>:  CS pulses between each byte ← almost never what you want</p>
+<p><strong>DMA note</strong>: spidev automatically uses kernel DMA for transfers &gt;32 bytes. You don&rsquo;t see it — it just makes large transfers faster.</p>
+<hr />
+<h2 id="complete-ros2-node">Complete ROS2 Node</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># ros2_ws/src/stm32_bridge/stm32_bridge/spi_node.py</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">spidev</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">struct</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.qos</span><span class="w"> </span><span class="kn">import</span> <span class="n">QoSProfile</span><span class="p">,</span> <span class="n">ReliabilityPolicy</span><span class="p">,</span> <span class="n">HistoryPolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sensor_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Imu</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">geometry_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">TwistStamped</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">sensor_frame_pb2</span><span class="w"> </span><span class="kn">import</span> <span class="n">SensorFrame</span>   <span class="c1"># generated from sensor_frame.proto</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Stm32BridgeNode</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="n">SYNC_BYTE</span>   <span class="o">=</span> <span class="mh">0xAA</span>
+    <span class="n">MAX_PAYLOAD</span> <span class="o">=</span> <span class="mi">512</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;stm32_bridge&#39;</span><span class="p">)</span>
+
+        <span class="c1"># ── SPI setup ─────────────────────────────────────────────────</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span> <span class="o">=</span> <span class="n">spidev</span><span class="o">.</span><span class="n">SpiDev</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">max_speed_hz</span> <span class="o">=</span> <span class="mi">10_000_000</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">mode</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="c1"># ── ROS2 publishers ───────────────────────────────────────────</span>
+        <span class="c1"># BEST_EFFORT QoS: don&#39;t queue old sensor data if subscriber is slow</span>
+        <span class="n">sensor_qos</span> <span class="o">=</span> <span class="n">QoSProfile</span><span class="p">(</span>
+            <span class="n">reliability</span><span class="o">=</span><span class="n">ReliabilityPolicy</span><span class="o">.</span><span class="n">BEST_EFFORT</span><span class="p">,</span>
+            <span class="n">history</span><span class="o">=</span><span class="n">HistoryPolicy</span><span class="o">.</span><span class="n">KEEP_LAST</span><span class="p">,</span>
+            <span class="n">depth</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">imu_pub</span>   <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">Imu</span><span class="p">,</span>          <span class="s1">&#39;/imu/raw&#39;</span><span class="p">,</span>     <span class="n">sensor_qos</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">wheel_pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">TwistStamped</span><span class="p">,</span> <span class="s1">&#39;/wheel_speed&#39;</span><span class="p">,</span> <span class="n">sensor_qos</span><span class="p">)</span>
+
+        <span class="c1"># ── Stats ──────────────────────────────────────────────────────</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rx_ok</span>    <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rx_err</span>   <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rx_total</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="c1"># ── 100Hz transfer timer ───────────────────────────────────────</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">create_timer</span><span class="p">(</span><span class="mf">0.010</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_transfer_cb</span><span class="p">)</span>
+
+        <span class="c1"># ── Diagnostic timer: log stats every 5 seconds ───────────────</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">create_timer</span><span class="p">(</span><span class="mf">5.0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stats_cb</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;stm32_bridge started — 100Hz SPI transfers&#39;</span><span class="p">)</span>
+
+    <span class="c1"># ── Main 100Hz callback ────────────────────────────────────────────</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_transfer_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rx_total</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">payload</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_read_frame</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">payload</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">rx_err</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">return</span>
+
+            <span class="n">frame</span> <span class="o">=</span> <span class="n">SensorFrame</span><span class="p">()</span>
+            <span class="n">frame</span><span class="o">.</span><span class="n">ParseFromString</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_publish</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">rx_ok</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;SPI transfer error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">rx_err</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="c1"># ── Frame read with sync + CRC ──────────────────────────────────────</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_read_frame</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytes</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># Read 3-byte header: sync + 2-byte length</span>
+        <span class="n">header</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">readbytes</span><span class="p">(</span><span class="mi">3</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="n">header</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">SYNC_BYTE</span><span class="p">:</span>
+            <span class="c1"># Lost sync — try to re-lock by consuming bytes until 0xAA</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Sync lost (got 0x</span><span class="si">{</span><span class="n">header</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">:</span><span class="s1">02X</span><span class="si">}</span><span class="s1">) — re-syncing&#39;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_resync</span><span class="p">()</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="n">length</span> <span class="o">=</span> <span class="p">(</span><span class="n">header</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;&lt;</span> <span class="mi">8</span><span class="p">)</span> <span class="o">|</span> <span class="n">header</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="n">length</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">length</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">MAX_PAYLOAD</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Invalid frame length: </span><span class="si">{</span><span class="n">length</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="c1"># Read payload + 2-byte CRC</span>
+        <span class="n">data</span>   <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">readbytes</span><span class="p">(</span><span class="n">length</span> <span class="o">+</span> <span class="mi">2</span><span class="p">))</span>
+        <span class="n">payload</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span>
+        <span class="n">rx_crc</span>  <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s1">&#39;&gt;H&#39;</span><span class="p">,</span> <span class="n">data</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">:])[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_crc16_ok</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">rx_crc</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s1">&#39;CRC mismatch — discarding frame&#39;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+
+        <span class="k">return</span> <span class="n">payload</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_resync</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Read bytes until 0xAA found (sync recovery).&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">MAX_PAYLOAD</span><span class="p">):</span>
+            <span class="n">b</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">readbytes</span><span class="p">(</span><span class="mi">1</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">b</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">SYNC_BYTE</span><span class="p">:</span>
+                <span class="k">return</span>
+
+    <span class="c1"># ── Publish decoded frame to ROS2 ───────────────────────────────────</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_publish</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">:</span> <span class="n">SensorFrame</span><span class="p">):</span>
+        <span class="n">now</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_clock</span><span class="p">()</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">to_msg</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">frame</span><span class="o">.</span><span class="n">HasField</span><span class="p">(</span><span class="s1">&#39;imu&#39;</span><span class="p">):</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="n">Imu</span><span class="p">()</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span>    <span class="o">=</span> <span class="n">now</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">frame_id</span> <span class="o">=</span> <span class="s1">&#39;imu_link&#39;</span>
+
+            <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">accel_x</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">accel_y</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">z</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">accel_z</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity</span><span class="o">.</span><span class="n">x</span>    <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">gyro_x</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity</span><span class="o">.</span><span class="n">y</span>    <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">gyro_y</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity</span><span class="o">.</span><span class="n">z</span>    <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">gyro_z</span>
+
+            <span class="c1"># -1.0 in [0] = &quot;covariance unknown&quot; per ROS2 convention</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration_covariance</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="mf">1.0</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity_covariance</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>    <span class="o">=</span> <span class="o">-</span><span class="mf">1.0</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">imu_pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">frame</span><span class="o">.</span><span class="n">HasField</span><span class="p">(</span><span class="s1">&#39;wheel&#39;</span><span class="p">):</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="n">TwistStamped</span><span class="p">()</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span>    <span class="o">=</span> <span class="n">now</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">frame_id</span> <span class="o">=</span> <span class="s1">&#39;base_link&#39;</span>
+            <span class="c1"># Pack wheel speeds into twist (convention depends on your robot)</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">linear</span><span class="o">.</span><span class="n">x</span>  <span class="o">=</span> <span class="p">(</span><span class="n">frame</span><span class="o">.</span><span class="n">wheel</span><span class="o">.</span><span class="n">speed_fl</span> <span class="o">+</span> <span class="n">frame</span><span class="o">.</span><span class="n">wheel</span><span class="o">.</span><span class="n">speed_fr</span> <span class="o">+</span>
+                                    <span class="n">frame</span><span class="o">.</span><span class="n">wheel</span><span class="o">.</span><span class="n">speed_rl</span> <span class="o">+</span> <span class="n">frame</span><span class="o">.</span><span class="n">wheel</span><span class="o">.</span><span class="n">speed_rr</span><span class="p">)</span> <span class="o">/</span> <span class="mf">4.0</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">wheel_pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+    <span class="c1"># ── CRC16-CCITT ──────────────────────────────────────────────────────</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_crc16_ok</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">,</span> <span class="n">expected</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="n">crc</span> <span class="o">=</span> <span class="mh">0xFFFF</span>
+        <span class="k">for</span> <span class="n">byte</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+            <span class="n">crc</span> <span class="o">^=</span> <span class="p">(</span><span class="n">byte</span> <span class="o">&lt;&lt;</span> <span class="mi">8</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">8</span><span class="p">):</span>
+                <span class="n">crc</span> <span class="o">=</span> <span class="p">((</span><span class="n">crc</span> <span class="o">&lt;&lt;</span> <span class="mi">1</span><span class="p">)</span> <span class="o">^</span> <span class="mh">0x1021</span><span class="p">)</span> <span class="k">if</span> <span class="p">(</span><span class="n">crc</span> <span class="o">&amp;</span> <span class="mh">0x8000</span><span class="p">)</span> <span class="k">else</span> <span class="p">(</span><span class="n">crc</span> <span class="o">&lt;&lt;</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">crc</span> <span class="o">&amp;</span> <span class="mh">0xFFFF</span><span class="p">)</span> <span class="o">==</span> <span class="n">expected</span>
+
+    <span class="c1"># ── Periodic stats ───────────────────────────────────────────────────</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_stats_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">rate</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">rx_ok</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">rx_total</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;SPI stats: ok=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">rx_ok</span><span class="si">}</span><span class="s1"> err=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">rx_err</span><span class="si">}</span><span class="s1"> &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;total=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">rx_total</span><span class="si">}</span><span class="s1"> success_rate=</span><span class="si">{</span><span class="n">rate</span><span class="si">:</span><span class="s1">.1f</span><span class="si">}</span><span class="s1">%&#39;</span>
+        <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">()</span>
+    <span class="n">node</span> <span class="o">=</span> <span class="n">Stm32BridgeNode</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">rclpy</span><span class="o">.</span><span class="n">spin</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+        <span class="k">pass</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">node</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="n">node</span><span class="o">.</span><span class="n">destroy_node</span><span class="p">()</span>
+        <span class="n">rclpy</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h2 id="ros2-package-setup">ROS2 Package Setup</h2>
+<div class="highlight"><pre><span></span><code>ros2_ws/
+└── src/
+    └── stm32_bridge/
+        ├── package.xml
+        ├── setup.py
+        ├── setup.cfg
+        └── stm32_bridge/
+            ├── __init__.py
+            ├── spi_node.py
+            └── sensor_frame_pb2.py   ← generated from sensor_frame.proto
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="cm">&lt;!-- package.xml --&gt;</span>
+<span class="nt">&lt;package</span><span class="w"> </span><span class="na">format=</span><span class="s">&quot;3&quot;</span><span class="nt">&gt;</span>
+<span class="w">  </span><span class="nt">&lt;name&gt;</span>stm32_bridge<span class="nt">&lt;/name&gt;</span>
+<span class="w">  </span><span class="nt">&lt;version&gt;</span>0.1.0<span class="nt">&lt;/version&gt;</span>
+<span class="w">  </span><span class="nt">&lt;description&gt;</span>STM32<span class="w"> </span>SPI<span class="w"> </span>bridge<span class="w"> </span>for<span class="w"> </span>Jetson<span class="w"> </span>ROS2<span class="nt">&lt;/description&gt;</span>
+
+<span class="w">  </span><span class="nt">&lt;depend&gt;</span>rclpy<span class="nt">&lt;/depend&gt;</span>
+<span class="w">  </span><span class="nt">&lt;depend&gt;</span>sensor_msgs<span class="nt">&lt;/depend&gt;</span>
+<span class="w">  </span><span class="nt">&lt;depend&gt;</span>geometry_msgs<span class="nt">&lt;/depend&gt;</span>
+
+<span class="w">  </span><span class="nt">&lt;exec_depend&gt;</span>python3-spidev<span class="nt">&lt;/exec_depend&gt;</span>
+<span class="w">  </span><span class="nt">&lt;exec_depend&gt;</span>python3-protobuf<span class="nt">&lt;/exec_depend&gt;</span>
+<span class="nt">&lt;/package&gt;</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1"># setup.py</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">setuptools</span><span class="w"> </span><span class="kn">import</span> <span class="n">setup</span>
+
+<span class="n">setup</span><span class="p">(</span>
+    <span class="n">name</span><span class="o">=</span><span class="s1">&#39;stm32_bridge&#39;</span><span class="p">,</span>
+    <span class="n">packages</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;stm32_bridge&#39;</span><span class="p">],</span>
+    <span class="n">install_requires</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;setuptools&#39;</span><span class="p">],</span>
+    <span class="n">entry_points</span><span class="o">=</span><span class="p">{</span>
+        <span class="s1">&#39;console_scripts&#39;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="s1">&#39;stm32_bridge = stm32_bridge.spi_node:main&#39;</span><span class="p">,</span>
+        <span class="p">],</span>
+    <span class="p">},</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<p>Build and run:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>~/ros2_ws
+colcon<span class="w"> </span>build<span class="w"> </span>--packages-select<span class="w"> </span>stm32_bridge
+<span class="nb">source</span><span class="w"> </span>install/setup.bash
+ros2<span class="w"> </span>run<span class="w"> </span>stm32_bridge<span class="w"> </span>stm32_bridge
+
+<span class="c1"># Verify output</span>
+ros2<span class="w"> </span>topic<span class="w"> </span>hz<span class="w"> </span>/imu/raw<span class="w">         </span><span class="c1"># should show ~100 Hz</span>
+ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/imu/raw<span class="w">       </span><span class="c1"># live data</span>
+ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/wheel_speed<span class="w">   </span><span class="c1"># live data</span>
+</code></pre></div>
+
+<hr />
+<h2 id="qos-settings-explained">QoS Settings Explained</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># For sensor data — use BEST_EFFORT</span>
+<span class="n">sensor_qos</span> <span class="o">=</span> <span class="n">QoSProfile</span><span class="p">(</span>
+    <span class="n">reliability</span><span class="o">=</span><span class="n">ReliabilityPolicy</span><span class="o">.</span><span class="n">BEST_EFFORT</span><span class="p">,</span>   <span class="c1"># don&#39;t retry dropped packets</span>
+    <span class="n">history</span><span class="o">=</span><span class="n">HistoryPolicy</span><span class="o">.</span><span class="n">KEEP_LAST</span><span class="p">,</span>
+    <span class="n">depth</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>                                      <span class="c1"># keep latest 5 messages</span>
+<span class="p">)</span>
+
+<span class="c1"># For control commands or critical data — use RELIABLE</span>
+<span class="n">ctrl_qos</span> <span class="o">=</span> <span class="n">QoSProfile</span><span class="p">(</span>
+    <span class="n">reliability</span><span class="o">=</span><span class="n">ReliabilityPolicy</span><span class="o">.</span><span class="n">RELIABLE</span><span class="p">,</span>       <span class="c1"># retry until delivered</span>
+    <span class="n">history</span><span class="o">=</span><span class="n">HistoryPolicy</span><span class="o">.</span><span class="n">KEEP_LAST</span><span class="p">,</span>
+    <span class="n">depth</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<p><strong>Why BEST_EFFORT for sensors?</strong>
+At 100Hz, if a subscriber falls behind, you want the latest IMU reading — not a queue of 50 stale ones from 500ms ago.
+RELIABLE on 100Hz data causes unbounded queue growth if any subscriber is slow.</p>
+<hr />
+<h2 id="timing-how-100hz-is-maintained">Timing — How 100Hz Is Maintained</h2>
+<div class="highlight"><pre><span></span><code>ROS2 timer resolution on Linux: ~1ms jitter (not real-time)
+Actual publish rate: 100Hz ± 1-2Hz typically
+
+For tighter timing (&lt;0.5ms jitter):
+  - Use PREEMPT_RT kernel patch on Jetson
+  - Set spi_node process to SCHED_FIFO priority:
+    sudo chrt -f 80 ros2 run stm32_bridge stm32_bridge
+  - Pin process to isolated CPU core:
+    taskset -c 3 ros2 run stm32_bridge stm32_bridge
+</code></pre></div>
+
+<hr />
+<h2 id="spi-electrical-notes-for-jetson-orin">SPI Electrical Notes for Jetson Orin</h2>
+<div class="highlight"><pre><span></span><code>Jetson GPIO voltage:      3.3V
+STM32 typical SPI:        3.3V  ← compatible, no level shifter needed
+STM32F1 (5V tolerant):    5V    ← needs level shifter to Jetson!
+
+Recommended wiring:
+Jetson SPI1_CLK  ──────►  STM32 SPI1_SCK
+Jetson SPI1_MOSI ──────►  STM32 SPI1_MOSI
+Jetson SPI1_MISO ◄──────  STM32 SPI1_MISO
+Jetson SPI1_CS0  ──────►  STM32 SPI1_NSS (+ GPIO interrupt pin)
+GND              ──────── GND   ← always connect ground between boards!
+
+Max trace length:  ~30cm without impedance matching
+Beyond 30cm:       add series 33Ω on CLK/MOSI at source
+</code></pre></div>
+
+<hr />
+<h2 id="troubleshooting">Troubleshooting</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All bytes 0xFF</td>
+<td>STM32 SPI not initialized or DMA not armed</td>
+<td>Scope CS — does STM32 respond? Check DMA setup</td>
+</tr>
+<tr>
+<td>First 32 bytes OK, rest garbage</td>
+<td>Cache coherency bug on STM32H7</td>
+<td>Add <code>SCB_CleanDCache_by_Addr()</code> before swap</td>
+</tr>
+<tr>
+<td>CRC errors &gt;1%</td>
+<td>Electrical noise or wrong CPOL/CPHA mode</td>
+<td>Scope CLK + MOSI, verify <code>spi.mode</code> matches STM32 config</td>
+</tr>
+<tr>
+<td>Rate drops to 50Hz</td>
+<td>SPI transfer taking &gt;20ms</td>
+<td>Reduce payload size or increase SPI clock</td>
+</tr>
+<tr>
+<td>Sync byte occasionally wrong</td>
+<td>Length field off by 1</td>
+<td>Verify frame builder padding; check <code>readbytes()</code> count</td>
+</tr>
+<tr>
+<td>ROS2 topic empty</td>
+<td>spidev permission denied</td>
+<td><code>sudo usermod -aG spi $USER</code> or run as root</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 — Passive Components: Resistors, Capacitors, Inductors - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-amber-600 hover:text-amber-800 mb-4 inline-block">&larr; Back to Electronics</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="01-passive-components-resistors-capacitors-inductors">01 — Passive Components: Resistors, Capacitors, Inductors</h1>
+<h3 id="the-foundation-of-every-circuit-youll-ever-build-or-debug">The foundation of every circuit you&rsquo;ll ever build or debug</h3>
+<p><strong>Prerequisite:</strong> Basic algebra (V=IR, that&rsquo;s it)
+<strong>Unlocks:</strong> Pull-up/pull-down resistors, decoupling, voltage dividers, RC filters, power budgeting</p>
+<hr />
+<h2 id="why-should-i-care-stm32jetson-project-context">Why Should I Care? (STM32/Jetson Project Context)</h2>
+<p>Every single wire in your SPI bridge has passive components on it:
+- <strong>Resistors:</strong> Pull-ups on CS lines keep slaves deselected during boot. Voltage dividers scale 5V signals to 3.3V. Current-limiting resistors protect GPIOs.
+- <strong>Capacitors:</strong> 100nF decoupling caps next to the STM32 prevent brownout during DMA bursts. Bulk 10µF caps smooth the 3.3V rail. RC filters on analog sensor inputs prevent aliasing.
+- <strong>Inductors:</strong> Ferrite beads on power lines keep switching noise from reaching the MCU. The Jetson&rsquo;s DC-DC converter uses inductors internally.</p>
+<p>If you skip this chapter, you cannot debug power-related SPI glitches. Half of the &ldquo;my SPI drops frames randomly&rdquo; bugs are really &ldquo;my power supply sags when the MCU is busy&rdquo; bugs.</p>
+<hr />
+<h1 id="part-1-resistors">PART 1 — RESISTORS</h1>
+<hr />
+<h2 id="11-what-a-resistor-physically-is">1.1 What a Resistor Physically IS</h2>
+<p>A resistor is a component that opposes the flow of electric current. It converts electrical energy into heat.</p>
+<p><strong>The highway analogy:</strong>
+Imagine current (electrons) as cars on a highway. A resistor is a section of road that narrows from 4 lanes to 1 lane. The same number of cars must get through, but they slow down and pile up. The wider the bottleneck (lower resistance), the more cars flow. The narrower (higher resistance), the fewer.</p>
+<p>Where the analogy breaks down: in a real highway, cars queue up. In a resistor, electrons don&rsquo;t &ldquo;wait&rdquo; — instead, a voltage difference builds up across the resistor (like water pressure building behind a constriction). This voltage drop is what Ohm&rsquo;s law describes.</p>
+<p><strong>Physically, resistors are made from:</strong>
+- <strong>Carbon film:</strong> A thin carbon layer on a ceramic rod. Cheap, ±5% tolerance. Brown/black cylinders with color bands.
+- <strong>Metal film:</strong> A thin metal (nickel-chromium) spiral on ceramic. Better: ±1% tolerance, lower noise. Blue body.
+- <strong>SMD (Surface Mount):</strong> Tiny rectangular chips soldered flat on PCBs. The &ldquo;0402&rdquo; and &ldquo;0603&rdquo; you see everywhere. Marked with 3-digit codes (e.g., &ldquo;103&rdquo; = 10 × 10³ = 10kΩ).
+- <strong>Wire-wound:</strong> Actual wire on a bobbin. For high power (5W+). Used in power supplies.</p>
+<div class="highlight"><pre><span></span><code>Through-hole resistor (axial):
+
+  Color bands
+  ↓↓↓↓
+  ████████████════════════════████████████
+ ─────┤                              ├─────
+  Lead                               Lead
+  (wire)                             (wire)
+
+SMD resistor (0603 package, 1.6mm × 0.8mm):
+
+  ┌──────┐
+  │ 103  │ ← marking = 10 × 10³ = 10kΩ
+  └──────┘
+</code></pre></div>
+
+<hr />
+<h2 id="12-ohms-law-the-one-equation-that-rules-them-all">1.2 Ohm&rsquo;s Law — The One Equation That Rules Them All</h2>
+<div class="highlight"><pre><span></span><code>    V = I × R
+
+    V = voltage across the resistor (Volts)
+    I = current through the resistor (Amps)
+    R = resistance (Ohms, Ω)
+</code></pre></div>
+
+<p>Rearranged: <code>I = V/R</code> and <code>R = V/I</code></p>
+<p><strong>Why should I care?</strong> Every time you add a component to a circuit, you need Ohm&rsquo;s law to calculate the current flowing, the voltage dropped, or the resistor value needed. It&rsquo;s the <code>print()</code> of electronics.</p>
+<h3 id="worked-example-led-current-limiting">Worked Example: LED Current Limiting</h3>
+<p><strong>Problem:</strong> You want to light a red LED from a 3.3V GPIO pin. The LED datasheet says: forward voltage Vf = 2.0V, typical current = 10mA.</p>
+<div class="highlight"><pre><span></span><code>        3.3V GPIO output
+            │
+            │
+           ┌┴┐
+           │R│  ← What value?
+           │ │
+           └┬┘
+            │
+           ╲│╱
+          ──┤├── ← Red LED (Vf = 2.0V)
+            │
+           GND
+</code></pre></div>
+
+<p><strong>Solution:</strong>
+1. Voltage across the resistor: Vr = 3.3V - 2.0V = 1.3V (the LED &ldquo;uses&rdquo; 2V, the rest falls across R)
+2. Desired current: I = 10mA = 0.010A
+3. Ohm&rsquo;s law: R = V/I = 1.3V / 0.010A = 130Ω</p>
+<p>Standard resistor values don&rsquo;t include 130Ω. Use 150Ω (the next standard value up):
+- Actual current: I = 1.3V / 150Ω = 8.7mA ← still bright enough, slightly safer</p>
+<p><strong>Common mistake:</strong> Forgetting to subtract the LED forward voltage. If you use R = 3.3V / 10mA = 330Ω, you get I = 1.3/330 = 3.9mA, which is quite dim. (Though 330Ω is commonly recommended as a conservative &ldquo;works for most LEDs&rdquo; value.)</p>
+<hr />
+<h2 id="13-voltage-dividers">1.3 Voltage Dividers</h2>
+<p>A voltage divider takes a high voltage and produces a lower voltage using two resistors.</p>
+<div class="highlight"><pre><span></span><code>    Vin ──┬──
+          │
+         ┌┴┐
+         │R1│
+         └┬┘
+          ├──── Vout
+         ┌┴┐
+         │R2│
+         └┬┘
+          │
+    GND ──┴──
+</code></pre></div>
+
+<p><strong>Formula:</strong></p>
+<div class="highlight"><pre><span></span><code>    Vout = Vin × R2 / (R1 + R2)
+</code></pre></div>
+
+<p><strong>ELI15 intuition:</strong> Think of R1 and R2 as two sections of a garden hose, the same water (current) flows through both. The pressure (voltage) drops proportionally across each section. If both hoses are the same length (R1 = R2), the pressure at the midpoint is exactly half.</p>
+<h3 id="worked-example-scaling-5v-to-33v-for-an-adc-input">Worked Example: Scaling 5V to 3.3V for an ADC input</h3>
+<p>A sensor outputs 0-5V, but your STM32 ADC accepts 0-3.3V maximum.</p>
+<p><strong>Target ratio:</strong> Vout/Vin = 3.3/5 = 0.66</p>
+<p><strong>Choose R2 = 20kΩ, solve for R1:</strong></p>
+<div class="highlight"><pre><span></span><code>    0.66 = 20k / (R1 + 20k)
+    R1 + 20k = 20k / 0.66 = 30.3k
+    R1 = 10.3k → use 10kΩ standard value
+</code></pre></div>
+
+<p><strong>Check:</strong> Vout = 5 × 20k / (10k + 20k) = 5 × 0.667 = 3.33V ✓</p>
+<p><strong>The loading problem:</strong> A voltage divider assumes no current is drawn from Vout. If you connect a load that draws current, the output voltage drops. For the ADC example above, the STM32 ADC input impedance is ~50kΩ during sampling. This appears in parallel with R2:</p>
+<div class="highlight"><pre><span></span><code>    R2_effective = R2 ∥ R_load = (20k × 50k) / (20k + 50k) = 14.3kΩ
+    Vout_loaded = 5 × 14.3k / (10k + 14.3k) = 2.94V  ← lower than expected!
+</code></pre></div>
+
+<p><strong>Fix:</strong> Use lower resistor values (1kΩ + 2kΩ) so the load doesn&rsquo;t matter, OR add a buffer (op-amp voltage follower) between the divider and the ADC. See chapter 03.</p>
+<hr />
+<h2 id="14-pull-up-and-pull-down-resistors">1.4 Pull-Up and Pull-Down Resistors</h2>
+<p><strong>Why should I care?</strong> SPI CS lines need pull-ups. I2C SDA/SCL need pull-ups. Reading a button on a GPIO needs a pull-up or pull-down. Missing pull-ups cause ~30% of &ldquo;my bus doesn&rsquo;t work&rdquo; bugs.</p>
+<h3 id="what-floating-means">What &ldquo;Floating&rdquo; Means</h3>
+<p>A CMOS input (like a GPIO pin configured as input) has extremely high impedance — think 10MΩ to 1TΩ. It draws essentially zero current. This means that if you leave it disconnected, its voltage is determined by whatever stray charge/coupling is around.</p>
+<div class="highlight"><pre><span></span><code>    What happens to a floating CMOS input:
+
+    Voltage
+    3.3V ┤      ╱╲    ╱╲        ← picks up 50/60Hz from nearby
+         │    ╱    ╲╱    ╲       power lines, radio, your hand
+         │  ╱                    waving nearby, etc.
+    1.65V┤ ╱
+         │╱          ╲
+    0V   ┤            ╲╱╲╱
+         └─────────────────── time
+
+    The input randomly oscillates between HIGH and LOW!
+</code></pre></div>
+
+<p>This is a &ldquo;floating&rdquo; input. It reads garbage. MOSFETs inside the IC partially turn on, which wastes power and can damage the chip over time.</p>
+<h3 id="how-pull-ups-fix-it">How Pull-Ups Fix It</h3>
+<p>A pull-up resistor connects the signal to VCC through a resistor. When nothing else drives the line, the resistor gently &ldquo;pulls&rdquo; it to VCC (HIGH). When a device wants to drive it LOW, it can easily overpower the weak pull-up.</p>
+<div class="highlight"><pre><span></span><code>    WITH PULL-UP:                    WITH PULL-DOWN:
+
+    VCC (3.3V)                       Signal ──┬── to GPIO
+      │                                       │
+     ┌┴┐                                     ┌┴┐
+     │R│ 10kΩ (typical)                       │R│ 10kΩ
+     └┬┘                                     └┬┘
+      ├── to GPIO (reads HIGH                  │
+      │    when nothing drives                GND
+      │    the line LOW)                 (reads LOW when
+      │                                  nothing drives HIGH)
+     ╱  ← switch or open-drain device
+    GND
+</code></pre></div>
+
+<p><strong>Pull-up value selection:</strong>
+- <strong>Too high (1MΩ):</strong> Still somewhat floating — slow rise time, susceptible to noise
+- <strong>Too low (100Ω):</strong> When the line is driven LOW, current = 3.3V/100Ω = 33mA — wastes power, may exceed GPIO sink current spec (typically 20mA)
+- <strong>Sweet spot:</strong> 1kΩ to 100kΩ depending on application
+  - I2C: 1kΩ–10kΩ (must charge bus capacitance fast enough — see chapter 06)
+  - SPI CS: 10kΩ (just needs to stay high during boot)
+  - Button: 10kΩ–100kΩ (no speed requirement)</p>
+<h3 id="internal-pull-ups-in-mcus">Internal Pull-Ups in MCUs</h3>
+<p>Most MCUs have internal pull-up/pull-down resistors you can enable in software. On STM32, they&rsquo;re typically 30kΩ–50kΩ. This is fine for buttons but TOO WEAK for I2C (can&rsquo;t charge bus capacitance fast enough at 400kHz). Always use external pull-ups for I2C.</p>
+<div class="highlight"><pre><span></span><code><span class="cm">/* Zephyr: enable internal pull-up on a GPIO */</span>
+<span class="n">gpio_pin_configure</span><span class="p">(</span><span class="n">dev</span><span class="p">,</span><span class="w"> </span><span class="n">PIN</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_INPUT</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">GPIO_PULL_UP</span><span class="p">);</span>
+</code></pre></div>
+
+<hr />
+<h2 id="15-power-dissipation-when-resistors-catch-fire">1.5 Power Dissipation — When Resistors Catch Fire</h2>
+<p><strong>Formula:</strong></p>
+<div class="highlight"><pre><span></span><code>    P = I² × R     (power in watts)
+    P = V² / R     (equivalent form)
+    P = V × I      (most general form)
+</code></pre></div>
+
+<h3 id="worked-example-why-a-100-resistor-on-12v-gets-hot">Worked Example: Why a 100Ω Resistor on 12V Gets Hot</h3>
+<div class="highlight"><pre><span></span><code>    I = V/R = 12V / 100Ω = 0.12A = 120mA
+    P = I² × R = 0.12² × 100 = 1.44W
+</code></pre></div>
+
+<p>A standard through-hole resistor is rated for <strong>0.25W</strong> (1/4 watt). You&rsquo;re dissipating 1.44W — that&rsquo;s <strong>5.8× the rated power</strong>. The resistor will overheat, the color bands will turn brown/black, and eventually the resistor burns open (fails as open circuit).</p>
+<p><strong>Fix options:</strong>
+- Use a higher resistance (1kΩ: P = 144mW ✓)
+- Use a higher-power resistor (2W wire-wound)
+- Use a different approach entirely (voltage regulator)</p>
+<p><strong>Rule of thumb:</strong> Always calculate power dissipation. Derate by 50% (don&rsquo;t run a 1/4W resistor above 1/8W for long life).</p>
+<hr />
+<h2 id="16-series-and-parallel-combinations">1.6 Series and Parallel Combinations</h2>
+<h3 id="series-resistances-add">Series: Resistances ADD</h3>
+<div class="highlight"><pre><span></span><code>    ─── R1 ─── R2 ─── R3 ───
+
+    R_total = R1 + R2 + R3
+</code></pre></div>
+
+<p><strong>Intuition:</strong> Three narrow sections of highway in a row. Cars must pass through all three. Total narrowing = sum of all narrowing.</p>
+<h3 id="parallel-conductances-add-reciprocals">Parallel: Conductances ADD (reciprocals)</h3>
+<div class="highlight"><pre><span></span><code>         ┌── R1 ──┐
+    ─────┤        ├─────
+         ├── R2 ──┤
+         │        │
+         └── R3 ──┘
+
+    1/R_total = 1/R1 + 1/R2 + 1/R3
+</code></pre></div>
+
+<p><strong>Intuition:</strong> Three highways side by side. Cars can take any of the three. More routes = less total resistance. The result is ALWAYS less than the smallest individual resistor.</p>
+<p><strong>Special case (two resistors in parallel):</strong></p>
+<div class="highlight"><pre><span></span><code>    R_total = (R1 × R2) / (R1 + R2)
+</code></pre></div>
+
+<p><strong>Quick mental math:</strong> Two equal resistors in parallel = half of one. 10kΩ ∥ 10kΩ = 5kΩ.</p>
+<hr />
+<h2 id="17-tolerance-and-markings">1.7 Tolerance and Markings</h2>
+<p><strong>Through-hole color code:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Color</th>
+<th>Digit</th>
+<th>Multiplier</th>
+<th>Tolerance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Black</td>
+<td>0</td>
+<td>×1</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Brown</td>
+<td>1</td>
+<td>×10</td>
+<td>±1%</td>
+</tr>
+<tr>
+<td>Red</td>
+<td>2</td>
+<td>×100</td>
+<td>±2%</td>
+</tr>
+<tr>
+<td>Orange</td>
+<td>3</td>
+<td>×1k</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Yellow</td>
+<td>4</td>
+<td>×10k</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Green</td>
+<td>5</td>
+<td>×100k</td>
+<td>±0.5%</td>
+</tr>
+<tr>
+<td>Blue</td>
+<td>6</td>
+<td>×1M</td>
+<td>±0.25%</td>
+</tr>
+<tr>
+<td>Violet</td>
+<td>7</td>
+<td>—</td>
+<td>±0.1%</td>
+</tr>
+<tr>
+<td>Grey</td>
+<td>8</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>White</td>
+<td>9</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Gold</td>
+<td>—</td>
+<td>×0.1</td>
+<td>±5%</td>
+</tr>
+<tr>
+<td>Silver</td>
+<td>—</td>
+<td>×0.01</td>
+<td>±10%</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Example:</strong> Brown-Black-Orange-Gold = 1, 0, ×1000, ±5% = 10kΩ ±5%</p>
+<p><strong>SMD 3-digit code:</strong> First two digits + multiplier (power of 10). Examples:
+- 103 = 10 × 10³ = 10kΩ
+- 472 = 47 × 10² = 4.7kΩ
+- 330 = 33 × 10⁰ = 33Ω</p>
+<p><strong>E12 standard values (the 12 &ldquo;magic numbers&rdquo;):</strong> 10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82 — then multiply by powers of 10. Every resistor value you can buy is one of these multiplied by 10ⁿ.</p>
+<hr />
+<h1 id="part-2-capacitors">PART 2 — CAPACITORS</h1>
+<hr />
+<h2 id="21-what-a-capacitor-physically-is">2.1 What a Capacitor Physically IS</h2>
+<p>A capacitor is two conductive plates separated by an insulator (dielectric). Apply voltage → electrons pile up on one plate and are repelled from the other. This stores energy in the electric field between the plates.</p>
+<p><strong>The water tank analogy (detailed mapping):</strong></p>
+<div class="highlight"><pre><span></span><code>    WATER MODEL                         ELECTRICAL MODEL
+    ───────────                         ────────────────
+    Water tank                    ←→    Capacitor
+    Tank width (diameter)         ←→    Capacitance (Farads)
+    Water level (height)          ←→    Voltage (Volts)
+    Water flow (liters/sec)       ←→    Current (Amps)
+    Pipe resistance               ←→    Series resistance (ESR)
+
+    Filling a tank through a narrow pipe:
+    - At first, tank is empty, water flows fast     → capacitor charges fast initially
+    - As tank fills, back-pressure builds           → voltage rises, current decreases
+    - Eventually, pressure equalizes → flow stops   → capacitor fully charged, current = 0
+
+    This is EXACTLY the RC charging curve!
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>    Capacitor symbol:
+
+    ──┤├──   Non-polarized (ceramic, film)
+
+    ──┤(──   Polarized (electrolytic, tantalum)
+       +     curved plate = negative terminal
+</code></pre></div>
+
+<p><strong>Key equations:</strong></p>
+<div class="highlight"><pre><span></span><code>    Q = C × V        (charge stored = capacitance × voltage)
+    I = C × dV/dt    (current = capacitance × rate of voltage change)
+</code></pre></div>
+
+<p>That second equation is the important one. It says: <strong>current only flows through a capacitor when its voltage is CHANGING.</strong> A steady (DC) voltage → no current flows. A changing (AC) voltage → current flows proportional to how fast it changes.</p>
+<hr />
+<h2 id="22-why-capacitors-block-dc-but-pass-ac">2.2 Why Capacitors Block DC but Pass AC</h2>
+<p>From <code>I = C × dV/dt</code>:
+- <strong>DC (constant voltage):</strong> dV/dt = 0 → I = 0. No current flows. The capacitor looks like an open circuit.
+- <strong>AC (changing voltage):</strong> dV/dt is nonzero → current flows. Higher frequency = faster change = more current.</p>
+<p><strong>Capacitive reactance (impedance):</strong></p>
+<div class="highlight"><pre><span></span><code>    Xc = 1 / (2π × f × C)
+
+    Where:
+    Xc = impedance in Ohms (how much the cap &quot;resists&quot; current)
+    f  = frequency in Hz
+    C  = capacitance in Farads
+</code></pre></div>
+
+<p><strong>Real numbers:</strong>
+| Capacitor | @ 100Hz | @ 10kHz | @ 1MHz |
+|-----------|---------|---------|--------|
+| 100nF | 15.9kΩ | 159Ω | 1.6Ω |
+| 10µF | 159Ω | 1.6Ω | 0.016Ω |</p>
+<p>At DC (f=0), Xc = ∞ (open circuit). At high frequency, Xc → 0 (short circuit). This is why capacitors are AC &ldquo;pass-through&rdquo; and DC &ldquo;blockers.&rdquo;</p>
+<hr />
+<h2 id="23-decoupling-capacitors-the-most-important-capacitor-in-your-circuit">2.3 Decoupling Capacitors — The Most Important Capacitor in Your Circuit</h2>
+<p><strong>Why should I care?</strong> If your SPI bridge randomly corrupts data or the MCU resets under heavy load, the #1 suspect is inadequate decoupling.</p>
+<h3 id="the-problem">The Problem</h3>
+<p>When a digital IC switches its outputs, it draws a burst of current from VCC. On an STM32H7 running at 480MHz, these bursts happen billions of times per second, each lasting nanoseconds.</p>
+<p>The power supply is far away (centimeters of PCB trace). Traces have inductance (~1nH per mm). Inductance resists changes in current (V = L × dI/dt). So when the IC demands current NOW, the trace inductance prevents it from arriving instantly. Result: VCC sags for a few nanoseconds.</p>
+<div class="highlight"><pre><span></span><code>    Without decoupling:
+
+    VCC ──────────────────────────── IC VCC pin
+    (10cm of trace = 100nH)        │
+                                    └── heavy switching
+    VCC at the IC:
+    3.3V ┤‾‾‾‾‾‾╲    ╱‾‾‾‾╲    ╱‾‾
+         │        ╲  ╱      ╲  ╱    ← voltage dips to 2.8V
+    2.8V ┤         ╲╱        ╲╱       during switching events
+         └──────────────────────── time
+         This can cause the IC to malfunction or reset!
+</code></pre></div>
+
+<h3 id="the-solution">The Solution</h3>
+<p>Place a 100nF ceramic capacitor <strong>as close as physically possible</strong> to the IC&rsquo;s VCC pin (within 3mm). It acts as a local energy reservoir.</p>
+<div class="highlight"><pre><span></span><code>    With decoupling:
+
+    VCC ──────────────┬────── IC VCC pin
+    (10cm trace)      │
+                     ┌┴┐
+                     │C│ 100nF ceramic
+                     └┬┘      ← within 3mm of VCC pin!
+                      │
+    GND ──────────────┴────── IC GND pin
+
+    Now when the IC demands current:
+    1. The 100nF cap supplies it INSTANTLY (it&#39;s right there)
+    2. The power supply slowly recharges the cap through the trace
+    3. VCC at the IC stays stable
+</code></pre></div>
+
+<h3 id="why-100nf-why-not-1f-or-10f">Why 100nF? Why not 1µF or 10µF?</h3>
+<p>It&rsquo;s about <strong>frequency response</strong>. Capacitors aren&rsquo;t ideal — they have parasitic inductance (ESL) from their leads and internal structure. This creates a self-resonant frequency:</p>
+<div class="highlight"><pre><span></span><code>    f_resonant = 1 / (2π × √(L × C))
+</code></pre></div>
+
+<table>
+<thead>
+<tr>
+<th>Cap Value</th>
+<th>Typical ESL</th>
+<th>Resonant Freq</th>
+<th>Good For</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>100nF ceramic (0402)</td>
+<td>0.3nH</td>
+<td>~29MHz</td>
+<td>High-freq switching noise</td>
+</tr>
+<tr>
+<td>1µF ceramic (0603)</td>
+<td>0.5nH</td>
+<td>~7MHz</td>
+<td>Mid-freq noise</td>
+</tr>
+<tr>
+<td>10µF ceramic (0805)</td>
+<td>1nH</td>
+<td>~1.6MHz</td>
+<td>Power supply ripple</td>
+</tr>
+<tr>
+<td>100µF electrolytic</td>
+<td>5nH</td>
+<td>~70kHz</td>
+<td>Bulk energy storage</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Best practice:</strong> Use BOTH a 100nF close to the IC (for high-freq) AND a 10µF nearby (for slower transients). This is called &ldquo;bulk + bypass&rdquo; or &ldquo;multi-value decoupling.&rdquo;</p>
+<div class="highlight"><pre><span></span><code>    The &quot;two cap&quot; recipe per IC:
+
+    VCC ────┬──────┬────── IC VCC
+            │      │
+           ┌┴┐   ┌┴┐
+           │C1│   │C2│
+           │10µ│  │100n│   ← C2 as close as possible
+           └┬┘   └┬┘
+            │      │
+    GND ────┴──────┴────── IC GND
+</code></pre></div>
+
+<hr />
+<h2 id="24-rc-time-constant">2.4 RC Time Constant</h2>
+<p>When you charge a capacitor through a resistor, the voltage rises exponentially:</p>
+<div class="highlight"><pre><span></span><code>    V(t) = Vmax × (1 - e^(-t/τ))
+
+    Where τ = R × C   (the &quot;time constant&quot;)
+</code></pre></div>
+
+<table>
+<thead>
+<tr>
+<th>Time</th>
+<th>Voltage</th>
+<th>% of Vmax</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1τ</td>
+<td>63.2%</td>
+<td>Two-thirds charged</td>
+</tr>
+<tr>
+<td>2τ</td>
+<td>86.5%</td>
+<td></td>
+</tr>
+<tr>
+<td>3τ</td>
+<td>95.0%</td>
+<td></td>
+</tr>
+<tr>
+<td>4τ</td>
+<td>98.2%</td>
+<td></td>
+</tr>
+<tr>
+<td>5τ</td>
+<td>99.3%</td>
+<td>&ldquo;Fully&rdquo; charged</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code>    RC Charging Curve:
+
+    Vmax ┤─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+         │                            ╱‾‾‾‾‾‾‾‾‾‾‾‾
+         │                      ╱‾‾‾╱
+    63%  ┤─ ─ ─ ─ ─ ─ ─ ╱‾‾╱
+         │            ╱╱
+         │         ╱╱
+         │      ╱╱
+         │   ╱╱
+         │ ╱╱
+    0V   ┤╱
+         └────┬─────┬─────┬─────┬─────┬── time
+              1τ    2τ    3τ    4τ    5τ
+</code></pre></div>
+
+<h3 id="worked-example">Worked Example</h3>
+<p><strong>R = 10kΩ, C = 100nF:</strong></p>
+<div class="highlight"><pre><span></span><code>    τ = R × C = 10,000 × 0.0000001 = 0.001 seconds = 1ms
+</code></pre></div>
+
+<p>The capacitor reaches 63% in 1ms and &gt;99% in 5ms.</p>
+<p><strong>Why should I care?</strong> This is exactly what determines I2C bus rise time! The pull-up resistor (R) charges the bus capacitance (C). If τ is too large, the signal can&rsquo;t rise fast enough for the clock frequency. See chapter 06 for the full calculation.</p>
+<hr />
+<h2 id="25-capacitor-types-when-to-use-which">2.5 Capacitor Types — When to Use Which</h2>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Capacitance Range</th>
+<th>Voltage</th>
+<th>Tolerance</th>
+<th>Polarized?</th>
+<th>Best For</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>C0G/NP0 ceramic</td>
+<td>1pF – 10nF</td>
+<td>up to 50V</td>
+<td>±1%</td>
+<td>No</td>
+<td>Precision filters, timing circuits, RF</td>
+</tr>
+<tr>
+<td>X7R/X5R ceramic</td>
+<td>100pF – 100µF</td>
+<td>up to 50V</td>
+<td>±10-20%</td>
+<td>No</td>
+<td>Decoupling, bypass, bulk (small)</td>
+</tr>
+<tr>
+<td>Electrolytic</td>
+<td>1µF – 10,000µF</td>
+<td>up to 450V</td>
+<td>±20%</td>
+<td><strong>YES</strong></td>
+<td>Bulk energy storage, power supply filtering</td>
+</tr>
+<tr>
+<td>Tantalum</td>
+<td>100nF – 1000µF</td>
+<td>up to 50V</td>
+<td>±10%</td>
+<td><strong>YES</strong></td>
+<td>Compact bulk, stable ESR</td>
+</tr>
+<tr>
+<td>Film (polyester)</td>
+<td>1nF – 10µF</td>
+<td>up to 630V</td>
+<td>±5%</td>
+<td>No</td>
+<td>Audio coupling, high-voltage, long life</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Critical polarized cap rule:</strong> Electrolytic and tantalum caps have a positive and negative terminal. <strong>Reversing polarity can cause them to explode.</strong> Literally. Tantalums fail short-circuit (fire!).</p>
+<div class="highlight"><pre><span></span><code>    Electrolytic cap: stripe marks the NEGATIVE terminal
+
+    ┌─────────────────────┐
+    │   ─  ─  ─  ─  ─    │ ← stripe on the can
+    │                     │
+    └──┤              ├───┘
+       │(neg)    (pos)│
+</code></pre></div>
+
+<p><strong>Ceramic cap gotcha (X7R/X5R):</strong> The capacitance drops significantly with applied DC voltage. A &ldquo;10µF&rdquo; X5R cap rated at 6.3V may only be 5µF when you apply 3.3V across it, and 2µF at 5V. Always check the datasheet derating curve. The &ldquo;no instantaneous voltage change&rdquo; rule, <code>I = C × dV/dt</code>, means the capacitor acts like a short circuit for sudden voltage spikes (dV/dt is enormous → huge current flows). This is exactly what makes decoupling work — the cap absorbs the voltage spike.</p>
+<hr />
+<h2 id="26-the-no-instantaneous-voltage-change-rule">2.6 The &ldquo;No Instantaneous Voltage Change&rdquo; Rule</h2>
+<p>From <code>I = C × dV/dt</code>: if voltage changed infinitely fast (dt → 0), current would be infinite. Since infinite current can&rsquo;t exist, the voltage CANNOT change instantaneously.</p>
+<p><strong>Consequences:</strong>
+1. Capacitors smooth out voltage spikes (decoupling)
+2. You can&rsquo;t teleport a capacitor from 0V to 5V — it charges through whatever resistance is in the path
+3. Short-circuiting a charged capacitor → enormous current pulse (the cap tries to maintain its voltage, current shoots up to equalize). This can weld contacts and destroy components.</p>
+<p><strong>Practical rule for your SPI bridge:</strong> Never hot-plug a board with large capacitors into a powered bus. The rush of current charging the caps can damage the source or the connector.</p>
+<hr />
+<h1 id="part-3-inductors">PART 3 — INDUCTORS</h1>
+<hr />
+<h2 id="31-what-an-inductor-physically-is">3.1 What an Inductor Physically IS</h2>
+<p>An inductor is a coil of wire. When current flows through it, it creates a magnetic field. Energy is stored in this magnetic field.</p>
+<p><strong>The flywheel analogy (detailed mapping):</strong></p>
+<div class="highlight"><pre><span></span><code>    FLYWHEEL MODEL                      ELECTRICAL MODEL
+    ──────────────                      ────────────────
+    Flywheel (spinning mass)      ←→    Inductor (coil)
+    Rotation speed                ←→    Current (Amps)
+    Torque (force to speed up)    ←→    Voltage (Volts)
+    Inertia (mass × radius²)     ←→    Inductance (Henrys)
+
+    Key behavior:
+    - Heavy flywheel resists speeding up            → inductor resists current increase
+    - Heavy flywheel resists slowing down            → inductor resists current decrease
+    - You CAN&#39;T instantly stop a spinning flywheel  → you CAN&#39;T instantly stop inductor current
+      (it stores kinetic energy)                      (it stores magnetic energy)
+
+    Where the analogy breaks down:
+    - A flywheel eventually stops (friction)
+    - An ideal inductor would maintain current forever (superconducting coil really does)
+    - Real inductors have wire resistance (DCR) → current eventually decays
+</code></pre></div>
+
+<p><strong>Key equation:</strong></p>
+<div class="highlight"><pre><span></span><code>    V = L × dI/dt
+
+    Where:
+    V = voltage across the inductor (Volts)
+    L = inductance (Henrys)
+    dI/dt = rate of change of current (Amps/second)
+</code></pre></div>
+
+<p>Compare this with the capacitor equation <code>I = C × dV/dt</code>. They&rsquo;re duals:
+- Capacitor: resists <strong>voltage</strong> change, stores energy in <strong>electric</strong> field
+- Inductor: resists <strong>current</strong> change, stores energy in <strong>magnetic</strong> field</p>
+<hr />
+<h2 id="32-dc-vs-ac-behavior-opposite-of-capacitors">3.2 DC vs AC Behavior — Opposite of Capacitors</h2>
+<p><strong>At DC (steady current):</strong> dI/dt = 0 → V = 0. The inductor looks like a short circuit (just a piece of wire). Current flows freely.</p>
+<p><strong>At AC (changing current):</strong> dI/dt is nonzero → voltage develops across the inductor. Higher frequency = faster change = more opposition.</p>
+<p><strong>Inductive reactance:</strong></p>
+<div class="highlight"><pre><span></span><code>    XL = 2π × f × L
+
+    Opposite of capacitive reactance!
+</code></pre></div>
+
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>DC Behavior</th>
+<th>AC Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Capacitor</td>
+<td>Open circuit (blocks DC)</td>
+<td>Passes AC (lower impedance at higher freq)</td>
+</tr>
+<tr>
+<td>Inductor</td>
+<td>Short circuit (passes DC)</td>
+<td>Blocks AC (higher impedance at higher freq)</td>
+</tr>
+</tbody>
+</table>
+<p>This complementary behavior is why LC combinations make such good filters.</p>
+<hr />
+<h2 id="33-back-emf-why-switching-off-an-inductive-load-is-dangerous">3.3 Back-EMF — Why Switching Off an Inductive Load is Dangerous</h2>
+<p><strong>Why should I care?</strong> If your robot drives relays, solenoids, or motors from MCU GPIOs, you MUST understand back-EMF or you WILL destroy transistors.</p>
+<p>From <code>V = L × dI/dt</code>: if you try to change current VERY FAST (like turning off a switch), dI/dt becomes enormous, so V becomes enormous — potentially hundreds of volts from a 12V relay coil!</p>
+<div class="highlight"><pre><span></span><code>    Scenario: Switch driving a relay coil (L = 100mH, I = 100mA)
+
+    Switch CLOSED:                  Switch OPENS:
+    12V ──┬── Relay ──┬── GND      12V ──┬── Relay ──┬── GND
+          │   coil    │                  │   coil    │
+          ├── SWITCH ─┘                  X   OPEN    │
+          │                              │           │
+                                    The inductor DEMANDS that its 100mA
+                                    keeps flowing. It generates whatever
+                                    voltage is necessary to maintain current
+                                    flow through the air gap.
+
+                                    V_spike = L × dI/dt
+                                    If dI/dt = 100mA in 1µs:
+                                    V = 0.1 × 0.1/0.000001 = 10,000V!!
+
+    (In practice, the arc or component breakdown limits it to ~50-200V,
+     but that&#39;s still enough to destroy a MOSFET rated for 30V.)
+</code></pre></div>
+
+<h3 id="the-fix-flyback-diode">The Fix: Flyback Diode</h3>
+<p>Place a diode across the coil, reverse-biased during normal operation. When the switch opens, the coil&rsquo;s voltage reverses and the diode conducts, routing the current safely through itself until the magnetic field dissipates.</p>
+<div class="highlight"><pre><span></span><code>    12V ──┬── Relay ──┬── GND
+          │   coil    │
+          │    ╱|     │    ← flyback diode (reverse-biased normally,
+          │   ╱ |     │       conducts when coil generates back-emf)
+          │  ╱──┘     │
+          │           │
+          └── SWITCH ─┘
+</code></pre></div>
+
+<p>Now when the switch opens, current circulates through the diode + coil, safely decaying as the energy dissipates in the coil&rsquo;s resistance. The voltage spike is clamped to ~0.7V (the diode forward drop).</p>
+<hr />
+<h2 id="34-inductors-in-dc-dc-converters-conceptual">3.4 Inductors in DC-DC Converters (Conceptual)</h2>
+<p><strong>Why should I care?</strong> The Jetson Orin and STM32 both use DC-DC converters internally. Understanding why they need inductors helps you understand switching noise — a major source of SPI interference.</p>
+<p>A buck converter (step-down) uses a switch + inductor + capacitor to efficiently convert 12V to 3.3V:</p>
+<div class="highlight"><pre><span></span><code>    12V ──┤SWITCH├──┬── 3.3V out
+                    │
+                   ┌┴┐
+                   │L│  Inductor
+                   └┬┘
+                    │
+                   ┌┴┐
+                   │C│  Output capacitor
+                   └┬┘
+                    │
+    GND ────────────┴──
+</code></pre></div>
+
+<p>The switch rapidly toggles on/off (100kHz–2MHz). The inductor smooths the pulsating current into a steady DC. The capacitor smooths the remaining ripple.</p>
+<p><strong>The noise consequence:</strong> The switch creates high-frequency electromagnetic noise. This is why:
+1. DC-DC converters have recommended layouts with specific trace widths and ground planes
+2. Sensitive analog circuits (ADCs, sensors) should be kept away from DC-DC inductor loops
+3. Ferrite beads (special lossy inductors) are placed on power lines going to sensitive ICs</p>
+<hr />
+<h2 id="35-ferrite-beads-the-inductor-you-use-every-day">3.5 Ferrite Beads — The Inductor You Use Every Day</h2>
+<p>A ferrite bead is a special inductor designed to be lossy at high frequencies — it converts noise to heat instead of storing and releasing energy.</p>
+<div class="highlight"><pre><span></span><code>    Schematic symbol:
+
+    ──┤FB├──    or    ──┤LFB├──
+</code></pre></div>
+
+<p>Used on power rails to block high-frequency switching noise while passing DC freely. In your project, you&rsquo;ll likely see them on the STM32 VDDA (analog power) pin, filtering noise from the main 3.3V rail.</p>
+<hr />
+<h1 id="part-4-rlc-circuits-and-filters">PART 4 — RLC CIRCUITS AND FILTERS</h1>
+<hr />
+<h2 id="41-the-big-picture-frequency-selective-circuits">4.1 The Big Picture: Frequency-Selective Circuits</h2>
+<p>By combining R, L, and C, you can build circuits that pass some frequencies and block others. These are <strong>filters</strong>, and they&rsquo;re everywhere in electronics.</p>
+<hr />
+<h2 id="42-low-pass-filter-rc">4.2 Low-Pass Filter (RC)</h2>
+<p>Passes low frequencies, blocks high frequencies. The simplest: one resistor + one capacitor.</p>
+<div class="highlight"><pre><span></span><code>    Input ──┤ R ├──┬── Output
+                   │
+                  ┌┴┐
+                  │C│
+                  └┬┘
+                   │
+    GND ───────────┘
+
+    Cutoff frequency: f_c = 1 / (2π × R × C)
+</code></pre></div>
+
+<p><strong>At the cutoff frequency, the output is 70.7% of the input (-3dB).</strong></p>
+<h3 id="worked-example-anti-alias-filter-for-adc">Worked Example: Anti-alias filter for ADC</h3>
+<p>Your ADC samples at 1kHz. Nyquist says you must filter out everything above 500Hz.</p>
+<p>Design for f_c = 500Hz:</p>
+<div class="highlight"><pre><span></span><code>    Choose C = 100nF (common value)
+    R = 1 / (2π × 500 × 100×10⁻⁹) = 1 / (0.000314) = 3.18kΩ → use 3.3kΩ
+</code></pre></div>
+
+<p><strong>Check:</strong> f_c = 1 / (2π × 3300 × 100×10⁻⁹) = 482Hz ✓ (close enough)</p>
+<p>This is a first-order filter: -20dB/decade rolloff (factor of 10 attenuation per decade of frequency above f_c). For steeper rolloff, cascade multiple stages or use op-amp active filters.</p>
+<hr />
+<h2 id="43-high-pass-filter-rc">4.3 High-Pass Filter (RC)</h2>
+<p>Passes high frequencies, blocks low frequencies. Swap R and C:</p>
+<div class="highlight"><pre><span></span><code>    Input ──┤ C ├──┬── Output
+                   │
+                  ┌┴┐
+                  │R│
+                  └┬┘
+                   │
+    GND ───────────┘
+
+    Same cutoff formula: f_c = 1 / (2π × R × C)
+</code></pre></div>
+
+<p>Used for: AC coupling (removing DC offset from audio signals), differentiating signals.</p>
+<hr />
+<h2 id="44-series-rlc-and-resonance">4.4 Series RLC and Resonance</h2>
+<p>When L and C are in series, there&rsquo;s a special frequency where their impedances cancel out:</p>
+<div class="highlight"><pre><span></span><code>    f_resonant = 1 / (2π × √(L × C))
+</code></pre></div>
+
+<p>At resonance:
+- XL = XC (inductive and capacitive reactances are equal)
+- They cancel, leaving only R
+- Current is maximum (only limited by R)
+- This is how radio tuners work — the LC circuit &ldquo;selects&rdquo; one frequency</p>
+<p><strong>Quality factor Q:</strong></p>
+<div class="highlight"><pre><span></span><code>    Q = 1/R × √(L/C)     (for series RLC)
+</code></pre></div>
+
+<ul>
+<li>High Q: sharp, narrow resonance peak (good for selecting one radio station)</li>
+<li>Low Q: broad, gentle peak (good for wideband filters)</li>
+</ul>
+<hr />
+<h2 id="45-pi-filter-clc-for-power-supply">4.5 Pi Filter (CLC) for Power Supply</h2>
+<div class="highlight"><pre><span></span><code>    VCC_noisy ──┤C1├──┤L├──┤C2├── VCC_clean
+                 │         │
+                GND       GND
+</code></pre></div>
+
+<p>C1 filters high-frequency noise, L blocks remaining mid-frequency noise, C2 smooths the final output. Used on analog power rails (VDDA, VREF) to keep switching noise from DC-DC converters away from sensitive ADCs.</p>
+<hr />
+<h1 id="part-5-comparison-table">PART 5 — COMPARISON TABLE</h1>
+<hr />
+<h2 id="the-three-passives-at-a-glance">The Three Passives at a Glance</h2>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Resistor</th>
+<th>Capacitor</th>
+<th>Inductor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Symbol</strong></td>
+<td>─┤R├─</td>
+<td>─┤C├─</td>
+<td>─┤L├─</td>
+</tr>
+<tr>
+<td><strong>Unit</strong></td>
+<td>Ohm (Ω)</td>
+<td>Farad (F)</td>
+<td>Henry (H)</td>
+</tr>
+<tr>
+<td><strong>DC behavior</strong></td>
+<td>Conducts (with V drop)</td>
+<td>Open circuit (blocks)</td>
+<td>Short circuit (passes)</td>
+</tr>
+<tr>
+<td><strong>AC behavior</strong></td>
+<td>Same impedance at all freq</td>
+<td>Lower impedance at higher freq</td>
+<td>Higher impedance at higher freq</td>
+</tr>
+<tr>
+<td><strong>Energy storage</strong></td>
+<td>None (dissipates as heat)</td>
+<td>Electric field</td>
+<td>Magnetic field</td>
+</tr>
+<tr>
+<td><strong>Key equation</strong></td>
+<td>V = IR</td>
+<td>I = C × dV/dt</td>
+<td>V = L × dI/dt</td>
+</tr>
+<tr>
+<td><strong>Impedance</strong></td>
+<td>R (constant)</td>
+<td>1/(2πfC) ↓ with freq</td>
+<td>2πfL ↑ with freq</td>
+</tr>
+<tr>
+<td><strong>Can&rsquo;t change instantly</strong></td>
+<td>N/A</td>
+<td>Voltage</td>
+<td>Current</td>
+</tr>
+<tr>
+<td><strong>Common values</strong></td>
+<td>10Ω – 10MΩ</td>
+<td>1pF – 10,000µF</td>
+<td>1nH – 10mH</td>
+</tr>
+<tr>
+<td><strong>Used for</strong></td>
+<td>Current limiting, dividers, pull-ups</td>
+<td>Decoupling, filtering, timing, energy storage</td>
+<td>Filtering, energy storage, DC-DC, EMI suppression</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="gotcha-table">GOTCHA TABLE</h1>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely Cause</th>
+<th>How to Diagnose</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LED doesn&rsquo;t light up</td>
+<td>Resistor too high, wrong polarity</td>
+<td>Measure voltage across LED. Check anode/cathode orientation</td>
+<td>Reduce resistance. Flip LED.</td>
+</tr>
+<tr>
+<td>MCU resets randomly under load</td>
+<td>Missing/bad decoupling caps</td>
+<td>Oscilloscope on VCC pin — look for dips below min voltage</td>
+<td>Add 100nF ceramic + 10µF bulk near every VCC pin</td>
+</tr>
+<tr>
+<td>Voltage divider output wrong</td>
+<td>Load drawing too much current</td>
+<td>Measure Vout with and without load connected</td>
+<td>Use lower R values, or add a buffer op-amp</td>
+</tr>
+<tr>
+<td>I2C bus unreliable</td>
+<td>Wrong pull-up value</td>
+<td>Oscilloscope: look for rounded edges on SCL/SDA, slow rise time</td>
+<td>Calculate proper pull-up for bus capacitance (see ch 06)</td>
+</tr>
+<tr>
+<td>Resistor is hot</td>
+<td>Power dissipation exceeds rating</td>
+<td>P = V²/R — calculate and compare to resistor wattage rating</td>
+<td>Use higher R value or higher-power resistor</td>
+</tr>
+<tr>
+<td>Electrolytic cap explodes</td>
+<td>Reverse polarity</td>
+<td>Check + and - markings vs schematic</td>
+<td>Always match polarity! Stripe = negative terminal</td>
+</tr>
+<tr>
+<td>3.3V rail has 200mV of 500kHz noise</td>
+<td>Switching regulator noise</td>
+<td>Scope with 20MHz BW limit off. Look at frequency</td>
+<td>Add ferrite bead + 100nF before sensitive IC</td>
+</tr>
+<tr>
+<td>ADC readings noisy</td>
+<td>No anti-alias filter, poor decoupling</td>
+<td>Scope the ADC input pin. Check VDDA decoupling</td>
+<td>Add RC low-pass filter. Add 100nF+10µF on VDDA</td>
+</tr>
+<tr>
+<td>Relay/motor driver MOSFET dies</td>
+<td>Missing flyback diode, back-EMF</td>
+<td>Check for diode across inductive load</td>
+<td>Add flyback diode (1N4148 for small, 1N4007 for power)</td>
+</tr>
+<tr>
+<td>Filter doesn&rsquo;t seem to work</td>
+<td>Wrong component values</td>
+<td>Calculate f_c = 1/(2πRC), compare to target frequency</td>
+<td>Recalculate and verify with oscilloscope</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="quick-reference-card">QUICK REFERENCE CARD</h1>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────── PASSIVE COMPONENTS CHEAT SHEET ──────────────────────────────┐
+│                                                                                              │
+│  OHM&#39;S LAW:     V = I × R           I = V / R           R = V / I                           │
+│  POWER:         P = V × I           P = I²R             P = V²/R                            │
+│                                                                                              │
+│  VOLTAGE DIVIDER:   Vout = Vin × R2/(R1+R2)                                                │
+│  PARALLEL R:        R = (R1 × R2)/(R1 + R2)                                                │
+│                                                                                              │
+│  RC TIME CONSTANT:  τ = R × C       5τ = &quot;fully charged&quot;     63% at 1τ                      │
+│  LOW-PASS CUTOFF:   f_c = 1/(2πRC)                                                         │
+│  HIGH-PASS CUTOFF:  f_c = 1/(2πRC)  (same formula, swapped topology)                       │
+│                                                                                              │
+│  CAPACITOR IMPEDANCE:  Xc = 1/(2πfC)    (decreases with frequency)                         │
+│  INDUCTOR IMPEDANCE:   XL = 2πfL        (increases with frequency)                         │
+│  RESONANT FREQUENCY:   f = 1/(2π√(LC))                                                     │
+│                                                                                              │
+│  DECOUPLING RECIPE:  100nF ceramic (≤3mm from VCC pin) + 10µF bulk (nearby)                │
+│  LED RESISTOR:        R = (Vcc - Vf) / I_desired                                           │
+│  PULL-UP TYPICAL:     4.7kΩ (I2C), 10kΩ (SPI CS, buttons)                                 │
+│                                                                                              │
+│  STANDARD E12 VALUES: 10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82 × 10^n              │
+│                                                                                              │
+│  SMD SIZES:  0201 (tiny) → 0402 → 0603 → 0805 → 1206 (large, hand-solderable)             │
+│              Size format: length × width in 0.01 inches (0603 = 0.06&quot; × 0.03&quot;)             │
+│                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,1539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jetson spidev + ROS2 + EKF Integration — Study Notes - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="jetson-spidev-ros2-ekf-integration-study-notes">Jetson spidev + ROS2 + EKF Integration — Study Notes</h1>
+<h3 id="projects-911-spidev-ros2-publisher-node-ekf-pipeline">Projects 9–11: spidev, ROS2 Publisher Node, EKF Pipeline</h3>
+<p><strong>Hardware:</strong> Jetson Orin NX · JetPack 6.x · PREEMPT-RT kernel · STM32 SPI Slave (from Projects 7–8)</p>
+<hr />
+<h2 id="part-1-eli15-concept-explanations">PART 1 — ELI15 Concept Explanations</h2>
+<hr />
+<h3 id="11-what-spidev-is-the-linux-kernel-spi-userspace-interface">1.1 What spidev is — the Linux kernel SPI userspace interface</h3>
+<p><strong>The analogy: a postal sort facility with a window hatch</strong></p>
+<p>The SPI controller inside the Jetson&rsquo;s Tegra SoC is a piece of hardware that only the kernel can talk to
+directly — like a postal sort facility deep in a government building. You, as a userspace program, are not
+allowed in the back room.</p>
+<p><code>spidev</code> is the <strong>window hatch</strong> the kernel provides so your Python or C program can hand a message over
+and get one back, without you ever needing to know how the sorting machinery works.</p>
+<p>Concretely:
+- The kernel&rsquo;s SPI controller driver registers a character device at <code>/dev/spidev&lt;bus&gt;.&lt;cs&gt;</code>
+- <code>bus</code> = which SPI controller (0, 1, 2…) — the Jetson has multiple
+- <code>cs</code>  = which chip-select line (0, 1…) — one physical line per slave device</p>
+<p>When you open <code>/dev/spidev0.0</code> in Python, you are opening a file descriptor to this hatch. When you call
+<code>xfer2()</code>, you are:
+1. Writing your TX bytes and a configuration struct into the kernel via <code>ioctl</code>
+2. The kernel driver programs the hardware SPI controller&rsquo;s DMA registers
+3. The SPI controller physically toggles CLK, shifts out MOSI, and samples MISO
+4. The kernel copies the received MISO bytes back into your buffer
+5. <code>ioctl</code> returns — you now have the reply</p>
+<p><strong>Important mental model:</strong> from your Python code&rsquo;s perspective, <code>spidev</code> looks like a simple file. Under
+the hood, the path is:</p>
+<div class="highlight"><pre><span></span><code>Python xfer2()
+  → ioctl(fd, SPI_IOC_MESSAGE, &amp;transfer_struct)
+    → Linux kernel SPI core
+      → Tegra SPI controller driver
+        → Hardware DMA engine shifts bits over MOSI/MISO/CLK
+      ← DMA complete interrupt fires
+    ← Kernel unblocks your process
+  ← ioctl() returns
+← xfer2() returns received bytes
+</code></pre></div>
+
+<p><strong>The device path tells you the hardware:</strong></p>
+<div class="highlight"><pre><span></span><code>ls<span class="w"> </span>/dev/spidev*
+<span class="c1"># /dev/spidev0.0  →  SPI controller 0, chip select 0  (our STM32 link)</span>
+<span class="c1"># /dev/spidev0.1  →  SPI controller 0, chip select 1  (another slave)</span>
+<span class="c1"># /dev/spidev1.0  →  SPI controller 1, chip select 0</span>
+
+<span class="c1"># Check which SPI controllers are in the device tree</span>
+cat<span class="w"> </span>/proc/device-tree/spi@3250000/status<span class="w">   </span><span class="c1"># spi0</span>
+cat<span class="w"> </span>/proc/device-tree/spi@3270000/status<span class="w">   </span><span class="c1"># spi1</span>
+</code></pre></div>
+
+<p><strong>Permission gotcha:</strong> <code>/dev/spidev*</code> is owned by <code>root:spidev</code> by default. Either add yourself to the
+<code>spidev</code> group (<code>sudo usermod -aG spidev $USER</code>) or run as root — the latter is fine on a robot but a
+bad habit for debugging.</p>
+<hr />
+<h3 id="12-why-jetson-iopy-must-be-run-first-the-pinmux-concept">1.2 Why jetson-io.py must be run first — the pinmux concept</h3>
+<p><strong>The analogy: a multi-function socket with a mode switch</strong></p>
+<p>Imagine a wall socket that can be either a regular power outlet, a network jack, or a USB port — but it
+can only be one thing at a time because all three options share the same wire pair inside the wall. A
+physical dial on the fuse box sets which function is active.</p>
+<p>Every pin on the Jetson&rsquo;s 40-pin GPIO header is exactly like this. Take pin 19 for example:</p>
+<div class="highlight"><pre><span></span><code>Pin 19 physically connects to ball T_B8 on the Tegra SoC.
+That ball can be one of:
+  - SPI1_MOSI     ← what we want
+  - I2S4_DOUT     ← audio output
+  - GPIO3_PCC.04  ← plain GPIO
+  - DMIC3_CLK     ← digital mic
+</code></pre></div>
+
+<p>Only ONE of these functions can be active at a time. The selection is stored in the Tegra&rsquo;s <strong>pinmux
+registers</strong> — hardware registers that live in the SoC and persist across reboots when stored in the boot
+configuration.</p>
+<p><code>jetson-io.py</code> is NVIDIA&rsquo;s GUI tool that writes these registers correctly for you:</p>
+<div class="highlight"><pre><span></span><code>sudo<span class="w"> </span>/opt/nvidia/jetson-io/jetson-io.py
+<span class="c1"># Opens an ncurses menu</span>
+<span class="c1"># Navigate to: &quot;Configure 40-pin expansion header&quot;</span>
+<span class="c1"># Enable: SPI1 (CS0, CLK, MISO, MOSI)</span>
+<span class="c1"># Save + reboot</span>
+</code></pre></div>
+
+<p><strong>Why you MUST reboot:</strong> <code>jetson-io.py</code> writes a new device tree overlay that the bootloader (CBoot)
+applies when it initialises the SoC. The overlay configures the pinmux hardware before Linux even starts.
+There is no way to reconfigure pinmux from Linux userspace after boot.</p>
+<p><strong>The symptom if you skip it:</strong> <code>/dev/spidev0.0</code> simply does not exist. <code>ls /dev/spidev*</code> returns nothing.
+The error is not &ldquo;permission denied&rdquo; or &ldquo;device busy&rdquo; — the file literally is not there because the kernel
+SPI driver was never told that SPI1 pins are wired for SPI.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># After jetson-io.py + reboot, verify:</span>
+ls<span class="w"> </span>-la<span class="w"> </span>/dev/spidev*
+<span class="c1"># Should show at least /dev/spidev0.0</span>
+
+<span class="c1"># Also verify the hardware link before any Python code:</span>
+sudo<span class="w"> </span>spidev_test<span class="w"> </span>-D<span class="w"> </span>/dev/spidev0.0<span class="w"> </span>-s<span class="w"> </span><span class="m">10000000</span><span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;AABBCCDD&quot;</span><span class="w"> </span>-v
+<span class="c1"># This sends 0xAA 0xBB 0xCC 0xDD and shows what came back.</span>
+<span class="c1"># If STM32 is in loopback mode: RX == TX. Otherwise RX = STM32&#39;s response.</span>
+</code></pre></div>
+
+<hr />
+<h3 id="13-the-spi_ioc_transfer-struct-explained-field-by-field">1.3 The spi_ioc_transfer struct explained field by field</h3>
+<p>When Python calls <code>spi.xfer2(data)</code>, under the hood it fills in a C struct called <code>spi_ioc_transfer</code>
+and hands it to the kernel via <code>ioctl</code>. Here is exactly what each field means:</p>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">spi_ioc_transfer</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">__u64</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">;</span><span class="w">        </span><span class="c1">// pointer to bytes to send (MOSI)</span>
+<span class="w">    </span><span class="n">__u64</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">;</span><span class="w">        </span><span class="c1">// pointer to buffer for received bytes (MISO)</span>
+<span class="w">    </span><span class="n">__u32</span><span class="w"> </span><span class="n">len</span><span class="p">;</span><span class="w">           </span><span class="c1">// number of bytes in this transfer</span>
+<span class="w">    </span><span class="n">__u32</span><span class="w"> </span><span class="n">speed_hz</span><span class="p">;</span><span class="w">      </span><span class="c1">// SPI clock frequency for THIS transfer (0 = use device default)</span>
+<span class="w">    </span><span class="n">__u16</span><span class="w"> </span><span class="n">delay_usecs</span><span class="p">;</span><span class="w">   </span><span class="c1">// microseconds to wait AFTER CS de-asserts before the next transfer</span>
+<span class="w">    </span><span class="n">__u8</span><span class="w">  </span><span class="n">bits_per_word</span><span class="p">;</span><span class="w"> </span><span class="c1">// bits per SPI word (0 = use device default, almost always 8)</span>
+<span class="w">    </span><span class="n">__u8</span><span class="w">  </span><span class="n">cs_change</span><span class="p">;</span><span class="w">     </span><span class="c1">// if 1: de-assert CS after this transfer, re-assert for the next</span>
+<span class="w">    </span><span class="n">__u8</span><span class="w">  </span><span class="n">tx_nbits</span><span class="p">;</span><span class="w">      </span><span class="c1">// for single/dual/quad SPI — use 0 (single) for standard SPI</span>
+<span class="w">    </span><span class="n">__u8</span><span class="w">  </span><span class="n">rx_nbits</span><span class="p">;</span><span class="w">      </span><span class="c1">// same</span>
+<span class="w">    </span><span class="n">__u16</span><span class="w"> </span><span class="n">pad</span><span class="p">;</span><span class="w">           </span><span class="c1">// alignment padding — set to 0</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p><strong>tx_buf and rx_buf — the full-duplex rule:</strong></p>
+<p>SPI is inherently full-duplex — every clock cycle pushes one bit out on MOSI AND shifts one bit in on
+MISO simultaneously. This means every transfer sends AND receives the same number of bytes. If you don&rsquo;t
+care about what comes back, you still allocate an rx_buf of the same length (just ignore its contents).
+If you only want to receive, you fill tx_buf with 0x00 bytes (dummy bytes — the STM32 sees them but
+ignores them if it&rsquo;s designed to).</p>
+<p><strong>len — single field controls both directions:</strong></p>
+<p><code>len</code> is the total byte count. The kernel writes <code>len</code> bytes from tx_buf onto MOSI and simultaneously
+fills rx_buf with <code>len</code> bytes from MISO. There&rsquo;s no separate tx_len and rx_len — it&rsquo;s always the same
+because physical SPI exchanges one bit per clock on each wire simultaneously.</p>
+<p><strong>speed_hz — per-transfer speed override:</strong></p>
+<p>Setting <code>speed_hz = 0</code> uses the device&rsquo;s <code>max_speed_hz</code> (set via <code>spi.max_speed_hz = 10_000_000</code>).
+You can override it per-transfer — useful if your protocol has a slow command phase followed by a fast
+data phase. <strong>The default kernel spidev speed is 500kHz</strong> — 20x too slow for our 100Hz × 64-byte frame.
+Always set this explicitly.</p>
+<p><strong>delay_usecs — the gap between chained transfers:</strong></p>
+<p>When you chain multiple <code>spi_ioc_transfer</code> structs in one <code>SPI_IOC_MESSAGE(n)</code> call, <code>delay_usecs</code>
+controls the idle time between them. For most protocols: 0 (no gap, CS stays asserted). Useful when
+talking to devices that need a &ldquo;turnaround&rdquo; time between a command send and a data receive.</p>
+<p><strong>cs_change — who controls CS between chained transfers:</strong></p>
+<ul>
+<li><code>cs_change = 0</code>: CS stays asserted for the entire chain (what you almost always want)</li>
+<li><code>cs_change = 1</code>: CS de-asserts after this transfer, then re-asserts for the next</li>
+</ul>
+<p>The STM32 sees a <code>cs_change = 1</code> as <em>two separate SPI transactions</em>. Use <code>cs_change = 0</code> for reading
+a multi-phase protocol (header + payload) as one atomic operation.</p>
+<hr />
+<h3 id="14-spi_ioc_messagen-why-its-a-single-syscall-that-chains-n-transfers">1.4 SPI_IOC_MESSAGE(n) — why it&rsquo;s a single syscall that chains n transfers</h3>
+<p><strong>The analogy: a single FedEx waybill with multiple stops</strong></p>
+<p>If you need to deliver packages to 3 locations, you could make 3 separate trips (inefficient) or put
+all 3 packages on one truck with a single routing manifest (efficient). <code>SPI_IOC_MESSAGE(n)</code> is the
+single-trip approach.</p>
+<p>Normally, each <code>ioctl</code> call is one kernel context switch: your thread yields to the kernel, the kernel
+does the work, returns. For a 3-phase SPI protocol (write command, wait, read response), doing 3 separate
+<code>ioctl</code> calls costs 3 context switches and the OS can schedule other work between them — meaning another
+thread could run between your &ldquo;send command&rdquo; and &ldquo;read response.&rdquo; This breaks protocols that require CS
+to stay asserted across phases.</p>
+<p><code>SPI_IOC_MESSAGE(n)</code> lets you pack n <code>spi_ioc_transfer</code> structs into ONE ioctl:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">spidev</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">array</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">fcntl</span>
+
+<span class="c1"># Build a 2-phase transfer: send 1-byte command, then receive 8 bytes,</span>
+<span class="c1"># CS stays asserted throughout (cs_change = 0 on first struct)</span>
+<span class="c1">#</span>
+<span class="c1"># Python spidev library handles this for you via xfer2():</span>
+<span class="n">rx</span> <span class="o">=</span> <span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">([</span><span class="mh">0x01</span><span class="p">,</span> <span class="mh">0x00</span><span class="p">,</span> <span class="mh">0x00</span><span class="p">,</span> <span class="mh">0x00</span><span class="p">,</span> <span class="mh">0x00</span><span class="p">,</span> <span class="mh">0x00</span><span class="p">,</span> <span class="mh">0x00</span><span class="p">,</span> <span class="mh">0x00</span><span class="p">,</span> <span class="mh">0x00</span><span class="p">])</span>
+<span class="c1"># This is ONE ioctl(SPI_IOC_MESSAGE(1), ...) — single atomic transfer</span>
+</code></pre></div>
+
+<p>For our use case: one <code>xfer2(64 bytes)</code> = one <code>SPI_IOC_MESSAGE(1)</code> = one ioctl = one context switch = 
+one atomic SPI transaction with CS asserted for all 64 bytes. This is exactly what we want for reading
+a full protobuf frame in one shot.</p>
+<hr />
+<h3 id="15-why-spidev-ioctl-blocks-your-thread-sleeps-until-the-hardware-is-done">1.5 Why spidev ioctl blocks — your thread sleeps until the hardware is done</h3>
+<p><strong>The analogy: you ring the doorbell and wait at the door</strong></p>
+<p>When you call <code>ioctl(fd, SPI_IOC_MESSAGE, ...)</code>, your calling thread is immediately <strong>suspended by
+the kernel</strong> — it enters a sleep state and gives up the CPU. The kernel programs the DMA engine to
+perform the SPI transfer. When the DMA completes, a hardware interrupt fires, the kernel&rsquo;s IRQ handler
+runs, the data is copied to your buffer, and <strong>your thread is woken up</strong> — the ioctl returns.</p>
+<p>From your code&rsquo;s perspective, the call blocks synchronously. From the OS&rsquo;s perspective, during the
+~6.4µs it takes to clock 64 bytes at 10MHz, your process is not running at all, and the CPU can run
+other processes.</p>
+<p><strong>The practical consequence:</strong></p>
+<p>At 10MHz SPI clock, a 64-byte frame takes:</p>
+<div class="highlight"><pre><span></span><code>64 bytes × 8 bits/byte = 512 bits
+512 bits ÷ 10,000,000 bits/sec = 51.2 µs
+</code></pre></div>
+
+<p>Plus kernel scheduling overhead (2–5µs on standard Linux, &lt;50µs on PREEMPT-RT): total ~55–60µs per
+ioctl. Your thread blocks for that entire time.</p>
+<p>This is fine when your thread&rsquo;s only job is SPI acquisition. It becomes a disaster if you put the
+ioctl inside a ROS2 timer callback (see section 1.6).</p>
+<hr />
+<h3 id="16-the-ioctl-in-timer-callback-anti-pattern-why-it-starves-the-executor">1.6 The &ldquo;ioctl in timer callback&rdquo; anti-pattern — why it starves the executor</h3>
+<p><strong>The analogy: a receptionist who takes 50ms phone calls during a 10ms meeting</strong></p>
+<p>The ROS2 executor is a single-threaded event loop. It manages ALL callbacks in your node:
+- Timer callbacks (your 100Hz timer)
+- Subscription callbacks (incoming messages)
+- Service callbacks
+- Action callbacks</p>
+<p>When a timer fires, the executor calls your callback function. If that callback calls <code>xfer2()</code> —
+which blocks for ~50–60ms waiting for SPI to complete — the executor is <strong>frozen</strong> for those 50ms.
+No other callback can run. The timer itself cannot fire again. You&rsquo;ve blocked the entire node.</p>
+<p><strong>The result:</strong> At 100Hz the timer should fire every 10ms. But your callback takes 50–60ms. The
+executor schedules the next fire only AFTER the current callback returns. You get:</p>
+<div class="highlight"><pre><span></span><code>Timer fires at t=0ms  → callback blocks until t=55ms → returns
+Timer fires at t=65ms → callback blocks until t=120ms → returns
+Actual rate: 1000ms ÷ 65ms = ~15Hz instead of 100Hz
+</code></pre></div>
+
+<p>Even worse: the executor&rsquo;s timer resolution on a non-RT kernel has ~1-2ms jitter, adding further
+deviation. In practice, learners see 83–87Hz and spend days tuning the callback instead of fixing
+the architecture.</p>
+<p><strong>Diagnosis:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Measure the actual rate you&#39;re getting</span>
+ros2<span class="w"> </span>topic<span class="w"> </span>hz<span class="w"> </span>/imu/raw
+
+<span class="c1"># If it&#39;s 87Hz instead of 100Hz, the executor is stalled.</span>
+<span class="c1"># The fix is NOT to make the SPI transfer faster —</span>
+<span class="c1"># it&#39;s to move the SPI transfer OUT of the callback entirely.</span>
+</code></pre></div>
+
+<hr />
+<h3 id="17-proper-thread-architecture-acquisition-thread-queue-publish-thread">1.7 Proper thread architecture — acquisition thread + queue + publish thread</h3>
+<p><strong>The analogy: a factory with a dedicated machine operator and a separate shipping clerk</strong></p>
+<p>The correct architecture separates two concerns:</p>
+<div class="highlight"><pre><span></span><code>┌──────────────────────────────────────────────────────────┐
+│  ACQUISITION THREAD (runs at SCHED_FIFO priority 90)     │
+│  Tight loop: xfer2() → decode protobuf → queue.put()    │
+│  No ROS2 involvement. Purely: grab data, enqueue it.    │
+└─────────────────────────────┬────────────────────────────┘
+                              │ queue.Queue (thread-safe)
+                              ▼
+┌──────────────────────────────────────────────────────────┐
+│  ROS2 PUBLISH THREAD (timer callback, 100Hz)            │
+│  queue.get_nowait() → fill Imu message → pub.publish()  │
+│  If queue is empty: log warning, publish stale data.    │
+└──────────────────────────────────────────────────────────┘
+</code></pre></div>
+
+<p><strong>Why this works:</strong></p>
+<ul>
+<li>The acquisition thread is a pure Python thread, blocked in <code>xfer2()</code> most of the time</li>
+<li>It never touches ROS2 internals — no GIL interaction with the executor</li>
+<li>The timer callback is now <em>very fast</em>: dequeue one item, fill a message struct, publish</li>
+<li>The executor is never blocked longer than a microsecond</li>
+</ul>
+<p><strong>Key detail — queue depth:</strong> Use <code>maxsize=5</code>. At 100Hz, each frame is 10ms apart. If the publisher
+isn&rsquo;t consuming fast enough, you want to drop old frames (via <code>queue.get_nowait()</code> + full check), not
+buffer them indefinitely. Stale sensor data is worse than no data for a Kalman filter.</p>
+<p><strong>Python queue is thread-safe:</strong> <code>queue.Queue</code> is protected internally by a mutex and condition
+variable. You do NOT need additional locks around <code>queue.put()</code> and <code>queue.get()</code>.</p>
+<hr />
+<h3 id="18-preempt-rt-what-it-is-and-what-it-changes">1.8 PREEMPT-RT — what it is and what it changes</h3>
+<p><strong>The analogy: a hospital emergency room triage policy</strong></p>
+<p>Standard Linux is like a hospital with a FIFO waiting room: you take a number and wait your turn
+regardless of how sick you are. Your 100Hz SPI reader is sitting next to someone with a stubbed toe
+waiting for their appointment.</p>
+<p>PREEMPT-RT is like adding proper triage: real-time patients (your SPI reader) can immediately
+preempt ongoing consultations for non-urgent cases. The key word is <strong>fully preemptible kernel</strong>.</p>
+<p>In standard Linux, certain sections of kernel code run with interrupts <strong>disabled</strong> — nothing can
+interrupt them, including your RT thread. These sections include spinlock holders, interrupt handlers,
+and some scheduler code. These &ldquo;blackout sections&rdquo; can last 1–10ms on a loaded system.</p>
+<p>PREEMPT-RT converts nearly all of these into <strong>preemptible sections</strong> by:
+1. Converting interrupt handlers into high-priority kernel threads (they can be preempted by a
+   higher-priority RT thread)
+2. Converting spinlocks into mutexes (which support priority inheritance)
+3. Making the scheduler itself preemptible</p>
+<p><strong>Result:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Standard Linux</th>
+<th>PREEMPT-RT</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Worst-case scheduler latency</td>
+<td>1–10ms</td>
+<td>50–200µs</td>
+</tr>
+<tr>
+<td>IRQ handler max latency</td>
+<td>500µs–5ms</td>
+<td>20–80µs</td>
+</tr>
+<tr>
+<td>Can task miss 10ms deadline?</td>
+<td>Yes, regularly</td>
+<td>Extremely rare</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="c1"># Check if your Jetson kernel has PREEMPT-RT:</span>
+uname<span class="w"> </span>-r
+<span class="c1"># 5.15.148-rt76-tegra  ← the &quot;rt&quot; means PREEMPT-RT is compiled in</span>
+
+<span class="c1"># Confirm it&#39;s active:</span>
+cat<span class="w"> </span>/sys/kernel/realtime
+<span class="c1"># 1 = active</span>
+
+<span class="c1"># Measure worst-case latency baseline (100,000 samples, 4 threads):</span>
+sudo<span class="w"> </span>cyclictest<span class="w"> </span>-m<span class="w"> </span>-sp99<span class="w"> </span>-t4<span class="w"> </span>-l100000
+<span class="c1"># You want: Max latency &lt; 100µs on a Jetson with good cooling</span>
+</code></pre></div>
+
+<hr />
+<h3 id="19-cpu-isolation-with-isolcpus-the-reserved-lane-analogy">1.9 CPU isolation with isolcpus — the &ldquo;reserved lane&rdquo; analogy</h3>
+<p><strong>The analogy: a dedicated express lane on the motorway</strong></p>
+<p>Imagine a 4-lane motorway. Normally, all cars (processes) use all lanes. During rush hour (high load),
+your ambulance (RT thread) gets stuck behind a lorry. The OS&rsquo;s <code>isolcpus</code> kernel parameter is like
+coning off CPU 3 as an <strong>express lane that only ambulances can use.</strong></p>
+<div class="highlight"><pre><span></span><code>CPU 0: system processes, kernel workers, network IRQs
+CPU 1: ROS2 nav stack, perception nodes
+CPU 2: GPU driver threads, camera pipelines
+CPU 3: ← ISOLATED — ONLY your SPI acquisition thread + its IRQ
+</code></pre></div>
+
+<p><strong>How to configure:</strong></p>
+<ol>
+<li>Add to Jetson bootloader config:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>sudo<span class="w"> </span>nano<span class="w"> </span>/boot/extlinux/extlinux.conf
+<span class="c1"># In the APPEND line, add:</span>
+<span class="c1"># isolcpus=3 nohz_full=3 rcu_nocbs=3</span>
+</code></pre></div>
+
+<ol start="2">
+<li>Pin your SPI thread to the isolated core:</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="n">os</span><span class="o">.</span><span class="n">sched_setaffinity</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="p">{</span><span class="mi">3</span><span class="p">})</span>  <span class="c1"># pin this process to CPU 3</span>
+</code></pre></div>
+
+<ol start="3">
+<li>Move the SPI controller&rsquo;s IRQ to CPU 3:</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="c1"># Find which IRQ handles the SPI controller</span>
+cat<span class="w"> </span>/proc/interrupts<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>spi
+<span class="c1"># e.g., 103:    0    0    0    1234  SMP  103  tegra-spi</span>
+
+<span class="c1"># Pin IRQ 103 to CPU 3:</span>
+<span class="nb">echo</span><span class="w"> </span><span class="m">8</span><span class="w"> </span>&gt;<span class="w"> </span>/proc/irq/103/smp_affinity<span class="w">   </span><span class="c1"># bitmask: 0b1000 = CPU 3</span>
+</code></pre></div>
+
+<p><strong>Effect without isolation:</strong>
+- Your RT thread wakes up on CPU 3
+- 0.5ms later, the kernel&rsquo;s RCU cleanup worker is scheduled on CPU 3
+- Your thread gets preempted for 0.3ms
+- This repeats every few hundred milliseconds: &ldquo;spurious 0.3ms spikes&rdquo;</p>
+<p><strong>Effect with isolation:</strong>
+- Nothing except your thread and your IRQ handler ever runs on CPU 3
+- Latency spikes from kernel housekeeping disappear</p>
+<hr />
+<h3 id="110-sched_fifo-vs-sched_other-why-the-default-gives-you-83hz-instead-of-100hz">1.10 SCHED_FIFO vs SCHED_OTHER — why the default gives you 83Hz instead of 100Hz</h3>
+<p><strong>The analogy: ticketed vs priority boarding at an airline gate</strong></p>
+<p><code>SCHED_OTHER</code> (the default scheduling policy) is the <strong>ticketed boarding</strong> system: every process gets
+a time slice (typically 1–4ms), and the scheduler rotates through all runnable processes fairly. Your
+SPI thread waits its turn even if it&rsquo;s ready to run right now.</p>
+<p><code>SCHED_FIFO</code> is <strong>priority boarding</strong>: when your RT thread becomes runnable (e.g., after xfer2() 
+returns), it immediately preempts any lower-priority <code>SCHED_OTHER</code> thread. No waiting for the next 
+scheduler tick.</p>
+<p><strong>At 100Hz, SCHED_OTHER causes timer drift:</strong></p>
+<div class="highlight"><pre><span></span><code>Intent:    fire every 10ms
+Reality:   timer fires at 10ms, OS scheduler adds 1ms jitter → fires at 11ms
+           next tick: 10ms + another 1ms jitter → fires at 22ms instead of 20ms
+           ... drift accumulates → ~83–91Hz observed
+</code></pre></div>
+
+<p>The root cause: <code>create_wall_timer(10ms, cb)</code> in ROS2 means &ldquo;at least 10ms between calls.&rdquo; If the
+executor thread is waiting for a scheduler timeslice, that &ldquo;at least&rdquo; becomes &ldquo;10ms + OS scheduling
+latency.&rdquo;</p>
+<p><strong>Setting SCHED_FIFO:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ctypes.util</span>
+
+<span class="n">libc</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">CDLL</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">find_library</span><span class="p">(</span><span class="s1">&#39;c&#39;</span><span class="p">),</span> <span class="n">use_errno</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="n">SCHED_FIFO</span> <span class="o">=</span> <span class="mi">1</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">SchedParam</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">Structure</span><span class="p">):</span>
+    <span class="n">_fields_</span> <span class="o">=</span> <span class="p">[(</span><span class="s1">&#39;sched_priority&#39;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">)]</span>
+
+<span class="n">param</span> <span class="o">=</span> <span class="n">SchedParam</span><span class="p">(</span><span class="n">sched_priority</span><span class="o">=</span><span class="mi">90</span><span class="p">)</span>   <span class="c1"># 90 = high RT priority (max 99)</span>
+<span class="n">ret</span> <span class="o">=</span> <span class="n">libc</span><span class="o">.</span><span class="n">sched_setscheduler</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">SCHED_FIFO</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">byref</span><span class="p">(</span><span class="n">param</span><span class="p">))</span>
+<span class="k">if</span> <span class="n">ret</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">OSError</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">get_errno</span><span class="p">(),</span> <span class="s2">&quot;sched_setscheduler failed — run as root?&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<p>Or from the shell without changing code:</p>
+<div class="highlight"><pre><span></span><code>sudo<span class="w"> </span>chrt<span class="w"> </span>-f<span class="w"> </span><span class="m">90</span><span class="w"> </span>python3<span class="w"> </span>spi_reader.py<span class="w">    </span><span class="c1"># SCHED_FIFO priority 90</span>
+</code></pre></div>
+
+<p><strong>Priority 90 vs 99:</strong> Priority 99 is reserved for kernel watchdog threads. Use 80–95 for your RT
+acquisition. Standard ROS2 executors are at SCHED_OTHER (priority 0) so any positive SCHED_FIFO
+priority will preempt them.</p>
+<hr />
+<h3 id="111-ros2-qos-reliable-vs-best_effort-for-sensor-topics">1.11 ROS2 QoS — RELIABLE vs BEST_EFFORT for sensor topics</h3>
+<p><strong>The analogy: registered letter vs postcard</strong></p>
+<p><code>RELIABLE</code> is like a registered letter: DDS (the ROS2 transport layer) stores the message, transmits
+it, waits for an acknowledgement, and retransmits if the ack doesn&rsquo;t come. No message is ever lost.</p>
+<p><code>BEST_EFFORT</code> is like a postcard: you drop it in the postbox and move on. If the postal service
+drops it, no retry — just use the next message.</p>
+<p><strong>Why RELIABLE at 100Hz is dangerous:</strong></p>
+<p>At 100Hz, a subscriber that falls behind by even 100ms has a backlog of 10 unread messages. With
+RELIABLE, the DDS layer keeps them all queued and retransmits endlessly. The backlog grows. The
+publisher sees backpressure. Eventually the queue overflows and <code>publish()</code> starts taking increasingly
+long. Your 100Hz becomes 60Hz not because SPI is slow, but because DDS is trying to deliver stale
+sensor data from 500ms ago.</p>
+<p><strong>Why BEST_EFFORT is correct for sensors:</strong></p>
+<p>If a subscriber misses frame 142, the next frame 143 arrives 10ms later. For an IMU or wheel encoder,
+that&rsquo;s fine — use the freshest data. With <code>depth=5</code>, you keep the 5 most recent messages for any
+subscriber that&rsquo;s slightly behind, but you never buffer hundreds of stale frames.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.qos</span><span class="w"> </span><span class="kn">import</span> <span class="n">QoSProfile</span><span class="p">,</span> <span class="n">ReliabilityPolicy</span><span class="p">,</span> <span class="n">HistoryPolicy</span><span class="p">,</span> <span class="n">DurabilityPolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.qos</span><span class="w"> </span><span class="kn">import</span> <span class="n">qos_profile_sensor_data</span>  <span class="c1"># pre-built BEST_EFFORT profile</span>
+
+<span class="c1"># Option 1: use the pre-built sensor profile (recommended)</span>
+<span class="n">pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">Imu</span><span class="p">,</span> <span class="s1">&#39;/imu/raw&#39;</span><span class="p">,</span> <span class="n">qos_profile_sensor_data</span><span class="p">)</span>
+
+<span class="c1"># Option 2: explicit construction (same result)</span>
+<span class="n">sensor_qos</span> <span class="o">=</span> <span class="n">QoSProfile</span><span class="p">(</span>
+    <span class="n">reliability</span><span class="o">=</span><span class="n">ReliabilityPolicy</span><span class="o">.</span><span class="n">BEST_EFFORT</span><span class="p">,</span>
+    <span class="n">durability</span><span class="o">=</span><span class="n">DurabilityPolicy</span><span class="o">.</span><span class="n">VOLATILE</span><span class="p">,</span>
+    <span class="n">history</span><span class="o">=</span><span class="n">HistoryPolicy</span><span class="o">.</span><span class="n">KEEP_LAST</span><span class="p">,</span>
+    <span class="n">depth</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">Imu</span><span class="p">,</span> <span class="s1">&#39;/imu/raw&#39;</span><span class="p">,</span> <span class="n">sensor_qos</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>The silent failure — QoS mismatch:</strong></p>
+<p>ROS2 silently drops the connection between a publisher and subscriber if their QoS policies are
+incompatible. The rule: a RELIABLE subscriber will NOT receive messages from a BEST_EFFORT publisher.
+The reverse is OK (BEST_EFFORT subscriber CAN receive from RELIABLE publisher). Neither side logs an
+error. You see zero messages in <code>ros2 topic echo</code>, with no error anywhere.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Detect mismatches — this shows every subscriber&#39;s actual QoS</span>
+ros2<span class="w"> </span>topic<span class="w"> </span>info<span class="w"> </span>-v<span class="w"> </span>/imu/raw
+
+<span class="c1"># Look for:</span>
+<span class="c1"># Publisher #1:  Reliability: BEST_EFFORT</span>
+<span class="c1"># Subscription #1: Reliability: RELIABLE   ← MISMATCH — subscriber gets nothing</span>
+</code></pre></div>
+
+<hr />
+<h3 id="112-the-timestamp-problem-capture-clock_monotonic_raw-immediately-after-ioctl">1.12 The timestamp problem — capture CLOCK_MONOTONIC_RAW immediately after ioctl</h3>
+<p><strong>The analogy: timestamping a lab sample at the centrifuge, not at the desk</strong></p>
+<p>You have a blood sample. The centrifuge finishes at 14:03:22. The nurse walks to the desk, checks her
+email, writes the label, and stamps &ldquo;14:03:45&rdquo; on the tube. That timestamp is wrong by 23 seconds.
+A doctor looking at the lab result will calculate drug metabolism rates incorrectly.</p>
+<p>Your IMU timestamp is the same problem. The xfer2() call returns with the IMU data at time T=0. If you
+capture the timestamp 2ms later (after protobuf decode, after building the message struct, after calling
+<code>self.get_clock().now()</code>), you stamp the data as T+2ms. The EKF integrates angular velocity using the
+wrong dt and produces a ghost drift in the estimated orientation.</p>
+<p><strong>Why 2ms matters at 100Hz:</strong></p>
+<div class="highlight"><pre><span></span><code>IMU publish rate: 100Hz → one frame every 10ms
+Angular velocity: 1.0 rad/s (slow rotation)
+Timestamp error:  2ms = 0.002s
+Position error from integration: 1.0 rad/s × 0.002s = 0.002 rad = 0.11 degrees
+Over 100 frames (1 second): this accumulates, not averages out
+</code></pre></div>
+
+<p>The EKF will diagnose this as &ldquo;noise,&rdquo; suggest you reduce process noise covariance, which makes the
+filter trust the IMU more, which makes the drift worse. Learners spend 3 days tuning EKF parameters
+when the real fix is one line of code.</p>
+<p><strong>The correct pattern:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ctypes.util</span>
+
+<span class="c1"># Load libc for clock_gettime</span>
+<span class="n">librt</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">CDLL</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">find_library</span><span class="p">(</span><span class="s1">&#39;rt&#39;</span><span class="p">),</span> <span class="n">use_errno</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Timespec</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">Structure</span><span class="p">):</span>
+    <span class="n">_fields_</span> <span class="o">=</span> <span class="p">[(</span><span class="s1">&#39;tv_sec&#39;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_long</span><span class="p">),</span> <span class="p">(</span><span class="s1">&#39;tv_nsec&#39;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_long</span><span class="p">)]</span>
+
+<span class="n">CLOCK_MONOTONIC_RAW</span> <span class="o">=</span> <span class="mi">4</span>  <span class="c1"># Linux constant — immune to NTP adjustments</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">get_monotonic_raw_ns</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return nanoseconds since boot (CLOCK_MONOTONIC_RAW).&quot;&quot;&quot;</span>
+    <span class="n">ts</span> <span class="o">=</span> <span class="n">Timespec</span><span class="p">()</span>
+    <span class="n">librt</span><span class="o">.</span><span class="n">clock_gettime</span><span class="p">(</span><span class="n">CLOCK_MONOTONIC_RAW</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">byref</span><span class="p">(</span><span class="n">ts</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">ts</span><span class="o">.</span><span class="n">tv_sec</span> <span class="o">*</span> <span class="mi">1_000_000_000</span> <span class="o">+</span> <span class="n">ts</span><span class="o">.</span><span class="n">tv_nsec</span>
+
+<span class="c1"># In the acquisition thread:</span>
+<span class="n">rx_bytes</span> <span class="o">=</span> <span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">([</span><span class="mh">0x00</span><span class="p">]</span> <span class="o">*</span> <span class="n">FRAME_SIZE</span><span class="p">)</span>       <span class="c1"># blocks until SPI complete</span>
+<span class="n">capture_ns</span> <span class="o">=</span> <span class="n">get_monotonic_raw_ns</span><span class="p">()</span>              <span class="c1"># ← IMMEDIATELY after xfer2 returns</span>
+<span class="n">frame</span> <span class="o">=</span> <span class="n">SensorFrame</span><span class="p">()</span>
+<span class="n">frame</span><span class="o">.</span><span class="n">ParseFromString</span><span class="p">(</span><span class="nb">bytes</span><span class="p">(</span><span class="n">rx_bytes</span><span class="p">[</span><span class="mi">3</span><span class="p">:]))</span>       <span class="c1"># decode AFTER capturing the timestamp</span>
+<span class="c1"># ... enqueue (frame, capture_ns)</span>
+</code></pre></div>
+
+<p><strong>Why <code>CLOCK_MONOTONIC_RAW</code> not <code>get_clock().now()</code>:</strong></p>
+<p><code>get_clock().now()</code> in rclpy uses <code>RCL_SYSTEM_TIME</code> which is corrected by NTP in real-time. NTP can
+adjust the clock backwards or jump it forward. <code>CLOCK_MONOTONIC_RAW</code> is immune to NTP adjustments and
+never goes backwards — exactly what you want for a Kalman filter&rsquo;s dt calculation.</p>
+<hr />
+<h3 id="113-robot_localization-covariance-matrix-why-zeros-crash-the-ekf">1.13 robot_localization covariance matrix — why zeros crash the EKF</h3>
+<p><strong>The analogy: a weather forecaster who refuses to admit uncertainty</strong></p>
+<p>A Kalman filter is fundamentally a <strong>weighted average</strong> between a prediction and a measurement. The
+weights come from:
+- Prediction covariance (how uncertain is our model?)
+- Measurement covariance (how uncertain is this sensor reading?)</p>
+<p>The covariance matrix in a <code>sensor_msgs/Imu</code> message is a 3×3 matrix flattened into a 9-element
+array. The diagonal elements mean:</p>
+<div class="highlight"><pre><span></span><code>linear_acceleration_covariance:
+  [σ²_ax, 0,     0,
+   0,     σ²_ay, 0,
+   0,     0,     σ²_az]
+
+Where σ²_ax = variance of x-acceleration measurement in (m/s²)²
+</code></pre></div>
+
+<p><strong>What zero means:</strong> <code>σ² = 0</code> means &ldquo;this measurement has zero uncertainty — it is infinitely
+accurate.&rdquo; The EKF&rsquo;s observation gain equation is:</p>
+<div class="highlight"><pre><span></span><code>K = P × H^T × (H × P × H^T + R)^(-1)
+</code></pre></div>
+
+<p>When R (measurement noise covariance) has zeros on the diagonal, the matrix inversion becomes
+numerically unstable, the Kalman gain explodes, and the filter diverges — often to NaN.</p>
+<p><strong>The two conventions and the special value -1.0:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Convention 1: set -1.0 in position [0] = &quot;I don&#39;t know the covariance&quot;</span>
+<span class="c1">#               robot_localization will use whatever you set in its YAML config instead</span>
+<span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration_covariance</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="mf">1.0</span>
+
+<span class="c1"># Convention 2: set actual calibrated values (better if you have them)</span>
+<span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration_covariance</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="mf">0.01</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span>  <span class="mf">0.0</span><span class="p">,</span>   <span class="c1"># σ²_ax = 0.01 (m/s²)²</span>
+    <span class="mf">0.0</span><span class="p">,</span>  <span class="mf">0.01</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span>   <span class="c1"># σ²_ay</span>
+    <span class="mf">0.0</span><span class="p">,</span>  <span class="mf">0.0</span><span class="p">,</span>  <span class="mf">0.01</span><span class="p">,</span>  <span class="c1"># σ²_az</span>
+<span class="p">]</span>
+
+<span class="c1"># NEVER do this — zero covariance = EKF divergence:</span>
+<span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration_covariance</span> <span class="o">=</span> <span class="p">[</span><span class="mf">0.0</span><span class="p">]</span> <span class="o">*</span> <span class="mi">9</span>  <span class="c1"># ← this will crash your EKF</span>
+</code></pre></div>
+
+<p><strong>robot_localization YAML — what the config covariance means:</strong></p>
+<p>In the <code>robot_localization</code> config YAML, you set <code>process_noise_covariance</code> (how much the EKF trusts
+its own motion model) and <code>initial_estimate_covariance</code> (how uncertain is the initial state). These
+are completely separate from the per-message measurement covariance. Confusing them is one of the
+most common EKF tuning mistakes.</p>
+<hr />
+<h3 id="114-tf2-frame-tree-map-odom-base_link-imu_frame">1.14 TF2 frame tree — map → odom → base_link → imu_frame</h3>
+<p><strong>The analogy: a chain of address changes</strong></p>
+<p>Your robot starts at the origin of the warehouse (map frame). As it moves, it accumulates a position
+estimate (odom frame). Its body (base_link frame) has sensors attached at known offsets
+(imu_frame, laser_frame).</p>
+<p>TF2 is the ROS2 library that manages these relationships and lets any node ask &ldquo;where is my IMU
+in the map frame RIGHT NOW?&rdquo; without having to manually chain transformations.</p>
+<div class="highlight"><pre><span></span><code>map                    ← absolute coordinate system; set by AMCL or GPS
+  └── odom             ← robot&#39;s dead-reckoning position; published by EKF
+        └── base_link  ← robot body center; the reference for everything on the robot
+              ├── imu_link      ← where the IMU sits, with its mounting orientation
+              ├── laser_link    ← where the LiDAR sits
+              └── camera_link   ← where the camera sits
+</code></pre></div>
+
+<p><strong>What each edge represents physically:</strong></p>
+<ul>
+<li>
+<p><code>map → odom</code>: the correction applied by the localization system (AMCL, GPS). This edge fills in
+  where the robot is in the global map. When AMCL updates, it adjusts this edge. This edge can jump
+  (that&rsquo;s fine — it corrects accumulated drift).</p>
+</li>
+<li>
+<p><code>odom → base_link</code>: the EKF&rsquo;s integrated estimate of how far the robot has moved since boot.
+  This edge is continuous and smooth (never jumps). Published by <code>robot_localization</code>.</p>
+</li>
+<li>
+<p><code>base_link → imu_link</code>: the static physical offset between the robot&rsquo;s body center and where the
+  IMU is mounted. This never changes during a run — published once by a static transform broadcaster.</p>
+</li>
+</ul>
+<p><strong>Why the frame_id in your IMU message MUST be correct:</strong></p>
+<p>When you set <code>msg.header.frame_id = 'imu_link'</code>, you&rsquo;re telling TF2 &ldquo;this data is measured in the
+imu_link frame.&rdquo; <code>robot_localization</code> uses TF2 to look up the transform from <code>imu_link</code> to
+<code>base_link</code> and rotate your accelerations/angular velocities into the body frame before fusing.</p>
+<p>If you write <code>'imu'</code> instead of <code>'imu_link'</code>, TF2 searches for a frame named <code>'imu'</code> in the tree,
+finds nothing, and <code>robot_localization</code> discards the message silently. The EKF runs on odometry
+alone — your IMU is ignored with no error message.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Verify your TF tree is complete:</span>
+ros2<span class="w"> </span>run<span class="w"> </span>tf2_tools<span class="w"> </span>view_frames
+evince<span class="w"> </span>frames.pdf<span class="w">   </span><span class="c1"># opens a visualization</span>
+
+<span class="c1"># Live TF lookup test:</span>
+ros2<span class="w"> </span>run<span class="w"> </span>tf2_ros<span class="w"> </span>tf2_echo<span class="w"> </span>base_link<span class="w"> </span>imu_link
+<span class="c1"># Should print: Translation + Rotation of imu_link relative to base_link</span>
+</code></pre></div>
+
+<hr />
+<h3 id="115-the-irq_balance-gotcha-spurious-2ms-spikes-despite-rt-setup">1.15 The irq_balance gotcha — spurious 2ms spikes despite RT setup</h3>
+<p><strong>The analogy: a well-meaning traffic manager who keeps changing your lane</strong></p>
+<p><code>irqbalance</code> is a Linux service that periodically re-examines which CPU handles which hardware
+interrupt, and migrates IRQs to balance CPU load. This is a good idea for busy servers running many
+processes. For a real-time acquisition thread, it&rsquo;s a slow-motion disaster.</p>
+<p>Here is the exact failure sequence:</p>
+<div class="highlight"><pre><span></span><code>t=0ms:      SPI acquisition thread on CPU3, SPI IRQ on CPU3 → perfect
+t=3000ms:   irqbalance runs, migrates SPI IRQ from CPU3 to CPU1
+t=3000ms+:  SPI ioctl starts on CPU3, DMA finishes, IRQ fires on CPU1
+            CPU1 runs the IRQ handler, updates the kernel SPI wait queue
+            CPU3 is notified via IPI (inter-processor interrupt) to wake up
+            IPI is not instantaneous: ~0.5-2ms additional latency
+t=3002ms:   xfer2() returns, 2ms late
+</code></pre></div>
+
+<p>The spike is intermittent (every few hundred seconds when irqbalance re-balances), disappears on
+restart (irqbalance randomizes assignments), and varies with system load. This makes it look like
+random noise in your timing measurements.</p>
+<p><strong>The fix:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Permanent: disable irqbalance service</span>
+sudo<span class="w"> </span>systemctl<span class="w"> </span>disable<span class="w"> </span>irqbalance
+sudo<span class="w"> </span>systemctl<span class="w"> </span>stop<span class="w"> </span>irqbalance
+
+<span class="c1"># Then manually pin the SPI IRQ to your isolated core:</span>
+<span class="c1"># Find the SPI IRQ number:</span>
+cat<span class="w"> </span>/proc/interrupts<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>spi
+<span class="c1"># Pin to CPU 3 (bitmask 0b1000 = 8):</span>
+<span class="nb">echo</span><span class="w"> </span><span class="m">8</span><span class="w"> </span>&gt;<span class="w"> </span>/proc/irq/&lt;SPI_IRQ_NUMBER&gt;/smp_affinity
+</code></pre></div>
+
+<p><strong>Verify it worked:</strong></p>
+<p>After pinning, run <code>cyclictest</code> while simultaneously doing SPI transfers and watch that worst-case
+latency stays flat instead of occasionally spiking. A spike of &gt;500µs every few minutes that disappears
+after <code>systemctl stop irqbalance</code> is the definitive diagnosis.</p>
+<hr />
+<h2 id="part-2-annotated-code-reference">PART 2 — Annotated Code Reference</h2>
+<hr />
+<h3 id="21-spidev-python-setup-open-configure-xfer2">2.1 spidev Python setup — open, configure, xfer2</h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">spidev</span>
+
+<span class="c1"># ── Step 1: Create the spidev instance ──────────────────────────────────────</span>
+<span class="n">spi</span> <span class="o">=</span> <span class="n">spidev</span><span class="o">.</span><span class="n">SpiDev</span><span class="p">()</span>
+<span class="c1"># spidev.SpiDev() allocates the wrapper object. No kernel interaction yet.</span>
+
+<span class="c1"># ── Step 2: Open the device ─────────────────────────────────────────────────</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<span class="c1"># Opens /dev/spidev0.0 — bus=0, chip_select=0</span>
+<span class="c1"># This is a blocking open() syscall. Fails with PermissionError if user is</span>
+<span class="c1"># not in the &#39;spidev&#39; group. Fails with FileNotFoundError if jetson-io.py</span>
+<span class="c1"># was not run + reboot.</span>
+
+<span class="c1"># ── Step 3: Set SPI clock speed ──────────────────────────────────────────────</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">max_speed_hz</span> <span class="o">=</span> <span class="mi">10_000_000</span>
+<span class="c1"># Sets the maximum clock frequency: 10 MHz</span>
+<span class="c1"># CRITICAL: the kernel default is 500_000 (500kHz) — 20× too slow for 100Hz × 64 bytes.</span>
+<span class="c1"># At 500kHz: 64 bytes × 8 bits = 512 bits @ 500kHz = 1.024ms per transfer</span>
+<span class="c1"># At 10MHz:  512 bits @ 10MHz  = 51.2µs per transfer → fits in 10ms budget</span>
+
+<span class="c1"># ── Step 4: Set SPI mode ─────────────────────────────────────────────────────</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">mode</span> <span class="o">=</span> <span class="mb">0b00</span>
+<span class="c1"># SPI mode encodes two bits:</span>
+<span class="c1">#   CPOL (bit 1): clock polarity — 0 = idle LOW, 1 = idle HIGH</span>
+<span class="c1">#   CPHA (bit 0): clock phase   — 0 = sample on LEADING edge, 1 = sample on TRAILING edge</span>
+<span class="c1">#</span>
+<span class="c1"># Mode 0 (CPOL=0, CPHA=0): clock idles LOW, data sampled on rising edge</span>
+<span class="c1"># Mode 1 (CPOL=0, CPHA=1): clock idles LOW, data sampled on falling edge</span>
+<span class="c1"># Mode 2 (CPOL=1, CPHA=0): clock idles HIGH, data sampled on falling edge</span>
+<span class="c1"># Mode 3 (CPOL=1, CPHA=1): clock idles HIGH, data sampled on rising edge</span>
+<span class="c1">#</span>
+<span class="c1"># STM32 SPI_CPOL_Low + SPI_CPHA_1Edge = Mode 0.</span>
+<span class="c1"># If your mode is WRONG you&#39;ll receive bytes that are consistently shifted</span>
+<span class="c1"># — logic analyzer shows wrong byte values; try modes 1,2,3 if rx is garbage.</span>
+
+<span class="n">spi</span><span class="o">.</span><span class="n">bits_per_word</span> <span class="o">=</span> <span class="mi">8</span>
+<span class="c1"># Almost always 8. The SPI protocol can support 4-16 bit words,</span>
+<span class="c1"># but our STM32 frame uses byte-sized units. Don&#39;t change this.</span>
+
+<span class="n">spi</span><span class="o">.</span><span class="n">no_cs</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="c1"># False = let spidev assert/deassert CS automatically around each transfer.</span>
+<span class="c1"># True  = you control CS manually via a GPIO. Rarely needed.</span>
+
+<span class="c1"># ── Step 5: Transfer ─────────────────────────────────────────────────────────</span>
+<span class="n">FRAME_SIZE</span> <span class="o">=</span> <span class="mi">64</span>    <span class="c1"># must match STM32 frame size</span>
+
+<span class="n">tx_dummy</span> <span class="o">=</span> <span class="p">[</span><span class="mh">0x00</span><span class="p">]</span> <span class="o">*</span> <span class="n">FRAME_SIZE</span>
+<span class="c1"># Dummy bytes — the STM32 ignores what the Jetson sends; it just waits for</span>
+<span class="c1"># CLK pulses to clock out its pre-built frame. We send zeros to make debugging</span>
+<span class="c1"># easier (0x00 on MOSI is easy to filter out in a logic analyzer capture).</span>
+
+<span class="n">rx</span> <span class="o">=</span> <span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">(</span><span class="n">tx_dummy</span><span class="p">)</span>
+<span class="c1"># xfer2(): CS asserted at start, held throughout, de-asserted at end.</span>
+<span class="c1"># Full-duplex: sends tx_dummy on MOSI, fills rx with MISO bytes simultaneously.</span>
+<span class="c1"># WHY xfer2 not xfer: xfer() would de-assert CS between each BYTE.</span>
+<span class="c1"># xfer2() keeps CS asserted for the entire 64-byte transfer → one transaction.</span>
+<span class="c1"># The STM32 relies on CS staying low to know it&#39;s part of one frame.</span>
+
+<span class="n">received_bytes</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="n">rx</span><span class="p">)</span>   <span class="c1"># convert list-of-ints to bytes for protobuf</span>
+
+<span class="n">spi</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>   <span class="c1"># release the file descriptor; good practice on shutdown</span>
+</code></pre></div>
+
+<hr />
+<h3 id="22-the-correct-acquisition-thread-sched_fifo-mlockall-tight-loop">2.2 The correct acquisition thread — SCHED_FIFO, mlockall, tight loop</h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">queue</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ctypes.util</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">spidev</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="c1"># ── Real-time setup helpers ──────────────────────────────────────────────────</span>
+
+<span class="n">libc</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">CDLL</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">find_library</span><span class="p">(</span><span class="s1">&#39;c&#39;</span><span class="p">),</span> <span class="n">use_errno</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">librt</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">CDLL</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">find_library</span><span class="p">(</span><span class="s1">&#39;rt&#39;</span><span class="p">),</span> <span class="n">use_errno</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="n">SCHED_FIFO</span> <span class="o">=</span> <span class="mi">1</span>
+<span class="n">MCL_CURRENT</span> <span class="o">=</span> <span class="mi">1</span>
+<span class="n">MCL_FUTURE</span> <span class="o">=</span> <span class="mi">2</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">SchedParam</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">Structure</span><span class="p">):</span>
+    <span class="n">_fields_</span> <span class="o">=</span> <span class="p">[(</span><span class="s1">&#39;sched_priority&#39;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">)]</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Timespec</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">Structure</span><span class="p">):</span>
+    <span class="n">_fields_</span> <span class="o">=</span> <span class="p">[(</span><span class="s1">&#39;tv_sec&#39;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_long</span><span class="p">),</span> <span class="p">(</span><span class="s1">&#39;tv_nsec&#39;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_long</span><span class="p">)]</span>
+
+<span class="n">CLOCK_MONOTONIC_RAW</span> <span class="o">=</span> <span class="mi">4</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_time_ns</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read CLOCK_MONOTONIC_RAW in nanoseconds. Must be called immediately after xfer2().&quot;&quot;&quot;</span>
+    <span class="n">ts</span> <span class="o">=</span> <span class="n">Timespec</span><span class="p">()</span>
+    <span class="n">librt</span><span class="o">.</span><span class="n">clock_gettime</span><span class="p">(</span><span class="n">CLOCK_MONOTONIC_RAW</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">byref</span><span class="p">(</span><span class="n">ts</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">ts</span><span class="o">.</span><span class="n">tv_sec</span> <span class="o">*</span> <span class="mi">1_000_000_000</span> <span class="o">+</span> <span class="n">ts</span><span class="o">.</span><span class="n">tv_nsec</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_set_realtime</span><span class="p">(</span><span class="n">priority</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">90</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Promote current thread to SCHED_FIFO. Must be called from the thread itself.&quot;&quot;&quot;</span>
+    <span class="n">param</span> <span class="o">=</span> <span class="n">SchedParam</span><span class="p">(</span><span class="n">sched_priority</span><span class="o">=</span><span class="n">priority</span><span class="p">)</span>
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">libc</span><span class="o">.</span><span class="n">sched_setscheduler</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">SCHED_FIFO</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">byref</span><span class="p">(</span><span class="n">param</span><span class="p">))</span>
+    <span class="c1"># 0 = current thread/process</span>
+    <span class="k">if</span> <span class="n">ret</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">err</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">get_errno</span><span class="p">()</span>
+        <span class="k">raise</span> <span class="ne">OSError</span><span class="p">(</span><span class="n">err</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;sched_setscheduler failed (errno=</span><span class="si">{</span><span class="n">err</span><span class="si">}</span><span class="s2">): run as root&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Lock all pages into RAM — prevents page faults delaying the RT thread.</span>
+    <span class="c1"># A page fault takes 0.1–1ms; unacceptable for a 10ms deadline.</span>
+    <span class="c1"># MCL_CURRENT: lock pages already in memory</span>
+    <span class="c1"># MCL_FUTURE:  lock pages that will be mapped in future</span>
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">libc</span><span class="o">.</span><span class="n">mlockall</span><span class="p">(</span><span class="n">MCL_CURRENT</span> <span class="o">|</span> <span class="n">MCL_FUTURE</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">ret</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">err</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">get_errno</span><span class="p">()</span>
+        <span class="k">raise</span> <span class="ne">OSError</span><span class="p">(</span><span class="n">err</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;mlockall failed (errno=</span><span class="si">{</span><span class="n">err</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+
+
+<span class="c1"># ── The acquisition thread function ─────────────────────────────────────────</span>
+
+<span class="n">FRAME_SIZE</span> <span class="o">=</span> <span class="mi">64</span>          <span class="c1"># must match STM32 DMA frame size</span>
+<span class="n">QUEUE_MAX</span>  <span class="o">=</span> <span class="mi">5</span>           <span class="c1"># drop old frames rather than buffer unboundedly</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_acquisition_thread</span><span class="p">(</span>
+    <span class="n">data_queue</span><span class="p">:</span> <span class="n">queue</span><span class="o">.</span><span class="n">Queue</span><span class="p">,</span>
+    <span class="n">stop_event</span><span class="p">:</span> <span class="n">threading</span><span class="o">.</span><span class="n">Event</span><span class="p">,</span>
+    <span class="n">spi_bus</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+    <span class="n">spi_cs</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Runs at SCHED_FIFO priority 90 on the isolated CPU core.</span>
+<span class="sd">    Does NOTHING except:</span>
+<span class="sd">      1. Call xfer2() to grab a frame</span>
+<span class="sd">      2. Capture the timestamp immediately</span>
+<span class="sd">      3. Push (raw_bytes, timestamp_ns) to data_queue</span>
+<span class="sd">    No logging, no ROS2, no protobuf decode in this thread.</span>
+<span class="sd">    Logging from an RT thread costs ~0.5ms if the log buffer is full.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">_set_realtime</span><span class="p">(</span><span class="n">priority</span><span class="o">=</span><span class="mi">90</span><span class="p">)</span>
+    <span class="c1"># Pin this thread to CPU3 (the isolated core)</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">sched_setaffinity</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="p">{</span><span class="mi">3</span><span class="p">})</span>
+
+    <span class="n">spi</span> <span class="o">=</span> <span class="n">spidev</span><span class="o">.</span><span class="n">SpiDev</span><span class="p">()</span>
+    <span class="n">spi</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">spi_bus</span><span class="p">,</span> <span class="n">spi_cs</span><span class="p">)</span>
+    <span class="n">spi</span><span class="o">.</span><span class="n">max_speed_hz</span> <span class="o">=</span> <span class="mi">10_000_000</span>    <span class="c1"># 10 MHz</span>
+    <span class="n">spi</span><span class="o">.</span><span class="n">mode</span> <span class="o">=</span> <span class="mb">0b00</span>                  <span class="c1"># CPOL=0 CPHA=0</span>
+    <span class="n">spi</span><span class="o">.</span><span class="n">bits_per_word</span> <span class="o">=</span> <span class="mi">8</span>
+    <span class="n">spi</span><span class="o">.</span><span class="n">no_cs</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="n">tx_dummy</span> <span class="o">=</span> <span class="p">[</span><span class="mh">0x00</span><span class="p">]</span> <span class="o">*</span> <span class="n">FRAME_SIZE</span>   <span class="c1"># allocated once — no malloc in the hot loop</span>
+
+    <span class="k">while</span> <span class="ow">not</span> <span class="n">stop_event</span><span class="o">.</span><span class="n">is_set</span><span class="p">():</span>
+        <span class="n">raw</span> <span class="o">=</span> <span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">(</span><span class="n">tx_dummy</span><span class="p">)</span>           <span class="c1"># blocking SPI transfer</span>
+        <span class="n">ts_ns</span> <span class="o">=</span> <span class="n">_get_time_ns</span><span class="p">()</span>              <span class="c1"># IMMEDIATELY capture timestamp — do not delay</span>
+
+        <span class="n">payload</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">data_queue</span><span class="o">.</span><span class="n">full</span><span class="p">():</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">data_queue</span><span class="o">.</span><span class="n">get_nowait</span><span class="p">()</span>     <span class="c1"># drop oldest item to make room</span>
+            <span class="k">except</span> <span class="n">queue</span><span class="o">.</span><span class="n">Empty</span><span class="p">:</span>
+                <span class="k">pass</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">data_queue</span><span class="o">.</span><span class="n">put_nowait</span><span class="p">((</span><span class="n">payload</span><span class="p">,</span> <span class="n">ts_ns</span><span class="p">))</span>
+        <span class="k">except</span> <span class="n">queue</span><span class="o">.</span><span class="n">Full</span><span class="p">:</span>
+            <span class="k">pass</span>                            <span class="c1"># extremely rare race condition — skip frame</span>
+
+    <span class="n">spi</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">start_acquisition</span><span class="p">(</span><span class="n">spi_bus</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">spi_cs</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">queue</span><span class="o">.</span><span class="n">Queue</span><span class="p">,</span> <span class="n">threading</span><span class="o">.</span><span class="n">Event</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Start the RT acquisition thread. Returns (queue, stop_event).&quot;&quot;&quot;</span>
+    <span class="n">data_q</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">Queue</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="n">QUEUE_MAX</span><span class="p">)</span>
+    <span class="n">stop_ev</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Event</span><span class="p">()</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span>
+        <span class="n">target</span><span class="o">=</span><span class="n">_acquisition_thread</span><span class="p">,</span>
+        <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">data_q</span><span class="p">,</span> <span class="n">stop_ev</span><span class="p">,</span> <span class="n">spi_bus</span><span class="p">,</span> <span class="n">spi_cs</span><span class="p">),</span>
+        <span class="n">daemon</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>      <span class="c1"># thread dies automatically when main process exits</span>
+        <span class="n">name</span><span class="o">=</span><span class="s1">&#39;spi_acq&#39;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">t</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">data_q</span><span class="p">,</span> <span class="n">stop_ev</span>
+</code></pre></div>
+
+<hr />
+<h3 id="23-ros2-python-publisher-node-proper-structure-with-sensordataqos-correct-timestamp">2.3 ROS2 Python publisher node — proper structure with SensorDataQoS, correct timestamp</h3>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env python3</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">spi_bridge_node.py — STM32 SPI to ROS2 bridge</span>
+
+<span class="sd">Architecture:</span>
+<span class="sd">  - acquisition thread (SCHED_FIFO, CPU3): reads SPI at 100Hz, timestamps immediately</span>
+<span class="sd">  - ROS2 executor thread: dequeues frames, publishes to /imu/raw + /wheel_speed</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.qos</span><span class="w"> </span><span class="kn">import</span> <span class="n">qos_profile_sensor_data</span>   <span class="c1"># pre-built BEST_EFFORT, depth=10</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">builtin_interfaces.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Time</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sensor_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Imu</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">geometry_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">TwistStamped</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">sensor_frame_pb2</span><span class="w"> </span><span class="kn">import</span> <span class="n">SensorFrame</span>        <span class="c1"># generated from sensor_frame.proto</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.spi_acquisition</span><span class="w"> </span><span class="kn">import</span> <span class="n">start_acquisition</span>  <span class="c1"># the thread from section 2.2</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">queue</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ns_to_ros_time</span><span class="p">(</span><span class="n">ns</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Time</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Convert nanoseconds since epoch to ROS2 Time message.&quot;&quot;&quot;</span>
+    <span class="n">msg</span> <span class="o">=</span> <span class="n">Time</span><span class="p">()</span>
+    <span class="n">msg</span><span class="o">.</span><span class="n">sec</span>     <span class="o">=</span> <span class="n">ns</span> <span class="o">//</span> <span class="mi">1_000_000_000</span>
+    <span class="n">msg</span><span class="o">.</span><span class="n">nanosec</span> <span class="o">=</span> <span class="n">ns</span>  <span class="o">%</span> <span class="mi">1_000_000_000</span>
+    <span class="k">return</span> <span class="n">msg</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">SpiBridgeNode</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;spi_bridge&#39;</span><span class="p">)</span>
+
+        <span class="c1"># ── Declare parameters ────────────────────────────────────────────────</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">declare_parameter</span><span class="p">(</span><span class="s1">&#39;spi_bus&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>         <span class="c1"># /dev/spidev&lt;bus&gt;.&lt;cs&gt;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">declare_parameter</span><span class="p">(</span><span class="s1">&#39;spi_cs&#39;</span><span class="p">,</span>  <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">declare_parameter</span><span class="p">(</span><span class="s1">&#39;imu_frame_id&#39;</span><span class="p">,</span> <span class="s1">&#39;imu_link&#39;</span><span class="p">)</span>   <span class="c1"># TF frame for IMU</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">declare_parameter</span><span class="p">(</span><span class="s1">&#39;base_frame_id&#39;</span><span class="p">,</span> <span class="s1">&#39;base_link&#39;</span><span class="p">)</span>
+
+        <span class="n">bus</span>       <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_parameter</span><span class="p">(</span><span class="s1">&#39;spi_bus&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+        <span class="n">cs</span>        <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_parameter</span><span class="p">(</span><span class="s1">&#39;spi_cs&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_imu_frame</span>  <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_parameter</span><span class="p">(</span><span class="s1">&#39;imu_frame_id&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_base_frame</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_parameter</span><span class="p">(</span><span class="s1">&#39;base_frame_id&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+
+        <span class="c1"># ── Publishers ────────────────────────────────────────────────────────</span>
+        <span class="c1"># qos_profile_sensor_data = BEST_EFFORT + VOLATILE + KEEP_LAST(10)</span>
+        <span class="c1"># Use BEST_EFFORT for ALL sensor topics at 100Hz — never RELIABLE.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_imu_pub</span>   <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">Imu</span><span class="p">,</span>          <span class="s1">&#39;/imu/raw&#39;</span><span class="p">,</span>     <span class="n">qos_profile_sensor_data</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_wheel_pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">TwistStamped</span><span class="p">,</span> <span class="s1">&#39;/wheel_speed&#39;</span><span class="p">,</span> <span class="n">qos_profile_sensor_data</span><span class="p">)</span>
+
+        <span class="c1"># ── Start RT acquisition thread ───────────────────────────────────────</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_data_q</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stop_ev</span> <span class="o">=</span> <span class="n">start_acquisition</span><span class="p">(</span><span class="n">bus</span><span class="p">,</span> <span class="n">cs</span><span class="p">)</span>
+
+        <span class="c1"># ── Statistics ───────────────────────────────────────────────────────</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pub_ok</span>  <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pub_err</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="c1"># ── 100Hz publish timer ───────────────────────────────────────────────</span>
+        <span class="c1"># This callback is now VERY fast: dequeue + fill message + publish.</span>
+        <span class="c1"># No SPI blocking. No protobuf decode (do that inside _publish).</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">create_timer</span><span class="p">(</span><span class="mf">0.010</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_publish_cb</span><span class="p">)</span>
+
+        <span class="c1"># ── Periodic stats log ────────────────────────────────────────────────</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">create_timer</span><span class="p">(</span><span class="mf">5.0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stats_cb</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;spi_bridge started: /dev/spidev</span><span class="si">{</span><span class="n">bus</span><span class="si">}</span><span class="s1">.</span><span class="si">{</span><span class="n">cs</span><span class="si">}</span><span class="s1"> @ 10MHz, &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;imu_frame=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_imu_frame</span><span class="si">}</span><span class="s1">&#39;</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_publish_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Called every 10ms by the executor. Dequeues ONE frame and publishes it.&quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">raw_bytes</span><span class="p">,</span> <span class="n">ts_ns</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_data_q</span><span class="o">.</span><span class="n">get_nowait</span><span class="p">()</span>
+        <span class="k">except</span> <span class="n">queue</span><span class="o">.</span><span class="n">Empty</span><span class="p">:</span>
+            <span class="c1"># SPI acquisition hasn&#39;t produced a frame yet (startup transient)</span>
+            <span class="c1"># or the acquisition thread is behind — log at warn, not error</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s1">&#39;publish_cb: queue empty&#39;</span><span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">frame</span> <span class="o">=</span> <span class="n">SensorFrame</span><span class="p">()</span>
+            <span class="n">frame</span><span class="o">.</span><span class="n">ParseFromString</span><span class="p">(</span><span class="n">raw_bytes</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_publish_frame</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="n">ts_ns</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pub_ok</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Frame decode error: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pub_err</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_publish_frame</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">:</span> <span class="n">SensorFrame</span><span class="p">,</span> <span class="n">ts_ns</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Fill and publish ROS2 messages from a decoded SensorFrame.&quot;&quot;&quot;</span>
+        <span class="n">ros_stamp</span> <span class="o">=</span> <span class="n">_ns_to_ros_time</span><span class="p">(</span><span class="n">ts_ns</span><span class="p">)</span>   <span class="c1"># timestamp of the ACTUAL SPI transfer</span>
+
+        <span class="k">if</span> <span class="n">frame</span><span class="o">.</span><span class="n">HasField</span><span class="p">(</span><span class="s1">&#39;imu&#39;</span><span class="p">):</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="n">Imu</span><span class="p">()</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span>    <span class="o">=</span> <span class="n">ros_stamp</span>       <span class="c1"># captured right after xfer2() returned</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">frame_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_imu_frame</span> <span class="c1"># must match your TF tree</span>
+
+            <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">accel_x</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">accel_y</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">z</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">accel_z</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity</span><span class="o">.</span><span class="n">x</span>    <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">gyro_x</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity</span><span class="o">.</span><span class="n">y</span>    <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">gyro_y</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity</span><span class="o">.</span><span class="n">z</span>    <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">gyro_z</span>
+
+            <span class="c1"># -1.0 in position [0] = &quot;covariance unknown; use robot_localization YAML config&quot;</span>
+            <span class="c1"># DO NOT leave all zeros — that means &quot;infinitely accurate&quot; → EKF diverges</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration_covariance</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="mf">1.0</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity_covariance</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>    <span class="o">=</span> <span class="o">-</span><span class="mf">1.0</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">orientation_covariance</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>         <span class="o">=</span> <span class="o">-</span><span class="mf">1.0</span>  <span class="c1"># IMU has no mag, no orientation</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_imu_pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">frame</span><span class="o">.</span><span class="n">HasField</span><span class="p">(</span><span class="s1">&#39;wheel&#39;</span><span class="p">):</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="n">TwistStamped</span><span class="p">()</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span>    <span class="o">=</span> <span class="n">ros_stamp</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">frame_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_base_frame</span>
+            <span class="n">vl</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">wheel</span><span class="o">.</span><span class="n">speed_left</span>
+            <span class="n">vr</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">wheel</span><span class="o">.</span><span class="n">speed_right</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">linear</span><span class="o">.</span><span class="n">x</span>  <span class="o">=</span> <span class="p">(</span><span class="n">vl</span> <span class="o">+</span> <span class="n">vr</span><span class="p">)</span> <span class="o">/</span> <span class="mf">2.0</span>     <span class="c1"># average forward speed</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">angular</span><span class="o">.</span><span class="n">z</span> <span class="o">=</span> <span class="p">(</span><span class="n">vr</span> <span class="o">-</span> <span class="n">vl</span><span class="p">)</span> <span class="o">/</span> <span class="mf">0.30</span>     <span class="c1"># angular from differential (0.30m wheelbase)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_wheel_pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_stats_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">total</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pub_ok</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pub_err</span>
+        <span class="n">rate</span>  <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pub_ok</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="n">total</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="mf">100.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;spi_bridge: ok=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_pub_ok</span><span class="si">}</span><span class="s1"> err=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_pub_err</span><span class="si">}</span><span class="s1"> &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;queue_size=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_data_q</span><span class="o">.</span><span class="n">qsize</span><span class="p">()</span><span class="si">}</span><span class="s1"> success=</span><span class="si">{</span><span class="n">rate</span><span class="si">:</span><span class="s1">.1f</span><span class="si">}</span><span class="s1">%&#39;</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">destroy_node</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_stop_ev</span><span class="o">.</span><span class="n">set</span><span class="p">()</span>     <span class="c1"># signal acquisition thread to exit</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">destroy_node</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="n">args</span><span class="p">)</span>
+    <span class="n">node</span> <span class="o">=</span> <span class="n">SpiBridgeNode</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">rclpy</span><span class="o">.</span><span class="n">spin</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>        <span class="c1"># runs executor; calls _publish_cb every 10ms</span>
+    <span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+        <span class="k">pass</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">node</span><span class="o">.</span><span class="n">destroy_node</span><span class="p">()</span>
+        <span class="n">rclpy</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h3 id="24-the-wrong-publisher-vs-the-correct-publisher-side-by-side">2.4 The WRONG publisher vs the CORRECT publisher — side by side</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># ════════════════════════════════════════════════════════════════════════════</span>
+<span class="c1"># ❌ WRONG: ioctl (xfer2) inside the timer callback</span>
+<span class="c1"># ════════════════════════════════════════════════════════════════════════════</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">WrongBridgeNode</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;wrong_bridge&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span> <span class="o">=</span> <span class="n">spidev</span><span class="o">.</span><span class="n">SpiDev</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">max_speed_hz</span> <span class="o">=</span> <span class="mi">10_000_000</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">mode</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">Imu</span><span class="p">,</span> <span class="s1">&#39;/imu/raw&#39;</span><span class="p">,</span> <span class="n">qos_profile_sensor_data</span><span class="p">)</span>
+
+        <span class="c1"># ← Timer callback does EVERYTHING: SPI + decode + publish</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">create_timer</span><span class="p">(</span><span class="mf">0.010</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cb</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># ← This xfer2() BLOCKS for ~55µs, holding the executor hostage</span>
+        <span class="c1"># The executor cannot fire ANY other callback until this returns.</span>
+        <span class="n">raw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">([</span><span class="mh">0x00</span><span class="p">]</span> <span class="o">*</span> <span class="mi">64</span><span class="p">)</span>
+
+        <span class="c1"># ← Timestamp captured AFTER the transfer — already 0.1ms late minimum</span>
+        <span class="c1"># The time from xfer2() return to get_clock().now() adds processing jitter.</span>
+        <span class="n">stamp</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_clock</span><span class="p">()</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">to_msg</span><span class="p">()</span>
+
+        <span class="n">frame</span> <span class="o">=</span> <span class="n">SensorFrame</span><span class="p">()</span>
+        <span class="n">frame</span><span class="o">.</span><span class="n">ParseFromString</span><span class="p">(</span><span class="nb">bytes</span><span class="p">(</span><span class="n">raw</span><span class="p">))</span>   <span class="c1"># decode here adds another 0.1ms</span>
+
+        <span class="n">msg</span> <span class="o">=</span> <span class="n">Imu</span><span class="p">()</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span> <span class="o">=</span> <span class="n">stamp</span>            <span class="c1"># wrong! already stale</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">accel_x</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="c1"># Total callback duration: ~200µs minimum, up to 3ms on a loaded system</span>
+        <span class="c1"># Actual publish rate: ~87Hz instead of 100Hz</span>
+        <span class="c1"># EKF sees 2ms timestamp error → phantom orientation drift</span>
+
+
+<span class="c1"># ════════════════════════════════════════════════════════════════════════════</span>
+<span class="c1"># ✅ CORRECT: dedicated RT acquisition thread + fast publish callback</span>
+<span class="c1"># ════════════════════════════════════════════════════════════════════════════</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">CorrectBridgeNode</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;correct_bridge&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">Imu</span><span class="p">,</span> <span class="s1">&#39;/imu/raw&#39;</span><span class="p">,</span> <span class="n">qos_profile_sensor_data</span><span class="p">)</span>
+
+        <span class="c1"># ← Acquisition happens in a SEPARATE Python thread at SCHED_FIFO priority.</span>
+        <span class="c1"># xfer2() blocking does NOT affect the executor.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_q</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stop</span> <span class="o">=</span> <span class="n">start_acquisition</span><span class="p">(</span><span class="n">spi_bus</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">spi_cs</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="c1"># ← Timer callback is now &lt;5µs: dequeue + message fill + publish</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">create_timer</span><span class="p">(</span><span class="mf">0.010</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cb</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">raw</span><span class="p">,</span> <span class="n">ts_ns</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_q</span><span class="o">.</span><span class="n">get_nowait</span><span class="p">()</span>   <span class="c1"># non-blocking dequeue</span>
+        <span class="k">except</span> <span class="n">queue</span><span class="o">.</span><span class="n">Empty</span><span class="p">:</span>
+            <span class="k">return</span>                               <span class="c1"># acquisition thread not ready yet</span>
+
+        <span class="c1"># ← Timestamp from the acquisition thread: captured IMMEDIATELY after xfer2</span>
+        <span class="n">msg</span> <span class="o">=</span> <span class="n">Imu</span><span class="p">()</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span>    <span class="o">=</span> <span class="n">_ns_to_ros_time</span><span class="p">(</span><span class="n">ts_ns</span><span class="p">)</span>   <span class="c1"># accurate to &lt;10µs</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">frame_id</span> <span class="o">=</span> <span class="s1">&#39;imu_link&#39;</span>
+        <span class="n">frame</span> <span class="o">=</span> <span class="n">SensorFrame</span><span class="p">()</span>
+        <span class="n">frame</span><span class="o">.</span><span class="n">ParseFromString</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">imu</span><span class="o">.</span><span class="n">accel_x</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration_covariance</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="mf">1.0</span>   <span class="c1"># not zero!</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="c1"># Total callback duration: ~5µs typical; executor never stalled</span>
+        <span class="c1"># Actual publish rate: 100.0Hz ± 0.3Hz</span>
+        <span class="c1"># EKF timestamp error: &lt;50µs</span>
+</code></pre></div>
+
+<p><strong>Key differences at a glance:</strong></p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>WRONG (ioctl in callback)</th>
+<th>CORRECT (thread + queue)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Executor blocked during xfer2?</td>
+<td>Yes — ~55µs</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Actual publish rate</td>
+<td>~83–87Hz</td>
+<td>99.5–100.5Hz</td>
+</tr>
+<tr>
+<td>Timestamp accuracy</td>
+<td>0.5–3ms error</td>
+<td>&lt;50µs error</td>
+</tr>
+<tr>
+<td>EKF behaviour</td>
+<td>Phantom drift</td>
+<td>Converges correctly</td>
+</tr>
+<tr>
+<td>Other callbacks delayed?</td>
+<td>Yes</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="25-cyclictest-measuring-your-rt-latency-baseline">2.5 cyclictest — measuring your RT latency baseline</h3>
+<p><code>cyclictest</code> is the standard tool for measuring how late a real-time task wakes up compared to its
+scheduled wakeup time. Run this BEFORE starting any node to confirm your RT baseline is acceptable.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Basic command:</span>
+sudo<span class="w"> </span>cyclictest<span class="w"> </span>-m<span class="w"> </span>-sp99<span class="w"> </span>-t4<span class="w"> </span>-l100000
+
+<span class="c1"># Flag breakdown:</span>
+<span class="c1">#   -m          : mlockall — prevent page faults during the test itself</span>
+<span class="c1">#   -s          : show summary at end</span>
+<span class="c1">#   -p99        : SCHED_FIFO priority 99 — maximum RT priority to expose worst-case kernel latency</span>
+<span class="c1">#   -t4         : run 4 threads (one per core — stresses all CPUs simultaneously)</span>
+<span class="c1">#   -l100000    : run 100,000 iterations per thread (takes ~100 seconds at -i 1000µs default)</span>
+
+<span class="c1"># Example output:</span>
+<span class="c1"># T: 0 (14423) P:99 I:1000 C: 100000 Min:    12 Act:   14 Avg:   18 Max:    67</span>
+<span class="c1"># T: 1 (14424) P:99 I:1000 C: 100000 Min:    11 Act:   13 Avg:   17 Max:    72</span>
+<span class="c1"># T: 2 (14425) P:99 I:1000 C: 100000 Min:    13 Act:   15 Avg:   19 Max:    81</span>
+<span class="c1"># T: 3 (14426) P:99 I:1000 C: 100000 Min:    12 Act:   14 Avg:   18 Max:    69</span>
+
+<span class="c1"># Column meanings:</span>
+<span class="c1">#   T:           thread index</span>
+<span class="c1">#   (14423):     PID</span>
+<span class="c1">#   P:99:        priority</span>
+<span class="c1">#   I:1000:      interval in microseconds (1ms between wakeups)</span>
+<span class="c1">#   C: 100000:   count of completed iterations</span>
+<span class="c1">#   Min: 12:     best-case wakeup latency = 12µs</span>
+<span class="c1">#   Act: 14:     most recent iteration latency</span>
+<span class="c1">#   Avg: 18:     average latency over all iterations</span>
+<span class="c1">#   Max: 67:     WORST-CASE latency = 67µs ← this is the number you care about</span>
+
+<span class="c1"># Acceptance criteria for 100Hz SPI acquisition:</span>
+<span class="c1">#   Max &lt; 100µs  → excellent, 10ms budget with &lt;1% consumed by latency</span>
+<span class="c1">#   Max &lt; 500µs  → acceptable for 100Hz</span>
+<span class="c1">#   Max &gt; 1000µs → investigate: irqbalance? thermal throttling? wrong kernel?</span>
+
+<span class="c1"># Run while your ROS2 node is active (stresses the system realistically):</span>
+sudo<span class="w"> </span>cyclictest<span class="w"> </span>-m<span class="w"> </span>-sp90<span class="w"> </span>-t1<span class="w"> </span>-l100000<span class="w"> </span><span class="p">&amp;</span>
+ros2<span class="w"> </span>run<span class="w"> </span>spi_bridge<span class="w"> </span>spi_bridge<span class="w"> </span><span class="p">&amp;</span>
+<span class="c1"># Compare Max values with and without the ROS2 node running</span>
+</code></pre></div>
+
+<hr />
+<h3 id="26-strace-t-measuring-actual-ioctl-duration-per-call">2.6 strace -T — measuring actual ioctl duration per call</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Trace only ioctl calls, show wall-clock time per call:</span>
+sudo<span class="w"> </span>strace<span class="w"> </span>-T<span class="w"> </span>-e<span class="w"> </span><span class="nv">trace</span><span class="o">=</span>ioctl<span class="w"> </span>python3<span class="w"> </span>spi_reader.py<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>SPI
+
+<span class="c1"># Example output (one line per ioctl call):</span>
+<span class="c1"># ioctl(3, SPI_IOC_MESSAGE(1), 0x7ff8b24000) = 1 &lt;0.000058&gt;</span>
+<span class="c1"># ioctl(3, SPI_IOC_MESSAGE(1), 0x7ff8b24000) = 1 &lt;0.000061&gt;</span>
+<span class="c1"># ioctl(3, SPI_IOC_MESSAGE(1), 0x7ff8b24000) = 1 &lt;0.000210&gt;  ← spike!</span>
+<span class="c1"># ioctl(3, SPI_IOC_MESSAGE(1), 0x7ff8b24000) = 1 &lt;0.000059&gt;</span>
+
+<span class="c1"># The number in &lt;&gt; is WALL-CLOCK time for that single ioctl call, in seconds.</span>
+<span class="c1"># 0.000058 = 58µs (normal for 64-byte frame at 10MHz)</span>
+<span class="c1"># 0.000210 = 210µs (spike — likely IRQ migration or cache miss)</span>
+
+<span class="c1"># The ioctl number SPI_IOC_MESSAGE(1) breaks down as:</span>
+<span class="c1">#   SPI_IOC_MESSAGE(n): ioctl that chains n spi_ioc_transfer structs</span>
+<span class="c1">#   The (1) means one transfer struct — our single 64-byte transfer</span>
+<span class="c1">#   Return value &quot;= 1&quot; means: success, 1 transfer completed</span>
+
+<span class="c1"># Useful combination: watch for spikes AND confirm nominal duration:</span>
+sudo<span class="w"> </span>strace<span class="w"> </span>-T<span class="w"> </span>-e<span class="w"> </span><span class="nv">trace</span><span class="o">=</span>ioctl<span class="w"> </span>python3<span class="w"> </span>spi_reader.py<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>SPI<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">&#39;{print $NF}&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="p">|</span><span class="w"> </span>tr<span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;&lt;&gt;&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">&#39;{if ($1+0 &gt; 0.0001) print &quot;SPIKE: &quot; $1}&#39;</span>
+<span class="w">    </span><span class="c1"># prints only ioctls taking &gt;100µs</span>
+</code></pre></div>
+
+<hr />
+<h3 id="27-robot_localization-yaml-config-covariance-matrix-annotation">2.7 robot_localization YAML config — covariance matrix annotation</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># ekf_config.yaml — robot_localization EKF node configuration</span>
+<span class="c1"># Located: ~/ros2_ws/src/my_robot/config/ekf_config.yaml</span>
+
+<span class="nt">ekf_node</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">ros__parameters</span><span class="p">:</span>
+<span class="w">    </span><span class="c1"># ── Coordinate frames ─────────────────────────────────────────────────────</span>
+<span class="w">    </span><span class="nt">world_frame</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">odom</span><span class="w">           </span><span class="c1"># frame published by this EKF (map or odom)</span>
+<span class="w">    </span><span class="nt">odom_frame</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">odom</span><span class="w">            </span><span class="c1"># the EKF publishes the odom→base_link transform</span>
+<span class="w">    </span><span class="nt">base_link_frame</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">base_link</span>
+
+<span class="w">    </span><span class="c1"># ── Input sensors ────────────────────────────────────────────────────────</span>
+<span class="w">    </span><span class="nt">imu0</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/imu/raw</span><span class="w">              </span><span class="c1"># Topic for IMU input</span>
+<span class="w">    </span><span class="nt">imu0_config</span><span class="p">:</span><span class="w">                </span><span class="c1"># 15 booleans: which fields to fuse</span>
+<span class="w">      </span><span class="c1"># Format: [roll, pitch, yaw, vroll, vpitch, vyaw, ax, ay, az, vx, vy, vz, x, y, z]</span>
+<span class="w">      </span><span class="c1"># False = ignore that field from this sensor</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w">   </span><span class="c1"># roll, pitch, yaw    — IMU has no magnetometer → no absolute heading</span>
+<span class="w">         </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="c1"># vroll, vpitch, vyaw — angular velocities from gyro ← fuse these</span>
+<span class="w">         </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="c1"># ax, ay, az          — linear accelerations from accel ← fuse these</span>
+<span class="w">         </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w">   </span><span class="c1"># vx, vy, vz          — velocities: not from IMU</span>
+<span class="w">         </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># x, y, z             — position: not from IMU</span>
+
+<span class="w">    </span><span class="nt">imu0_differential</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">    </span><span class="c1"># false: use absolute values; true: use incremental changes</span>
+<span class="w">    </span><span class="nt">imu0_relative</span><span class="p">:</span><span class="w">     </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">    </span><span class="c1"># false: use sensor&#39;s frame; true: interpret w.r.t. robot start pose</span>
+<span class="w">    </span><span class="nt">imu0_queue_size</span><span class="p">:</span><span class="w">   </span><span class="l l-Scalar l-Scalar-Plain">10</span><span class="w">       </span><span class="c1"># internal queue; increase if messages arrive in bursts</span>
+
+<span class="w">    </span><span class="nt">odom0</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/wheel_speed</span><span class="w">         </span><span class="c1"># Topic for wheel odometry</span>
+<span class="w">    </span><span class="nt">odom0_config</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="c1"># vx (forward velocity) and vyaw (from differential drive)</span>
+<span class="w">         </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">]</span>
+
+<span class="w">    </span><span class="c1"># ── Process noise covariance (Q matrix) ─────────────────────────────────</span>
+<span class="w">    </span><span class="c1"># How much we trust our OWN MOTION MODEL between measurements.</span>
+<span class="w">    </span><span class="c1"># Larger value = &quot;our model is uncertain&quot; → EKF weights sensor data more heavily.</span>
+<span class="w">    </span><span class="c1"># 15×15 matrix (flattened). Elements correspond to:</span>
+<span class="w">    </span><span class="c1"># [roll, pitch, yaw, vroll, vpitch, vyaw, ax, ay, az, vx, vy, vz, x, y, z]</span>
+<span class="w">    </span><span class="c1"># Diagonal entries matter; off-diagonal usually 0.</span>
+<span class="w">    </span><span class="nt">process_noise_covariance</span><span class="p">:</span><span class="w">   </span><span class="c1"># Q matrix, 15×15 flattened to 225 values</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0.05</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0.05</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0.06</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0.03</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0.03</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0.06</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0.025</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0.025</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0.04</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0.01</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0.01</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0.02</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0.1</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0.1</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0.15</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="c1"># ↑ The [0,0] element (0.05) = process noise for roll: how much roll can change per second²</span>
+<span class="w">    </span><span class="c1"># ↑ The [6,6] element (0.025) = process noise for ax: accelerometer model uncertainty</span>
+<span class="w">    </span><span class="c1"># Rule of thumb: start with these values; if EKF reacts too slowly → increase;</span>
+<span class="w">    </span><span class="c1">#                if EKF is noisy → decrease</span>
+
+<span class="w">    </span><span class="c1"># ── Initial state covariance (P₀ matrix) ─────────────────────────────────</span>
+<span class="w">    </span><span class="c1"># How uncertain we are about the robot&#39;s STARTING state.</span>
+<span class="w">    </span><span class="c1"># High values = &quot;I have no idea where I am at boot&quot; (usually correct)</span>
+<span class="w">    </span><span class="nt">initial_estimate_covariance</span><span class="p">:</span><span class="w">  </span><span class="c1"># 15×15, same structure as process_noise_covariance</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">1e-9</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">1e-9</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">1e-9</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">1e-9</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">1e-9</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">1e-9</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">1e-9</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">1e-9</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">1e-9</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">1e-9</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">1e-9</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">1e-9</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0.5</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0.5</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">0</span><span class="p p-Indicator">,</span>
+<span class="w">         </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">     </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="nv">0.5</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="c1"># ↑ Small values for rotations/velocities (we start at rest = well-known)</span>
+<span class="w">    </span><span class="c1"># ↑ 0.5 for x, y, z position (we might not know where we are yet)</span>
+</code></pre></div>
+
+<hr />
+<h3 id="28-tf2-static-transform-broadcaster-for-imu_link">2.8 TF2 static transform broadcaster for imu_link</h3>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env python3</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Publish the static transform between base_link and imu_link.</span>
+<span class="sd">This runs once at startup and keeps the transform alive via /tf_static.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">tf2_ros</span><span class="w"> </span><span class="kn">import</span> <span class="n">StaticTransformBroadcaster</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">geometry_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">TransformStamped</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">ImuTfPublisher</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;imu_tf_publisher&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_broadcaster</span> <span class="o">=</span> <span class="n">StaticTransformBroadcaster</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+        <span class="n">tf</span> <span class="o">=</span> <span class="n">TransformStamped</span><span class="p">()</span>
+
+        <span class="c1"># ── Header ────────────────────────────────────────────────────────────</span>
+        <span class="n">tf</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span>    <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_clock</span><span class="p">()</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">to_msg</span><span class="p">()</span>
+        <span class="n">tf</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">frame_id</span> <span class="o">=</span> <span class="s1">&#39;base_link&#39;</span>     <span class="c1"># parent frame</span>
+        <span class="n">tf</span><span class="o">.</span><span class="n">child_frame_id</span>  <span class="o">=</span> <span class="s1">&#39;imu_link&#39;</span>      <span class="c1"># child frame</span>
+
+        <span class="c1"># ── Translation: where is the IMU relative to base_link center? ──────</span>
+        <span class="c1"># Positive x = forward, positive y = left, positive z = up</span>
+        <span class="c1"># Example: IMU is 5cm forward, 0 lateral, 3cm above base center</span>
+        <span class="n">tf</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">translation</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="mf">0.05</span>    <span class="c1"># 5cm forward</span>
+        <span class="n">tf</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">translation</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">tf</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">translation</span><span class="o">.</span><span class="n">z</span> <span class="o">=</span> <span class="mf">0.03</span>    <span class="c1"># 3cm above base_link origin</span>
+
+        <span class="c1"># ── Rotation: how is the IMU mounted? ─────────────────────────────────</span>
+        <span class="c1"># If IMU x-axis aligns with robot forward and z-axis points up:</span>
+        <span class="c1"># → no rotation needed → identity quaternion</span>
+        <span class="n">tf</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">rotation</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">tf</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">rotation</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">tf</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">rotation</span><span class="o">.</span><span class="n">z</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">tf</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">rotation</span><span class="o">.</span><span class="n">w</span> <span class="o">=</span> <span class="mf">1.0</span>       <span class="c1"># identity quaternion = no rotation</span>
+
+        <span class="c1"># If IMU is mounted rotated 90° around Z (IMU x = robot left):</span>
+        <span class="c1"># tf.transform.rotation.z = math.sin(math.pi / 4)  # sin(45°)</span>
+        <span class="c1"># tf.transform.rotation.w = math.cos(math.pi / 4)  # cos(45°)</span>
+
+        <span class="c1"># StaticTransformBroadcaster.sendTransform() publishes to /tf_static</span>
+        <span class="c1"># /tf_static is LATCHED — new subscribers get the transform immediately,</span>
+        <span class="c1"># even if they subscribe after this node has already published.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_broadcaster</span><span class="o">.</span><span class="n">sendTransform</span><span class="p">(</span><span class="n">tf</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;Published static TF: </span><span class="si">{</span><span class="n">tf</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">frame_id</span><span class="si">}</span><span class="s1"> → </span><span class="si">{</span><span class="n">tf</span><span class="o">.</span><span class="n">child_frame_id</span><span class="si">}</span><span class="s1">&#39;</span>
+        <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="n">args</span><span class="p">)</span>
+    <span class="n">node</span> <span class="o">=</span> <span class="n">ImuTfPublisher</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">spin</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+    <span class="n">node</span><span class="o">.</span><span class="n">destroy_node</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</code></pre></div>
+
+<p><strong>Verify the transform was published:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1"># List all known TF frames:</span>
+ros2<span class="w"> </span>run<span class="w"> </span>tf2_tools<span class="w"> </span>view_frames<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>evince<span class="w"> </span>frames.pdf
+
+<span class="c1"># Query the specific transform:</span>
+ros2<span class="w"> </span>run<span class="w"> </span>tf2_ros<span class="w"> </span>tf2_echo<span class="w"> </span>base_link<span class="w"> </span>imu_link
+<span class="c1"># Should print translation + rotation without error</span>
+
+<span class="c1"># If you see &quot;lookup would require extrapolation into the future&quot;:</span>
+<span class="c1"># The TF is not being published. Check your node is running.</span>
+
+<span class="c1"># If you see &quot;frame does not exist&quot;:</span>
+<span class="c1"># Common causes:</span>
+<span class="c1">#   1. frame_id typo (&quot;imu&quot; vs &quot;imu_link&quot;)</span>
+<span class="c1">#   2. Static broadcaster node not running</span>
+<span class="c1">#   3. /tf_static not being published (check ros2 topic echo /tf_static)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="part-3-gotcha-table">PART 3 — Gotcha Table</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely Cause</th>
+<th>How to Diagnose</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/dev/spidev0.0</code> does not exist</td>
+<td><code>jetson-io.py</code> not run, or run but no reboot</td>
+<td><code>ls /dev/spidev*</code> returns empty. Check <code>dmesg | grep spi</code>. No spidev kernel module loaded for that bus.</td>
+<td>Run <code>sudo /opt/nvidia/jetson-io/jetson-io.py</code>, configure SPI1, save, then <strong>reboot</strong> the Jetson.</td>
+</tr>
+<tr>
+<td><code>ioctl</code> hangs forever, node freezes</td>
+<td>STM32 reset mid-transfer with CS still asserted</td>
+<td>Node stops responding. <code>strace</code> shows ioctl blocking with no return. The kernel SPI driver has no timeout.</td>
+<td>Run SPI ioctl in a dedicated thread with a watchdog timer. Detect STM32 reset via a GPIO &ldquo;heartbeat&rdquo; pin.</td>
+</tr>
+<tr>
+<td>Default speed too slow — can&rsquo;t hit 100Hz</td>
+<td><code>max_speed_hz</code> not set, defaults to 500kHz kernel default</td>
+<td>At 500kHz, 64-byte frame takes 1.024ms. At 100Hz you need &lt;10ms. <code>strace -T</code> shows each ioctl taking ~1ms.</td>
+<td>Set <code>spi.max_speed_hz = 10_000_000</code> explicitly. Validate with <code>spidev_test -s 10000000</code>.</td>
+</tr>
+<tr>
+<td>Publish rate stuck at 83–87Hz</td>
+<td><code>xfer2()</code> called inside ROS2 timer callback — executor stalled</td>
+<td><code>ros2 topic hz /imu/raw</code> shows ~87Hz. <code>strace -T</code> shows ioctl calls ~55µs each but callback period is &gt;11ms.</td>
+<td>Move <code>xfer2()</code> to a dedicated Python thread. Push frames via <code>queue.Queue</code>. Timer callback only dequeues and publishes.</td>
+</tr>
+<tr>
+<td>No messages received on a topic despite publisher running</td>
+<td>QoS mismatch — publisher BEST_EFFORT, subscriber RELIABLE (or vice versa)</td>
+<td><code>ros2 topic hz /imu/raw</code> shows 0Hz at subscriber. <code>ros2 topic info -v /imu/raw</code> shows mismatched Reliability fields between publisher and subscriber.</td>
+<td>Both publisher and subscriber must use compatible QoS. Use <code>qos_profile_sensor_data</code> (BEST_EFFORT) on both ends for sensor topics.</td>
+</tr>
+<tr>
+<td>rviz2 shows no data / &ldquo;No tf data&rdquo;</td>
+<td>Wrong <code>frame_id</code> in message header</td>
+<td>Check <code>ros2 topic echo /imu/raw | grep frame_id</code>. If it says <code>"imu"</code> but your TF tree has <code>"imu_link"</code>, TF2 can&rsquo;t look up the transform.</td>
+<td>Set <code>msg.header.frame_id = 'imu_link'</code> (match exactly what&rsquo;s in your static TF broadcaster).</td>
+</tr>
+<tr>
+<td>EKF diverges / orientation drifts without physical motion</td>
+<td>Timestamp captured too late (stale by 1–3ms)</td>
+<td><code>ros2 topic delay /imu/raw</code> shows &gt;2ms end-to-end latency. The EKF integrates angular velocity using dt that includes the latency. Symptoms appear as slow orientation drift.</td>
+<td>Capture <code>CLOCK_MONOTONIC_RAW</code> <strong>immediately</strong> after <code>xfer2()</code> returns, before any decode or message construction. Pass the nanosecond value through the queue to the publisher.</td>
+</tr>
+<tr>
+<td>EKF diverges immediately to NaN</td>
+<td>Covariance matrix has zeros on diagonal</td>
+<td>Check your Imu message: <code>msg.linear_acceleration_covariance</code> all zeros. A zero covariance diagonal means &ldquo;infinite precision&rdquo; → Kalman gain computation divides by zero → NaN propagates.</td>
+<td>Set <code>msg.linear_acceleration_covariance[0] = -1.0</code> (unknown) OR fill the full 3×3 diagonal with your calibrated variance values (e.g., <code>0.01</code>). Never leave as all-zeros.</td>
+</tr>
+<tr>
+<td>Intermittent 2ms latency spikes in SPI timing despite PREEMPT-RT</td>
+<td><code>irqbalance</code> migrating the SPI IRQ to a different CPU</td>
+<td>Spikes appear every few hundred seconds, disappear on node restart. <code>cat /proc/interrupts | grep spi</code> shows the SPI IRQ moving between CPUs over time.</td>
+<td><code>sudo systemctl disable irqbalance &amp;&amp; sudo systemctl stop irqbalance</code>. Pin the SPI IRQ manually: <code>echo 8 &gt; /proc/irq/&lt;N&gt;/smp_affinity</code> (CPU3).</td>
+</tr>
+<tr>
+<td><code>rosbag2 record</code> degrades IMU publish rate</td>
+<td>SQLite WAL flush: default storage backend blocks all DDS writes for ~40ms every ~4 seconds</td>
+<td>Start recording, watch <code>ros2 topic hz /imu/raw</code> drop from 100Hz to periodic stuttering. <code>strace</code> on the ros2 bag process shows <code>fsync()</code> calls taking 20–40ms.</td>
+<td>Use MCAP storage: <code>ros2 bag record --storage mcap /imu/raw</code>. Or set BEST_EFFORT QoS on all sensor topics so DDS backpressure doesn&rsquo;t stall the publisher.</td>
+</tr>
+<tr>
+<td><code>spidev_test</code> works but Python script gets garbage</td>
+<td>Wrong SPI mode (CPOL/CPHA mismatch)</td>
+<td><code>spidev_test</code> uses mode 0 by default. Your Python script might have <code>spi.mode = 1</code> or <code>spi.mode = 2</code>. Logic analyzer: check CLK idle state and sample edge.</td>
+<td>Match <code>spi.mode</code> exactly to your STM32 configuration. STM32 <code>SPI_CPOL_Low + SPI_CPHA_1Edge</code> = mode 1, not mode 0.</td>
+</tr>
+<tr>
+<td><code>colcon build</code> succeeds but <code>ros2 run spi_bridge spi_bridge</code> says &ldquo;executable not found&rdquo;</td>
+<td><code>source install/setup.bash</code> not run after build</td>
+<td>The new package is not yet on the ROS2 package path.</td>
+<td>Run <code>source ~/ros2_ws/install/setup.bash</code> after every <code>colcon build</code>. Add this to <code>~/.bashrc</code> for convenience.</td>
+</tr>
+<tr>
+<td>EKF ignores IMU entirely — only uses odometry</td>
+<td>IMU topic not listed in <code>robot_localization</code> YAML, or <code>imu0_config</code> has all <code>false</code></td>
+<td><code>robot_localization</code> debug output shows &ldquo;imu0: 0 measurements fused.&rdquo; Topic name typo in YAML, or all fuse flags are <code>false</code>.</td>
+<td>Verify <code>imu0: /imu/raw</code> matches the actual topic name. Ensure at least <code>vroll, vpitch, vyaw</code> and <code>ax, ay, az</code> are <code>true</code> in <code>imu0_config</code>.</td>
+</tr>
+<tr>
+<td><code>ros2 topic delay /imu/raw</code> shows 50ms</td>
+<td>rosbag2 recording on same machine + RELIABLE QoS causing backpressure</td>
+<td>Delay grows under recording load. Subscriber queue fills up.</td>
+<td>Switch to BEST_EFFORT QoS everywhere for sensor topics, and use MCAP storage for rosbag2.</td>
+</tr>
+<tr>
+<td>Thermal throttling looks like SPI timeouts</td>
+<td>Jetson CPU frequency drops 30% under sustained load</td>
+<td><code>tegrastats</code> shows CPU freq below max. <code>sudo nvpmodel -q</code> shows non-MAXN mode. <code>cyclictest</code> Max latency increases over time.</td>
+<td><code>sudo nvpmodel -m 0 &amp;&amp; sudo jetson_clocks</code> before any timing test. Ensure adequate cooling on heatsink.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="quick-reference-card">Quick Reference Card</h2>
+<div class="highlight"><pre><span></span><code># ── spidev hardware validation ──────────────────────────────────────────────
+ls /dev/spidev*                              # verify /dev/spidev0.0 exists
+sudo spidev_test -D /dev/spidev0.0 \         # hardware round-trip test
+    -s 10000000 -p &quot;AABBCCDD&quot; -v
+
+# ── Jetson RT setup (run before any SPI node) ─────────────────────────────
+sudo nvpmodel -m 0 &amp;&amp; sudo jetson_clocks    # max CPU/GPU clocks, disable throttling
+sudo systemctl disable irqbalance           # stop IRQ migration
+sudo systemctl stop irqbalance              # stop immediately
+# Edit /boot/extlinux/extlinux.conf: add isolcpus=3 nohz_full=3 rcu_nocbs=3
+echo 8 &gt; /proc/irq/$(cat /proc/interrupts | grep spi | awk &#39;{print $1}&#39; | tr -d &#39;:&#39;)/smp_affinity
+
+# ── RT latency measurement ──────────────────────────────────────────────────
+sudo cyclictest -m -sp99 -t4 -l100000       # 100k samples, 4 threads; Max should be &lt;100µs
+sudo strace -T -e trace=ioctl python3 spi_reader.py 2&gt;&amp;1 | grep SPI  # real ioctl duration
+
+# ── Thread RT setup (in Python) ─────────────────────────────────────────────
+# From shell: sudo chrt -f 90 taskset -c 3 python3 spi_reader.py
+import ctypes; libc = ctypes.CDLL(&#39;libc.so.6&#39;, use_errno=True)
+class SP(ctypes.Structure): _fields_=[(&#39;sched_priority&#39;,ctypes.c_int)]
+libc.sched_setscheduler(0, 1, ctypes.byref(SP(90)))   # SCHED_FIFO priority 90
+import os; os.sched_setaffinity(0, {3})               # pin to CPU3
+
+# ── ROS2 health checks ───────────────────────────────────────────────────────
+ros2 topic hz /imu/raw                       # should show ~100.0Hz
+ros2 topic delay /imu/raw                    # should show &lt;5ms
+ros2 topic info -v /imu/raw                  # shows QoS for all connections (detect mismatch)
+ros2 run tf2_tools view_frames               # verify TF tree; evince frames.pdf to view
+ros2 run tf2_ros tf2_echo base_link imu_link # verify static transform exists
+
+# ── QoS — always use for sensor topics ─────────────────────────────────────
+from rclpy.qos import qos_profile_sensor_data
+pub = self.create_publisher(Imu, &#39;/imu/raw&#39;, qos_profile_sensor_data)
+
+# ── Covariance — never leave as zero ────────────────────────────────────────
+msg.linear_acceleration_covariance[0] = -1.0   # -1.0 = unknown (lets EKF use YAML config)
+msg.angular_velocity_covariance[0]    = -1.0
+msg.orientation_covariance[0]         = -1.0
+
+# ── Timestamp — capture immediately after xfer2() ──────────────────────────
+import ctypes; librt = ctypes.CDLL(&#39;librt.so.1&#39;)
+class TS(ctypes.Structure): _fields_=[(&#39;tv_sec&#39;,ctypes.c_long),(&#39;tv_nsec&#39;,ctypes.c_long)]
+def now_ns():
+    t=TS(); librt.clock_gettime(4, ctypes.byref(t)); return t.tv_sec*10**9+t.tv_nsec
+rx = spi.xfer2([0]*64); ts_ns = now_ns()  # capture BEFORE ANY DECODE
+
+# ── robot_localization launch ────────────────────────────────────────────────
+ros2 launch robot_localization ekf.launch.py   # verify before ROS2 node
+# In ekf_config.yaml: imu0: /imu/raw, imu0_config: vroll,vpitch,vyaw,ax,ay,az = true
+# NEVER put all zeros in covariance matrices — causes NaN immediately
+
+# ── rosbag2 for sensors — use MCAP storage ──────────────────────────────────
+ros2 bag record --storage mcap /imu/raw /wheel_speed /odom   # avoids SQLite WAL stalls
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

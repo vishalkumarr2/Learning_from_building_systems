@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Module 16: Sanitizer Workshop — Practical Bug-Hunting with C++ Sanitizers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-indigo-600 hover:text-indigo-800 mb-4 inline-block">&larr; Back to C++ Advanced</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="module-16-sanitizer-workshop-practical-bug-hunting-with-c-sanitizers">Module 16: Sanitizer Workshop — Practical Bug-Hunting with C++ Sanitizers</h1>
+<h2 id="overview">Overview</h2>
+<p>Sanitizers are compiler-based tools that instrument your code at compile time and detect
+bugs at runtime. They are the single most effective bug-finding tool for C++ code —
+faster and more comprehensive than Valgrind, and used by every major C++ project
+(Chrome, LLVM, Firefox, Linux kernel test suites).</p>
+<p><strong>Key insight</strong>: Sanitizers catch bugs at RUNTIME. You need tests that exercise the
+code paths. A sanitizer with no test coverage catches nothing.</p>
+<hr />
+<h2 id="the-sanitizer-family">The Sanitizer Family</h2>
+<table>
+<thead>
+<tr>
+<th>Sanitizer</th>
+<th>Flag</th>
+<th>Catches</th>
+<th>Overhead</th>
+<th>GCC</th>
+<th>Clang</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>ASan</strong> (AddressSanitizer)</td>
+<td><code>-fsanitize=address</code></td>
+<td>Memory errors</td>
+<td>~2x</td>
+<td>✓</td>
+<td>✓</td>
+</tr>
+<tr>
+<td><strong>UBSan</strong> (UndefinedBehaviorSanitizer)</td>
+<td><code>-fsanitize=undefined</code></td>
+<td>Undefined behavior</td>
+<td>~minimal</td>
+<td>✓</td>
+<td>✓</td>
+</tr>
+<tr>
+<td><strong>TSan</strong> (ThreadSanitizer)</td>
+<td><code>-fsanitize=thread</code></td>
+<td>Data races</td>
+<td>~5-15x</td>
+<td>✓</td>
+<td>✓</td>
+</tr>
+<tr>
+<td><strong>MSan</strong> (MemorySanitizer)</td>
+<td><code>-fsanitize=memory</code></td>
+<td>Uninitialized reads</td>
+<td>~3x</td>
+<td>✗</td>
+<td>✓</td>
+</tr>
+<tr>
+<td><strong>LSan</strong> (LeakSanitizer)</td>
+<td>Included in ASan</td>
+<td>Memory leaks</td>
+<td>~minimal</td>
+<td>✓</td>
+<td>✓</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Critical constraint</strong>: ASan and TSan cannot be combined (different runtimes).
+Run them as separate CI jobs.</p>
+<hr />
+<h2 id="how-sanitizers-work">How Sanitizers Work</h2>
+<ol>
+<li><strong>Compile-time instrumentation</strong>: The compiler inserts extra checks around memory
+   accesses, arithmetic operations, thread synchronization, etc.</li>
+<li><strong>Runtime library</strong>: A runtime component (linked into the binary) manages shadow
+   memory, tracks allocations, monitors thread operations.</li>
+<li><strong>Error reporting</strong>: When a violation is detected, the sanitizer prints a detailed
+   report with stack traces and terminates (or continues, depending on configuration).</li>
+</ol>
+<p>This is fundamentally different from Valgrind, which uses binary translation (no
+recompilation needed, but 10-50x slower).</p>
+<hr />
+<h2 id="asan-addresssanitizer">ASan (AddressSanitizer)</h2>
+<h3 id="what-it-catches">What it catches:</h3>
+<ul>
+<li><strong>Heap-buffer-overflow</strong>: Writing/reading past the end of a <code>malloc</code>&lsquo;d / <code>new</code>&lsquo;d buffer</li>
+<li><strong>Stack-buffer-overflow</strong>: Writing/reading past stack arrays</li>
+<li><strong>Use-after-free</strong>: Accessing memory after <code>delete</code> / <code>free</code></li>
+<li><strong>Use-after-scope</strong>: Reference to local variable outlives its scope</li>
+<li><strong>Double-free</strong>: Calling <code>free</code>/<code>delete</code> on the same pointer twice</li>
+<li><strong>Memory leaks</strong> (via integrated LSan): Allocations with no corresponding free</li>
+<li><strong>Use-after-return</strong>: Returning pointer to stack-allocated memory (with runtime flag)</li>
+<li><strong>Container-overflow</strong>: Out-of-bounds access on STL containers (with annotations)</li>
+</ul>
+<h3 id="compiler-flags">Compiler flags:</h3>
+<div class="highlight"><pre><span></span><code>g++<span class="w"> </span>-std<span class="o">=</span>c++2a<span class="w"> </span>-fsanitize<span class="o">=</span>address<span class="w"> </span>-fno-omit-frame-pointer<span class="w"> </span>-g<span class="w"> </span>-O1<span class="w"> </span>source.cpp<span class="w"> </span>-o<span class="w"> </span>binary
+</code></pre></div>
+
+<ul>
+<li><code>-fno-omit-frame-pointer</code>: Ensures accurate stack traces</li>
+<li><code>-g</code>: Debug info for line numbers in reports</li>
+<li><code>-O1</code>: Recommended optimization level (catches more than <code>-O0</code>, less noise than <code>-O2</code>)</li>
+</ul>
+<h3 id="runtime-options-environment-variables">Runtime options (environment variables):</h3>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">ASAN_OPTIONS</span><span class="o">=</span><span class="s2">&quot;detect_stack_use_after_return=1:detect_leaks=1:halt_on_error=0&quot;</span>
+</code></pre></div>
+
+<p>Key options:
+- <code>detect_stack_use_after_return=1</code> — enables use-after-return detection (extra overhead)
+- <code>detect_leaks=1</code> — enable leak checking (default on Linux)
+- <code>halt_on_error=0</code> — continue after first error (find multiple bugs in one run)
+- <code>malloc_context_size=30</code> — deeper stack traces for allocations
+- <code>suppressions=/path/to/asan.supp</code> — suppress known false positives</p>
+<h3 id="how-asan-works-shadow-memory">How ASan works (shadow memory):</h3>
+<p>ASan maps every 8 bytes of application memory to 1 byte of &ldquo;shadow memory&rdquo;.
+The shadow byte encodes which of the 8 bytes are accessible. Each <code>malloc</code> adds
+&ldquo;redzones&rdquo; around the allocation (poisoned shadow bytes). Each <code>free</code> poisons
+the entire region and adds it to a quarantine (delayed reuse).</p>
+<hr />
+<h2 id="ubsan-undefinedbehaviorsanitizer">UBSan (UndefinedBehaviorSanitizer)</h2>
+<h3 id="what-it-catches_1">What it catches:</h3>
+<ul>
+<li><strong>Signed integer overflow</strong>: <code>INT_MAX + 1</code></li>
+<li><strong>Shift exponent errors</strong>: Shift by negative or &gt;= bit width</li>
+<li><strong>Null pointer dereference</strong>: Dereferencing <code>nullptr</code></li>
+<li><strong>Division by zero</strong>: Integer division by zero</li>
+<li><strong>Alignment violations</strong>: Accessing data through misaligned pointers</li>
+<li><strong>Float-cast overflow</strong>: Floating point value too large for target integer type</li>
+<li><strong>Unreachable code</strong>: Reaching <code>__builtin_unreachable()</code></li>
+<li><strong>Invalid bool/enum</strong>: Loading invalid values for bool or enum types</li>
+<li><strong>VLA bound</strong>: Non-positive VLA size</li>
+</ul>
+<h3 id="compiler-flags_1">Compiler flags:</h3>
+<div class="highlight"><pre><span></span><code>g++<span class="w"> </span>-std<span class="o">=</span>c++2a<span class="w"> </span>-fsanitize<span class="o">=</span>undefined<span class="w"> </span>-g<span class="w"> </span>source.cpp<span class="w"> </span>-o<span class="w"> </span>binary
+</code></pre></div>
+
+<h3 id="sub-sanitizers-can-be-enabled-individually">Sub-sanitizers (can be enabled individually):</h3>
+<div class="highlight"><pre><span></span><code>-fsanitize<span class="o">=</span>signed-integer-overflow
+-fsanitize<span class="o">=</span>null
+-fsanitize<span class="o">=</span>alignment
+-fsanitize<span class="o">=</span><span class="nb">shift</span>
+-fsanitize<span class="o">=</span>float-cast-overflow
+-fsanitize<span class="o">=</span>vla-bound
+</code></pre></div>
+
+<h3 id="runtime-options">Runtime options:</h3>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">UBSAN_OPTIONS</span><span class="o">=</span><span class="s2">&quot;print_stacktrace=1:halt_on_error=1&quot;</span>
+</code></pre></div>
+
+<ul>
+<li><code>print_stacktrace=1</code> — include stack trace in error reports</li>
+<li><code>halt_on_error=1</code> — abort on first UB (default is to continue)</li>
+</ul>
+<h3 id="ubsan-asan-combination">UBSan + ASan combination:</h3>
+<p>UBSan can be combined with ASan:</p>
+<div class="highlight"><pre><span></span><code>g++<span class="w"> </span>-fsanitize<span class="o">=</span>address,undefined<span class="w"> </span>-fno-omit-frame-pointer<span class="w"> </span>-g<span class="w"> </span>source.cpp
+</code></pre></div>
+
+<hr />
+<h2 id="tsan-threadsanitizer">TSan (ThreadSanitizer)</h2>
+<h3 id="what-it-catches_2">What it catches:</h3>
+<ul>
+<li><strong>Data races</strong>: Two threads access the same memory location, at least one is a write,
+  with no synchronization between them</li>
+<li><strong>Lock-order inversion</strong>: Thread 1 locks A then B, Thread 2 locks B then A (deadlock)</li>
+<li><strong>Signal-unsafe code</strong>: Calling non-async-signal-safe functions in signal handlers</li>
+</ul>
+<h3 id="compiler-flags_2">Compiler flags:</h3>
+<div class="highlight"><pre><span></span><code>g++<span class="w"> </span>-std<span class="o">=</span>c++2a<span class="w"> </span>-fsanitize<span class="o">=</span>thread<span class="w"> </span>-g<span class="w"> </span>-O1<span class="w"> </span>source.cpp<span class="w"> </span>-o<span class="w"> </span>binary<span class="w"> </span>-pthread
+</code></pre></div>
+
+<p><strong>IMPORTANT</strong>: Must compile ALL source files with <code>-fsanitize=thread</code>, including libraries.
+Mixing instrumented and non-instrumented code produces false positives.</p>
+<h3 id="runtime-options_1">Runtime options:</h3>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">TSAN_OPTIONS</span><span class="o">=</span><span class="s2">&quot;second_deadlock_stack=1:halt_on_error=0:history_size=7&quot;</span>
+</code></pre></div>
+
+<ul>
+<li><code>second_deadlock_stack=1</code> — show both stacks in deadlock reports</li>
+<li><code>halt_on_error=0</code> — continue after finding a race</li>
+<li><code>history_size=7</code> — more memory for race detection (0-7, higher = more memory)</li>
+<li><code>suppressions=/path/to/tsan.supp</code> — suppress known races</li>
+</ul>
+<h3 id="tsan-limitations">TSan limitations:</h3>
+<ul>
+<li>5-15x slowdown, 5-10x memory overhead</li>
+<li>Cannot combine with ASan (different memory layouts)</li>
+<li>Maximum 8192 threads</li>
+<li>May miss races that don&rsquo;t manifest in a particular execution</li>
+</ul>
+<h3 id="suppression-file-format">Suppression file format:</h3>
+<div class="highlight"><pre><span></span><code># tsan.supp
+race:third_party_lib::SomeFunction
+race:legacy_module.cpp
+deadlock:known_safe_lock_pattern
+</code></pre></div>
+
+<hr />
+<h2 id="msan-memorysanitizer-clang-only">MSan (MemorySanitizer) — Clang Only</h2>
+<p>MSan detects use of uninitialized memory. <strong>Not available in GCC.</strong></p>
+<div class="highlight"><pre><span></span><code>clang++<span class="w"> </span>-fsanitize<span class="o">=</span>memory<span class="w"> </span>-fno-omit-frame-pointer<span class="w"> </span>-g<span class="w"> </span>source.cpp<span class="w"> </span>-o<span class="w"> </span>binary
+</code></pre></div>
+
+<p>MSan requires ALL linked libraries to be instrumented. This makes it the hardest
+sanitizer to deploy (you need to build libc++, etc. with MSan).</p>
+<hr />
+<h2 id="lsan-leaksanitizer">LSan (LeakSanitizer)</h2>
+<p>LSan is integrated into ASan and runs at program exit:</p>
+<div class="highlight"><pre><span></span><code>g++<span class="w"> </span>-fsanitize<span class="o">=</span>address<span class="w"> </span>source.cpp<span class="w"> </span>-o<span class="w"> </span>binary
+<span class="nv">ASAN_OPTIONS</span><span class="o">=</span><span class="nv">detect_leaks</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./binary
+</code></pre></div>
+
+<p>Or standalone (Clang only):</p>
+<div class="highlight"><pre><span></span><code>clang++<span class="w"> </span>-fsanitize<span class="o">=</span>leak<span class="w"> </span>source.cpp<span class="w"> </span>-o<span class="w"> </span>binary
+</code></pre></div>
+
+<hr />
+<h2 id="sanitizer-suppressions">Sanitizer Suppressions</h2>
+<p>When you have false positives or third-party code you can&rsquo;t fix:</p>
+<p><strong>ASan suppression file</strong> (<code>asan.supp</code>):</p>
+<div class="highlight"><pre><span></span><code>interceptor_via_fun:third_party_function
+leak:ThirdPartyLib::Allocate
+</code></pre></div>
+
+<p><strong>TSan suppression file</strong> (<code>tsan.supp</code>):</p>
+<div class="highlight"><pre><span></span><code>race:ThirdPartyLib*
+mutex:AnnotateMutex
+</code></pre></div>
+
+<p><strong>UBSan suppression file</strong> — use function attribute instead:</p>
+<div class="highlight"><pre><span></span><code><span class="n">__attribute__</span><span class="p">((</span><span class="n">no_sanitize</span><span class="p">(</span><span class="s">&quot;undefined&quot;</span><span class="p">)))</span>
+<span class="kt">void</span><span class="w"> </span><span class="n">legacy_function_with_known_ub</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+
+<p>Apply at runtime:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">ASAN_OPTIONS</span><span class="o">=</span><span class="nv">suppressions</span><span class="o">=</span>asan.supp<span class="w"> </span>./binary
+<span class="nv">TSAN_OPTIONS</span><span class="o">=</span><span class="nv">suppressions</span><span class="o">=</span>tsan.supp<span class="w"> </span>./binary
+</code></pre></div>
+
+<hr />
+<h2 id="integration-with-cicd">Integration with CI/CD</h2>
+<p>Best practice: run each sanitizer as a separate CI job:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># .github/workflows/sanitizers.yml</span>
+<span class="nt">jobs</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">asan</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
+<span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cmake -DCMAKE_CXX_FLAGS=&quot;-fsanitize=address -fno-omit-frame-pointer&quot; ..</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">make &amp;&amp; ctest</span>
+
+<span class="w">  </span><span class="nt">ubsan</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
+<span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cmake -DCMAKE_CXX_FLAGS=&quot;-fsanitize=undefined&quot; ..</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">make &amp;&amp; ctest</span>
+
+<span class="w">  </span><span class="nt">tsan</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
+<span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cmake -DCMAKE_CXX_FLAGS=&quot;-fsanitize=thread&quot; ..</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">make &amp;&amp; ctest</span>
+</code></pre></div>
+
+<hr />
+<h2 id="sanitizers-vs-valgrind">Sanitizers vs Valgrind</h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Sanitizers</th>
+<th>Valgrind</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Speed</td>
+<td>2-15x overhead</td>
+<td>10-50x overhead</td>
+</tr>
+<tr>
+<td>Recompilation needed</td>
+<td>Yes</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Memory errors</td>
+<td>ASan</td>
+<td>Memcheck</td>
+</tr>
+<tr>
+<td>Thread errors</td>
+<td>TSan</td>
+<td>Helgrind/DRD</td>
+</tr>
+<tr>
+<td>UB detection</td>
+<td>UBSan</td>
+<td>Limited</td>
+</tr>
+<tr>
+<td>Uninitialized reads</td>
+<td>MSan (Clang)</td>
+<td>Memcheck</td>
+</tr>
+<tr>
+<td>Platform</td>
+<td>Linux, macOS, others</td>
+<td>Linux primarily</td>
+</tr>
+<tr>
+<td>False positives</td>
+<td>Very rare</td>
+<td>Occasional</td>
+</tr>
+<tr>
+<td>CI suitability</td>
+<td>Excellent (fast)</td>
+<td>Poor (slow)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule of thumb</strong>: Use sanitizers for CI, Valgrind for one-off deep analysis of
+existing binaries you can&rsquo;t recompile.</p>
+<hr />
+<h2 id="ros-integration">ROS Integration</h2>
+<p>Running ROS nodes under sanitizers:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Build your ROS package with sanitizers</span>
+catkin_make<span class="w"> </span>-DCMAKE_CXX_FLAGS<span class="o">=</span><span class="s2">&quot;-fsanitize=address -fno-omit-frame-pointer -g&quot;</span>
+
+<span class="c1"># Run a node with ASan</span>
+<span class="nv">ASAN_OPTIONS</span><span class="o">=</span><span class="s2">&quot;detect_leaks=0:halt_on_error=0&quot;</span><span class="w"> </span>rosrun<span class="w"> </span>my_package<span class="w"> </span>my_node
+
+<span class="c1"># Suppress noise from ROS libraries</span>
+<span class="nv">ASAN_OPTIONS</span><span class="o">=</span><span class="s2">&quot;suppressions=</span><span class="nv">$HOME</span><span class="s2">/ros_asan.supp&quot;</span><span class="w"> </span>rosrun<span class="w"> </span>my_package<span class="w"> </span>my_node
+</code></pre></div>
+
+<p>Common suppressions needed for ROS:</p>
+<div class="highlight"><pre><span></span><code># ros_asan.supp
+leak:ros::init
+leak:ros::NodeHandle
+leak:pluginlib
+</code></pre></div>
+
+<p>For TSan with ROS, many races in ROS infrastructure are benign but noisy.
+Use a suppression file and focus on YOUR code&rsquo;s races.</p>
+<hr />
+<h2 id="real-world-catches">Real-World Catches</h2>
+<p>Sanitizers have found critical bugs in major projects:</p>
+<ul>
+<li><strong>Chrome</strong>: Thousands of security vulnerabilities found by ASan/MSan in continuous fuzzing</li>
+<li><strong>LLVM</strong>: Regular ASan/UBSan runs catch bugs before they reach releases</li>
+<li><strong>Firefox</strong>: TSan found data races that caused intermittent crashes</li>
+<li><strong>Linux kernel</strong>: KASAN (kernel ASan) catches slab-out-of-bounds, use-after-free in drivers</li>
+<li><strong>ROS 2</strong>: TSan revealed races in rmw implementations and executor scheduling</li>
+</ul>
+<hr />
+<h2 id="limitations">Limitations</h2>
+<ol>
+<li><strong>Runtime only</strong>: Sanitizers only catch bugs in code paths that actually execute.
+   Dead code bugs are invisible. You need good test coverage.</li>
+<li><strong>Not combinable</strong>: ASan + TSan cannot coexist. Run separately.</li>
+<li><strong>MSan is Clang-only</strong>: GCC users miss uninitialized reads (use Valgrind instead).</li>
+<li><strong>Performance overhead</strong>: TSan&rsquo;s 5-15x makes it impractical for real-time systems.</li>
+<li><strong>Cannot catch logic errors</strong>: Code that is technically correct but semantically wrong.</li>
+<li><strong>ABA problem</strong>: Lock-free algorithms with ABA issues are invisible to TSan.</li>
+<li><strong>Signed overflow wrapping</strong>: If overflow is intentional (hash functions), use
+   <code>-fwrapv</code> or cast to unsigned.</li>
+</ol>
+<hr />
+<h2 id="quick-reference-compilation-commands">Quick Reference: Compilation Commands</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># ASan (memory bugs)</span>
+g++<span class="w"> </span>-std<span class="o">=</span>c++2a<span class="w"> </span>-fsanitize<span class="o">=</span>address<span class="w"> </span>-fno-omit-frame-pointer<span class="w"> </span>-g<span class="w"> </span>-O1<span class="w"> </span>src.cpp<span class="w"> </span>-o<span class="w"> </span>bin_asan
+
+<span class="c1"># UBSan (undefined behavior)</span>
+g++<span class="w"> </span>-std<span class="o">=</span>c++2a<span class="w"> </span>-fsanitize<span class="o">=</span>undefined<span class="w"> </span>-g<span class="w"> </span>src.cpp<span class="w"> </span>-o<span class="w"> </span>bin_ubsan
+
+<span class="c1"># TSan (data races) — needs -pthread</span>
+g++<span class="w"> </span>-std<span class="o">=</span>c++2a<span class="w"> </span>-fsanitize<span class="o">=</span>thread<span class="w"> </span>-g<span class="w"> </span>-O1<span class="w"> </span>src.cpp<span class="w"> </span>-o<span class="w"> </span>bin_tsan<span class="w"> </span>-pthread
+
+<span class="c1"># ASan + UBSan combined</span>
+g++<span class="w"> </span>-std<span class="o">=</span>c++2a<span class="w"> </span>-fsanitize<span class="o">=</span>address,undefined<span class="w"> </span>-fno-omit-frame-pointer<span class="w"> </span>-g<span class="w"> </span>src.cpp<span class="w"> </span>-o<span class="w"> </span>bin_combo
+
+<span class="c1"># Run with options</span>
+<span class="nv">ASAN_OPTIONS</span><span class="o">=</span><span class="s2">&quot;detect_leaks=1:halt_on_error=0&quot;</span><span class="w"> </span>./bin_asan
+<span class="nv">UBSAN_OPTIONS</span><span class="o">=</span><span class="s2">&quot;print_stacktrace=1:halt_on_error=1&quot;</span><span class="w"> </span>./bin_ubsan
+<span class="nv">TSAN_OPTIONS</span><span class="o">=</span><span class="s2">&quot;second_deadlock_stack=1&quot;</span><span class="w"> </span>./bin_tsan
+</code></pre></div>
+
+<hr />
+<h2 id="exercises-in-this-module">Exercises in This Module</h2>
+<table>
+<thead>
+<tr>
+<th>Exercise</th>
+<th>Sanitizer</th>
+<th>Focus</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ex01</td>
+<td>ASan</td>
+<td>8 classic memory bugs</td>
+</tr>
+<tr>
+<td>ex02</td>
+<td>UBSan</td>
+<td>8 undefined behavior patterns</td>
+</tr>
+<tr>
+<td>ex03</td>
+<td>TSan</td>
+<td>5 data races + deadlock</td>
+</tr>
+<tr>
+<td>ex04</td>
+<td>All three</td>
+<td>Realistic mini-project, find &amp; fix</td>
+</tr>
+<tr>
+<td>ex05</td>
+<td>Detective</td>
+<td>Real-world-like subtle bugs</td>
+</tr>
+<tr>
+<td>puzzle01</td>
+<td>TSan</td>
+<td>False positive + suppression</td>
+</tr>
+<tr>
+<td>puzzle02</td>
+<td>None</td>
+<td>What sanitizers CAN&rsquo;T catch</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

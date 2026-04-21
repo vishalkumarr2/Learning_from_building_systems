@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 — CAN Bus Deep Dive - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-amber-600 hover:text-amber-800 mb-4 inline-block">&larr; Back to Electronics</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="07-can-bus-deep-dive">07 — CAN Bus Deep Dive</h1>
+<h3 id="from-differential-signaling-to-arbitration-error-handling-and-socketcan">From differential signaling to arbitration, error handling, and SocketCAN</h3>
+<p><strong>Prerequisites:</strong> Chapter 01 (basic electronics), Chapter 02 (transistors for transceivers)
+<strong>Unlocks:</strong> Vehicle/robot communication, industrial automation, battery management, OBD-II</p>
+<hr />
+<h2 id="why-should-i-care-stm32jetson-project-context">Why Should I Care? (STM32/Jetson Project Context)</h2>
+<ul>
+<li>CAN is the backbone of automotive and industrial robot communication</li>
+<li>OKS AMR robots may use CAN for motor controllers, battery management (BMS), and sensor modules</li>
+<li>CAN is designed for harsh electrical environments: factory floors, vehicles, long cable runs</li>
+<li>Unlike I2C/SPI (board-level buses), CAN is a multi-node fieldbus for distances up to 1km</li>
+<li>Understanding CAN is essential if you interface with motor drivers, BMS, or industrial IO</li>
+</ul>
+<hr />
+<h1 id="part-1-the-physics-differential-signaling">PART 1 — THE PHYSICS: DIFFERENTIAL SIGNALING</h1>
+<hr />
+<h2 id="11-why-differential-noise-immunity">1.1 Why Differential? — Noise Immunity</h2>
+<p>I2C, SPI, and UART use &ldquo;single-ended&rdquo; signaling: voltage is measured relative to a shared GND wire. Any noise on GND shifts all signals.</p>
+<p>CAN uses &ldquo;differential&rdquo; signaling: the information is in the VOLTAGE DIFFERENCE between two wires (CANH and CANL). If noise hits both wires equally (which it does when they&rsquo;re twisted together), the difference stays the same.</p>
+<div class="highlight"><pre><span></span><code>    Single-ended (I2C, SPI):             Differential (CAN):
+
+    Signal ──────────────→               CANH ──────────────→
+    GND ─────────────────→               CANL ──────────────→
+
+    Noise adds +0.5V to both:            Noise adds +0.5V to both:
+    Signal: 3.3V → 3.8V                  CANH: 3.5V → 4.0V
+    GND:    0V   → 0.5V                  CANL: 1.5V → 2.0V
+    Diff:   3.3V → 3.3V (wrong!)         Diff: 2.0V → 2.0V ✓
+    But GND shift means receiver sees     Receiver still sees
+    3.3V (unchanged) relative to new      correct 2.0V difference!
+    GND → COULD be OK, but cumulative     → Immune to common-mode noise
+    GND noise causes errors
+</code></pre></div>
+
+<p><strong>ELI15 analogy — the seesaw:</strong></p>
+<p>Imagine two kids on a seesaw. The &ldquo;signal&rdquo; is which side is up. If you raise the entire playground by 2 feet (noise), the seesaw still tips the same direction. The receiver only cares about the <em>difference</em> between the two ends, not their absolute height.</p>
+<hr />
+<h2 id="12-can-bus-voltage-levels">1.2 CAN Bus Voltage Levels</h2>
+<p>CAN defines two states: <strong>dominant</strong> (logic 0) and <strong>recessive</strong> (logic 1).</p>
+<div class="highlight"><pre><span></span><code>    RECESSIVE (logic 1):      DOMINANT (logic 0):
+    Both wires at 2.5V        CANH to ~3.5V, CANL to ~1.5V
+    Vdiff = 0V                Vdiff = ~2V
+
+    Voltage waveform for a few bits: 1  0  1  1  0  0
+
+    CANH: ~~2.5~~|~3.5~|~~2.5~~|~~2.5~~|~3.5~|~3.5~|
+                 |     |       |       |     |     |
+    CANL: ~~2.5~~|~1.5~|~~2.5~~|~~2.5~~|~1.5~|~1.5~|
+                 |     |       |       |     |     |
+    Vdiff:  ~0V  | ~2V |  ~0V  |  ~0V  | ~2V | ~2V |
+    State:  REC  | DOM |  REC  |  REC  | DOM | DOM |
+    Logic:   1   |  0  |   1   |   1   |  0  |  0  |
+</code></pre></div>
+
+<p><strong>Why these names?</strong>
+- <strong>Dominant</strong> (0): The transceiver actively drives CANH high and CANL low — creating a voltage difference. This state always &ldquo;wins&rdquo; over recessive.
+- <strong>Recessive</strong> (1): The transceiver does nothing — both lines float to 2.5V through the termination resistors. If ANY node drives dominant, the recessive state is overridden.</p>
+<p>This is the CAN version of I2C&rsquo;s wired-AND: multiple nodes can transmit simultaneously, and 0 (dominant) always wins over 1 (recessive). This enables non-destructive arbitration.</p>
+<hr />
+<h2 id="13-the-can-transceiver">1.3 The CAN Transceiver</h2>
+<p>Your microcontroller&rsquo;s CAN peripheral (called FDCAN on STM32H7, bxCAN on STM32F4) generates logical 0s and 1s on CANTX/CANRX pins. The <strong>transceiver</strong> converts these to/from differential signals.</p>
+<div class="highlight"><pre><span></span><code>    STM32                CAN Transceiver              CAN Bus
+    ┌──────┐            ┌──────────────┐         ┌─────────────┐
+    │      │  CANTX ──→ │              │  CANH ──┤             │
+    │ FDCAN│            │  SN65HVD230  │         │   Twisted   │
+    │      │  CANRX ←── │  or TJA1050  │  CANL ──┤    Pair     │
+    └──────┘            └──────────────┘         └─────────────┘
+                              │
+                             GND
+
+    Common transceivers:
+    ┌────────────┬────────────────────────────────────────────┐
+    │ SN65HVD230 │ 3.3V, 1Mbps, standby mode, cheap          │
+    │ TJA1050    │ 5V, 1Mbps, very common, automotive        │
+    │ TJA1051    │ 3.3V/5V, automotive, VIO for 3.3V logic   │
+    │ MCP2551    │ 5V, 1Mbps, Microchip, very common         │
+    │ MCP2542    │ CAN FD up to 8Mbps, automotive            │
+    └────────────┴────────────────────────────────────────────┘
+</code></pre></div>
+
+<hr />
+<h2 id="14-bus-termination-the-120-resistors">1.4 Bus Termination — The 120Ω Resistors</h2>
+<p>CAN bus REQUIRES 120Ω termination resistors at each end of the bus to prevent signal reflections.</p>
+<div class="highlight"><pre><span></span><code>    Node 1       Node 2       Node 3       Node 4
+      │            │            │            │
+      │            │            │            │
+    ──┴──────────────────────────────────────┴──── CANH
+      │                                      │
+     120Ω                                   120Ω
+      │                                      │
+    ──┴──────────────────────────────────────┴──── CANL
+
+    ↑ END of bus                        END of bus ↑
+
+    Only at the two PHYSICAL ENDS of the bus!
+    Middle nodes do NOT get termination resistors!
+</code></pre></div>
+
+<p><strong>Why 120Ω?</strong></p>
+<p>CAN uses a 120Ω characteristic impedance cable (twisted pair). To prevent reflections, the termination resistance must match the cable impedance. Two 120Ω resistors in parallel = 60Ω total impedance (this is the specified bus impedance).</p>
+<p><strong>How to verify:</strong> Measure resistance between CANH and CANL with the bus powered off:
+- ~60Ω: correct (two 120Ω in parallel)
+- ~120Ω: one termination missing
+- Open circuit: no termination → bus won&rsquo;t work reliably
+- ~40Ω: three termination resistors → remove one</p>
+<p><strong>What happens without termination:</strong>
+- Reflections cause ringing on the bus edges
+- At low speeds (125kbps), might work anyway (dangerous — passes testing, fails in the field)
+- At 1Mbps, the bus will have constant bit errors</p>
+<hr />
+<h1 id="part-2-can-frame-format">PART 2 — CAN FRAME FORMAT</h1>
+<hr />
+<h2 id="21-standard-can-frame-can-20a-11-bit-id">2.1 Standard CAN Frame (CAN 2.0A — 11-bit ID)</h2>
+<div class="highlight"><pre><span></span><code>    ┌─────────────────────────────────────────────────────────────────────────────────┐
+    │ SOF │ Identifier │ RTR │ IDE │ r0 │ DLC │ Data     │ CRC     │ ACK │ EOF │ IFS │
+    │ (1) │   (11)     │ (1) │ (1) │(1) │ (4) │ (0-64)   │ (15+1)  │(1+1)│ (7) │ (3) │
+    └─────────────────────────────────────────────────────────────────────────────────┘
+           ←── Arbitration ──→ ←Control→  ← Data field → ← CRC ──→
+
+    Total: 44 + 8×N bits (N = data bytes, 0-8) + stuff bits
+</code></pre></div>
+
+<p><strong>Field-by-field breakdown:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Bits</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>SOF</strong></td>
+<td>1</td>
+<td>Start of frame — always dominant (0). All nodes sync to this edge.</td>
+</tr>
+<tr>
+<td><strong>Identifier</strong></td>
+<td>11</td>
+<td>Message ID and priority (lower number = higher priority).</td>
+</tr>
+<tr>
+<td><strong>RTR</strong></td>
+<td>1</td>
+<td>Remote Transmission Request: 0 = data frame, 1 = request frame.</td>
+</tr>
+<tr>
+<td><strong>IDE</strong></td>
+<td>1</td>
+<td>ID Extension: 0 = 11-bit standard, 1 = 29-bit extended.</td>
+</tr>
+<tr>
+<td><strong>r0</strong></td>
+<td>1</td>
+<td>Reserved: must be 0 (dominant).</td>
+</tr>
+<tr>
+<td><strong>DLC</strong></td>
+<td>4</td>
+<td>Data Length Code: 0–8 bytes in CAN 2.0, up to 64 bytes in CAN FD.</td>
+</tr>
+<tr>
+<td><strong>Data</strong></td>
+<td>0–64</td>
+<td>Payload: 0 to 8 bytes (CAN 2.0) or 0 to 64 bytes (CAN FD).</td>
+</tr>
+<tr>
+<td><strong>CRC</strong></td>
+<td>15+1</td>
+<td>15-bit CRC + 1 delimiter bit. Hardware verifies automatically.</td>
+</tr>
+<tr>
+<td><strong>ACK</strong></td>
+<td>1+1</td>
+<td>ACK slot + delimiter. Receiver pulls ACK slot dominant → &ldquo;I heard you.&rdquo;</td>
+</tr>
+<tr>
+<td><strong>EOF</strong></td>
+<td>7</td>
+<td>End of frame: 7 recessive bits.</td>
+</tr>
+<tr>
+<td><strong>IFS</strong></td>
+<td>3</td>
+<td>Interframe space: minimum 3 recessive bits between frames.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>ASCII Diagram — One CAN Frame (ID=0x123, Data=[0xDE, 0xAD]):</strong></p>
+<div class="highlight"><pre><span></span><code>    Bit positions (simplified, no stuff bits):
+
+    SOF  ID[10:0]       RTR IDE r0  DLC[3:0]  DATA[0]   DATA[1]   CRC           ACK  EOF
+     │   │          │    │   │   │  │       │ │       │ │       │ │             │ │ │ │       │
+     0   0 0 1 0 0 1 0 0 0 1 1  0   0   0  0 0 1 0  1 1 0 1 1 1 1 0 1 0 1 0 1 1 0 1 0 ...  1111111
+     │   ←── 0x123 = 0b00100100011 ──→            ←0xDE=11011110→ ←0xAD=10101101→
+
+     SOF = dominant (0) — all nodes sync
+     ID = 0x123 = 0b00100100011 (11 bits, MSB first)
+     RTR = 0 (this is a data frame, not a request)
+     DLC = 0b0010 = 2 bytes
+</code></pre></div>
+
+<hr />
+<h2 id="22-extended-can-frame-can-20b-29-bit-id">2.2 Extended CAN Frame (CAN 2.0B — 29-bit ID)</h2>
+<div class="highlight"><pre><span></span><code>    ┌──────────────────────────────────────────────────────────────────────────────┐
+    │ SOF │ Base ID │ SRR │ IDE │ Extended ID │ RTR │ r1 │ r0 │ DLC │ Data │ ... │
+    │ (1) │  (11)   │ (1) │ (1) │    (18)     │ (1) │(1) │(1) │ (4) │      │     │
+    └──────────────────────────────────────────────────────────────────────────────┘
+
+    Total 29-bit ID = 11-bit base + 18-bit extension
+    SRR = Substitute Remote Request (always recessive)
+    IDE = 1 (extended frame flag)
+</code></pre></div>
+
+<p>Extended frames are common in J1939 (heavy-duty vehicles), CANopen, and DeviceNet.</p>
+<hr />
+<h2 id="23-bit-stuffing">2.3 Bit Stuffing</h2>
+<p>After 5 consecutive bits of the same polarity, the transmitter inserts an opposite bit. The receiver removes it.</p>
+<div class="highlight"><pre><span></span><code>    Without stuffing: 1 0 0 0 0 0 0 1 1 1 1 1 1 0
+    With stuffing:    1 0 0 0 0 0 [1] 0 1 1 1 1 1 [0] 1 0
+                              ↑ inserted          ↑ inserted
+                         (5 zeros → stuff 1)   (5 ones → stuff 0)
+</code></pre></div>
+
+<p><strong>Why?</strong> Without stuffing, long runs of the same bit would make it impossible for receivers to stay synchronized (the clock recovery mechanism needs regular edges). Bit stuffing guarantees an edge at least every 6 bit times.</p>
+<p><strong>Impact:</strong> Bit stuffing increases the actual frame length by up to ~20%. Worst case: every 5th bit is stuffed. When calculating bus throughput, account for stuff bits.</p>
+<hr />
+<h1 id="part-3-arbitration-the-killer-feature">PART 3 — ARBITRATION — THE KILLER FEATURE</h1>
+<hr />
+<h2 id="31-how-non-destructive-arbitration-works">3.1 How Non-Destructive Arbitration Works</h2>
+<p>Any node can start transmitting when the bus is idle. If two nodes start at the same time:</p>
+<ol>
+<li>Both transmit their SOF (dominant) — bus sees dominant ✓</li>
+<li>Both start transmitting their ID bits simultaneously</li>
+<li>Each node reads back the bus after sending each bit</li>
+<li>The node with the LOWER ID wins (0 is dominant, wins over 1)</li>
+</ol>
+<p><strong>Walkthrough — Node A sends ID=0x100, Node B sends ID=0x080:</strong></p>
+<div class="highlight"><pre><span></span><code>    ID bit:    10   9   8   7   6   5   4   3   2   1   0
+
+    0x100 =   0    1   0   0   0   0   0   0   0   0   0
+    0x080 =   0    0   1   0   0   0   0   0   0   0   0
+    Bus:      0    0   ← B wins here
+                   ↑
+              Node A sent 1 (recessive)
+              Node B sent 0 (dominant)
+              Bus = 0 (dominant wins)
+
+              Node A reads back 0, but it sent 1 → LOST!
+              Node A stops transmitting immediately.
+              Node B continues, unaware of the conflict.
+</code></pre></div>
+
+<p><strong>Key insight:</strong> The node with the lower ID (numerically) wins. This means:
+- ID 0x000 is highest priority
+- ID 0x7FF is lowest priority (11-bit)
+- <strong>Priority is designed into the ID assignment</strong>, not a runtime decision</p>
+<hr />
+<h2 id="32-practical-id-assignment-strategy">3.2 Practical ID Assignment Strategy</h2>
+<div class="highlight"><pre><span></span><code>    Priority Assignment (example for a robot):
+
+    ID Range        Purpose                    Priority
+    0x000 – 0x00F   Emergency / E-stop         Highest ← these always get through
+    0x010 – 0x0FF   Motor commands             High    ← real-time critical
+    0x100 – 0x1FF   Sensor data (IMU, odom)    Medium  ← regular data
+    0x200 – 0x3FF   Battery management         Normal  ← periodic status
+    0x400 – 0x5FF   Diagnostics / debug        Low     ← non-critical
+    0x600 – 0x7FF   Configuration / heartbeat  Lowest  ← infrequent
+</code></pre></div>
+
+<hr />
+<h1 id="part-4-error-handling-cans-defensive-system">PART 4 — ERROR HANDLING — CAN&rsquo;S DEFENSIVE SYSTEM</h1>
+<hr />
+<h2 id="41-five-types-of-errors">4.1 Five Types of Errors</h2>
+<p>CAN has <strong>five</strong> error detection mechanisms, checked in hardware by every node:</p>
+<table>
+<thead>
+<tr>
+<th>Error Type</th>
+<th>What It Checks</th>
+<th>How It&rsquo;s Detected</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Bit Error</strong></td>
+<td>Transmitter reads back each bit</td>
+<td>Sent dominant, read recessive (or vice versa in non-arbitration fields)</td>
+</tr>
+<tr>
+<td><strong>Stuff Error</strong></td>
+<td>Bit stuffing rule</td>
+<td>6 consecutive same-polarity bits detected</td>
+</tr>
+<tr>
+<td><strong>CRC Error</strong></td>
+<td>Data integrity</td>
+<td>Received CRC doesn&rsquo;t match calculated CRC</td>
+</tr>
+<tr>
+<td><strong>Form Error</strong></td>
+<td>Fixed-format fields</td>
+<td>SOF, EOF, ACK delimiter, CRC delimiter not at expected value</td>
+</tr>
+<tr>
+<td><strong>ACK Error</strong></td>
+<td>Message received by someone</td>
+<td>ACK slot stays recessive (nobody acknowledged)</td>
+</tr>
+</tbody>
+</table>
+<p>When any node detects an error, it transmits an <strong>Error Frame</strong>: 6 dominant bits (violates bit stuffing → ALL nodes detect it → everyone discards the corrupted frame).</p>
+<hr />
+<h2 id="42-error-counters-tec-and-rec">4.2 Error Counters — TEC and REC</h2>
+<p>Every CAN node has two error counters:
+- <strong>TEC</strong> (Transmit Error Counter): incremented when the node&rsquo;s transmission causes errors
+- <strong>REC</strong> (Receive Error Counter): incremented when the node detects errors in received frames</p>
+<div class="highlight"><pre><span></span><code>    Error State Machine:
+
+    ┌─────────────┐   TEC &gt; 127     ┌──────────────┐   TEC &gt; 255      ┌───────────┐
+    │ ERROR ACTIVE │   or REC &gt; 127  │ ERROR PASSIVE │                  │  BUS OFF  │
+    │ (normal)     │ ───────────────→│ (reduced)     │ ────────────────→│ (dead)    │
+    │              │                 │               │                  │           │
+    │ Sends ACTIVE │                 │ Sends PASSIVE │                  │ Cannot    │
+    │ Error Frames │                 │ Error Frames  │                  │ transmit  │
+    │ (6 dominant) │                 │ (6 recessive) │                  │ or receive│
+    └──────────────┘ ←───────────────┘               │                  └───────────┘
+                       TEC, REC &lt; 128                 │               ↓ 128 × 11 recessive
+                       (successful msgs)              │               ↓ bits detected
+                                                      │               ↓
+                                                      └───────────────┘
+                                                        Auto-recovery
+</code></pre></div>
+
+<p><strong>Why Error Active vs Error Passive?</strong></p>
+<ul>
+<li>
+<p><strong>Error Active</strong> (TEC, REC &lt; 128): Node is healthy. When it detects an error, it sends an Active Error Frame (6 dominant bits → immediately disrupts the bus → ALL nodes see the error). This is aggressive but correct — one bad frame shouldn&rsquo;t be received by anyone.</p>
+</li>
+<li>
+<p><strong>Error Passive</strong> (TEC or REC ≥ 128): Node is having too many errors. Something might be wrong with THIS node (loose connector, bad transceiver). It can still send Error Frames, but they&rsquo;re passive (6 recessive bits → only visible if no one else is transmitting). This prevents a faulty node from constantly disrupting the bus with error frames.</p>
+</li>
+<li>
+<p><strong>Bus-Off</strong> (TEC ≥ 256): Node is removed from the bus completely. It can&rsquo;t transmit or receive. Recovery requires detecting 128 occurrences of 11 consecutive recessive bits (bus idle), then re-initializing. Some systems auto-recover; critical safety systems require manual reset.</p>
+</li>
+</ul>
+<p><strong>Why this matters for robot debugging:</strong>
+- A motor controller with a loose CAN connector will gradually go Error Passive → Bus Off
+- Other nodes will see ACK errors (the failing node stops acknowledging)
+- Check TEC/REC values in your CAN controller registers for diagnostic info</p>
+<hr />
+<h2 id="43-error-frame-format">4.3 Error Frame Format</h2>
+<div class="highlight"><pre><span></span><code>    Normal frame:   [...data...]  [CRC] [ACK] [EOF: 1111111] [IFS: 111]
+
+    Error detected mid-frame:
+    [...data...]  ← ERROR DETECTED HERE
+    [Error Flag: 000000] [Error Delimiter: 11111111] [IFS: 111]
+     6 dominant bits       8 recessive bits
+     (Active Error Flag)
+
+    This destroys the current frame. All nodes discard it.
+    The transmitter AUTOMATICALLY retransmits the frame.
+</code></pre></div>
+
+<p><strong>Automatic retransmission</strong> is a key CAN feature: when a frame is corrupted, the transmitter retries without any software intervention. The hardware handles it.</p>
+<hr />
+<h1 id="part-5-can-fd-flexible-data-rate">PART 5 — CAN FD (FLEXIBLE DATA-RATE)</h1>
+<hr />
+<p>CAN FD (introduced ~2012) extends classic CAN with:</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Classic CAN 2.0</th>
+<th>CAN FD</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Max data</td>
+<td>8 bytes</td>
+<td>64 bytes</td>
+</tr>
+<tr>
+<td>Max speed</td>
+<td>1 Mbps</td>
+<td>8 Mbps (data phase)</td>
+</tr>
+<tr>
+<td>Arbitration speed</td>
+<td>Up to 1 Mbps</td>
+<td>Up to 1 Mbps (same)</td>
+</tr>
+<tr>
+<td>Data phase speed</td>
+<td>Same as arbitration</td>
+<td>Up to 8 Mbps (faster!)</td>
+</tr>
+<tr>
+<td>CRC</td>
+<td>15-bit</td>
+<td>17-bit (≤16B) or 21-bit (&gt;16B)</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code>    CAN FD Frame:
+
+    ┌──────────────────────────────────────────────────────────────────────┐
+    │ SOF │ ID │ FDF │ BRS │ DLC │     Data (0-64 bytes)     │ CRC │ ... │
+    └──────────────────────────────────────────────────────────────────────┘
+                  ↑      ↑
+                  │      └── Bit Rate Switch: 1 = switch to fast rate for data
+                  └── FD Format: 1 = CAN FD frame (0 = classic CAN)
+
+    Speed profile:
+    ←── Arbitration at 500kbps ──→←── Data at 4Mbps ──→←── 500kbps ──→
+    [SOF][ID][control]              [data payload]        [CRC][ACK][EOF]
+
+    Arbitration MUST be at the slower rate (all nodes must participate).
+    Data phase CAN be faster (only the recipient needs to keep up).
+</code></pre></div>
+
+<p><strong>DLC encoding for CAN FD (data length &gt; 8):</strong></p>
+<table>
+<thead>
+<tr>
+<th>DLC value</th>
+<th style="text-align: right;">Bytes (Classic CAN)</th>
+<th style="text-align: right;">Bytes (CAN FD)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0–8</td>
+<td style="text-align: right;">0–8</td>
+<td style="text-align: right;">0–8</td>
+</tr>
+<tr>
+<td>9</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">12</td>
+</tr>
+<tr>
+<td>10</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">16</td>
+</tr>
+<tr>
+<td>11</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">20</td>
+</tr>
+<tr>
+<td>12</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">24</td>
+</tr>
+<tr>
+<td>13</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">32</td>
+</tr>
+<tr>
+<td>14</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">48</td>
+</tr>
+<tr>
+<td>15</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">64</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="part-6-socketcan-on-linux">PART 6 — SOCKETCAN ON LINUX</h1>
+<hr />
+<h2 id="61-socketcan-architecture">6.1 SocketCAN Architecture</h2>
+<p>Linux treats CAN interfaces like network sockets. You can use standard socket APIs or command-line tools.</p>
+<div class="highlight"><pre><span></span><code>    ┌──────────────────────────────────────────────────┐
+    │                User Space                         │
+    │  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
+    │  │ cansend  │  │ candump  │  │ Your C/Python  │  │
+    │  │ canutils │  │ canutils │  │ application    │  │
+    │  └────┬─────┘  └────┬─────┘  └───────┬───────┘  │
+    │       │              │                │          │
+    │  ═════╪══════════════╪════════════════╪═════════ │
+    │       │        socket interface       │          │
+    │  ─────┼──────────────┼────────────────┼───────── │
+    │                Kernel Space                       │
+    │  ┌─────────────────────────────────────────────┐ │
+    │  │           SocketCAN Framework               │ │
+    │  │  (can.ko, can-raw.ko, can-gw.ko)            │ │
+    │  └────────────────┬────────────────────────────┘ │
+    │                   │                              │
+    │  ┌────────────────┼──────────────────┐          │
+    │  │          CAN Driver               │          │
+    │  │  (mcp251x, peak_pci, vcan, slcan) │          │
+    │  └────────────────┬──────────────────┘          │
+    └───────────────────┼──────────────────────────────┘
+                        │
+                  CAN Hardware / vcan
+</code></pre></div>
+
+<h2 id="62-essential-cli-commands">6.2 Essential CLI Commands</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># === Setup ===</span>
+
+<span class="c1"># Load kernel modules</span>
+sudo<span class="w"> </span>modprobe<span class="w"> </span>can
+sudo<span class="w"> </span>modprobe<span class="w"> </span>can-raw
+sudo<span class="w"> </span>modprobe<span class="w"> </span>vcan<span class="w">              </span><span class="c1"># Virtual CAN for testing</span>
+
+<span class="c1"># Create virtual CAN interface (for testing without hardware)</span>
+sudo<span class="w"> </span>ip<span class="w"> </span>link<span class="w"> </span>add<span class="w"> </span>dev<span class="w"> </span>vcan0<span class="w"> </span><span class="nb">type</span><span class="w"> </span>vcan
+sudo<span class="w"> </span>ip<span class="w"> </span>link<span class="w"> </span><span class="nb">set</span><span class="w"> </span>up<span class="w"> </span>vcan0
+
+<span class="c1"># Configure hardware CAN interface</span>
+sudo<span class="w"> </span>ip<span class="w"> </span>link<span class="w"> </span><span class="nb">set</span><span class="w"> </span>can0<span class="w"> </span><span class="nb">type</span><span class="w"> </span>can<span class="w"> </span>bitrate<span class="w"> </span><span class="m">500000</span><span class="w">     </span><span class="c1"># 500kbps</span>
+sudo<span class="w"> </span>ip<span class="w"> </span>link<span class="w"> </span><span class="nb">set</span><span class="w"> </span>can0<span class="w"> </span><span class="nb">type</span><span class="w"> </span>can<span class="w"> </span>bitrate<span class="w"> </span><span class="m">500000</span><span class="w"> </span>dbitrate<span class="w"> </span><span class="m">2000000</span><span class="w"> </span>fd<span class="w"> </span>on<span class="w">  </span><span class="c1"># CAN FD</span>
+sudo<span class="w"> </span>ip<span class="w"> </span>link<span class="w"> </span><span class="nb">set</span><span class="w"> </span>up<span class="w"> </span>can0
+
+<span class="c1"># === Sending ===</span>
+
+<span class="c1"># Send standard frame: ID=0x123, data=0xDE 0xAD 0xBE 0xEF</span>
+cansend<span class="w"> </span>can0<span class="w"> </span><span class="m">123</span><span class="c1">#DEADBEEF</span>
+
+<span class="c1"># Send extended frame (29-bit ID): prefix with 8 hex digits</span>
+cansend<span class="w"> </span>can0<span class="w"> </span>1234ABCD#11223344
+
+<span class="c1"># Send CAN FD frame (up to 64 bytes):</span>
+cansend<span class="w"> </span>can0<span class="w"> </span><span class="m">123</span><span class="c1">##1.DEADBEEF...  # ## for FD, 1=BRS flag</span>
+
+<span class="c1"># === Receiving ===</span>
+
+<span class="c1"># Dump all frames on can0 (like tcpdump for CAN):</span>
+candump<span class="w"> </span>can0
+
+<span class="c1"># Dump with timestamp:</span>
+candump<span class="w"> </span>-ta<span class="w"> </span>can0
+
+<span class="c1"># Filter: only show ID 0x100–0x1FF:</span>
+candump<span class="w"> </span>can0,100:700<span class="w">     </span><span class="c1"># mask=0x700, match=0x100</span>
+
+<span class="c1"># === Monitoring ===</span>
+
+<span class="c1"># Show CAN interface statistics:</span>
+ip<span class="w"> </span>-details<span class="w"> </span>-statistics<span class="w"> </span>link<span class="w"> </span>show<span class="w"> </span>can0
+
+<span class="c1"># Show bus error counters (TEC/REC):</span>
+ip<span class="w"> </span>-details<span class="w"> </span>link<span class="w"> </span>show<span class="w"> </span>can0<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span><span class="s1">&#39;state\|restarts\|error&#39;</span>
+</code></pre></div>
+
+<h2 id="63-python-socketcan">6.3 Python SocketCAN</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">socket</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">struct</span>
+
+<span class="c1"># Create raw CAN socket</span>
+<span class="n">sock</span> <span class="o">=</span> <span class="n">socket</span><span class="o">.</span><span class="n">socket</span><span class="p">(</span><span class="n">socket</span><span class="o">.</span><span class="n">PF_CAN</span><span class="p">,</span> <span class="n">socket</span><span class="o">.</span><span class="n">SOCK_RAW</span><span class="p">,</span> <span class="n">socket</span><span class="o">.</span><span class="n">CAN_RAW</span><span class="p">)</span>
+<span class="n">sock</span><span class="o">.</span><span class="n">bind</span><span class="p">((</span><span class="s1">&#39;can0&#39;</span><span class="p">,))</span>
+
+<span class="c1"># Send a frame</span>
+<span class="c1"># struct format: arbitration ID (4B, big-endian) + DLC (1B) + padding (3B) + data (8B)</span>
+<span class="n">can_id</span> <span class="o">=</span> <span class="mh">0x123</span>
+<span class="n">data</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">([</span><span class="mh">0xDE</span><span class="p">,</span> <span class="mh">0xAD</span><span class="p">,</span> <span class="mh">0xBE</span><span class="p">,</span> <span class="mh">0xEF</span><span class="p">])</span>
+<span class="n">dlc</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+<span class="n">can_frame</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;=IB3x8s&#39;</span><span class="p">,</span> <span class="n">can_id</span><span class="p">,</span> <span class="n">dlc</span><span class="p">,</span> <span class="n">data</span><span class="o">.</span><span class="n">ljust</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;</span><span class="se">\x00</span><span class="s1">&#39;</span><span class="p">))</span>
+<span class="n">sock</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">can_frame</span><span class="p">)</span>
+
+<span class="c1"># Receive a frame</span>
+<span class="n">frame</span> <span class="o">=</span> <span class="n">sock</span><span class="o">.</span><span class="n">recv</span><span class="p">(</span><span class="mi">16</span><span class="p">)</span>
+<span class="n">can_id</span><span class="p">,</span> <span class="n">dlc</span><span class="p">,</span> <span class="n">raw_data</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s1">&#39;=IB3x8s&#39;</span><span class="p">,</span> <span class="n">frame</span><span class="p">)</span>
+<span class="n">can_id</span> <span class="o">&amp;=</span> <span class="mh">0x1FFFFFFF</span>  <span class="c1"># Mask out flags</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">raw_data</span><span class="p">[:</span><span class="n">dlc</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;ID: 0x</span><span class="si">{</span><span class="n">can_id</span><span class="si">:</span><span class="s2">03X</span><span class="si">}</span><span class="s2">, DLC: </span><span class="si">{</span><span class="n">dlc</span><span class="si">}</span><span class="s2">, Data: </span><span class="si">{</span><span class="n">data</span><span class="o">.</span><span class="n">hex</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<p>For production code, use the <code>python-can</code> library:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">can</span>
+
+<span class="n">bus</span> <span class="o">=</span> <span class="n">can</span><span class="o">.</span><span class="n">interface</span><span class="o">.</span><span class="n">Bus</span><span class="p">(</span><span class="n">channel</span><span class="o">=</span><span class="s1">&#39;can0&#39;</span><span class="p">,</span> <span class="n">interface</span><span class="o">=</span><span class="s1">&#39;socketcan&#39;</span><span class="p">)</span>
+
+<span class="c1"># Send</span>
+<span class="n">msg</span> <span class="o">=</span> <span class="n">can</span><span class="o">.</span><span class="n">Message</span><span class="p">(</span><span class="n">arbitration_id</span><span class="o">=</span><span class="mh">0x123</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="p">[</span><span class="mh">0xDE</span><span class="p">,</span> <span class="mh">0xAD</span><span class="p">,</span> <span class="mh">0xBE</span><span class="p">,</span> <span class="mh">0xEF</span><span class="p">])</span>
+<span class="n">bus</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+<span class="c1"># Receive (blocks until a message arrives or timeout)</span>
+<span class="n">msg</span> <span class="o">=</span> <span class="n">bus</span><span class="o">.</span><span class="n">recv</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+<span class="k">if</span> <span class="n">msg</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;ID: 0x</span><span class="si">{</span><span class="n">msg</span><span class="o">.</span><span class="n">arbitration_id</span><span class="si">:</span><span class="s2">03X</span><span class="si">}</span><span class="s2">, Data: </span><span class="si">{</span><span class="n">msg</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">hex</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Receive with filtering</span>
+<span class="n">bus</span><span class="o">.</span><span class="n">set_filters</span><span class="p">([</span>
+    <span class="p">{</span><span class="s2">&quot;can_id&quot;</span><span class="p">:</span> <span class="mh">0x100</span><span class="p">,</span> <span class="s2">&quot;can_mask&quot;</span><span class="p">:</span> <span class="mh">0x700</span><span class="p">,</span> <span class="s2">&quot;extended&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+<span class="p">])</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-7-stm32-fdcan-peripheral">PART 7 — STM32 FDCAN PERIPHERAL</h1>
+<hr />
+<h2 id="71-stm32h7-fdcan-configuration-zephyr">7.1 STM32H7 FDCAN Configuration (Zephyr)</h2>
+<div class="highlight"><pre><span></span><code><span class="cm">/* Zephyr CAN API example for STM32H7 FDCAN */</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/can.h&gt;</span>
+
+<span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">can_dev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">fdcan1</span><span class="p">));</span>
+
+<span class="cm">/* Initialize */</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">ret</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">can_start</span><span class="p">(</span><span class="n">can_dev</span><span class="p">);</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ret</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">printk</span><span class="p">(</span><span class="s">&quot;CAN start failed: %d</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">ret</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="cm">/* Send a frame */</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">can_frame</span><span class="w"> </span><span class="n">tx_frame</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0x123</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">dlc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="mh">0xDE</span><span class="p">,</span><span class="w"> </span><span class="mh">0xAD</span><span class="p">,</span><span class="w"> </span><span class="mh">0xBE</span><span class="p">,</span><span class="w"> </span><span class="mh">0xEF</span><span class="p">}</span>
+<span class="p">};</span>
+<span class="n">ret</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">can_send</span><span class="p">(</span><span class="n">can_dev</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx_frame</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">100</span><span class="p">),</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">);</span>
+
+<span class="cm">/* Set up RX filter + callback */</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">can_filter</span><span class="w"> </span><span class="n">rx_filter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0x200</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">mask</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CAN_STD_ID_MASK</span><span class="p">,</span><span class="w">  </span><span class="cm">/* exact match */</span>
+<span class="w">    </span><span class="p">.</span><span class="n">flags</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span>
+<span class="p">};</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">rx_callback</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">can_frame</span><span class="w"> </span><span class="o">*</span><span class="n">frame</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">user_data</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">printk</span><span class="p">(</span><span class="s">&quot;Received: ID=0x%03X DLC=%d Data=&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">frame</span><span class="o">-&gt;</span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="n">frame</span><span class="o">-&gt;</span><span class="n">dlc</span><span class="p">);</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">frame</span><span class="o">-&gt;</span><span class="n">dlc</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">printk</span><span class="p">(</span><span class="s">&quot;%02X &quot;</span><span class="p">,</span><span class="w"> </span><span class="n">frame</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">[</span><span class="n">i</span><span class="p">]);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="n">printk</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="n">filter_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">can_add_rx_filter</span><span class="p">(</span><span class="n">can_dev</span><span class="p">,</span><span class="w"> </span><span class="n">rx_callback</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rx_filter</span><span class="p">);</span>
+</code></pre></div>
+
+<h2 id="72-devicetree-overlay-for-stm32h7-fdcan">7.2 DeviceTree overlay for STM32H7 FDCAN</h2>
+<div class="highlight"><pre><span></span><code><span class="cm">/* boards/nucleo_h743zi.overlay */</span>
+<span class="o">&amp;</span><span class="na">fdcan1</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kr">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;okay&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">fdcan1_rx_pd0</span><span class="w"> </span><span class="o">&amp;</span><span class="na">fdcan1_tx_pd1</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;default&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">bus-speed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">500000</span><span class="o">&gt;</span><span class="p">;</span><span class="w">        </span><span class="cm">/* 500kbps nominal */</span>
+<span class="w">    </span><span class="n">bus-speed-data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">2000000</span><span class="o">&gt;</span><span class="p">;</span><span class="w">  </span><span class="cm">/* 2Mbps data phase (FD) */</span>
+<span class="w">    </span><span class="n">sample-point</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">875</span><span class="o">&gt;</span><span class="p">;</span><span class="w">       </span><span class="cm">/* 87.5% sample point */</span>
+<span class="w">    </span><span class="n">sample-point-data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">750</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-8-higher-layer-protocols">PART 8 — HIGHER-LAYER PROTOCOLS</h1>
+<hr />
+<p>CAN only defines the physical and data-link layers. Higher-layer protocols add meaning to the raw ID+data frames:</p>
+<table>
+<thead>
+<tr>
+<th>Protocol</th>
+<th>Domain</th>
+<th>ID Usage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>CANopen</strong></td>
+<td>Industrial automation</td>
+<td>7-bit node ID + 4-bit function code. PDO, SDO, NMT, SYNC, EMCY.</td>
+</tr>
+<tr>
+<td><strong>J1939</strong></td>
+<td>Heavy vehicles</td>
+<td>29-bit ID encodes PGN (parameter group), source, priority.</td>
+</tr>
+<tr>
+<td><strong>DeviceNet</strong></td>
+<td>Factory automation</td>
+<td>11-bit ID with MAC ID + message group.</td>
+</tr>
+<tr>
+<td><strong>OBD-II</strong></td>
+<td>Automotive diagnostics</td>
+<td>ID 0x7DF (broadcast), 0x7E0–0x7E7 (specific ECU).</td>
+</tr>
+<tr>
+<td><strong>UAVCAN (DroneCAN)</strong></td>
+<td>Drones / UAVs</td>
+<td>29-bit ID with priority, type, source/destination.</td>
+</tr>
+<tr>
+<td><strong>ISO-TP (ISO 15765-2)</strong></td>
+<td>Transport layer</td>
+<td>Multi-frame segmentation for &gt;8 byte messages over CAN 2.0.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Which one for robots?</strong> Most custom robot systems use raw CAN with a project-specific protocol. For ROS integration, <code>ros_canopen</code> or <code>socketcan_bridge</code> packages are common.</p>
+<hr />
+<h1 id="part-9-can-bus-design-rules">PART 9 — CAN BUS DESIGN RULES</h1>
+<hr />
+<h2 id="91-physical-layout">9.1 Physical Layout</h2>
+<div class="highlight"><pre><span></span><code>    CORRECT — Linear bus topology (daisy-chain):
+
+    ┌──┐    ┌──┐    ┌──┐    ┌──┐
+    │N1├────┤N2├────┤N3├────┤N4│
+    └──┘    └──┘    └──┘    └──┘
+    120Ω                    120Ω
+    (end)                   (end)
+
+    WRONG — Star topology (creates reflections):
+
+                ┌──┐
+                │N3│
+                └┬─┘
+    ┌──┐    ┌───┴───┐    ┌──┐
+    │N1├────┤  HUB  ├────┤N2│       ← DON&#39;T DO THIS!
+    └──┘    └───┬───┘    └──┘
+                ┌┴─┐
+                │N4│
+                └──┘
+</code></pre></div>
+
+<h2 id="92-speed-vs-distance">9.2 Speed vs Distance</h2>
+<table>
+<thead>
+<tr>
+<th>Bit Rate</th>
+<th>Max Bus Length</th>
+<th>Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 Mbps</td>
+<td>40m</td>
+<td>Short bus, fast response</td>
+</tr>
+<tr>
+<td>500 kbps</td>
+<td>100m</td>
+<td>Automotive standard</td>
+</tr>
+<tr>
+<td>250 kbps</td>
+<td>250m</td>
+<td>Trucks, industrial</td>
+</tr>
+<tr>
+<td>125 kbps</td>
+<td>500m</td>
+<td>Light industrial</td>
+</tr>
+<tr>
+<td>50 kbps</td>
+<td>1000m</td>
+<td>Building automation</td>
+</tr>
+<tr>
+<td>10 kbps</td>
+<td>5km+</td>
+<td>Very long runs</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule:</strong> Speed × distance ≈ constant. Faster = shorter max bus length.</p>
+<h2 id="93-wiring">9.3 Wiring</h2>
+<ul>
+<li>Use <strong>twisted pair</strong> cable, 120Ω characteristic impedance</li>
+<li>Shield the cable in noisy environments (ground shield at one end only → avoid ground loops)</li>
+<li>Keep stub lengths (from bus to node connector) under 30cm at 1Mbps</li>
+<li>Separate CAN wiring from power wiring (at least 10cm distance)</li>
+</ul>
+<hr />
+<h1 id="gotcha-table">GOTCHA TABLE</h1>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely Cause</th>
+<th>How to Diagnose</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No communication at all</td>
+<td>Missing termination resistors</td>
+<td>Measure 60Ω between CANH and CANL (powered off)</td>
+<td>Add 120Ω at each end of bus</td>
+</tr>
+<tr>
+<td>Communication at low speed but not high speed</td>
+<td>Termination or cable issues</td>
+<td>Try lower bitrate. Scope the bus for ringing.</td>
+<td>Check termination. Use proper twisted pair. Shorten stubs.</td>
+</tr>
+<tr>
+<td>Node goes Bus-Off</td>
+<td>High TEC (&gt;255). Wiring fault, wrong bitrate, or transceiver failure.</td>
+<td>Read TEC/REC from CAN controller registers</td>
+<td>Check wiring. Verify all nodes have same bitrate. Replace transceiver.</td>
+</tr>
+<tr>
+<td>ACK errors (transmitter)</td>
+<td>No other node on the bus, or all receivers have wrong bitrate</td>
+<td>Need at least 2 nodes. Check all nodes&rsquo; bitrate matches.</td>
+<td>Add a second node or fix bitrate mismatch.</td>
+</tr>
+<tr>
+<td>Frames received but data is garbled</td>
+<td>Bitrate mismatch between nodes</td>
+<td>Check configured bitrate on ALL nodes. Even 0.1% off can cause issues.</td>
+<td>Use the same crystal/oscillator frequency. Match bitrate exactly.</td>
+</tr>
+<tr>
+<td>Intermittent errors under vibration</td>
+<td>Loose connector or cracked solder joint</td>
+<td>Wiggle cables while monitoring bus errors</td>
+<td>Re-crimp connectors. Re-solder joints.</td>
+</tr>
+<tr>
+<td>One node works, another doesn&rsquo;t</td>
+<td>Wrong transceiver voltage level (3.3V vs 5V)</td>
+<td>Check transceiver T×/R× pins with scope. Check VCC.</td>
+<td>Use correct transceiver for your MCU&rsquo;s logic level.</td>
+</tr>
+<tr>
+<td>Bus error rate increases over time</td>
+<td>EMI from nearby power cables or motors</td>
+<td>Move CAN cable away from noise sources. Add shielding.</td>
+<td>Route CAN cables separately. Use shielded twisted pair.</td>
+</tr>
+<tr>
+<td>CAN FD frames rejected by some nodes</td>
+<td>Classic CAN nodes on FD-enabled bus</td>
+<td>Error frames when FD frame is sent</td>
+<td>Either upgrade all nodes to FD or keep bus at classic CAN</td>
+</tr>
+<tr>
+<td>Star topology causes random errors</td>
+<td>Reflections from un-terminated branch ends</td>
+<td>Scope shows ringing on edges. Works at low speed.</td>
+<td>Convert to linear (daisy-chain) topology</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="quick-reference-card">QUICK REFERENCE CARD</h1>
+<div class="highlight"><pre><span></span><code>┌──────────────────────────────── CAN BUS CHEAT SHEET ──────────────────────────────────────┐
+│                                                                                            │
+│  CORE:  Differential signaling (CANH, CANL), multi-master, broadcast, half-duplex         │
+│         Dominant (0) = actively driven. Recessive (1) = passive.  0 wins over 1.          │
+│                                                                                            │
+│  FRAME STRUCTURE (11-bit ID):                                                              │
+│    [SOF][11-bit ID][RTR][IDE][r0][DLC 4b][Data 0-8B][CRC 15b+1][ACK 1+1][EOF 7][IFS 3]   │
+│                                                                                            │
+│  TERMINATION:  120Ω at each physical END of bus. Net = 60Ω between CANH/CANL.             │
+│                                                                                            │
+│  SPEED:  1Mbps/40m   500kbps/100m   250kbps/250m   125kbps/500m   10kbps/5km              │
+│                                                                                            │
+│  ARBITRATION:  Lower ID = higher priority. Dominant (0) wins. Non-destructive.             │
+│                                                                                            │
+│  ERROR COUNTERS:  TEC/REC                                                                  │
+│    Error Active (&lt;128): Normal, sends active error frames                                  │
+│    Error Passive (≥128): Sending passive error frames, reduced disruption                  │
+│    Bus-Off (TEC≥256): Node removed, requires recovery                                     │
+│                                                                                            │
+│  5 ERROR TYPES:  Bit, Stuff (6 same bits), CRC, Form, ACK                                 │
+│                                                                                            │
+│  CAN FD:  Up to 64 bytes data, up to 8Mbps data phase, 1Mbps arbitration                  │
+│                                                                                            │
+│  LINUX:  ip link set can0 type can bitrate 500000 &amp;&amp; ip link set up can0                  │
+│          cansend can0 123#DEADBEEF                                                         │
+│          candump can0                                                                      │
+│                                                                                            │
+│  TOPOLOGY:  Linear bus (daisy-chain) ONLY. No star. Stubs &lt; 30cm at 1Mbps.                │
+│                                                                                            │
+│  TRANSCEIVERS:  SN65HVD230 (3.3V), TJA1050 (5V), MCP2542 (FD)                            │
+│                                                                                            │
+│  COMMON PROTOCOLS:  CANopen (industrial), J1939 (trucks), OBD-II (cars), DroneCAN (UAV)   │
+│                                                                                            │
+└────────────────────────────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

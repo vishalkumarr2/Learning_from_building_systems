@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Module 17: Software-Defined Vehicles &amp; Mission-Critical C++ - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-indigo-600 hover:text-indigo-800 mb-4 inline-block">&larr; Back to C++ Advanced</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="module-17-software-defined-vehicles-mission-critical-c">Module 17: Software-Defined Vehicles &amp; Mission-Critical C++</h1>
+<h2 id="overview">Overview</h2>
+<p>A <strong>Software-Defined Vehicle (SDV)</strong> is a vehicle where software — not mechanical linkages or fixed ECU firmware — defines behavior, features, and capabilities. The vehicle becomes a rolling computer that receives over-the-air (OTA) updates, runs containerized services, and coordinates dozens of heterogeneous processors through middleware.</p>
+<p><strong>Mission-critical</strong> means failure causes loss of life, destruction of expensive hardware, or catastrophic environmental damage. In an SDV, braking, steering, and power management are mission-critical. Infotainment is not. The boundary between them is enforced by architecture, not wishful thinking.</p>
+<p>This module teaches the C++ patterns, architectures, and disciplines used in production SDV systems — from AUTOSAR Adaptive to zonal architectures, from functional safety (ISO 26262) to cybersecurity (ISO/SAE 21434), from deterministic execution to graceful degradation.</p>
+<hr />
+<h2 id="1-the-sdv-architecture-revolution">1. The SDV Architecture Revolution</h2>
+<h3 id="11-from-distributed-ecus-to-centralized-compute">1.1 From Distributed ECUs to Centralized Compute</h3>
+<p>Traditional vehicles have 70–150 Electronic Control Units (ECUs), each running a single function: one for ABS, one for airbags, one for power windows. Each ECU is a microcontroller (ARM Cortex-M, Renesas RH850) running bare-metal or AUTOSAR Classic.</p>
+<p><strong>Problems with the distributed model:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Problem</th>
+<th>Impact</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>150 ECUs × 150 unique firmware builds</td>
+<td>Integration testing is exponential</td>
+</tr>
+<tr>
+<td>CAN bus bandwidth (~1 Mbps)</td>
+<td>Cannot move camera frames or lidar clouds</td>
+</tr>
+<tr>
+<td>No OTA update for most ECUs</td>
+<td>Recalls are physical, costing $100M+</td>
+</tr>
+<tr>
+<td>Each supplier owns their ECU firmware</td>
+<td>OEM cannot innovate on software</td>
+</tr>
+<tr>
+<td>Fixed function per ECU</td>
+<td>A parking sensor ECU can&rsquo;t help with ADAS</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The SDV answer: Zonal Architecture</strong></p>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────────────┐
+│              Central Compute (HPC)               │
+│   ┌─────────┐  ┌──────────┐  ┌──────────────┐  │
+│   │ ADAS    │  │ Vehicle  │  │ Infotainment │  │
+│   │ Domain  │  │ Dynamics │  │ Domain       │  │
+│   └────┬────┘  └────┬─────┘  └──────┬───────┘  │
+│        │            │               │           │
+│   ┌────┴────────────┴───────────────┴────┐      │
+│   │    Service-Oriented Middleware        │      │
+│   │    (SOME/IP, DDS, Zenoh)             │      │
+│   └────┬────────────┬───────────────┬────┘      │
+└────────┼────────────┼───────────────┼───────────┘
+         │ Ethernet   │ Ethernet      │ Ethernet
+    ┌────┴────┐  ┌────┴────┐    ┌─────┴────┐
+    │ Zone    │  │ Zone    │    │ Zone     │
+    │ Gateway │  │ Gateway │    │ Gateway  │
+    │ (Front) │  │ (Rear)  │    │ (Left)   │
+    └────┬────┘  └────┬────┘    └────┬─────┘
+         │            │              │
+    Sensors,      Sensors,       Sensors,
+    Actuators     Actuators      Actuators
+</code></pre></div>
+
+<p><strong>Key shifts:</strong>
+- <strong>ECU → Software service</strong>: ABS becomes a containerized service, deployable independently
+- <strong>CAN → Automotive Ethernet</strong>: 100 Mbps → 10 Gbps backbone
+- <strong>Fixed firmware → OTA-updatable</strong>: Services updated like phone apps
+- <strong>Supplier ECU → OEM-controlled compute</strong>: Software differentiation at the OEM level</p>
+<h3 id="12-the-sdv-software-stack">1.2 The SDV Software Stack</h3>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────────┐
+│           Application Layer                  │
+│  (ADAS, Body Control, Chassis, Diagnostics) │
+├─────────────────────────────────────────────┤
+│           Service Layer                      │
+│  (AUTOSAR Adaptive ara::com, DDS, SOME/IP)  │
+├─────────────────────────────────────────────┤
+│           Middleware / OS Abstraction         │
+│  (POSIX, Execution Manager, Health Monitor)  │
+├─────────────────────────────────────────────┤
+│           OS Layer                           │
+│  (QNX, Linux + PREEMPT_RT, PikeOS, seL4)    │
+├─────────────────────────────────────────────┤
+│           Hypervisor                         │
+│  (XEN, ACRN, QNX Hypervisor)                │
+├─────────────────────────────────────────────┤
+│           Hardware                           │
+│  (NVIDIA Orin, Qualcomm SA8650, NXP S32G)   │
+└─────────────────────────────────────────────┘
+</code></pre></div>
+
+<h3 id="13-why-c-dominates-sdv">1.3 Why C++ Dominates SDV</h3>
+<table>
+<thead>
+<tr>
+<th>Language</th>
+<th>Use Case</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>C++17/20</strong></td>
+<td>ADAS, middleware, vehicle dynamics</td>
+<td>Deterministic, zero-cost abstractions, ISO 26262 qualified toolchains</td>
+</tr>
+<tr>
+<td><strong>C</strong></td>
+<td>Microcontroller firmware, bootloaders</td>
+<td>No runtime, smallest footprint</td>
+</tr>
+<tr>
+<td><strong>Rust</strong></td>
+<td>New security-critical components</td>
+<td>Memory safety, but immature toolchain qualification</td>
+</tr>
+<tr>
+<td><strong>Python</strong></td>
+<td>Test automation, ML model training</td>
+<td>Not for production runtime</td>
+</tr>
+<tr>
+<td><strong>Java/Kotlin</strong></td>
+<td>Android Automotive infotainment</td>
+<td>Not for safety-critical paths</td>
+</tr>
+</tbody>
+</table>
+<p>C++ owns the mission-critical layer because:
+1. <strong>Deterministic timing</strong> — no GC pauses, RAII for resource management
+2. <strong>Qualified compilers</strong> — GCC, Clang, and Green Hills are ISO 26262 qualified
+3. <strong>AUTOSAR Adaptive</strong> — defined entirely in C++14/17
+4. <strong>Zero-cost abstractions</strong> — <code>std::variant</code>, <code>constexpr</code>, templates compile to optimal code
+5. <strong>Decades of automotive validation</strong> — proven in every mass-production vehicle since 2005</p>
+<hr />
+<h2 id="2-autosar-adaptive-platform-the-sdv-framework">2. AUTOSAR Adaptive Platform — The SDV Framework</h2>
+<h3 id="21-what-is-autosar-adaptive">2.1 What is AUTOSAR Adaptive?</h3>
+<p>AUTOSAR Adaptive is a standardized middleware platform for high-performance automotive computers. Unlike AUTOSAR Classic (static, single-threaded, C-only), Adaptive is:</p>
+<ul>
+<li><strong>POSIX-based</strong>: Runs on Linux or QNX</li>
+<li><strong>C++14/17</strong>: All APIs are modern C++</li>
+<li><strong>Service-oriented</strong>: Components communicate via service discovery and proxies</li>
+<li><strong>Dynamic</strong>: Services start, stop, and update at runtime</li>
+</ul>
+<h3 id="22-key-functional-clusters">2.2 Key Functional Clusters</h3>
+<table>
+<thead>
+<tr>
+<th>Cluster</th>
+<th>Purpose</th>
+<th>C++ API Namespace</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Communication Management (ara::com)</strong></td>
+<td>Service-oriented communication (SOME/IP, DDS)</td>
+<td><code>ara::com</code></td>
+</tr>
+<tr>
+<td><strong>Execution Management (ara::exec)</strong></td>
+<td>Process lifecycle, deterministic scheduling</td>
+<td><code>ara::exec</code></td>
+</tr>
+<tr>
+<td><strong>Diagnostics (ara::diag)</strong></td>
+<td>UDS (ISO 14229), DTCs, fault memory</td>
+<td><code>ara::diag</code></td>
+</tr>
+<tr>
+<td><strong>Persistency (ara::per)</strong></td>
+<td>Key-value store, file proxies</td>
+<td><code>ara::per</code></td>
+</tr>
+<tr>
+<td><strong>Update &amp; Config (ara::ucm)</strong></td>
+<td>OTA updates, software package management</td>
+<td><code>ara::ucm</code></td>
+</tr>
+<tr>
+<td><strong>Cryptography (ara::crypto)</strong></td>
+<td>HSM integration, secure boot, TLS</td>
+<td><code>ara::crypto</code></td>
+</tr>
+<tr>
+<td><strong>Identity &amp; Access (ara::iam)</strong></td>
+<td>Service-level access control</td>
+<td><code>ara::iam</code></td>
+</tr>
+<tr>
+<td><strong>Health Management (ara::phm)</strong></td>
+<td>Watchdog supervision, health monitoring</td>
+<td><code>ara::phm</code></td>
+</tr>
+<tr>
+<td><strong>Log &amp; Trace (ara::log)</strong></td>
+<td>DLT-compatible structured logging</td>
+<td><code>ara::log</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="23-aracom-service-communication-in-c">2.3 ara::com — Service Communication in C++</h3>
+<p>The core of Adaptive AUTOSAR. Services are defined in ARXML (Adaptive autosar XML), then code-generated into proxy/skeleton classes.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Generated service interface: RadarService</span>
+<span class="c1">// Provider side (Skeleton)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">RadarServiceSkeleton</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">ara</span><span class="o">::</span><span class="n">com</span><span class="o">::</span><span class="n">ServiceSkeleton</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="c1">// Event: new radar object detected</span>
+<span class="w">    </span><span class="n">ara</span><span class="o">::</span><span class="n">com</span><span class="o">::</span><span class="n">Event</span><span class="o">&lt;</span><span class="n">RadarObject</span><span class="o">&gt;</span><span class="w"> </span><span class="n">object_detected</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Method: calibrate the radar sensor</span>
+<span class="w">    </span><span class="n">ara</span><span class="o">::</span><span class="n">com</span><span class="o">::</span><span class="n">Future</span><span class="o">&lt;</span><span class="n">CalibrationResult</span><span class="o">&gt;</span><span class="w"> </span><span class="n">Calibrate</span><span class="p">(</span>
+<span class="w">        </span><span class="n">CalibrationParams</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="w"> </span><span class="n">params</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Field: current radar status (get/set/notify)</span>
+<span class="w">    </span><span class="n">ara</span><span class="o">::</span><span class="n">com</span><span class="o">::</span><span class="n">Field</span><span class="o">&lt;</span><span class="n">RadarStatus</span><span class="o">&gt;</span><span class="w"> </span><span class="n">status</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="c1">// Consumer side (Proxy)</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">consume_radar_data</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Find all instances of RadarService</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">handles</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ara</span><span class="o">::</span><span class="n">com</span><span class="o">::</span><span class="n">FindService</span><span class="o">&lt;</span><span class="n">RadarServiceProxy</span><span class="o">&gt;</span><span class="p">(</span>
+<span class="w">        </span><span class="n">ara</span><span class="o">::</span><span class="n">com</span><span class="o">::</span><span class="n">InstanceSpecifier</span><span class="p">(</span><span class="s">&quot;radar_front&quot;</span><span class="p">));</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">handles</span><span class="p">.</span><span class="n">empty</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">ara</span><span class="o">::</span><span class="n">log</span><span class="o">::</span><span class="n">LogError</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;No radar service found&quot;</span><span class="p">;</span>
+<span class="w">        </span><span class="k">return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Create proxy from first handle</span>
+<span class="w">    </span><span class="n">RadarServiceProxy</span><span class="w"> </span><span class="n">proxy</span><span class="p">(</span><span class="n">handles</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+
+<span class="w">    </span><span class="c1">// Subscribe to events</span>
+<span class="w">    </span><span class="n">proxy</span><span class="p">.</span><span class="n">object_detected</span><span class="p">.</span><span class="n">Subscribe</span><span class="p">(</span><span class="mi">10</span><span class="p">);</span><span class="w">  </span><span class="c1">// queue depth</span>
+<span class="w">    </span><span class="n">proxy</span><span class="p">.</span><span class="n">object_detected</span><span class="p">.</span><span class="n">SetReceiveHandler</span><span class="p">([](</span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">samples</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">obj</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">samples</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">process_radar_object</span><span class="p">(</span><span class="o">*</span><span class="n">obj</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">});</span>
+
+<span class="w">    </span><span class="c1">// Call a method (returns Future)</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">future</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">proxy</span><span class="p">.</span><span class="n">Calibrate</span><span class="p">(</span><span class="n">CalibrationParams</span><span class="p">{.</span><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Mode</span><span class="o">::</span><span class="n">FULL</span><span class="p">});</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">future</span><span class="p">.</span><span class="n">get</span><span class="p">();</span><span class="w">  </span><span class="c1">// blocks until response</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">result</span><span class="p">.</span><span class="n">success</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">ara</span><span class="o">::</span><span class="n">log</span><span class="o">::</span><span class="n">LogInfo</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Radar calibrated OK&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="24-araexec-deterministic-execution">2.4 ara::exec — Deterministic Execution</h3>
+<p>The Execution Manager controls when and how processes run. In mission-critical systems, you need <strong>deterministic scheduling</strong> — the same inputs always produce the same outputs in the same time.</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;ara/exec/execution_client.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;ara/exec/deterministic_client.h&gt;</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Report to Execution Manager that we&#39;re alive</span>
+<span class="w">    </span><span class="n">ara</span><span class="o">::</span><span class="n">exec</span><span class="o">::</span><span class="n">ExecutionClient</span><span class="w"> </span><span class="n">exec_client</span><span class="p">;</span>
+<span class="w">    </span><span class="n">exec_client</span><span class="p">.</span><span class="n">ReportExecutionState</span><span class="p">(</span>
+<span class="w">        </span><span class="n">ara</span><span class="o">::</span><span class="n">exec</span><span class="o">::</span><span class="n">ExecutionState</span><span class="o">::</span><span class="n">kRunning</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Deterministic execution: wait for activation cycle</span>
+<span class="w">    </span><span class="n">ara</span><span class="o">::</span><span class="n">exec</span><span class="o">::</span><span class="n">DeterministicClient</span><span class="w"> </span><span class="n">det_client</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="nb">true</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Block until the Execution Manager triggers this cycle</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">activation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">det_client</span><span class="p">.</span><span class="n">WaitForActivation</span><span class="p">();</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">activation</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">ara</span><span class="o">::</span><span class="n">exec</span><span class="o">::</span><span class="n">ActivationReturnType</span><span class="o">::</span><span class="n">kTerminate</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">break</span><span class="p">;</span><span class="w">  </span><span class="c1">// graceful shutdown requested</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="c1">// This code runs at a guaranteed period (e.g., every 10ms)</span>
+<span class="w">        </span><span class="c1">// WCET must be bounded and verified</span>
+<span class="w">        </span><span class="n">read_sensors</span><span class="p">();</span>
+<span class="w">        </span><span class="n">compute_control</span><span class="p">();</span>
+<span class="w">        </span><span class="n">write_actuators</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">exec_client</span><span class="p">.</span><span class="n">ReportExecutionState</span><span class="p">(</span>
+<span class="w">        </span><span class="n">ara</span><span class="o">::</span><span class="n">exec</span><span class="o">::</span><span class="n">ExecutionState</span><span class="o">::</span><span class="n">kTerminating</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="25-araphm-health-monitoring">2.5 ara::phm — Health Monitoring</h3>
+<p>Mission-critical services must be supervised. If a service misses its deadline, the platform must react — escalating from restart to safe state.</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;ara/phm/supervised_entity.h&gt;</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">BrakeController</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">ara</span><span class="o">::</span><span class="n">phm</span><span class="o">::</span><span class="n">SupervisedEntity</span><span class="w"> </span><span class="n">supervised_</span><span class="p">;</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="n">BrakeController</span><span class="p">()</span>
+<span class="w">        </span><span class="o">:</span><span class="w"> </span><span class="n">supervised_</span><span class="p">(</span><span class="n">ara</span><span class="o">::</span><span class="n">com</span><span class="o">::</span><span class="n">InstanceSpecifier</span><span class="p">(</span><span class="s">&quot;brake_ctrl&quot;</span><span class="p">))</span><span class="w"> </span><span class="p">{}</span>
+
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">control_cycle</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Report alive checkpoint — must happen within configured deadline</span>
+<span class="w">        </span><span class="n">supervised_</span><span class="p">.</span><span class="n">ReportCheckpoint</span><span class="p">(</span>
+<span class="w">            </span><span class="n">ara</span><span class="o">::</span><span class="n">phm</span><span class="o">::</span><span class="n">Checkpoint</span><span class="o">::</span><span class="n">kAliveCheckpoint</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// --- Begin safety-critical computation ---</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">brake_request</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">read_brake_pedal</span><span class="p">();</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">wheel_speeds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">read_wheel_speeds</span><span class="p">();</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">brake_torque</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">compute_abs</span><span class="p">(</span><span class="n">brake_request</span><span class="p">,</span><span class="w"> </span><span class="n">wheel_speeds</span><span class="p">);</span>
+<span class="w">        </span><span class="n">apply_brake_torque</span><span class="p">(</span><span class="n">brake_torque</span><span class="p">);</span>
+<span class="w">        </span><span class="c1">// --- End safety-critical computation ---</span>
+
+<span class="w">        </span><span class="c1">// Report logical checkpoint — confirms correct execution flow</span>
+<span class="w">        </span><span class="n">supervised_</span><span class="p">.</span><span class="n">ReportCheckpoint</span><span class="p">(</span>
+<span class="w">            </span><span class="n">ara</span><span class="o">::</span><span class="n">phm</span><span class="o">::</span><span class="n">Checkpoint</span><span class="o">::</span><span class="n">kLogicalCheckpoint</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p><strong>Supervision modes:</strong>
+- <strong>Alive supervision</strong>: &ldquo;Are you still running?&rdquo; — periodic heartbeat
+- <strong>Deadline supervision</strong>: &ldquo;Did you finish in time?&rdquo; — WCET enforcement
+- <strong>Logical supervision</strong>: &ldquo;Did you execute correctly?&rdquo; — checkpoint sequence verification</p>
+<hr />
+<h2 id="3-functional-safety-iso-26262-for-c-developers">3. Functional Safety — ISO 26262 for C++ Developers</h2>
+<h3 id="31-asil-levels-and-what-they-mean-for-code">3.1 ASIL Levels and What They Mean for Code</h3>
+<p>ISO 26262 defines Automotive Safety Integrity Levels:</p>
+<table>
+<thead>
+<tr>
+<th>ASIL</th>
+<th>Risk</th>
+<th>Example Systems</th>
+<th>Code Requirements</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>QM</strong></td>
+<td>No safety requirement</td>
+<td>Radio, seat memory</td>
+<td>Standard quality</td>
+</tr>
+<tr>
+<td><strong>ASIL A</strong></td>
+<td>Low risk</td>
+<td>Headlights, wipers</td>
+<td>Basic coding guidelines</td>
+</tr>
+<tr>
+<td><strong>ASIL B</strong></td>
+<td>Medium risk</td>
+<td>Cruise control, EPB</td>
+<td>Unit testing, code review</td>
+</tr>
+<tr>
+<td><strong>ASIL C</strong></td>
+<td>High risk</td>
+<td>ABS, ESC</td>
+<td>MC/DC coverage, static analysis</td>
+</tr>
+<tr>
+<td><strong>ASIL D</strong></td>
+<td>Highest risk</td>
+<td>Steering, airbag, braking</td>
+<td>All of the above + formal methods</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-misra-c-2023-the-coding-standard">3.2 MISRA C++ 2023 — The Coding Standard</h3>
+<p>MISRA C++ 2023 (based on C++17) replaces the ancient MISRA C++ 2008. Key rules for SDV:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// === RULE: No implicit conversions that lose data ===</span>
+<span class="c1">// VIOLATION:</span>
+<span class="kt">double</span><span class="w"> </span><span class="n">sensor_value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">3.14159</span><span class="p">;</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">quantized</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sensor_value</span><span class="p">;</span><span class="w">  </span><span class="c1">// silent truncation!</span>
+
+<span class="c1">// COMPLIANT:</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">quantized</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="p">(</span><span class="n">sensor_value</span><span class="p">);</span><span class="w">  </span><span class="c1">// explicit intent</span>
+
+<span class="c1">// === RULE: No dynamic_cast in safety-critical paths ===</span>
+<span class="c1">// VIOLATION:</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="n">SensorBase</span><span class="o">*</span><span class="w"> </span><span class="n">s</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">lidar</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">dynamic_cast</span><span class="o">&lt;</span><span class="n">LidarSensor</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">s</span><span class="p">))</span><span class="w"> </span><span class="p">{</span><span class="w">  </span><span class="c1">// RTTI overhead</span>
+<span class="w">        </span><span class="n">lidar</span><span class="o">-&gt;</span><span class="n">get_pointcloud</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// COMPLIANT: Use static polymorphism or variant</span>
+<span class="k">using</span><span class="w"> </span><span class="n">Sensor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">variant</span><span class="o">&lt;</span><span class="n">LidarSensor</span><span class="p">,</span><span class="w"> </span><span class="n">RadarSensor</span><span class="p">,</span><span class="w"> </span><span class="n">CameraSensor</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="n">Sensor</span><span class="o">&amp;</span><span class="w"> </span><span class="n">s</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">visit</span><span class="p">([](</span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">sensor</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">sensor</span><span class="p">.</span><span class="n">process</span><span class="p">();</span><span class="w"> </span><span class="p">},</span><span class="w"> </span><span class="n">s</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="c1">// === RULE: All switch cases must be handled ===</span>
+<span class="c1">// VIOLATION:</span>
+<span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">GearState</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">PARK</span><span class="p">,</span><span class="w"> </span><span class="n">REVERSE</span><span class="p">,</span><span class="w"> </span><span class="n">NEUTRAL</span><span class="p">,</span><span class="w"> </span><span class="n">DRIVE</span><span class="w"> </span><span class="p">};</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">handle_gear</span><span class="p">(</span><span class="n">GearState</span><span class="w"> </span><span class="n">g</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">switch</span><span class="w"> </span><span class="p">(</span><span class="n">g</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">GearState</span><span class="o">::</span><span class="no">PARK</span><span class="p">:</span><span class="w"> </span><span class="n">park</span><span class="p">();</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">GearState</span><span class="o">::</span><span class="no">DRIVE</span><span class="p">:</span><span class="w"> </span><span class="n">drive</span><span class="p">();</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<span class="w">        </span><span class="c1">// Missing REVERSE and NEUTRAL!</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// COMPLIANT:</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">handle_gear</span><span class="p">(</span><span class="n">GearState</span><span class="w"> </span><span class="n">g</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">switch</span><span class="w"> </span><span class="p">(</span><span class="n">g</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">GearState</span><span class="o">::</span><span class="no">PARK</span><span class="p">:</span><span class="w">    </span><span class="n">park</span><span class="p">();</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">GearState</span><span class="o">::</span><span class="no">REVERSE</span><span class="p">:</span><span class="w"> </span><span class="n">reverse</span><span class="p">();</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">GearState</span><span class="o">::</span><span class="no">NEUTRAL</span><span class="p">:</span><span class="w"> </span><span class="n">neutral</span><span class="p">();</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">GearState</span><span class="o">::</span><span class="no">DRIVE</span><span class="p">:</span><span class="w">   </span><span class="n">drive</span><span class="p">();</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<span class="w">        </span><span class="c1">// No default — compiler warns on missing enum values</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="33-mcdc-coverage-the-gold-standard">3.3 MC/DC Coverage — The Gold Standard</h3>
+<p>Modified Condition/Decision Coverage (MC/DC) requires that every condition in a decision independently affects the outcome. Required for ASIL C/D.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Decision: (A &amp;&amp; B) || C</span>
+<span class="c1">// MC/DC requires test cases proving each condition matters independently:</span>
+<span class="c1">//</span>
+<span class="c1">// Test 1: A=T, B=T, C=F → true  (baseline for A and B)</span>
+<span class="c1">// Test 2: A=F, B=T, C=F → false (A independently affects result)</span>
+<span class="c1">// Test 3: A=T, B=F, C=F → false (B independently affects result)</span>
+<span class="c1">// Test 4: A=F, B=F, C=T → true  (C independently affects result)</span>
+<span class="c1">//</span>
+<span class="c1">// 4 test cases for 3 conditions (vs 8 for exhaustive, 2 for statement coverage)</span>
+
+<span class="kt">bool</span><span class="w"> </span><span class="nf">should_apply_emergency_brake</span><span class="p">(</span><span class="kt">bool</span><span class="w"> </span><span class="n">obstacle_detected</span><span class="p">,</span>
+<span class="w">                                    </span><span class="kt">bool</span><span class="w"> </span><span class="n">closing_fast</span><span class="p">,</span>
+<span class="w">                                    </span><span class="kt">bool</span><span class="w"> </span><span class="n">driver_unresponsive</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="n">obstacle_detected</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">closing_fast</span><span class="p">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">driver_unresponsive</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// MC/DC test suite:</span>
+<span class="k">static_assert</span><span class="p">(</span><span class="n">should_apply_emergency_brake</span><span class="p">(</span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nb">true</span><span class="p">);</span>
+<span class="k">static_assert</span><span class="p">(</span><span class="n">should_apply_emergency_brake</span><span class="p">(</span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nb">false</span><span class="p">);</span>
+<span class="k">static_assert</span><span class="p">(</span><span class="n">should_apply_emergency_brake</span><span class="p">(</span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nb">false</span><span class="p">);</span>
+<span class="k">static_assert</span><span class="p">(</span><span class="n">should_apply_emergency_brake</span><span class="p">(</span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nb">true</span><span class="p">);</span>
+</code></pre></div>
+
+<h3 id="34-freedom-from-interference-ffi">3.4 Freedom from Interference (FFI)</h3>
+<p>ASIL D code (braking) must not be corrupted by QM code (infotainment). This is enforced through:</p>
+<ol>
+<li><strong>Memory Protection Units (MPU)</strong>: Hardware isolation between partitions</li>
+<li><strong>Time Partitioning</strong>: Hypervisor guarantees CPU time per partition</li>
+<li><strong>Communication Firewalls</strong>: Only validated messages cross partition boundaries</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="c1">// === Partition Boundary — validated message passing ===</span>
+<span class="c1">// An ASIL D brake service receives speed from an ASIL B sensor.</span>
+<span class="c1">// The message MUST be validated before use.</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">SpeedMessage</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">speed_mps</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">sequence</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">crc32</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">timestamp_ns</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="c1">// E2E Protection (AUTOSAR E2E Profile 4)</span>
+<span class="kt">bool</span><span class="w"> </span><span class="nf">validate_speed_message</span><span class="p">(</span><span class="n">SpeedMessage</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="w"> </span><span class="n">msg</span><span class="p">,</span>
+<span class="w">                             </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">expected_seq</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// 1. CRC check — detect bit flips</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">compute_crc32</span><span class="p">(</span><span class="o">&amp;</span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="n">offsetof</span><span class="p">(</span><span class="n">SpeedMessage</span><span class="p">,</span><span class="w"> </span><span class="n">crc32</span><span class="p">))</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">msg</span><span class="p">.</span><span class="n">crc32</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// 2. Sequence check — detect message loss or repetition</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">msg</span><span class="p">.</span><span class="n">sequence</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">expected_seq</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// 3. Timeout check — detect stale data</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">now</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">get_monotonic_time_ns</span><span class="p">();</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">now</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">msg</span><span class="p">.</span><span class="n">timestamp_ns</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">MAX_AGE_NS</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// 4. Plausibility check — detect sensor fault</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">msg</span><span class="p">.</span><span class="n">speed_mps</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mf">-1.0f</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">msg</span><span class="p">.</span><span class="n">speed_mps</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mf">100.0f</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span><span class="w">  </span><span class="c1">// physically impossible</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="4-autosar-e2e-protection-defending-data-in-transit">4. AUTOSAR E2E Protection — Defending Data in Transit</h2>
+<h3 id="41-why-every-message-needs-a-bodyguard">4.1 Why Every Message Needs a Bodyguard</h3>
+<p>In a vehicle, messages travel over shared buses and Ethernet. Faults include:
+- <strong>Bit flips</strong> (EMI, cosmic rays)
+- <strong>Message loss</strong> (bus overload, gateway crash)
+- <strong>Message repetition</strong> (stuck sender, replay attack)
+- <strong>Message reordering</strong> (gateway buffering)
+- <strong>Message delay</strong> (network congestion)
+- <strong>Message insertion</strong> (compromised node)</p>
+<p>AUTOSAR E2E Protection adds a safety wrapper to every message:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// E2E Profile 4 (most common in Adaptive AUTOSAR)</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">E2EHeader</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">data_id</span><span class="p">;</span><span class="w">       </span><span class="c1">// unique message type identifier</span>
+<span class="w">    </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">length</span><span class="p">;</span><span class="w">        </span><span class="c1">// payload length</span>
+<span class="w">    </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">counter</span><span class="p">;</span><span class="w">       </span><span class="c1">// sequence number (0–65535)</span>
+<span class="w">    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">crc</span><span class="p">;</span><span class="w">           </span><span class="c1">// CRC-32/Ethernet over header + payload</span>
+<span class="p">};</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">E2EProtector</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">tx_counter_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">rx_expected_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">MAX_DELTA</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span><span class="w">  </span><span class="c1">// tolerate up to 5 missed</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="c1">// Sender side: protect outgoing data</span>
+<span class="w">    </span><span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">protect</span><span class="p">(</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">data_id</span><span class="p">,</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="w"> </span><span class="n">payload</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">E2EHeader</span><span class="w"> </span><span class="n">header</span><span class="p">{};</span>
+<span class="w">        </span><span class="n">header</span><span class="p">.</span><span class="n">data_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">data_id</span><span class="p">;</span>
+<span class="w">        </span><span class="n">header</span><span class="p">.</span><span class="n">length</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">T</span><span class="p">);</span>
+<span class="w">        </span><span class="n">header</span><span class="p">.</span><span class="n">counter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tx_counter_</span><span class="o">++</span><span class="p">;</span>
+
+<span class="w">        </span><span class="c1">// Serialize header + payload</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">buffer</span><span class="p">(</span><span class="k">sizeof</span><span class="p">(</span><span class="n">header</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">T</span><span class="p">));</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">memcpy</span><span class="p">(</span><span class="n">buffer</span><span class="p">.</span><span class="n">data</span><span class="p">(),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">header</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">header</span><span class="p">));</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">memcpy</span><span class="p">(</span><span class="n">buffer</span><span class="p">.</span><span class="n">data</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">header</span><span class="p">),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">T</span><span class="p">));</span>
+
+<span class="w">        </span><span class="c1">// Compute CRC over everything except CRC field itself</span>
+<span class="w">        </span><span class="n">header</span><span class="p">.</span><span class="n">crc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">crc32_ethernet</span><span class="p">(</span><span class="n">buffer</span><span class="p">.</span><span class="n">data</span><span class="p">(),</span>
+<span class="w">                                      </span><span class="n">offsetof</span><span class="p">(</span><span class="n">E2EHeader</span><span class="p">,</span><span class="w"> </span><span class="n">crc</span><span class="p">));</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">memcpy</span><span class="p">(</span><span class="n">buffer</span><span class="p">.</span><span class="n">data</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offsetof</span><span class="p">(</span><span class="n">E2EHeader</span><span class="p">,</span><span class="w"> </span><span class="n">crc</span><span class="p">),</span>
+<span class="w">                     </span><span class="o">&amp;</span><span class="n">header</span><span class="p">.</span><span class="n">crc</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">header</span><span class="p">.</span><span class="n">crc</span><span class="p">));</span>
+
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">buffer</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Receiver side: verify incoming data</span>
+<span class="w">    </span><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">Status</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">OK</span><span class="p">,</span><span class="w"> </span><span class="n">WRONG_CRC</span><span class="p">,</span><span class="w"> </span><span class="n">LOST</span><span class="p">,</span><span class="w"> </span><span class="n">REPEATED</span><span class="p">,</span><span class="w"> </span><span class="n">NO_NEW_DATA</span><span class="w"> </span><span class="p">};</span>
+
+<span class="w">    </span><span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">Status</span><span class="p">,</span><span class="w"> </span><span class="n">T</span><span class="o">&gt;</span><span class="w"> </span><span class="n">check</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="w"> </span><span class="n">buffer</span><span class="p">,</span>
+<span class="w">                                </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">expected_data_id</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">T</span><span class="w"> </span><span class="n">payload</span><span class="p">{};</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">buffer</span><span class="p">.</span><span class="n">size</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">E2EHeader</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">T</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="n">Status</span><span class="o">::</span><span class="n">WRONG_CRC</span><span class="p">,</span><span class="w"> </span><span class="n">payload</span><span class="p">};</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="n">E2EHeader</span><span class="w"> </span><span class="n">header</span><span class="p">{};</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">memcpy</span><span class="p">(</span><span class="o">&amp;</span><span class="n">header</span><span class="p">,</span><span class="w"> </span><span class="n">buffer</span><span class="p">.</span><span class="n">data</span><span class="p">(),</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">header</span><span class="p">));</span>
+
+<span class="w">        </span><span class="c1">// Verify data_id</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">header</span><span class="p">.</span><span class="n">data_id</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">expected_data_id</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="n">Status</span><span class="o">::</span><span class="n">WRONG_CRC</span><span class="p">,</span><span class="w"> </span><span class="n">payload</span><span class="p">};</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="c1">// Verify CRC</span>
+<span class="w">        </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">stored_crc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">header</span><span class="p">.</span><span class="n">crc</span><span class="p">;</span>
+<span class="w">        </span><span class="n">header</span><span class="p">.</span><span class="n">crc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">        </span><span class="c1">// ... (recompute and compare)</span>
+
+<span class="w">        </span><span class="c1">// Check counter for loss/repetition</span>
+<span class="w">        </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">delta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">int16_t</span><span class="o">&gt;</span><span class="p">(</span>
+<span class="w">            </span><span class="n">header</span><span class="p">.</span><span class="n">counter</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">rx_expected_</span><span class="p">);</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">delta</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// Perfect — expected counter</span>
+<span class="w">            </span><span class="n">rx_expected_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">header</span><span class="p">.</span><span class="n">counter</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">delta</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">delta</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">MAX_DELTA</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// Lost some messages but within tolerance</span>
+<span class="w">            </span><span class="n">rx_expected_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">header</span><span class="p">.</span><span class="n">counter</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="n">Status</span><span class="o">::</span><span class="n">LOST</span><span class="p">,</span><span class="w"> </span><span class="n">payload</span><span class="p">};</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">delta</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="n">Status</span><span class="o">::</span><span class="n">REPEATED</span><span class="p">,</span><span class="w"> </span><span class="n">payload</span><span class="p">};</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">memcpy</span><span class="p">(</span><span class="o">&amp;</span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="n">buffer</span><span class="p">.</span><span class="n">data</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">E2EHeader</span><span class="p">),</span>
+<span class="w">                     </span><span class="k">sizeof</span><span class="p">(</span><span class="n">T</span><span class="p">));</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="n">Status</span><span class="o">::</span><span class="n">OK</span><span class="p">,</span><span class="w"> </span><span class="n">payload</span><span class="p">};</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<hr />
+<h2 id="5-service-oriented-communication-someip-and-dds">5. Service-Oriented Communication — SOME/IP and DDS</h2>
+<h3 id="51-someip-scalable-service-oriented-middleware-over-ip">5.1 SOME/IP — Scalable Service-Oriented Middleware over IP</h3>
+<p>SOME/IP is the dominant SDV middleware. It provides:
+- <strong>Service discovery</strong>: Find services on the network dynamically
+- <strong>Request/Response</strong>: RPC-style method calls
+- <strong>Fire &amp; Forget</strong>: One-way notifications
+- <strong>Events</strong>: Publish/subscribe with configurable event groups
+- <strong>Fields</strong>: Get/set/notify for service state</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// === SOME/IP Service Discovery ===</span>
+<span class="c1">// When a service starts, it announces itself via SD (Service Discovery).</span>
+<span class="c1">// Consumers &quot;find&quot; services by (ServiceID, InstanceID, MajorVersion).</span>
+<span class="c1">//</span>
+<span class="c1">// Wire format: UDP multicast on 224.0.0.1:30490 (default)</span>
+<span class="c1">// SD offers/finds are periodic, with configurable initial delay and</span>
+<span class="c1">// repetition phase timing.</span>
+
+<span class="c1">// Production pattern: vsomeip-based service</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;vsomeip/vsomeip.hpp&gt;</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">SpeedService</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">vsomeip</span><span class="o">::</span><span class="n">application</span><span class="o">&gt;</span><span class="w"> </span><span class="n">app_</span><span class="p">;</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="n">vsomeip</span><span class="o">::</span><span class="n">service_t</span><span class="w"> </span><span class="n">SERVICE_ID</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0x1234</span><span class="p">;</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="n">vsomeip</span><span class="o">::</span><span class="n">instance_t</span><span class="w"> </span><span class="n">INSTANCE_ID</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0x0001</span><span class="p">;</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="n">vsomeip</span><span class="o">::</span><span class="n">event_t</span><span class="w"> </span><span class="n">EVENT_SPEED</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0x8001</span><span class="p">;</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="n">vsomeip</span><span class="o">::</span><span class="n">eventgroup_t</span><span class="w"> </span><span class="n">EVENTGROUP_SPEED</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0x0001</span><span class="p">;</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">init</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">app_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">vsomeip</span><span class="o">::</span><span class="n">runtime</span><span class="o">::</span><span class="n">get</span><span class="p">()</span><span class="o">-&gt;</span><span class="n">create_application</span><span class="p">(</span><span class="s">&quot;speed_svc&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">app_</span><span class="o">-&gt;</span><span class="n">init</span><span class="p">();</span>
+
+<span class="w">        </span><span class="c1">// Offer the service</span>
+<span class="w">        </span><span class="n">app_</span><span class="o">-&gt;</span><span class="n">offer_service</span><span class="p">(</span><span class="n">SERVICE_ID</span><span class="p">,</span><span class="w"> </span><span class="n">INSTANCE_ID</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// Offer event group</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">set</span><span class="o">&lt;</span><span class="n">vsomeip</span><span class="o">::</span><span class="n">eventgroup_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">groups</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="n">EVENTGROUP_SPEED</span><span class="p">};</span>
+<span class="w">        </span><span class="n">app_</span><span class="o">-&gt;</span><span class="n">offer_event</span><span class="p">(</span><span class="n">SERVICE_ID</span><span class="p">,</span><span class="w"> </span><span class="n">INSTANCE_ID</span><span class="p">,</span><span class="w"> </span><span class="n">EVENT_SPEED</span><span class="p">,</span>
+<span class="w">                           </span><span class="n">groups</span><span class="p">,</span><span class="w"> </span><span class="n">vsomeip</span><span class="o">::</span><span class="n">event_type_e</span><span class="o">::</span><span class="n">ET_FIELD</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">publish_speed</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">speed_mps</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Serialize speed to payload</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">payload</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">vsomeip</span><span class="o">::</span><span class="n">runtime</span><span class="o">::</span><span class="n">get</span><span class="p">()</span><span class="o">-&gt;</span><span class="n">create_payload</span><span class="p">();</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">vsomeip</span><span class="o">::</span><span class="n">byte_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">data</span><span class="p">(</span><span class="k">sizeof</span><span class="p">(</span><span class="kt">float</span><span class="p">));</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">memcpy</span><span class="p">(</span><span class="n">data</span><span class="p">.</span><span class="n">data</span><span class="p">(),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">speed_mps</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">float</span><span class="p">));</span>
+<span class="w">        </span><span class="n">payload</span><span class="o">-&gt;</span><span class="n">set_data</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">data</span><span class="p">));</span>
+
+<span class="w">        </span><span class="c1">// Notify all subscribers</span>
+<span class="w">        </span><span class="n">app_</span><span class="o">-&gt;</span><span class="n">notify</span><span class="p">(</span><span class="n">SERVICE_ID</span><span class="p">,</span><span class="w"> </span><span class="n">INSTANCE_ID</span><span class="p">,</span><span class="w"> </span><span class="n">EVENT_SPEED</span><span class="p">,</span><span class="w"> </span><span class="n">payload</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">run</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">app_</span><span class="o">-&gt;</span><span class="n">start</span><span class="p">();</span><span class="w"> </span><span class="p">}</span><span class="w">  </span><span class="c1">// blocks, processes messages</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<h3 id="52-dds-data-distribution-service">5.2 DDS — Data Distribution Service</h3>
+<p>DDS (OMG standard) is used in ADAS and autonomous driving. Unlike SOME/IP, DDS provides:
+- <strong>QoS policies</strong>: Reliability, durability, deadline, lifespan
+- <strong>Decentralized discovery</strong>: No broker, peer-to-peer
+- <strong>Type safety</strong>: IDL-defined data types</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// DDS with Cyclone DDS (Eclipse project, used by ROS 2)</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;dds/dds.hpp&gt;</span>
+
+<span class="c1">// IDL-generated type</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">VehicleSpeed</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">speed_mps</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">timestamp_ns</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">quality</span><span class="p">;</span><span class="w">  </span><span class="c1">// 0=invalid, 1=estimated, 2=measured</span>
+<span class="p">};</span>
+
+<span class="c1">// Publisher</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">publish_speed_dds</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">dds</span><span class="o">::</span><span class="n">domain</span><span class="o">::</span><span class="n">DomainParticipant</span><span class="w"> </span><span class="n">dp</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span><span class="w">  </span><span class="c1">// domain 0</span>
+
+<span class="w">    </span><span class="n">dds</span><span class="o">::</span><span class="n">topic</span><span class="o">::</span><span class="n">Topic</span><span class="o">&lt;</span><span class="n">VehicleSpeed</span><span class="o">&gt;</span><span class="w"> </span><span class="n">topic</span><span class="p">(</span><span class="n">dp</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;VehicleSpeed&quot;</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// QoS: Reliable delivery with 50ms deadline</span>
+<span class="w">    </span><span class="n">dds</span><span class="o">::</span><span class="n">pub</span><span class="o">::</span><span class="n">qos</span><span class="o">::</span><span class="n">DataWriterQos</span><span class="w"> </span><span class="n">qos</span><span class="p">;</span>
+<span class="w">    </span><span class="n">qos</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">dds</span><span class="o">::</span><span class="n">core</span><span class="o">::</span><span class="n">policy</span><span class="o">::</span><span class="n">Reliability</span><span class="o">::</span><span class="n">Reliable</span><span class="p">(</span>
+<span class="w">              </span><span class="n">dds</span><span class="o">::</span><span class="n">core</span><span class="o">::</span><span class="n">Duration</span><span class="o">::</span><span class="n">from_millisecs</span><span class="p">(</span><span class="mi">100</span><span class="p">))</span>
+<span class="w">        </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">dds</span><span class="o">::</span><span class="n">core</span><span class="o">::</span><span class="n">policy</span><span class="o">::</span><span class="n">Deadline</span><span class="p">(</span>
+<span class="w">              </span><span class="n">dds</span><span class="o">::</span><span class="n">core</span><span class="o">::</span><span class="n">Duration</span><span class="o">::</span><span class="n">from_millisecs</span><span class="p">(</span><span class="mi">50</span><span class="p">));</span>
+
+<span class="w">    </span><span class="n">dds</span><span class="o">::</span><span class="n">pub</span><span class="o">::</span><span class="n">DataWriter</span><span class="o">&lt;</span><span class="n">VehicleSpeed</span><span class="o">&gt;</span><span class="w"> </span><span class="n">writer</span><span class="p">(</span>
+<span class="w">        </span><span class="n">dds</span><span class="o">::</span><span class="n">pub</span><span class="o">::</span><span class="n">Publisher</span><span class="p">(</span><span class="n">dp</span><span class="p">),</span><span class="w"> </span><span class="n">topic</span><span class="p">,</span><span class="w"> </span><span class="n">qos</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">VehicleSpeed</span><span class="w"> </span><span class="n">msg</span><span class="p">{.</span><span class="n">speed_mps</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">13.5f</span><span class="p">,</span>
+<span class="w">                      </span><span class="p">.</span><span class="n">timestamp_ns</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">get_monotonic_ns</span><span class="p">(),</span>
+<span class="w">                      </span><span class="p">.</span><span class="n">quality</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">};</span>
+<span class="w">    </span><span class="n">writer</span><span class="p">.</span><span class="n">write</span><span class="p">(</span><span class="n">msg</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="53-someip-vs-dds-when-to-use-which">5.3 SOME/IP vs DDS — When to Use Which</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>SOME/IP</th>
+<th>DDS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Primary use</strong></td>
+<td>Classic vehicle services</td>
+<td>ADAS, autonomous driving</td>
+</tr>
+<tr>
+<td><strong>Discovery</strong></td>
+<td>Centralized SD</td>
+<td>Decentralized (SPDP/SEDP)</td>
+</tr>
+<tr>
+<td><strong>QoS</strong></td>
+<td>Basic (reliable/unreliable)</td>
+<td>Rich (22+ QoS policies)</td>
+</tr>
+<tr>
+<td><strong>Serialization</strong></td>
+<td>Custom (SOME/IP-SD)</td>
+<td>CDR (CORBA standard)</td>
+</tr>
+<tr>
+<td><strong>Latency</strong></td>
+<td>~100µs (UDP)</td>
+<td>~50µs (shared memory)</td>
+</tr>
+<tr>
+<td><strong>Tooling</strong></td>
+<td>vsomeip, CommonAPI</td>
+<td>Cyclone DDS, FastDDS, RTI</td>
+</tr>
+<tr>
+<td><strong>Standard</strong></td>
+<td>AUTOSAR</td>
+<td>OMG</td>
+</tr>
+<tr>
+<td><strong>ROS 2 integration</strong></td>
+<td>Via bridge</td>
+<td>Native (rmw_cyclonedds)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-ota-updates-updating-mission-critical-software-safely">6. OTA Updates — Updating Mission-Critical Software Safely</h2>
+<h3 id="61-the-ab-partition-strategy">6.1 The A/B Partition Strategy</h3>
+<p>You cannot update running software in-place. The vehicle might lose power mid-update. The solution is A/B partitioning:</p>
+<div class="highlight"><pre><span></span><code>┌──────────────────────────────────────────────┐
+│                   Storage                     │
+│  ┌──────────────┐  ┌──────────────┐          │
+│  │  Partition A  │  │  Partition B  │         │
+│  │  (Active)     │  │  (Standby)    │         │
+│  │  v2.3.1       │  │  v2.4.0       │         │
+│  │  RUNNING      │  │  READY        │         │
+│  └──────────────┘  └──────────────┘          │
+│                                               │
+│  Boot selector: → A (current) → B (on reboot)│
+└──────────────────────────────────────────────┘
+</code></pre></div>
+
+<p><strong>Update flow:</strong>
+1. Download new software to standby partition (B)
+2. Verify integrity (hash chain, code signature)
+3. Mark B as &ldquo;pending&rdquo;
+4. At next safe opportunity (vehicle parked, engine off), reboot into B
+5. B runs self-tests; if pass → mark B as &ldquo;active&rdquo;
+6. If B fails self-test → rollback to A automatically</p>
+<h3 id="62-ota-update-manager-in-c">6.2 OTA Update Manager in C++</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// Simplified AUTOSAR UCM (Update and Configuration Management)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">UpdateManager</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">State</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">IDLE</span><span class="p">,</span>
+<span class="w">        </span><span class="n">DOWNLOADING</span><span class="p">,</span>
+<span class="w">        </span><span class="n">VERIFYING</span><span class="p">,</span>
+<span class="w">        </span><span class="n">READY</span><span class="p">,</span>
+<span class="w">        </span><span class="n">ACTIVATING</span><span class="p">,</span>
+<span class="w">        </span><span class="n">ROLLING_BACK</span>
+<span class="w">    </span><span class="p">};</span>
+
+<span class="w">    </span><span class="n">State</span><span class="w"> </span><span class="n">state_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">IDLE</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">active_partition_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;A&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">standby_partition_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;B&quot;</span><span class="p">;</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="c1">// Step 1: Download package to standby partition</span>
+<span class="w">    </span><span class="n">Result</span><span class="w"> </span><span class="n">download</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">url</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">expected_hash</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">assert</span><span class="p">(</span><span class="n">state_</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">IDLE</span><span class="p">);</span>
+<span class="w">        </span><span class="n">state_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">DOWNLOADING</span><span class="p">;</span>
+
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fetch_package</span><span class="p">(</span><span class="n">url</span><span class="p">);</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">data</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">state_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">IDLE</span><span class="p">;</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">Result</span><span class="o">::</span><span class="n">DOWNLOAD_FAILED</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="c1">// Verify cryptographic hash</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">actual_hash</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sha256</span><span class="p">(</span><span class="n">data</span><span class="p">.</span><span class="n">value</span><span class="p">());</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">actual_hash</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">expected_hash</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">state_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">IDLE</span><span class="p">;</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">Result</span><span class="o">::</span><span class="n">HASH_MISMATCH</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="c1">// Verify code signature (public key embedded in hardware)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">verify_signature</span><span class="p">(</span><span class="n">data</span><span class="p">.</span><span class="n">value</span><span class="p">(),</span><span class="w"> </span><span class="n">get_oem_public_key</span><span class="p">()))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">state_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">IDLE</span><span class="p">;</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">Result</span><span class="o">::</span><span class="n">SIGNATURE_INVALID</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="n">write_to_partition</span><span class="p">(</span><span class="n">standby_partition_</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">.</span><span class="n">value</span><span class="p">());</span>
+<span class="w">        </span><span class="n">state_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">VERIFYING</span><span class="p">;</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">Result</span><span class="o">::</span><span class="n">OK</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Step 2: Verify the written partition</span>
+<span class="w">    </span><span class="n">Result</span><span class="w"> </span><span class="n">verify</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">assert</span><span class="p">(</span><span class="n">state_</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">VERIFYING</span><span class="p">);</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">readback_hash</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">hash_partition</span><span class="p">(</span><span class="n">standby_partition_</span><span class="p">);</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">readback_hash</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">expected_partition_hash_</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">state_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">IDLE</span><span class="p">;</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">Result</span><span class="o">::</span><span class="n">VERIFY_FAILED</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">state_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">READY</span><span class="p">;</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">Result</span><span class="o">::</span><span class="n">OK</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Step 3: Activate on next boot (only when vehicle is safe)</span>
+<span class="w">    </span><span class="n">Result</span><span class="w"> </span><span class="n">activate</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">assert</span><span class="p">(</span><span class="n">state_</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">READY</span><span class="p">);</span>
+<span class="w">        </span><span class="n">assert</span><span class="p">(</span><span class="n">vehicle_is_parked</span><span class="p">());</span><span class="w">     </span><span class="c1">// safety precondition</span>
+<span class="w">        </span><span class="n">assert</span><span class="p">(</span><span class="o">!</span><span class="n">engine_is_running</span><span class="p">());</span><span class="w">    </span><span class="c1">// safety precondition</span>
+
+<span class="w">        </span><span class="n">set_boot_partition</span><span class="p">(</span><span class="n">standby_partition_</span><span class="p">);</span>
+<span class="w">        </span><span class="n">state_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">ACTIVATING</span><span class="p">;</span>
+<span class="w">        </span><span class="n">request_reboot</span><span class="p">();</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">Result</span><span class="o">::</span><span class="n">OK</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Step 4: Called by new software after boot</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">confirm_activation</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Self-test passed — mark this partition as good</span>
+<span class="w">        </span><span class="n">mark_partition_good</span><span class="p">(</span><span class="n">active_partition_</span><span class="p">);</span>
+<span class="w">        </span><span class="n">state_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">IDLE</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Called if self-test fails after boot</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">rollback</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">state_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">State</span><span class="o">::</span><span class="n">ROLLING_BACK</span><span class="p">;</span>
+<span class="w">        </span><span class="n">set_boot_partition</span><span class="p">(</span><span class="n">get_previous_partition</span><span class="p">());</span>
+<span class="w">        </span><span class="n">mark_partition_bad</span><span class="p">(</span><span class="n">active_partition_</span><span class="p">);</span>
+<span class="w">        </span><span class="n">request_reboot</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<hr />
+<h2 id="7-cybersecurity-isosae-21434-for-sdv">7. Cybersecurity — ISO/SAE 21434 for SDV</h2>
+<h3 id="71-the-threat-landscape">7.1 The Threat Landscape</h3>
+<p>A connected vehicle has multiple attack surfaces:
+- <strong>OBD-II port</strong>: Physical access to CAN bus
+- <strong>Telematics unit (TCU)</strong>: Cellular modem, remote attack surface
+- <strong>Infotainment</strong>: Wi-Fi, Bluetooth, USB, browser
+- <strong>V2X</strong>: Vehicle-to-everything communication
+- <strong>OTA updates</strong>: Compromised update server
+- <strong>Charging ports</strong> (EVs): Power-line communication</p>
+<h3 id="72-secure-boot-chain">7.2 Secure Boot Chain</h3>
+<div class="highlight"><pre><span></span><code>┌─────────────────┐
+│ Hardware Root    │
+│ of Trust (HSM)  │──── OEM Root Key (burned in silicon)
+└───────┬─────────┘
+        │ Verifies
+┌───────┴─────────┐
+│ Bootloader      │──── Signed by OEM
+│ (ROM/BootROM)   │
+└───────┬─────────┘
+        │ Verifies
+┌───────┴─────────┐
+│ Secondary       │──── Signed by OEM
+│ Bootloader      │
+└───────┬─────────┘
+        │ Verifies
+┌───────┴─────────┐
+│ Hypervisor      │──── Signed by OEM
+└───────┬─────────┘
+        │ Verifies
+┌───────┬─────────┐
+│ Linux │ QNX     │──── Signed kernel images
+└───────┴─────────┘
+        │ Verifies
+┌───────┬─────────┐
+│ App1  │ App2    │──── Signed application manifests
+└───────┴─────────┘
+</code></pre></div>
+
+<h3 id="73-secoc-secure-onboard-communication">7.3 SecOC — Secure Onboard Communication</h3>
+<p>Messages on CAN and Ethernet can be spoofed. SecOC adds authentication:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// SecOC: Authenticated CAN/Ethernet message</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">SecOCAuthenticator</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="p">,</span><span class="w"> </span><span class="mi">16</span><span class="o">&gt;</span><span class="w"> </span><span class="n">key_</span><span class="p">;</span><span class="w">  </span><span class="c1">// Pre-shared key from HSM</span>
+<span class="w">    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">freshness_counter_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="c1">// Authenticate outgoing message</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">authenticate</span><span class="p">(</span>
+<span class="w">            </span><span class="n">std</span><span class="o">::</span><span class="n">span</span><span class="o">&lt;</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">payload</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="o">++</span><span class="n">freshness_counter_</span><span class="p">;</span>
+
+<span class="w">        </span><span class="c1">// Build data to authenticate: payload + freshness</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">auth_data</span><span class="p">;</span>
+<span class="w">        </span><span class="n">auth_data</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="n">auth_data</span><span class="p">.</span><span class="n">end</span><span class="p">(),</span>
+<span class="w">                          </span><span class="n">payload</span><span class="p">.</span><span class="n">begin</span><span class="p">(),</span><span class="w"> </span><span class="n">payload</span><span class="p">.</span><span class="n">end</span><span class="p">());</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">fc_bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">to_bytes</span><span class="p">(</span><span class="n">freshness_counter_</span><span class="p">);</span>
+<span class="w">        </span><span class="n">auth_data</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="n">auth_data</span><span class="p">.</span><span class="n">end</span><span class="p">(),</span>
+<span class="w">                          </span><span class="n">fc_bytes</span><span class="p">.</span><span class="n">begin</span><span class="p">(),</span><span class="w"> </span><span class="n">fc_bytes</span><span class="p">.</span><span class="n">end</span><span class="p">());</span>
+
+<span class="w">        </span><span class="c1">// Compute truncated CMAC (AES-128-CMAC, truncated to 4 bytes)</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">mac</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cmac_aes128</span><span class="p">(</span><span class="n">key_</span><span class="p">,</span><span class="w"> </span><span class="n">auth_data</span><span class="p">);</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">truncated_mac</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">truncate</span><span class="p">(</span><span class="n">mac</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">);</span><span class="w">  </span><span class="c1">// 32-bit MAC</span>
+
+<span class="w">        </span><span class="c1">// Output: payload + truncated freshness + truncated MAC</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">secured_pdu</span><span class="p">;</span>
+<span class="w">        </span><span class="n">secured_pdu</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="n">secured_pdu</span><span class="p">.</span><span class="n">end</span><span class="p">(),</span>
+<span class="w">                            </span><span class="n">payload</span><span class="p">.</span><span class="n">begin</span><span class="p">(),</span><span class="w"> </span><span class="n">payload</span><span class="p">.</span><span class="n">end</span><span class="p">());</span>
+<span class="w">        </span><span class="n">secured_pdu</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span>
+<span class="w">            </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">freshness_counter_</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">));</span>
+<span class="w">        </span><span class="n">secured_pdu</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="n">secured_pdu</span><span class="p">.</span><span class="n">end</span><span class="p">(),</span>
+<span class="w">                            </span><span class="n">truncated_mac</span><span class="p">.</span><span class="n">begin</span><span class="p">(),</span>
+<span class="w">                            </span><span class="n">truncated_mac</span><span class="p">.</span><span class="n">end</span><span class="p">());</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">secured_pdu</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Verify incoming message</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">verify</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">span</span><span class="o">&lt;</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">secured_pdu</span><span class="p">,</span>
+<span class="w">                </span><span class="kt">size_t</span><span class="w"> </span><span class="n">payload_len</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Extract payload, freshness hint, MAC</span>
+<span class="w">        </span><span class="c1">// Reconstruct full freshness from hint + local counter</span>
+<span class="w">        </span><span class="c1">// Recompute CMAC and compare</span>
+<span class="w">        </span><span class="c1">// Reject if freshness is too old (replay protection)</span>
+<span class="w">        </span><span class="c1">// ... (implementation mirrors authenticate in reverse)</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span><span class="w">  </span><span class="c1">// placeholder</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<hr />
+<h2 id="8-diagnostics-uds-and-fault-management">8. Diagnostics — UDS and Fault Management</h2>
+<h3 id="81-uds-unified-diagnostic-services-iso-14229">8.1 UDS (Unified Diagnostic Services — ISO 14229)</h3>
+<p>Every vehicle must support diagnostics for manufacturing, service, and compliance. UDS defines standardized services:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// UDS Service IDs relevant to SDV</span>
+<span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">UDSService</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">DiagnosticSessionControl</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="mh">0x10</span><span class="p">,</span>
+<span class="w">    </span><span class="n">ECUReset</span><span class="w">                   </span><span class="o">=</span><span class="w"> </span><span class="mh">0x11</span><span class="p">,</span>
+<span class="w">    </span><span class="n">SecurityAccess</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="mh">0x27</span><span class="p">,</span>
+<span class="w">    </span><span class="n">CommunicationControl</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mh">0x28</span><span class="p">,</span>
+<span class="w">    </span><span class="n">ReadDataByIdentifier</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mh">0x22</span><span class="p">,</span>
+<span class="w">    </span><span class="n">WriteDataByIdentifier</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mh">0x2E</span><span class="p">,</span>
+<span class="w">    </span><span class="n">RoutineControl</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="mh">0x31</span><span class="p">,</span>
+<span class="w">    </span><span class="n">RequestDownload</span><span class="w">            </span><span class="o">=</span><span class="w"> </span><span class="mh">0x34</span><span class="p">,</span>
+<span class="w">    </span><span class="n">TransferData</span><span class="w">               </span><span class="o">=</span><span class="w"> </span><span class="mh">0x36</span><span class="p">,</span>
+<span class="w">    </span><span class="n">RequestTransferExit</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="mh">0x37</span><span class="p">,</span>
+<span class="w">    </span><span class="n">ReadDTCInformation</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="mh">0x19</span><span class="p">,</span>
+<span class="w">    </span><span class="n">ClearDiagnosticInformation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0x14</span><span class="p">,</span>
+<span class="w">    </span><span class="n">ControlDTCSetting</span><span class="w">          </span><span class="o">=</span><span class="w"> </span><span class="mh">0x85</span>
+<span class="p">};</span>
+
+<span class="c1">// Production DTC (Diagnostic Trouble Code) manager</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">DTCManager</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">DTCEntry</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">dtc_number</span><span class="p">;</span><span class="w">          </span><span class="c1">// e.g., 0xC07300 = CAN comm error</span>
+<span class="w">        </span><span class="kt">uint8_t</span><span class="w">  </span><span class="n">status</span><span class="p">;</span><span class="w">              </span><span class="c1">// bit-encoded status mask</span>
+<span class="w">        </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">first_occurrence_ns</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">last_occurrence_ns</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">occurrence_count</span><span class="p">;</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="p">,</span><span class="w"> </span><span class="mi">32</span><span class="o">&gt;</span><span class="w"> </span><span class="n">snapshot</span><span class="p">;</span><span class="w"> </span><span class="c1">// freeze-frame data</span>
+<span class="w">    </span><span class="p">};</span>
+
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">DTCEntry</span><span class="o">&gt;</span><span class="w"> </span><span class="n">fault_memory_</span><span class="p">;</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">MAX_DTCS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">256</span><span class="p">;</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="c1">// Report a new fault</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">report_fault</span><span class="p">(</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">dtc</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">span</span><span class="o">&lt;</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">snapshot</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">it</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">find_if</span><span class="p">(</span><span class="n">fault_memory_</span><span class="p">.</span><span class="n">begin</span><span class="p">(),</span>
+<span class="w">                                </span><span class="n">fault_memory_</span><span class="p">.</span><span class="n">end</span><span class="p">(),</span>
+<span class="w">                                </span><span class="p">[</span><span class="n">dtc</span><span class="p">](</span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                                    </span><span class="k">return</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">dtc_number</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">dtc</span><span class="p">;</span>
+<span class="w">                                </span><span class="p">});</span>
+
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">now</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">get_monotonic_ns</span><span class="p">();</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">it</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">fault_memory_</span><span class="p">.</span><span class="n">end</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// Update existing fault</span>
+<span class="w">            </span><span class="n">it</span><span class="o">-&gt;</span><span class="n">last_occurrence_ns</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">now</span><span class="p">;</span>
+<span class="w">            </span><span class="n">it</span><span class="o">-&gt;</span><span class="n">occurrence_count</span><span class="o">++</span><span class="p">;</span>
+<span class="w">            </span><span class="n">it</span><span class="o">-&gt;</span><span class="n">status</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="mh">0x01</span><span class="p">;</span><span class="w">  </span><span class="c1">// testFailed bit</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">fault_memory_</span><span class="p">.</span><span class="n">size</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">MAX_DTCS</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// New fault</span>
+<span class="w">            </span><span class="n">DTCEntry</span><span class="w"> </span><span class="n">entry</span><span class="p">{};</span>
+<span class="w">            </span><span class="n">entry</span><span class="p">.</span><span class="n">dtc_number</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">dtc</span><span class="p">;</span>
+<span class="w">            </span><span class="n">entry</span><span class="p">.</span><span class="n">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0x09</span><span class="p">;</span><span class="w">  </span><span class="c1">// testFailed + confirmedDTC</span>
+<span class="w">            </span><span class="n">entry</span><span class="p">.</span><span class="n">first_occurrence_ns</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">now</span><span class="p">;</span>
+<span class="w">            </span><span class="n">entry</span><span class="p">.</span><span class="n">last_occurrence_ns</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">now</span><span class="p">;</span>
+<span class="w">            </span><span class="n">entry</span><span class="p">.</span><span class="n">occurrence_count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">            </span><span class="n">std</span><span class="o">::</span><span class="n">copy_n</span><span class="p">(</span><span class="n">snapshot</span><span class="p">.</span><span class="n">data</span><span class="p">(),</span>
+<span class="w">                         </span><span class="n">std</span><span class="o">::</span><span class="n">min</span><span class="p">(</span><span class="n">snapshot</span><span class="p">.</span><span class="n">size</span><span class="p">(),</span><span class="w"> </span><span class="kt">size_t</span><span class="p">(</span><span class="mi">32</span><span class="p">)),</span>
+<span class="w">                         </span><span class="n">entry</span><span class="p">.</span><span class="n">snapshot</span><span class="p">.</span><span class="n">begin</span><span class="p">());</span>
+<span class="w">            </span><span class="n">fault_memory_</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span><span class="n">entry</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Clear all DTCs (UDS service 0x14)</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">clear_all</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">fault_memory_</span><span class="p">.</span><span class="n">clear</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<hr />
+<h2 id="9-graceful-degradation-when-things-go-wrong">9. Graceful Degradation — When Things Go Wrong</h2>
+<h3 id="91-the-degradation-state-machine">9.1 The Degradation State Machine</h3>
+<p>Mission-critical systems must not just crash — they must degrade gracefully. A self-driving car with a failed lidar should not slam to a halt at highway speed.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Vehicle-level degradation manager</span>
+<span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">DegradationLevel</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">FULL_AUTONOMY</span><span class="p">,</span><span class="w">       </span><span class="c1">// L4: all sensors and systems nominal</span>
+<span class="w">    </span><span class="n">LIMITED_AUTONOMY</span><span class="p">,</span><span class="w">    </span><span class="c1">// Reduced sensor set, lower speed</span>
+<span class="w">    </span><span class="n">DRIVER_ASSIST</span><span class="p">,</span><span class="w">       </span><span class="c1">// L2: driver must monitor</span>
+<span class="w">    </span><span class="n">MANUAL_CONTROL</span><span class="p">,</span><span class="w">      </span><span class="c1">// All autonomy disabled, driver in control</span>
+<span class="w">    </span><span class="n">MINIMAL_RISK</span><span class="p">,</span><span class="w">        </span><span class="c1">// Pull over and stop safely</span>
+<span class="w">    </span><span class="n">SAFE_STOP</span><span class="w">            </span><span class="c1">// Emergency stop, hazard lights, unlock doors</span>
+<span class="p">};</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">DegradationManager</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">DegradationLevel</span><span class="w"> </span><span class="n">current_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DegradationLevel</span><span class="o">::</span><span class="n">FULL_AUTONOMY</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Sensor health tracking</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">SensorStatus</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">bool</span><span class="w"> </span><span class="n">lidar_front</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">bool</span><span class="w"> </span><span class="n">lidar_rear</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">bool</span><span class="w"> </span><span class="n">radar_front</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">bool</span><span class="w"> </span><span class="n">camera_front</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">bool</span><span class="w"> </span><span class="n">camera_surround</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">bool</span><span class="w"> </span><span class="n">gnss</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">bool</span><span class="w"> </span><span class="n">imu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">    </span><span class="p">};</span>
+
+<span class="w">    </span><span class="n">SensorStatus</span><span class="w"> </span><span class="n">sensors_</span><span class="p">;</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="n">DegradationLevel</span><span class="w"> </span><span class="n">evaluate</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">critical_failures</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">redundancy_lost</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">sensors_</span><span class="p">.</span><span class="n">lidar_front</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="n">sensors_</span><span class="p">.</span><span class="n">radar_front</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// Forward perception lost entirely</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">DegradationLevel</span><span class="o">::</span><span class="n">SAFE_STOP</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">sensors_</span><span class="p">.</span><span class="n">lidar_front</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">!</span><span class="n">sensors_</span><span class="p">.</span><span class="n">radar_front</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// Lost one forward sensor — still have redundancy</span>
+<span class="w">            </span><span class="n">redundancy_lost</span><span class="o">++</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">sensors_</span><span class="p">.</span><span class="n">imu</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// IMU is single-point-of-failure for localization</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">DegradationLevel</span><span class="o">::</span><span class="n">MINIMAL_RISK</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">sensors_</span><span class="p">.</span><span class="n">camera_front</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// Can&#39;t read signs, traffic lights</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">DegradationLevel</span><span class="o">::</span><span class="n">DRIVER_ASSIST</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">redundancy_lost</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">2</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">DegradationLevel</span><span class="o">::</span><span class="n">LIMITED_AUTONOMY</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">DegradationLevel</span><span class="o">::</span><span class="n">FULL_AUTONOMY</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Transition with logging and notification</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">transition</span><span class="p">(</span><span class="n">DegradationLevel</span><span class="w"> </span><span class="n">new_level</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">new_level</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">current_</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="p">;</span>
+
+<span class="w">        </span><span class="c1">// Degradation can only go DOWN (more restrictive), never UP</span>
+<span class="w">        </span><span class="c1">// without explicit operator/system confirmation</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="p">(</span><span class="n">new_level</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="p">(</span><span class="n">current_</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">log_warning</span><span class="p">(</span><span class="s">&quot;Attempted upgrade from {} to {} — blocked&quot;</span><span class="p">,</span>
+<span class="w">                         </span><span class="n">current_</span><span class="p">,</span><span class="w"> </span><span class="n">new_level</span><span class="p">);</span>
+<span class="w">            </span><span class="k">return</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="n">log_critical</span><span class="p">(</span><span class="s">&quot;Degradation: {} → {}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">current_</span><span class="p">,</span><span class="w"> </span><span class="n">new_level</span><span class="p">);</span>
+<span class="w">        </span><span class="n">notify_driver</span><span class="p">(</span><span class="n">new_level</span><span class="p">);</span>
+<span class="w">        </span><span class="n">notify_fleet_management</span><span class="p">(</span><span class="n">new_level</span><span class="p">);</span>
+<span class="w">        </span><span class="n">current_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">new_level</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<h3 id="92-fail-operational-vs-fail-safe">9.2 Fail-Operational vs Fail-Safe</h3>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Behavior</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Fail-safe</strong></td>
+<td>System enters safe state on failure</td>
+<td>Airbag ECU: fire → safe state (deployed)</td>
+</tr>
+<tr>
+<td><strong>Fail-operational</strong></td>
+<td>System continues in degraded mode</td>
+<td>Steering: one motor fails → second motor takes over</td>
+</tr>
+<tr>
+<td><strong>Fail-silent</strong></td>
+<td>System stops producing output</td>
+<td>Sensor: bad data → stop publishing (don&rsquo;t corrupt downstream)</td>
+</tr>
+</tbody>
+</table>
+<p>For SDV, ADAS <strong>must</strong> be fail-operational for L3+. A highway autopilot cannot just &ldquo;turn off&rdquo; — the driver may not be paying attention.</p>
+<hr />
+<h2 id="10-deterministic-execution-and-real-time-patterns">10. Deterministic Execution and Real-Time Patterns</h2>
+<h3 id="101-cyclic-execution-pattern">10.1 Cyclic Execution Pattern</h3>
+<p>Mission-critical SDV software runs in fixed-period cycles (typically 10ms for vehicle dynamics, 33ms for perception, 100ms for planning).</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Production cyclic execution with jitter monitoring</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">CyclicTask</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">nanoseconds</span><span class="w"> </span><span class="n">period_</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">nanoseconds</span><span class="w"> </span><span class="n">wcet_</span><span class="p">;</span><span class="w">       </span><span class="c1">// worst-case execution time</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">nanoseconds</span><span class="w"> </span><span class="n">max_jitter_</span><span class="p">;</span><span class="w">  </span><span class="c1">// max observed jitter</span>
+<span class="w">    </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">overrun_count_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="n">CyclicTask</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">milliseconds</span><span class="w"> </span><span class="n">period</span><span class="p">,</span>
+<span class="w">               </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">microseconds</span><span class="w"> </span><span class="n">budget</span><span class="p">)</span>
+<span class="w">        </span><span class="o">:</span><span class="w"> </span><span class="n">period_</span><span class="p">(</span><span class="n">period</span><span class="p">)</span>
+<span class="w">        </span><span class="p">,</span><span class="w"> </span><span class="n">wcet_</span><span class="p">(</span><span class="n">budget</span><span class="p">)</span><span class="w"> </span><span class="p">{}</span>
+
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">run</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Pin to CPU core (avoid migration)</span>
+<span class="w">        </span><span class="kt">cpu_set_t</span><span class="w"> </span><span class="n">cpuset</span><span class="p">;</span>
+<span class="w">        </span><span class="n">CPU_ZERO</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cpuset</span><span class="p">);</span>
+<span class="w">        </span><span class="n">CPU_SET</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">cpuset</span><span class="p">);</span><span class="w">  </span><span class="c1">// core 2 for safety tasks</span>
+<span class="w">        </span><span class="n">pthread_setaffinity_np</span><span class="p">(</span><span class="n">pthread_self</span><span class="p">(),</span>
+<span class="w">                                </span><span class="k">sizeof</span><span class="p">(</span><span class="n">cpuset</span><span class="p">),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">cpuset</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// Set SCHED_FIFO with high priority</span>
+<span class="w">        </span><span class="k">struct</span><span class="w"> </span><span class="nc">sched_param</span><span class="w"> </span><span class="n">param</span><span class="p">;</span>
+<span class="w">        </span><span class="n">param</span><span class="p">.</span><span class="n">sched_priority</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">90</span><span class="p">;</span><span class="w">  </span><span class="c1">// high but below watchdog</span>
+<span class="w">        </span><span class="n">pthread_setschedparam</span><span class="p">(</span><span class="n">pthread_self</span><span class="p">(),</span><span class="w"> </span><span class="n">SCHED_FIFO</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">param</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// Lock all memory to prevent page faults</span>
+<span class="w">        </span><span class="n">mlockall</span><span class="p">(</span><span class="n">MCL_CURRENT</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">MCL_FUTURE</span><span class="p">);</span>
+
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">next_wake</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">steady_clock</span><span class="o">::</span><span class="n">now</span><span class="p">();</span>
+
+<span class="w">        </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">running_</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">next_wake</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">period_</span><span class="p">;</span>
+
+<span class="w">            </span><span class="k">auto</span><span class="w"> </span><span class="n">start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">steady_clock</span><span class="o">::</span><span class="n">now</span><span class="p">();</span>
+
+<span class="w">            </span><span class="c1">// --- Deterministic work ---</span>
+<span class="w">            </span><span class="n">read_inputs</span><span class="p">();</span>
+<span class="w">            </span><span class="n">compute</span><span class="p">();</span>
+<span class="w">            </span><span class="n">write_outputs</span><span class="p">();</span>
+<span class="w">            </span><span class="c1">// --- End deterministic work ---</span>
+
+<span class="w">            </span><span class="k">auto</span><span class="w"> </span><span class="n">end</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">steady_clock</span><span class="o">::</span><span class="n">now</span><span class="p">();</span>
+<span class="w">            </span><span class="k">auto</span><span class="w"> </span><span class="n">execution_time</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">end</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">start</span><span class="p">;</span>
+
+<span class="w">            </span><span class="c1">// Monitor for overruns</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">execution_time</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">wcet_</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="o">++</span><span class="n">overrun_count_</span><span class="p">;</span>
+<span class="w">                </span><span class="n">report_overrun</span><span class="p">(</span><span class="n">execution_time</span><span class="p">);</span>
+<span class="w">            </span><span class="p">}</span>
+
+<span class="w">            </span><span class="c1">// Sleep until next period</span>
+<span class="w">            </span><span class="n">std</span><span class="o">::</span><span class="n">this_thread</span><span class="o">::</span><span class="n">sleep_until</span><span class="p">(</span><span class="n">next_wake</span><span class="p">);</span>
+
+<span class="w">            </span><span class="c1">// Measure jitter</span>
+<span class="w">            </span><span class="k">auto</span><span class="w"> </span><span class="n">actual_wake</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">steady_clock</span><span class="o">::</span><span class="n">now</span><span class="p">();</span>
+<span class="w">            </span><span class="k">auto</span><span class="w"> </span><span class="n">jitter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">actual_wake</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">next_wake</span><span class="p">;</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">jitter</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">max_jitter_</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">max_jitter_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">jitter</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<h3 id="102-lock-free-communication-between-cycles">10.2 Lock-Free Communication Between Cycles</h3>
+<p>Different cycle rates need to share data without blocking. Triple-buffering avoids locks:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Lock-free triple buffer for producer-consumer between different cycles</span>
+<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">TripleBuffer</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="n">T</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="o">&gt;</span><span class="w"> </span><span class="n">buffers_</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">atomic</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">write_idx_</span><span class="p">{</span><span class="mi">0</span><span class="p">};</span><span class="w">   </span><span class="c1">// producer writes here</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">atomic</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">read_idx_</span><span class="p">{</span><span class="mi">2</span><span class="p">};</span><span class="w">    </span><span class="c1">// consumer reads here</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">atomic</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">middle_idx_</span><span class="p">{</span><span class="mi">1</span><span class="p">};</span><span class="w">  </span><span class="c1">// swap buffer</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="c1">// Producer: write new data, then swap</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">write</span><span class="p">(</span><span class="n">T</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="w"> </span><span class="n">data</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">buffers_</span><span class="p">[</span><span class="n">write_idx_</span><span class="p">.</span><span class="n">load</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">memory_order_relaxed</span><span class="p">)]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">data</span><span class="p">;</span>
+
+<span class="w">        </span><span class="c1">// Swap write and middle buffers</span>
+<span class="w">        </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">w</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">write_idx_</span><span class="p">.</span><span class="n">load</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">memory_order_relaxed</span><span class="p">);</span>
+<span class="w">        </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">middle_idx_</span><span class="p">.</span><span class="n">exchange</span><span class="p">(</span><span class="n">w</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">memory_order_acq_rel</span><span class="p">);</span>
+<span class="w">        </span><span class="n">write_idx_</span><span class="p">.</span><span class="n">store</span><span class="p">(</span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">memory_order_release</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Consumer: swap and read latest data</span>
+<span class="w">    </span><span class="n">T</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="w"> </span><span class="n">read</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Swap read and middle buffers</span>
+<span class="w">        </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">read_idx_</span><span class="p">.</span><span class="n">load</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">memory_order_relaxed</span><span class="p">);</span>
+<span class="w">        </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">middle_idx_</span><span class="p">.</span><span class="n">exchange</span><span class="p">(</span><span class="n">r</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">memory_order_acq_rel</span><span class="p">);</span>
+<span class="w">        </span><span class="n">read_idx_</span><span class="p">.</span><span class="n">store</span><span class="p">(</span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">memory_order_release</span><span class="p">);</span>
+
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">buffers_</span><span class="p">[</span><span class="n">read_idx_</span><span class="p">.</span><span class="n">load</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">memory_order_acquire</span><span class="p">)];</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+
+<span class="c1">// Usage: 10ms control cycle produces, 33ms perception cycle consumes</span>
+<span class="n">TripleBuffer</span><span class="o">&lt;</span><span class="n">VehicleState</span><span class="o">&gt;</span><span class="w"> </span><span class="n">state_buffer</span><span class="p">;</span>
+
+<span class="c1">// 10ms cycle (producer)</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">control_cycle</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">VehicleState</span><span class="w"> </span><span class="n">state</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">compute_vehicle_state</span><span class="p">();</span>
+<span class="w">    </span><span class="n">state_buffer</span><span class="p">.</span><span class="n">write</span><span class="p">(</span><span class="n">state</span><span class="p">);</span><span class="w">  </span><span class="c1">// non-blocking</span>
+<span class="p">}</span>
+
+<span class="c1">// 33ms cycle (consumer)</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">perception_cycle</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="k">const</span><span class="o">&amp;</span><span class="w"> </span><span class="n">state</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">state_buffer</span><span class="p">.</span><span class="n">read</span><span class="p">();</span><span class="w">  </span><span class="c1">// non-blocking, latest data</span>
+<span class="w">    </span><span class="n">fuse_with_perception</span><span class="p">(</span><span class="n">state</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="11-production-patterns-lessons-from-industry">11. Production Patterns — Lessons from Industry</h2>
+<h3 id="111-the-service-manifest-pattern">11.1 The Service Manifest Pattern</h3>
+<p>Every SDV service needs a machine-readable manifest for the Execution Manager:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;service_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;emergency_brake_assist&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2.4.1&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;asil_level&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;D&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;execution&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;startup_order&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;scheduling&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;FIXED_PRIORITY&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;priority&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">95</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;cpu_affinity&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">],</span>
+<span class="w">        </span><span class="nt">&quot;memory_limit_mb&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">64</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;cycle_time_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;wcet_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;health_monitoring&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;alive_timeout_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">50</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;deadline_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;max_consecutive_failures&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;recovery_action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;RESTART_THEN_DEGRADE&quot;</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;dependencies&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">        </span><span class="p">{</span><span class="nt">&quot;service&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;radar_front&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">},</span>
+<span class="w">        </span><span class="p">{</span><span class="nt">&quot;service&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;camera_front&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">},</span>
+<span class="w">        </span><span class="p">{</span><span class="nt">&quot;service&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;vehicle_speed&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}</span>
+<span class="w">    </span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;e2e_protection&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;profile&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;PROFILE_04&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;data_id_list&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">            </span><span class="p">{</span><span class="nt">&quot;topic&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;radar_objects&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;data_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0x1234&quot;</span><span class="p">},</span>
+<span class="w">            </span><span class="p">{</span><span class="nt">&quot;topic&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;brake_command&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;data_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0x5678&quot;</span><span class="p">}</span>
+<span class="w">        </span><span class="p">]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="112-the-watchdog-cascade-pattern">11.2 The Watchdog Cascade Pattern</h3>
+<p>Production vehicles use cascading watchdogs — if one level fails to detect a hang, the next level catches it:</p>
+<div class="highlight"><pre><span></span><code>┌──────────────────────────────────────┐
+│ Level 3: Hardware Watchdog           │
+│ (Reset entire SoC if not fed)        │
+│ Timeout: 500ms                       │
+├──────────────────────────────────────┤
+│ Level 2: OS-level Health Monitor     │
+│ (Restart crashed processes)          │
+│ Timeout: 100ms per process           │
+├──────────────────────────────────────┤
+│ Level 1: Application Watchdog        │
+│ (Detect stuck threads within app)    │
+│ Timeout: 20ms per cycle              │
+└──────────────────────────────────────┘
+</code></pre></div>
+
+<h3 id="113-the-black-box-recorder-pattern">11.3 The Black Box Recorder Pattern</h3>
+<p>Like an aircraft flight recorder, SDV systems continuously record data for post-incident analysis:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">BlackBoxRecorder</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Ring buffer: last N seconds of data, constantly overwritten</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">BUFFER_SIZE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1024</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1024</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">128</span><span class="p">;</span><span class="w">  </span><span class="c1">// 128 MB</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="p">,</span><span class="w"> </span><span class="n">BUFFER_SIZE</span><span class="o">&gt;</span><span class="w"> </span><span class="n">ring_buffer_</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">size_t</span><span class="w"> </span><span class="n">write_pos_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Trigger conditions for saving</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">triggered_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">size_t</span><span class="w"> </span><span class="n">pre_trigger_size_</span><span class="p">;</span><span class="w">   </span><span class="c1">// how much data to save before trigger</span>
+<span class="w">    </span><span class="kt">size_t</span><span class="w"> </span><span class="n">post_trigger_size_</span><span class="p">;</span><span class="w">  </span><span class="c1">// how much to continue recording after</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">record</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">span</span><span class="o">&lt;</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">data</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">auto</span><span class="w"> </span><span class="n">byte</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">data</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">ring_buffer_</span><span class="p">[</span><span class="n">write_pos_</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="n">BUFFER_SIZE</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">byte</span><span class="p">;</span>
+<span class="w">            </span><span class="o">++</span><span class="n">write_pos_</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Called when an incident is detected (collision, AEB activation, etc.)</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">trigger_save</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">reason</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">triggered_</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="p">;</span><span class="w">  </span><span class="c1">// already triggered</span>
+<span class="w">        </span><span class="n">triggered_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+
+<span class="w">        </span><span class="c1">// Save pre-trigger data (last 30 seconds)</span>
+<span class="w">        </span><span class="c1">// Continue recording post-trigger data (next 10 seconds)</span>
+<span class="w">        </span><span class="c1">// Write to persistent storage with timestamp and reason</span>
+<span class="w">        </span><span class="n">save_to_flash</span><span class="p">(</span><span class="n">reason</span><span class="p">,</span><span class="w"> </span><span class="n">get_pre_trigger_data</span><span class="p">(),</span>
+<span class="w">                       </span><span class="n">get_post_trigger_data</span><span class="p">());</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<hr />
+<h2 id="12-development-toolchain-for-sdv">12. Development Toolchain for SDV</h2>
+<h3 id="121-build-system">12.1 Build System</h3>
+<p>SDV projects typically use:
+- <strong>CMake</strong> with Conan or vcpkg for dependency management
+- <strong>Cross-compilation</strong> toolchains (aarch64-linux-gnu for ARM targets)
+- <strong>Yocto/Buildroot</strong> for building the entire Linux distribution
+- <strong>CI/CD</strong> with hardware-in-the-loop (HiL) testing</p>
+<h3 id="122-testing-pyramid-for-sdv">12.2 Testing Pyramid for SDV</h3>
+<div class="highlight"><pre><span></span><code>         ╱╲
+        ╱  ╲  Vehicle-level tests (real car, test track)
+       ╱ VT ╲
+      ╱──────╲
+     ╱  HiL   ╲  Hardware-in-the-loop (real ECU, simulated vehicle)
+    ╱──────────╲
+   ╱   SiL      ╲  Software-in-the-loop (compiled binary, vehicle model)
+  ╱──────────────╲
+ ╱  Integration    ╲  Multiple services running together
+╱──────────────────╲
+╱ Unit Tests         ╲  Individual function/class testing
+──────────────────────
+</code></pre></div>
+
+<h3 id="123-static-analysis-tools">12.3 Static Analysis Tools</h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Purpose</th>
+<th>Standard</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Polyspace</strong></td>
+<td>Prove absence of runtime errors</td>
+<td>ISO 26262 qualified</td>
+</tr>
+<tr>
+<td><strong>Coverity</strong></td>
+<td>Find bugs in C/C++ at scale</td>
+<td>CWE, MISRA</td>
+</tr>
+<tr>
+<td><strong>LDRA</strong></td>
+<td>MISRA compliance, MC/DC coverage</td>
+<td>ISO 26262 qualified</td>
+</tr>
+<tr>
+<td><strong>clang-tidy</strong></td>
+<td>Modern C++ checks, MISRA subset</td>
+<td>Open source</td>
+</tr>
+<tr>
+<td><strong>cppcheck</strong></td>
+<td>Undefined behavior, leaks</td>
+<td>Open source</td>
+</tr>
+<tr>
+<td><strong>PVS-Studio</strong></td>
+<td>Advanced pattern detection</td>
+<td>Automotive certification</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="summary-key-takeaways">Summary — Key Takeaways</h2>
+<ol>
+<li><strong>SDV = software-defined, not software-only</strong> — hardware still matters for safety</li>
+<li><strong>AUTOSAR Adaptive</strong> is the de facto middleware standard (C++14/17, POSIX-based)</li>
+<li><strong>ISO 26262</strong> dictates your coding rules, testing strategy, and architecture</li>
+<li><strong>E2E protection</strong> is mandatory — every message is a potential corruption vector</li>
+<li><strong>Graceful degradation</strong> beats crash-and-restart in mission-critical systems</li>
+<li><strong>Deterministic execution</strong> requires OS-level support (PREEMPT_RT, CPU pinning, mlockall)</li>
+<li><strong>Cybersecurity</strong> (ISO/SAE 21434) is as important as functional safety</li>
+<li><strong>OTA updates</strong> need A/B partitions, cryptographic verification, and rollback capability</li>
+<li><strong>Triple buffering</strong> and lock-free patterns are essential for multi-rate systems</li>
+<li><strong>Test at every level</strong> — from unit tests to hardware-in-the-loop to vehicle tests</li>
+</ol>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

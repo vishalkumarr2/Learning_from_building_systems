@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exercises: I2C — Inter-Integrated Circuit - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-amber-600 hover:text-amber-800 mb-4 inline-block">&larr; Back to Electronics</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="exercises-i2c-inter-integrated-circuit">Exercises: I2C — Inter-Integrated Circuit</h1>
+<h3 id="chapter-06-from-open-drain-physics-to-complete-protocol-transactions">Chapter 06: From open-drain physics to complete protocol transactions</h3>
+<p><strong>Self-assessment guide:</strong> Write your answer before expanding the details block. I2C is the &ldquo;Swiss Army knife&rdquo; of board-level communication — slower than SPI but simpler wiring for multi-sensor setups. Master the pull-up calculations and the open-drain model; they&rsquo;ll save you hours of debugging.</p>
+<p><strong>Project context:</strong> Your STM32H7 board has I2C sensors (temperature, EEPROM for calibration data), and the ICM-42688 IMU also supports I2C as a fallback to SPI. Understanding I2C&rsquo;s physical layer — especially the open-drain pull-up interaction — is essential for debugging &ldquo;bus stuck&rdquo; conditions on production robots.</p>
+<hr />
+<h2 id="section-a-conceptual-questions">Section A — Conceptual Questions</h2>
+<p><strong>A1.</strong> Explain what &ldquo;open-drain&rdquo; means physically. Why can&rsquo;t an open-drain output drive a line HIGH? What external component makes the line go HIGH, and how?</p>
+<details><summary>Answer</summary>
+
+An open-drain output contains only an **N-channel MOSFET** (or NPN BJT) connected between the output pin and GND. The MOSFET **drain** is connected to the bus wire but NOT to VCC — hence "open" drain.
+
+- **MOSFET ON** (gate HIGH): Drain is pulled to GND → bus wire = LOW (0V)
+- **MOSFET OFF** (gate LOW): Drain is disconnected (high impedance) → bus wire is **floating** — it is NOT driven HIGH
+
+The bus wire only goes HIGH because of an **external pull-up resistor** connected between the bus wire and VCC. When all MOSFET outputs on the bus are OFF (released), the pull-up resistor charges the bus capacitance, pulling the voltage toward VCC.
+
+**Why not push-pull?** If two devices on the same bus used push-pull outputs — one driving HIGH (VCC) and one driving LOW (GND) — there would be a **direct short circuit** through both output stages. The open-drain topology makes this impossible: the worst case is two devices both pulling LOW, which is two MOSFETs conducting to GND in parallel — no conflict.
+
+</details>
+
+<hr />
+<p><strong>A2.</strong> What is &ldquo;wired-AND&rdquo; and why is it important for I2C? Write out the truth table for two devices on a bus.</p>
+<details><summary>Answer</summary>
+
+"Wired-AND" describes the behavior of an open-drain bus with a pull-up: the bus is HIGH only when **ALL** devices release it. **ANY** single device pulling LOW makes the entire bus LOW.
+
+This is logically equivalent to an AND gate:
+
+| Device A | Device B | Bus Level | Logic |
+|----------|----------|-----------|-------|
+| Release (1) | Release (1) | **HIGH (1)** | 1 AND 1 = 1 |
+| Release (1) | Pull LOW (0) | **LOW (0)** | 1 AND 0 = 0 |
+| Pull LOW (0) | Release (1) | **LOW (0)** | 0 AND 1 = 0 |
+| Pull LOW (0) | Pull LOW (0) | **LOW (0)** | 0 AND 0 = 0 |
+
+**Why it matters for I2C:**
+
+1. **Bus arbitration:** When two masters transmit simultaneously, the one that sends a 1 (releases the bus) while the other sends 0 (pulls LOW) can detect the conflict by reading back the bus state. The master that "lost" (sent 1 but reads 0) backs off. This is non-destructive — the winning master's frame is unharmed.
+
+2. **Clock stretching:** A slow slave holds SCL LOW to pause the master. The master releases SCL (tries to go HIGH) but reads it back as LOW → knows the slave isn't ready yet. No damage, no contention.
+
+3. **ACK/NACK:** After 8 data bits, the transmitter releases SDA and the receiver pulls it LOW for ACK. Both actions are safe because of wired-AND.
+
+</details>
+
+<hr />
+<p><strong>A3.</strong> You measure the I2C bus rise time and find it&rsquo;s 800 ns. Your design target is Fast mode (400 kHz), which requires rise time &lt; 300 ns. What&rsquo;s wrong and how do you fix it?</p>
+<details><summary>Answer</summary>
+
+The rise time is too slow because the **pull-up resistance is too high** relative to the bus capacitance.
+
+Rise time ≈ 0.8473 × Rp × Cbus
+
+If rise time = 800 ns and Cbus is, say, 200 pF:
+- 800 ns = 0.8473 × Rp × 200 pF
+- Rp = 800 ns / (0.8473 × 200 × 10⁻¹²) = 4,721 Ω ≈ **4.7 kΩ**
+
+For 300 ns target:
+- Rp < 300 ns / (0.8473 × 200 × 10⁻¹²) = 1,770 Ω
+
+**Fix:** Replace the 4.7 kΩ pull-ups with **1.5 kΩ or 1.8 kΩ** resistors. This provides faster charging of the bus capacitance, bringing the rise time below 300 ns.
+
+**Caution:** Don't go too low — the pull-up must not exceed the device's maximum LOW-state sink current (typically 3 mA for standard I2C). Minimum Rp = VCC / I_sink = 3.3V / 3 mA = 1,100 Ω. So the valid range is **1.1 kΩ < Rp < 1.77 kΩ**.
+
+The classic "4.7 kΩ pull-up" is for Standard mode (100 kHz) with low bus capacitance. It's almost always wrong for Fast mode with multiple devices.
+
+</details>
+
+<hr />
+<p><strong>A4.</strong> Why does I2C transmit MSB first while UART transmits LSB first? What practical issue does this create when bridging data between the two protocols?</p>
+<details><summary>Answer</summary>
+
+**I2C transmits MSB first** because the arbitration mechanism compares bits from the most-significant end. The device with the lower address (with a 0 where the other has a 1) wins arbitration. For this to work bit-by-bit during transmission, the MSB must come first — otherwise you'd need the full address before arbitration can begin.
+
+**UART transmits LSB first** for historical reasons (early UARTs could start processing partial data) and because UART has no arbitration — there's no advantage to MSB-first.
+
+**Bridging issue:** If you naively forward raw bytes between UART and I2C without accounting for bit order, and the data passes through a bit-level shift register (not a byte-level buffer), the bit order within each byte appears reversed. For example, 0xC1 (MSB-first: 1100_0001) received over I2C and forwarded bit-by-bit to UART (LSB-first) would appear as 0x83 (1000_0011).
+
+In practice, most microcontroller peripherals handle bit order internally — the I2C peripheral delivers complete bytes to the CPU regardless of wire-level bit order. The issue only arises in **bit-banged** implementations or hardware that directly chains SPI/I2C/UART shift registers.
+
+</details>
+
+<hr />
+<p><strong>A5.</strong> Explain what happens during an I2C &ldquo;Repeated START&rdquo; (Sr) and why it&rsquo;s used instead of STOP + START when reading a register from the ICM-42688.</p>
+<details><summary>Answer</summary>
+
+Reading a register from the ICM-42688 requires two phases:
+1. **WRITE** the register address (tell the device which register you want)
+2. **READ** the register data back
+
+Between these phases, you need to **change direction** (from write to read). Two options:
+
+**STOP + START:** Releases the bus, then re-acquires it.
+- Problem 1: Another master could grab the bus between STOP and START (multi-master systems)
+- Problem 2: Some devices reset their internal register pointer on STOP, so the address you just wrote is lost
+- Problem 3: Slower — includes idle time between transactions
+
+**Repeated START (Sr):** SDA transitions HIGH→LOW while SCL is HIGH, just like a normal START, but WITHOUT a preceding STOP.
+- The bus is never released — no window for another master to interfere
+- The slave's register pointer is preserved
+- Immediately transitions to the read phase
+
+**The sequence for reading register 0x75 from address 0x68:**
+
+<div class="highlight"><pre><span></span><code>[START] [0xD0 (addr+W)] [ACK] [0x75 (reg)] [ACK] [Sr] [0xD1 (addr+R)] [ACK] [data] [NACK] [STOP]
+</code></pre></div>
+
+
+
+The `[Sr]` is the Repeated START — it flips from write to read without releasing the bus.
+
+</details>
+
+<hr />
+<p><strong>A6.</strong> Your I2C bus has suddenly stopped working — SDA is permanently stuck LOW. No device responds to any address. What physical condition causes this, and describe the exact recovery procedure.</p>
+<details><summary>Answer</summary>
+
+**Cause:** A slave device is stuck **mid-byte**. It was in the process of sending data (pulling SDA LOW for a '0' bit) when the master unexpectedly stopped clocking — perhaps due to a reset, crash, or timeout. The slave is now waiting for more SCL clocks to complete its byte, but the master has stopped. Since the slave is holding SDA LOW, the master can't generate a START condition (which requires SDA HIGH→LOW while SCL HIGH).
+
+**Recovery procedure — the 9-clock method:**
+
+1. **Reconfigure SCL as GPIO output, SDA as GPIO input** (take control away from the I2C peripheral)
+2. **Bit-bang 9 clock pulses on SCL** (HIGH then LOW, ~5 µs each half):
+   - The stuck slave receives these clocks and shifts out its remaining data bits
+   - After at most 8 clocks, the slave finishes its data byte
+   - On the 9th clock, the slave's ACK phase completes and it releases SDA
+3. **After each clock pulse, check SDA**: if SDA is HIGH, the slave has released — stop early
+4. **Generate a STOP condition**: Drive SDA LOW, then SCL HIGH, then SDA HIGH (while SCL is HIGH)
+5. **Reconfigure pins for I2C peripheral** and resume normal operation
+
+Zephyr provides `i2c_recover_bus()` which does exactly this. Some STM32 I2C peripherals also have **hardware bus recovery** support.
+
+</details>
+
+<hr />
+<p><strong>A7.</strong> Why is a BSS138 MOSFET circuit used for I2C level shifting (3.3V ↔ 5V) but NOT suitable for SPI level shifting?</p>
+<details><summary>Answer</summary>
+
+The BSS138 level shifter exploits I2C's **open-drain** nature:
+
+- When the 3.3V side pulls LOW → MOSFET gate-source voltage rises → MOSFET turns ON → pulls 5V side LOW ✓
+- When the 5V side pulls LOW → MOSFET body diode conducts + gate-source inverts → pulls 3.3V side LOW ✓
+- When both sides release → respective pull-ups pull each side to its own VCC (3.3V or 5V) ✓
+
+This works because I2C outputs **only pull LOW or release** — they never actively drive HIGH. The pull-up on each side handles the HIGH level at the correct voltage.
+
+**SPI is push-pull**: SPI outputs actively drive both HIGH and LOW. The BSS138 circuit can't handle an actively-driven HIGH: when the 3.3V side drives 3.3V, the 5V pull-up would try to pull to 5V, creating a conflict. And when the 5V side drives 5V, that voltage appears directly on the 3.3V side — exceeding the 3.3V device's maximum input rating.
+
+**For SPI level shifting**, use a dedicated bidirectional level shifter IC like **TXB0104** (auto-direction sensing, push-pull compatible) or **SN74LVC** series unidirectional buffers.
+
+</details>
+
+<hr />
+<p><strong>A8.</strong> A temperature sensor (TMP102) and a 16-bit ADC (ADS1115) both have I2C address 0x48. You need both on the same bus. What are two solutions?</p>
+<details><summary>Answer</summary>
+
+**Solution 1: Change the address using address pins.**
+
+Both TMP102 and ADS1115 have configurable address pins (A0, A1). By connecting these pins to different combinations of GND and VCC, you can shift one device's address:
+- TMP102: A0=GND → 0x48
+- ADS1115: A0=VCC → 0x49
+
+Check each device's datasheet for the available address options. TMP102 supports 0x48–0x4B (2 address bits), ADS1115 supports 0x48–0x4B (2 address bits with ADDR pin connected to GND/VCC/SDA/SCL).
+
+**Solution 2: Use an I2C multiplexer (TCA9548A).**
+
+The TCA9548A is an 8-channel I2C mux. Connect it to the main I2C bus, then connect TMP102 to channel 0 and ADS1115 to channel 1. Select the active channel by writing to the TCA9548A's control register before communicating with the target device.
+
+Advantage: even if the address pins can't differentiate the devices, the mux creates electrically separate sub-buses. You could even have 8 identical devices (all at 0x48) on 8 different channels.
+
+The TCA9548A itself has 3 address pins → up to 8 muxes on one bus → 64 sub-buses → theoretically 7,168 devices (64 channels × 112 usable addresses).
+
+</details>
+
+<hr />
+<h2 id="section-b-spot-the-bug">Section B — Spot the Bug</h2>
+<p><strong>B1.</strong> An engineer designs a Fast-mode (400 kHz) I2C bus with 5 devices, 20 cm total wire length, and 10 kΩ pull-up resistors. The bus works perfectly at Standard mode (100 kHz) but at 400 kHz, data is frequently corrupted. What&rsquo;s wrong?</p>
+<details><summary>Answer</summary>
+
+**Bug:** The **10 kΩ pull-ups are far too high** for 400 kHz operation.
+
+Estimating bus capacitance:
+- 5 devices × 10 pF (input capacitance) = 50 pF
+- 20 cm wire × 5 pF/cm = 100 pF
+- Total ≈ 150 pF (conservative estimate: 200 pF with safety margin)
+
+Rise time with 10 kΩ pull-ups:
+- Rise time ≈ 0.8473 × 10,000 × 200 × 10⁻¹² = **1695 ns**
+
+Fast mode requires rise time < **300 ns**. The actual rise time is 5.6× too slow!
+
+At Standard mode (100 kHz), the specification allows rise time up to 1000 ns, so 1695 ns is marginal but approaches working (explaining why it "works" at 100 kHz on a good day). At 400 kHz, the slow edges mean the bus barely reaches VCC before being pulled LOW again → sampling happens on a rising slope → indeterminate logic level → corruption.
+
+**Fix:** Replace 10 kΩ with **1.5 kΩ or 2.2 kΩ** pull-ups. Check: rise time ≈ 0.8473 × 2200 × 200 pF = 373 ns. Still slightly above 300 ns → use 1.5 kΩ: 0.8473 × 1500 × 200 pF = 254 ns ✓
+
+</details>
+
+<hr />
+<p><strong>B2.</strong> A developer writes I2C code to read the WHO_AM_I register (0x75) from an ICM-42688 at address 0x68. They send address byte 0x68 followed by register 0x75, but always get a NACK on the address byte. No device responds. <code>i2cdetect</code> shows the device at address 0x68. What&rsquo;s wrong?</p>
+<details><summary>Answer</summary>
+
+**Bug:** The developer sent **0x68 as the raw byte** on the wire, but I2C address bytes must be **shifted left by 1** with the R/W̄ bit in the LSB:
+
+- Write address byte = (0x68 << 1) | 0 = **0xD0**
+- Read address byte = (0x68 << 1) | 1 = **0xD1**
+
+Sending 0x68 directly means the I2C peripheral interprets:
+- Address = 0x68 >> 1 = **0x34** (wrong device!)
+- R/W̄ bit = 0x68 & 0x01 = 0 (write)
+
+No device at address 0x34 exists → NACK.
+
+**Fix:** In most frameworks (including Zephyr), you pass the **7-bit address** (0x68) and the driver handles the shift and R/W bit. The bug is usually in raw register access or bit-banged I2C where the developer incorrectly uses the 7-bit address as an 8-bit value.
+
+**Common confusion:** Datasheets sometimes list the 8-bit write address (0xD0) and 8-bit read address (0xD1). Always check which format the datasheet and your software library expect.
+
+</details>
+
+<hr />
+<p><strong>B3.</strong> An I2C bus has the following configuration: Main bus at 3.3V with 4.7 kΩ pull-ups, connected via a BSS138 level shifter to a 5V sub-bus also with 4.7 kΩ pull-ups. A 5V EEPROM on the sub-bus reads correctly, but writes to it always fail with a NACK error. What could be wrong?</p>
+<details><summary>Answer</summary>
+
+**Bug:** The BSS138 level shifter introduces **additional propagation delay** and the combined pull-up on both sides effectively creates a higher pull-up resistance from the slave's perspective. But more likely, the issue is that the **EEPROM's write operation requires an internal programming cycle** (typically 3–5 ms for page writes), during which it does not ACK any new transactions.
+
+However, the specific symptom — reads work but writes always NACK — points to:
+
+1. **Write-protect pin:** Many EEPROMs have a WP (Write Protect) pin. If WP is tied HIGH (or floating with an internal pull-up), all write operations are silently rejected with a NACK. Read operations still work normally.
+
+2. **Incorrect write sequence:** EEPROMs typically have a page-write protocol where the address must be followed by data within the same I2C transaction. If the developer does STOP between the address and data, the EEPROM may interpret it as a zero-length write.
+
+**Most likely fix:** Check the EEPROM's WP pin — tie it to GND to enable writes. If using an Adafruit/SparkFun breakout, check if there's a solder jumper for write protection.
+
+</details>
+
+<hr />
+<p><strong>B4.</strong> A robot&rsquo;s I2C bus has 8 sensors. During operation, the bus freezes approximately once every 24 hours. Power-cycling the entire board recovers it. The engineer adds a watchdog that power-cycles the I2C peripheral on the STM32 when a timeout is detected. The bus still freezes — the watchdog fires but communication doesn&rsquo;t resume. Why doesn&rsquo;t re-initializing the STM32&rsquo;s I2C peripheral fix the stuck bus?</p>
+<details><summary>Answer</summary>
+
+**Bug:** The bus is stuck because a **slave device** is holding SDA LOW (stuck mid-byte), not because the STM32's I2C peripheral is frozen. Re-initializing the STM32's peripheral resets the master's state machine, but does nothing about the slave that's still pulling SDA LOW.
+
+The master can't generate a START condition (START = SDA HIGH→LOW while SCL HIGH) because SDA is held LOW by the stuck slave. Re-initializing the master's I2C peripheral just puts it back in "waiting for SDA to be HIGH" state.
+
+**Fix:** Before re-initializing the I2C peripheral, perform **9-clock bus recovery**:
+1. Reconfigure SCL as GPIO output, SDA as GPIO input
+2. Toggle SCL 9 times (the maximum number of clocks needed to complete any stuck transfer)
+3. Check SDA — it should be HIGH after the slave releases
+4. Generate STOP condition (SDA LOW → SCL HIGH → SDA HIGH)
+5. THEN re-initialize the I2C peripheral
+
+Zephyr's `i2c_recover_bus()` does exactly this. Add it to the watchdog handler **before** `i2c_configure()`.
+
+</details>
+
+<hr />
+<p><strong>B5.</strong> An engineer uses <code>i2cdetect</code> on a Raspberry Pi to scan the bus. They see their TMP102 temperature sensor at address 0x48. They write Python code using <code>smbus2</code> and call <code>bus.read_byte_data(0x48, 0x00)</code>. The Pi freezes completely — no keyboard response, must hard-reboot. What happened?</p>
+<details><summary>Answer</summary>
+
+**Bug:** The TMP102 uses **clock stretching** during temperature conversion. After receiving the read command, it holds SCL LOW for up to 26 ms while the ADC converts.
+
+The Raspberry Pi's **hardware I2C (BCM2835)** has a known bug: it doesn't properly handle clock stretching. When the slave holds SCL LOW longer than the Pi's I2C peripheral expects, the peripheral enters a deadlocked state. The kernel I2C driver blocks in an infinite loop waiting for the transfer to complete, which can hang the entire system if the driver holds a kernel lock.
+
+**Fixes:**
+1. Use **software I2C (bit-banged)** on the Pi: `dtoverlay=i2c-gpio` in config.txt. Bit-banged I2C naturally handles clock stretching because it checks SCL before each clock cycle.
+2. Set the I2C clock speed **slower** (50 kHz instead of 100 kHz) — gives more time for the Pi's buggy hardware to detect stretched clocks.
+3. Use a **different I2C master** (STM32, which handles clock stretching correctly) and communicate with the Pi over SPI or UART.
+4. Some newer Pi models/firmware have improved I2C clock stretching support — check Raspberry Pi firmware updates.
+
+</details>
+
+<hr />
+<h2 id="section-c-fill-in-the-blank-from-memory">Section C — Fill in the Blank / From Memory</h2>
+<h3 id="c1-i2c-pull-up-resistor-ranges">C1: I2C Pull-Up Resistor Ranges</h3>
+<p>Fill in the typical pull-up values for 3.3V I2C:</p>
+<table>
+<thead>
+<tr>
+<th>I2C Speed Mode</th>
+<th>Frequency</th>
+<th>Typical Pull-Up Range</th>
+<th>Max Rise Time</th>
+<th>Max Bus Capacitance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Standard</td>
+<td>_____</td>
+<td>_____</td>
+<td>_____</td>
+<td>_____</td>
+</tr>
+<tr>
+<td>Fast</td>
+<td>_____</td>
+<td>_____</td>
+<td>_____</td>
+<td>_____</td>
+</tr>
+<tr>
+<td>Fast-mode Plus</td>
+<td>_____</td>
+<td>_____</td>
+<td>_____</td>
+<td>_____</td>
+</tr>
+</tbody>
+</table>
+<details><summary>Answer</summary>
+
+| I2C Speed Mode | Frequency | Typical Pull-Up Range | Max Rise Time | Max Bus Capacitance |
+|---------------|-----------|----------------------|---------------|---------------------|
+| Standard | **100 kHz** | **4.7 kΩ – 10 kΩ** | **1000 ns** | **400 pF** |
+| Fast | **400 kHz** | **1.5 kΩ – 4.7 kΩ** | **300 ns** | **400 pF** |
+| Fast-mode Plus | **1 MHz** | **1 kΩ – 2.2 kΩ** | **120 ns** | **550 pF** |
+
+**Key formula:** Rise time ≈ 0.8473 × Rp × Cbus
+
+**Minimum Rp** is limited by device sink current: Rp_min = VCC / I_sink_max = 3.3V / 3mA = 1.1 kΩ (standard), or 3.3V / 20mA = 165 Ω (Fast-mode Plus).
+
+</details>
+
+<hr />
+<h3 id="c2-i2c-address-byte-format">C2: I2C Address Byte Format</h3>
+<p>Fill in the address byte construction:</p>
+<table>
+<thead>
+<tr>
+<th>Device</th>
+<th>7-bit Address</th>
+<th>Write Byte (hex)</th>
+<th>Read Byte (hex)</th>
+<th>Formula</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ICM-42688</td>
+<td>0x68</td>
+<td>_____</td>
+<td>_____</td>
+<td>_____</td>
+</tr>
+<tr>
+<td>TMP102</td>
+<td>0x48</td>
+<td>_____</td>
+<td>_____</td>
+<td>_____</td>
+</tr>
+<tr>
+<td>EEPROM 24C02</td>
+<td>0x50</td>
+<td>_____</td>
+<td>_____</td>
+<td>_____</td>
+</tr>
+<tr>
+<td>PCA9555</td>
+<td>0x20</td>
+<td>_____</td>
+<td>_____</td>
+<td>_____</td>
+</tr>
+</tbody>
+</table>
+<details><summary>Answer</summary>
+
+| Device | 7-bit Address | Write Byte (hex) | Read Byte (hex) | Formula |
+|--------|--------------|-------------------|-----------------|---------|
+| ICM-42688 | 0x68 | **0xD0** | **0xD1** | **(0x68 << 1) | R/W̄** |
+| TMP102 | 0x48 | **0x90** | **0x91** | **(0x48 << 1) | R/W̄** |
+| EEPROM 24C02 | 0x50 | **0xA0** | **0xA1** | **(0x50 << 1) | R/W̄** |
+| PCA9555 | 0x20 | **0x40** | **0x41** | **(0x20 << 1) | R/W̄** |
+
+Formula: **Write = (addr << 1) | 0, Read = (addr << 1) | 1**
+
+In Zephyr and most embedded frameworks, you pass the **7-bit address** and the driver handles the shift and R/W bit automatically.
+
+</details>
+
+<hr />
+<h3 id="c3-i2c-vs-spi-vs-uart-for-common-tasks">C3: I2C vs SPI vs UART for Common Tasks</h3>
+<p>Fill in the recommended protocol:</p>
+<table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Recommended Protocol</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Read IMU at 100Hz</td>
+<td>_____</td>
+<td>_____</td>
+</tr>
+<tr>
+<td>Read temperature sensor once per second</td>
+<td>_____</td>
+<td>_____</td>
+</tr>
+<tr>
+<td>Store calibration in EEPROM at boot</td>
+<td>_____</td>
+<td>_____</td>
+</tr>
+<tr>
+<td>Debug console output</td>
+<td>_____</td>
+<td>_____</td>
+</tr>
+<tr>
+<td>8 sensors with 2 wires</td>
+<td>_____</td>
+<td>_____</td>
+</tr>
+<tr>
+<td>Motor controller over 10m cable</td>
+<td>_____</td>
+<td>_____</td>
+</tr>
+</tbody>
+</table>
+<details><summary>Answer</summary>
+
+| Task | Recommended Protocol | Reason |
+|------|---------------------|--------|
+| Read IMU at 100Hz | **SPI** | **High speed needed, SPI at 10+ MHz gives microsecond reads. I2C at 400kHz would work but 25× slower.** |
+| Read temperature sensor once per second | **I2C** | **Low speed sufficient, saves wires, I2C addressing handles multiple sensors.** |
+| Store calibration in EEPROM at boot | **I2C** | **One-time read at boot, EEPROM naturally I2C. SPI EEPROMs exist but waste a CS̄ pin.** |
+| Debug console output | **UART** | **Human-readable, universal tool support, zero complexity.** |
+| 8 sensors with 2 wires | **I2C** | **Built-in 7-bit addressing supports 112 devices on 2 wires. SPI would need 8 CS̄ lines.** |
+| Motor controller over 10m cable | **CAN (or RS-485 UART)** | **Differential signaling for noise immunity over distance. I2C/SPI limited to <1m.** |
+
+</details>
+
+<hr />
+<h2 id="section-d-lab-calculation-tasks">Section D — Lab / Calculation Tasks</h2>
+<p><strong>D1.</strong> Calculate the correct pull-up resistor value for a Fast-mode (400 kHz) I2C bus at 3.3V with the following load: 4 devices (10 pF each), 12 cm of wire (50 pF per 10 cm), and a safety margin of 1.5×. The maximum sink current is 3 mA.</p>
+<details><summary>Answer</summary>
+
+**Step 1: Calculate bus capacitance**
+- Device capacitance: 4 × 10 pF = 40 pF
+- Wire capacitance: 12 cm × 5 pF/cm = 60 pF
+- Subtotal: 100 pF
+- With 1.5× safety margin: 100 × 1.5 = **150 pF**
+
+**Step 2: Calculate maximum Rp (from rise time)**
+- Fast mode: rise time < 300 ns
+- 300 ns > 0.8473 × Rp × 150 pF
+- Rp < 300 × 10⁻⁹ / (0.8473 × 150 × 10⁻¹²)
+- Rp < 300 / 127.1 × 10³
+- Rp < **2,361 Ω**
+
+**Step 3: Calculate minimum Rp (from sink current)**
+- Rp > VCC / I_sink = 3.3V / 3 mA = **1,100 Ω**
+
+**Step 4: Choose a standard value**
+- Valid range: 1,100 Ω < Rp < 2,361 Ω
+- Standard resistor values in range: 1.2 kΩ, 1.5 kΩ, 1.8 kΩ, 2.2 kΩ
+- **Best choice: 1.5 kΩ or 1.8 kΩ**
+
+Verification with 1.8 kΩ:
+- Rise time = 0.8473 × 1800 × 150 pF = 229 ns < 300 ns ✓
+- Sink current = 3.3V / 1800 = 1.83 mA < 3 mA ✓
+
+</details>
+
+<hr />
+<p><strong>D2.</strong> You need to read the WHO_AM_I register (0x75) from an ICM-42688 at I2C address 0x68. Write out the complete bit-by-bit sequence on the bus, including: START, address byte (with R/W), ACK/NACK, register byte, Repeated START, second address byte, data byte, and STOP. Use binary for each byte.</p>
+<details><summary>Answer</summary>
+
+**Phase 1 — Write register address:**
+
+
+<div class="highlight"><pre><span></span><code>[START]  [1 1 0 1 0 0 0 0]  [ACK]  [0 1 1 1 0 1 0 1]  [ACK]
+          └── 0xD0 ─────┘           └── 0x75 ─────────┘
+          addr=0x68, W=0             register=WHO_AM_I
+          (MSB first)                (MSB first)
+</code></pre></div>
+
+
+
+- START: SDA falls while SCL HIGH
+- 0xD0 = (0x68 << 1) | 0 = 1101_0000 — address + write
+- ACK: Slave pulls SDA LOW on 9th clock
+- 0x75 = 0111_0101 — register address
+- ACK: Slave pulls SDA LOW on 9th clock
+
+**Phase 2 — Repeated START + Read data:**
+
+
+<div class="highlight"><pre><span></span><code>[Sr]  [1 1 0 1 0 0 0 1]  [ACK]  [0 1 0 0 0 1 1 1]  [NACK]  [STOP]
+       └── 0xD1 ─────┘           └── 0x47 ─────────┘
+       addr=0x68, R=1             WHO_AM_I response
+</code></pre></div>
+
+
+
+- Sr (Repeated START): SDA falls while SCL HIGH (no preceding STOP)
+- 0xD1 = (0x68 << 1) | 1 = 1101_0001 — address + read
+- ACK: Slave pulls SDA LOW on 9th clock
+- 0x47 = 0100_0111 — slave sends WHO_AM_I value (master reads)
+- NACK: Master leaves SDA HIGH on 9th clock — "I don't want more bytes"
+- STOP: SDA rises while SCL HIGH
+
+**Total clocks: 9 + 9 + 9 + 9 = 36 clock cycles** (plus START, Sr, STOP conditions)
+
+</details>
+
+<hr />
+<p><strong>D3.</strong> An I2C bus occasionally gets stuck (SDA held LOW by a slave). Your STM32 firmware detects this via a 50 ms timeout. Write pseudocode for a bus recovery function that: (a) checks if SDA is stuck, (b) performs 9-clock recovery, (c) generates STOP, (d) reports success/failure.</p>
+<details><summary>Answer</summary>
+
+
+<div class="highlight"><pre><span></span><code>function i2c_bus_recover(scl_pin, sda_pin):
+    // Step 0: Check if bus is actually stuck
+    configure sda_pin as GPIO input
+    if read(sda_pin) == HIGH:
+        return SUCCESS  // Bus is not stuck, nothing to do
+
+    // Step 1: Configure SCL as GPIO output for bit-banging
+    configure scl_pin as GPIO output
+
+    // Step 2: Send up to 9 clock pulses
+    recovered = false
+    for i = 0 to 8:
+        write scl_pin HIGH
+        delay_us(5)          // Half-period for ~100kHz
+        write scl_pin LOW
+        delay_us(5)
+
+        // Check if slave released SDA
+        if read(sda_pin) == HIGH:
+            recovered = true
+            break
+
+    // Step 3: Generate STOP condition
+    if recovered:
+        write sda_pin LOW as output   // SDA LOW
+        delay_us(5)
+        write scl_pin HIGH            // SCL HIGH
+        delay_us(5)
+        write sda_pin HIGH            // SDA HIGH while SCL HIGH = STOP
+        delay_us(5)
+
+    // Step 4: Restore I2C peripheral
+    configure scl_pin as I2C alternate function
+    configure sda_pin as I2C alternate function
+    reinitialize I2C peripheral
+
+    if recovered:
+        return SUCCESS
+    else:
+        // SDA still stuck after 9 clocks — slave may be dead
+        return FAILURE  // Need power-cycle of the slave device
+</code></pre></div>
+
+
+
+**Key points:**
+- 9 clocks is the maximum: 8 data bits + 1 ACK bit. After 9 clocks, any mid-byte slave must have completed its transfer.
+- Check SDA after each clock — stop early if the slave releases.
+- Always generate STOP after recovery to put the bus in a known idle state.
+- If 9 clocks don't work, the slave's I/O cell may be permanently latched → only a power cycle can recover it.
+
+</details>
+
+<hr />
+<p><strong>D4.</strong> Your STM32H7 has both I2C and SPI connected to an ICM-42688 IMU. The I2C bus runs at 400 kHz. The SPI runs at 8 MHz. Calculate the time to read a 14-byte burst (accel + gyro + temp) over each interface. Include protocol overhead (address bytes, register address, ACK bits for I2C; command byte and dummy byte for SPI).</p>
+<details><summary>Answer</summary>
+
+**I2C at 400 kHz:**
+
+Phase 1 (write register address):
+- START (1 clock equivalent)
+- Address byte + ACK: 9 clocks
+- Register byte + ACK: 9 clocks
+
+Phase 2 (read 14 bytes):
+- Repeated START (1 clock equivalent)
+- Address byte + ACK: 9 clocks
+- 14 data bytes × 9 clocks each (8 data + ACK): 126 clocks
+- STOP (1 clock equivalent)
+
+Total: ~1 + 9 + 9 + 1 + 9 + 126 + 1 = **156 clocks**
+Time = 156 / 400,000 = **390 µs**
+
+**SPI at 8 MHz (Mode 3):**
+
+- 1 byte register address (with read bit) = 8 clocks
+- 14 bytes data = 112 clocks
+- (The master simultaneously sends 14 dummy bytes — no additional time)
+
+Total: 8 + 112 = **120 clocks**
+Time = 120 / 8,000,000 = **15 µs**
+
+**SPI is 26× faster** for this operation (390 µs vs 15 µs). At 100 Hz, the I2C read consumes 3.9% of the frame period vs SPI's 0.15%. For a real-time 100 Hz control loop, SPI's lower latency is significantly better.
+
+</details>
+
+<hr />
+<p><strong>D5.</strong> You have a TCA9548A I2C multiplexer at address 0x70, with 4 identical BMP280 pressure sensors (all at address 0x76) connected to channels 0–3. Write the I2C transaction sequence to read the temperature register (0xFA, 3 bytes) from the sensor on channel 2.</p>
+<details><summary>Answer</summary>
+
+**Step 1: Select channel 2 on the TCA9548A**
+
+
+<div class="highlight"><pre><span></span><code>[START] [0xE0] [ACK] [0x04] [ACK] [STOP]
+         ↑              ↑
+    (0x70&lt;&lt;1|W)    Channel mask: bit 2 = 1 → 0b00000100 = 0x04
+</code></pre></div>
+
+
+
+The TCA9548A's control register is a bitmask where each bit enables one channel. Writing 0x04 enables only channel 2.
+
+**Step 2: Read 3 bytes from BMP280 at 0x76, register 0xFA**
+
+
+<div class="highlight"><pre><span></span><code>[START] [0xEC] [ACK] [0xFA] [ACK] [Sr] [0xED] [ACK] [byte1] [ACK] [byte2] [ACK] [byte3] [NACK] [STOP]
+         ↑              ↑                ↑              ↑
+    (0x76&lt;&lt;1|W)   reg addr         (0x76&lt;&lt;1|R)    3 data bytes
+</code></pre></div>
+
+
+
+- Write address byte: 0x76 << 1 | 0 = 0xEC
+- Read address byte: 0x76 << 1 | 1 = 0xED
+- Master ACKs bytes 1 and 2 (requesting more data)
+- Master NACKs byte 3 (last byte requested)
+
+**Step 3: (Optional) Deselect channels**
+
+
+<div class="highlight"><pre><span></span><code>[START] [0xE0] [ACK] [0x00] [ACK] [STOP]
+</code></pre></div>
+
+
+
+Writing 0x00 disables all channels — good practice to avoid unintended access.
+
+**Total: 3 I2C transactions** to read from one muxed sensor. The mux switch takes ~10–30 µs at 400 kHz.
+
+</details>
+
+<hr />
+<h2 id="section-e-deeper-thinking">Section E — Deeper Thinking</h2>
+<p><strong>E1.</strong> Compare I2C&rsquo;s &ldquo;wired-AND with pull-ups&rdquo; approach to CAN&rsquo;s &ldquo;dominant/recessive&rdquo; approach. Both allow multiple devices to share a bus safely. What are the fundamental physical trade-offs? Why does I2C&rsquo;s open-drain approach limit it to shorter distances and lower speeds than CAN?</p>
+<details><summary>Answer</summary>
+
+**I2C (open-drain + pull-up):**
+- Logic HIGH is created **passively** by a pull-up resistor charging the bus capacitance through an RC time constant
+- Rising edges are **slow** (exponential RC charge) — limited by Rp × Cbus
+- Lower pull-ups = faster rise time but more current = more power
+- Bus capacitance increases with distance (wire capacitance) and device count → rise time degrades → speed limited to ~1 MHz at <1 m
+
+**CAN (differential, dominant/recessive):**
+- Dominant (0) is **actively driven** by the transceiver (pushes CANH high and CANL low → fast transition)
+- Recessive (1) is passive (both lines float to common-mode voltage via termination)
+- The differential pair rejects common-mode noise (both wires see the same noise)
+- Active drive means edges are fast regardless of bus length
+- Can operate up to 1 Mbps at 40 m, or lower speeds at up to 1 km
+
+**Key trade-offs:**
+
+| Property | I2C | CAN |
+|----------|-----|-----|
+| Speed | Limited by RC rise time | Limited by propagation + bit sampling |
+| Distance | <1 m (capacitance limits) | Up to 1 km |
+| Power | Low (pull-up current only when bus LOW) | Higher (active drive, termination current) |
+| Wire count | 2 (SDA, SCL — plus GND) | 2 (CANH, CANL — plus GND) |
+| Noise immunity | Low (single-ended, sensitive to GND noise) | High (differential, rejects common-mode) |
+| Hardware cost | Minimal (just pull-ups) | Transceiver IC + termination resistors |
+
+I2C's open-drain approach is elegant for board-level communication (cm distances) where capacitance is low and simplicity matters. CAN's active-drive differential approach is designed for field-level communication (m to km distances) where noise immunity and speed matter more than hardware simplicity.
+
+</details>
+
+<hr />
+<p><strong>E2.</strong> You&rsquo;re designing the sensor I2C bus for a new robot board. It will carry: 2× TMP102 temperature sensors, 1× EEPROM (AT24C256), 1× IO expander (PCA9555), and 1× pressure sensor (BMP280). Total wire length is 8 cm. Design the bus: choose the speed mode, calculate the pull-up value, and address the devices. What&rsquo;s your total bus capacitance budget and how much margin do you have?</p>
+<details><summary>Answer</summary>
+
+**Device addressing:**
+| Device | Base Address | Config | Final Address |
+|--------|-------------|--------|---------------|
+| TMP102 #1 | 0x48 | A0=GND | 0x48 |
+| TMP102 #2 | 0x48 | A0=VCC | 0x49 |
+| AT24C256 | 0x50 | A0=A1=A2=GND | 0x50 |
+| PCA9555 | 0x20 | A0=A1=A2=GND | 0x20 |
+| BMP280 | 0x76 | SDO=GND | 0x76 |
+
+No address conflicts ✓
+
+**Speed mode selection:** Standard mode (100 kHz) is sufficient — these are slow sensors read at 1–10 Hz. No need for Fast mode. Lower speed = wider pull-up tolerance = simpler design.
+
+**Bus capacitance:**
+- 5 devices × 10 pF = 50 pF
+- 8 cm wire × 5 pF/cm = 40 pF
+- Total: **90 pF** (well under 400 pF max for Standard mode)
+
+**Pull-up calculation (Standard mode, 100 kHz):**
+- Max Rp: rise time < 1000 ns → Rp < 1000 ns / (0.8473 × 90 pF) = 13,120 Ω
+- Min Rp: Rp > 3.3V / 3 mA = 1,100 Ω
+- Valid range: 1,100 – 13,120 Ω
+- **Choose 4.7 kΩ** (classic value, well within range)
+- Actual rise time = 0.8473 × 4700 × 90 pF = 358 ns (easily under 1000 ns)
+
+**Margin:**
+- Capacitance: 90 pF / 400 pF = 22.5% utilization → **77.5% margin** (could add ~15 more devices or 60+ cm more wire)
+- Rise time: 358 ns / 1000 ns = 35.8% → **64.2% margin**
+- Could upgrade to Fast mode (400 kHz) if needed — with 4.7 kΩ pull-ups, rise time = 358 ns > 300 ns limit, so pull-ups would need to drop to ~3.3 kΩ.
+
+</details>
+
+<hr />
+<p><strong>E3.</strong> The STM32H7 I2C peripheral supports &ldquo;analog noise filter&rdquo; (suppresses spikes &lt;50 ns) and &ldquo;digital noise filter&rdquo; (configurable, suppresses spikes of 1–15 SCL clock periods). Your robot operates in a factory with variable-frequency motor drives (VFDs) that produce EMI bursts. You observe occasional I2C transaction failures that correlate with VFD activity. How would you configure the noise filters, and what other physical measures would you take?</p>
+<details><summary>Answer</summary>
+
+**I2C noise filter configuration:**
+
+1. **Analog filter: ENABLE** (default ON). This filters out spikes shorter than ~50 ns — typical EMI glitches from VFD switching transients (which often have ns-scale rise times).
+
+2. **Digital filter: Set to 2–4 SCL periods.** At 400 kHz, 1 SCL period = 2.5 µs. Setting the digital filter to 2 periods means signals shorter than 5 µs are rejected. VFD EMI bursts are typically <1 µs, so even 1 period (2.5 µs) would suffice. Don't set it too high — more than 4 periods adds significant delay to SCL edge detection, potentially violating I2C timing specs.
+
+**Physical measures (most effective to least):**
+
+1. **Route I2C traces away from power wiring.** Maintain at least 2 cm separation from VFD cables. Cross at 90° if crossing is unavoidable.
+
+2. **Add 100 pF capacitors on SDA and SCL** near the slave devices. These form a low-pass filter with the pull-ups: at 4.7 kΩ + 100 pF, the filter corner is ~340 kHz — passes the 100–400 kHz I2C signal but attenuates MHz-range EMI.
+
+3. **Use shielded cable** for any I2C wires that leave the PCB. Ground the shield at one end only to avoid ground loops.
+
+4. **Add common-mode chokes** on the I2C lines — these suppress common-mode noise (which EMI typically is) without affecting the differential signal.
+
+5. **Reduce bus speed.** At 100 kHz, each bit period is 10 µs — a 1 µs EMI burst affects only 10% of one bit time. The center sampling still reads the correct value. At 400 kHz, the same burst affects 40% of a bit time — more likely to cause an error.
+
+6. **Add I2C bus recovery** with timeout and the 9-clock method — even with all protections, occasional bus stalls may occur in severe EMI environments.
+
+</details>
+
+<hr />
+<p><strong>E4.</strong> I2C was designed in the 1980s by Philips for inter-chip communication on a single PCB. SPI was developed by Motorola for similar use cases. Both exist on your STM32H7. Why hasn&rsquo;t one replaced the other in 40+ years? What fundamental design decision in each protocol prevents it from being &ldquo;good enough&rdquo; to deprecate the other?</p>
+<details><summary>Answer</summary>
+
+**I2C's fundamental decision:** Use **2 wires with in-protocol addressing.** This means any number of devices share the same bus with minimal wiring, but the protocol requires per-byte ACK handshaking, open-drain outputs (limiting speed), and pull-up tuning.
+
+**SPI's fundamental decision:** Use **separate CS̄ per device with no protocol overhead.** This gives maximum speed (direct shift register exchange, no ACK/NACK, no addressing overhead), but wire count scales linearly with device count.
+
+**Why neither can replace the other:**
+
+I2C **cannot match SPI's speed** because:
+- Open-drain outputs create RC rise times that fundamentally limit bandwidth
+- ACK/NACK after every byte adds 11% protocol overhead
+- Clock stretching creates unpredictable latency
+- Even Fast-mode Plus (1 MHz) is 100× slower than typical SPI
+
+SPI **cannot match I2C's scaling** because:
+- Each slave needs a dedicated CS̄ wire → 10 slaves = 10 CS̄ pins + 3 shared = 13 wires
+- No built-in addressing, arbitration, or error signaling
+- No multi-master support without custom protocols
+- Each CS̄ requires a GPIO pin on the MCU — a finite resource
+
+**They occupy different niches** in the same way that highways (SPI: fast, wide, expensive) and local streets (I2C: slow, narrow, cheap) coexist. A sensor-heavy design with 8 temperature sensors and EEPROMs wants I2C. A data-intensive design with an IMU at 100 Hz wants SPI. The STM32H7 provides both because real systems need both.
+
+The 40-year coexistence is a sign of good engineering: each protocol was designed with a clear, non-overlapping use case, and neither has been stretched beyond its natural domain.
+
+</details>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

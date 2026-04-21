@@ -1,0 +1,1581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Module 18: Coding Standards, Profiling &amp; System Tracing - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-indigo-600 hover:text-indigo-800 mb-4 inline-block">&larr; Back to C++ Advanced</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="module-18-coding-standards-profiling-system-tracing">Module 18: Coding Standards, Profiling &amp; System Tracing</h1>
+<h2 id="overview">Overview</h2>
+<p>Module 16 taught you <strong>what</strong> sanitizers catch and how to read their reports.
+This module teaches the <strong>broader quality ecosystem</strong>: how to prevent bugs
+before they happen (coding standards + static analysis), how to find performance
+bottlenecks (profiling), how to trace system behaviour in production (LTTng,
+strace, perf), and how to debug the toughest problems (advanced GDB).</p>
+<p><strong>Key insight</strong>: Sanitizers are <em>reactive</em> — they find bugs after you write them.
+Coding standards + static analysis are <em>preventive</em>. Profiling and tracing are
+<em>diagnostic</em>. A production-grade workflow uses ALL three layers.</p>
+<div class="highlight"><pre><span></span><code>Layer 1 — PREVENTION:  Coding standards → static analysis → compiler warnings
+Layer 2 — DETECTION:   Sanitizers (ASan, TSan, UBSan) → Module 16
+Layer 3 — DIAGNOSIS:   Profiling (perf, callgrind) → Tracing (LTTng, strace)
+Layer 4 — DEBUG:       GDB advanced → core dumps → post-mortem
+</code></pre></div>
+
+<hr />
+<h2 id="part-1-c-coding-standards-static-analysis">Part 1: C++ Coding Standards &amp; Static Analysis</h2>
+<h3 id="11-why-coding-standards-matter">1.1 Why Coding Standards Matter</h3>
+<p>Coding standards reduce bugs by <strong>banning patterns that are known to cause defects</strong>.
+They are not about style (tabs vs spaces) — they encode decades of hard-won
+knowledge about what goes wrong in C++ code.</p>
+<table>
+<thead>
+<tr>
+<th>Standard</th>
+<th>Scope</th>
+<th>Target Domain</th>
+<th>Key Feature</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>CppCoreGuidelines</strong></td>
+<td>General</td>
+<td>All C++</td>
+<td>Broad, modern, tool-enforceable</td>
+</tr>
+<tr>
+<td><strong>MISRA C++:2023</strong></td>
+<td>Safety</td>
+<td>Automotive, medical, aerospace</td>
+<td>Decidable, every rule provable</td>
+</tr>
+<tr>
+<td><strong>CERT C++</strong></td>
+<td>Security</td>
+<td>Network, systems</td>
+<td>Focuses on exploitability</td>
+</tr>
+<tr>
+<td><strong>AUTOSAR C++14</strong></td>
+<td>Safety</td>
+<td>Automotive ECU</td>
+<td>Based on MISRA, adds automotive rules</td>
+</tr>
+<tr>
+<td><strong>SEI CERT C</strong></td>
+<td>Security</td>
+<td>C code (not C++)</td>
+<td>Applicable to C-style code in C++</td>
+</tr>
+<tr>
+<td><strong>JSF++ AV</strong></td>
+<td>Safety</td>
+<td>Joint Strike Fighter</td>
+<td>Military aerospace, very strict</td>
+</tr>
+</tbody>
+</table>
+<p><strong>For robot software</strong> (our context): CppCoreGuidelines + selected MISRA rules
+give the best cost/benefit ratio. Full MISRA compliance is only needed for
+ISO 26262 / IEC 61508 certification.</p>
+<hr />
+<h3 id="12-cppcoreguidelines-the-essential-rules">1.2 CppCoreGuidelines — The Essential Rules</h3>
+<p>The full guidelines have 500+ rules. Here are the ones that catch the most bugs:</p>
+<h4 id="resource-management-r">Resource Management (R)</h4>
+<div class="highlight"><pre><span></span><code><span class="c1">// R.1: Manage resources automatically using RAII</span>
+<span class="c1">// BAD — raw pointer ownership</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">bad</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Widget</span><span class="p">();</span>
+<span class="w">    </span><span class="n">do_something</span><span class="p">(</span><span class="o">*</span><span class="n">p</span><span class="p">);</span><span class="w">  </span><span class="c1">// if this throws → LEAK</span>
+<span class="w">    </span><span class="k">delete</span><span class="w"> </span><span class="n">p</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// GOOD — unique_ptr enforces cleanup</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">good</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">Widget</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="w">    </span><span class="n">do_something</span><span class="p">(</span><span class="o">*</span><span class="n">p</span><span class="p">);</span><span class="w">  </span><span class="c1">// exception-safe, no leak possible</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1">// R.3: A raw pointer (T*) is non-owning</span>
+<span class="c1">// Rule: if you see T*, the pointed-to object is managed elsewhere.</span>
+<span class="c1">// Ownership MUST use unique_ptr or shared_ptr.</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="n">Widget</span><span class="o">*</span><span class="w"> </span><span class="n">w</span><span class="p">);</span><span class="w">  </span><span class="c1">// non-owning: caller keeps ownership</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">owner</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">Widget</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="n">process</span><span class="p">(</span><span class="n">owner</span><span class="p">.</span><span class="n">get</span><span class="p">());</span><span class="w">     </span><span class="c1">// explicitly non-owning</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1">// R.5: Prefer scoped objects, don&#39;t heap-allocate unnecessarily</span>
+<span class="c1">// BAD — heap allocation for no reason</span>
+<span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="p">{</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">};</span>
+<span class="c1">// ...</span>
+<span class="k">delete</span><span class="w"> </span><span class="n">data</span><span class="p">;</span>
+
+<span class="c1">// GOOD — stack allocation</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">data</span><span class="p">{</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">};</span>
+</code></pre></div>
+
+<h4 id="lifetime-safety-f-c">Lifetime Safety (F, C)</h4>
+<div class="highlight"><pre><span></span><code><span class="c1">// F.42: Return a T* to indicate a position (only)</span>
+<span class="c1">// Never return a pointer to indicate ownership transfer.</span>
+
+<span class="c1">// F.43: Never return a pointer or reference to a local object</span>
+<span class="c1">// BAD</span>
+<span class="kt">int</span><span class="o">&amp;</span><span class="w"> </span><span class="nf">bad</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">local</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">42</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">local</span><span class="p">;</span><span class="w">  </span><span class="c1">// dangling reference — undefined behavior</span>
+<span class="p">}</span>
+
+<span class="c1">// C.31: All resources acquired by a class must be released by the destructor</span>
+<span class="c1">// This IS the Rule of Zero / Rule of Five.</span>
+</code></pre></div>
+
+<h4 id="concurrency-cp">Concurrency (CP)</h4>
+<div class="highlight"><pre><span></span><code><span class="c1">// CP.1: Assume code will run in a multi-threaded environment</span>
+<span class="c1">// Even single-threaded code may become multi-threaded later.</span>
+
+<span class="c1">// CP.2: Avoid data races</span>
+<span class="c1">// A data race = two threads access the same memory, at least one writes,</span>
+<span class="c1">// no synchronization. This is UNDEFINED BEHAVIOR (not just a bug).</span>
+
+<span class="c1">// CP.20: Use RAII for locking, never plain lock()/unlock()</span>
+<span class="c1">// BAD</span>
+<span class="n">mutex_</span><span class="p">.</span><span class="n">lock</span><span class="p">();</span>
+<span class="n">do_work</span><span class="p">();</span><span class="w">  </span><span class="c1">// if this throws → deadlock (mutex never unlocked)</span>
+<span class="n">mutex_</span><span class="p">.</span><span class="n">unlock</span><span class="p">();</span>
+
+<span class="c1">// GOOD</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">lock_guard</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">mutex</span><span class="o">&gt;</span><span class="w"> </span><span class="n">lock</span><span class="p">(</span><span class="n">mutex_</span><span class="p">);</span>
+<span class="w">    </span><span class="n">do_work</span><span class="p">();</span><span class="w">  </span><span class="c1">// unlock guaranteed even on exception</span>
+<span class="p">}</span>
+
+<span class="c1">// CP.44: Remember to name your lock_guards and unique_locks</span>
+<span class="c1">// BAD — anonymous temporary, unlocks immediately!</span>
+<span class="n">std</span><span class="o">::</span><span class="n">lock_guard</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">mutex</span><span class="o">&gt;</span><span class="p">{</span><span class="n">mutex_</span><span class="p">};</span><span class="w">  </span><span class="c1">// ← UNLOCKS RIGHT HERE</span>
+<span class="n">do_work</span><span class="p">();</span><span class="w">  </span><span class="c1">// ← UNPROTECTED!</span>
+
+<span class="c1">// GOOD — named variable lives until scope end</span>
+<span class="n">std</span><span class="o">::</span><span class="n">lock_guard</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">mutex</span><span class="o">&gt;</span><span class="w"> </span><span class="n">lock</span><span class="p">{</span><span class="n">mutex_</span><span class="p">};</span>
+<span class="n">do_work</span><span class="p">();</span><span class="w">  </span><span class="c1">// ← protected</span>
+</code></pre></div>
+
+<h4 id="type-safety-i-es">Type Safety (I, ES)</h4>
+<div class="highlight"><pre><span></span><code><span class="c1">// ES.48: Avoid casts</span>
+<span class="c1">// If you must cast, prefer static_cast over C-style casts.</span>
+<span class="c1">// C-style casts can silently do reinterpret_cast.</span>
+
+<span class="c1">// I.11: Never transfer ownership by a raw pointer</span>
+<span class="c1">// Use unique_ptr for single ownership, shared_ptr for shared.</span>
+
+<span class="c1">// ES.46: Avoid lossy narrowing conversions</span>
+<span class="c1">// BAD</span>
+<span class="kt">int64_t</span><span class="w"> </span><span class="n">big</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1L</span><span class="n">L</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">40</span><span class="p">;</span>
+<span class="kt">int32_t</span><span class="w"> </span><span class="n">small</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">big</span><span class="p">;</span><span class="w">  </span><span class="c1">// silent truncation</span>
+
+<span class="c1">// GOOD</span>
+<span class="kt">int32_t</span><span class="w"> </span><span class="n">small</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">int32_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">big</span><span class="p">);</span><span class="w">  </span><span class="c1">// explicit</span>
+<span class="c1">// Even better: use gsl::narrow&lt;&gt; which throws on data loss</span>
+</code></pre></div>
+
+<hr />
+<h3 id="13-misra-c2023-safety-critical-rules">1.3 MISRA C++:2023 — Safety-Critical Rules</h3>
+<p>MISRA rules are classified as <strong>Required</strong>, <strong>Advisory</strong>, or <strong>Mandatory</strong>.
+Here are the most impactful Required rules:</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Category</th>
+<th>What it bans</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.1.2</td>
+<td>Mandatory</td>
+<td>Unreachable code</td>
+<td>Dead code masks bugs</td>
+</tr>
+<tr>
+<td>4.6.1</td>
+<td>Required</td>
+<td>Implicit narrowing conversions</td>
+<td>Silent data loss</td>
+</tr>
+<tr>
+<td>6.0.1</td>
+<td>Required</td>
+<td><code>goto</code></td>
+<td>Unstructured control flow</td>
+</tr>
+<tr>
+<td>6.7.2</td>
+<td>Required</td>
+<td>Global non-const variables</td>
+<td>Hidden coupling</td>
+</tr>
+<tr>
+<td>6.8.2</td>
+<td>Required</td>
+<td>Single-use variables</td>
+<td>Unnecessarily complex</td>
+</tr>
+<tr>
+<td>7.0.5</td>
+<td>Required</td>
+<td>C-style casts</td>
+<td>Bypasses type system</td>
+</tr>
+<tr>
+<td>7.6.1</td>
+<td>Required</td>
+<td><code>reinterpret_cast</code></td>
+<td>Undefined behavior risk</td>
+</tr>
+<tr>
+<td>8.2.5</td>
+<td>Required</td>
+<td>Virtual functions in constructors</td>
+<td>Surprising dispatch</td>
+</tr>
+<tr>
+<td>8.14.1</td>
+<td>Required</td>
+<td><code>const_cast</code> to remove const</td>
+<td>Breaks type safety</td>
+</tr>
+<tr>
+<td>9.3.1</td>
+<td>Required</td>
+<td><code>malloc</code>/<code>free</code> in C++</td>
+<td>Use RAII instead</td>
+</tr>
+<tr>
+<td>10.3.1</td>
+<td>Required</td>
+<td>Empty throw (<code>throw;</code>) outside catch</td>
+<td>Calls <code>std::terminate</code></td>
+</tr>
+<tr>
+<td>12.3.1</td>
+<td>Required</td>
+<td>NULL macro</td>
+<td>Use <code>nullptr</code></td>
+</tr>
+<tr>
+<td>15.0.2</td>
+<td>Required</td>
+<td>Uninitialized variables</td>
+<td>Undefined behavior</td>
+</tr>
+<tr>
+<td>19.0.1</td>
+<td>Required</td>
+<td><code>#define</code> for constants</td>
+<td>Use <code>constexpr</code></td>
+</tr>
+<tr>
+<td>21.10.1</td>
+<td>Required</td>
+<td><code>signal()</code> for signal handling</td>
+<td>Race conditions</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key insight</strong>: Many MISRA rules can be enforced automatically with
+clang-tidy + cppcheck. You don&rsquo;t need to memorize them — configure your tools.</p>
+<hr />
+<h3 id="14-cert-c-secure-coding">1.4 CERT C++ Secure Coding</h3>
+<p>CERT rules focus on <strong>security</strong> — what an attacker can exploit:</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>What</th>
+<th>Exploit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>STR50-CPP</td>
+<td>Guarantee null termination</td>
+<td>Buffer overflow</td>
+</tr>
+<tr>
+<td>MEM50-CPP</td>
+<td>Don&rsquo;t access freed memory</td>
+<td>Use-after-free → RCE</td>
+</tr>
+<tr>
+<td>MEM51-CPP</td>
+<td>Properly deallocate memory</td>
+<td>Memory corruption</td>
+</tr>
+<tr>
+<td>INT50-CPP</td>
+<td>Don&rsquo;t cast to smaller type</td>
+<td>Integer truncation</td>
+</tr>
+<tr>
+<td>ERR50-CPP</td>
+<td>Don&rsquo;t call <code>exit()</code> in destructors</td>
+<td>Stack unwinding break</td>
+</tr>
+<tr>
+<td>CON50-CPP</td>
+<td>Don&rsquo;t destroy a locked mutex</td>
+<td>Undefined behavior</td>
+</tr>
+<tr>
+<td>DCL50-CPP</td>
+<td>Don&rsquo;t define a C-style variadic function</td>
+<td>Type confusion</td>
+</tr>
+<tr>
+<td>EXP50-CPP</td>
+<td>Don&rsquo;t depend on order of evaluation</td>
+<td>Sequencing bugs</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="15-enforcing-standards-with-clang-tidy">1.5 Enforcing Standards with clang-tidy</h3>
+<p>clang-tidy is the primary tool for automated coding standard enforcement:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install (Ubuntu 20.04)</span>
+sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>clang-tidy-10<span class="w">  </span><span class="c1"># or later</span>
+
+<span class="c1"># Run all checks</span>
+clang-tidy<span class="w"> </span>-checks<span class="o">=</span><span class="s1">&#39;*&#39;</span><span class="w"> </span>source.cpp<span class="w"> </span>--<span class="w"> </span>-std<span class="o">=</span>c++2a
+
+<span class="c1"># Run specific check categories</span>
+clang-tidy<span class="w"> </span>-checks<span class="o">=</span><span class="s1">&#39;cppcoreguidelines-*,modernize-*,bugprone-*&#39;</span><span class="w"> </span>source.cpp
+
+<span class="c1"># Auto-fix what it can</span>
+clang-tidy<span class="w"> </span>-checks<span class="o">=</span><span class="s1">&#39;modernize-*&#39;</span><span class="w"> </span>-fix<span class="w"> </span>source.cpp
+
+<span class="c1"># Use with compile_commands.json (from CMake)</span>
+cmake<span class="w"> </span>-DCMAKE_EXPORT_COMPILE_COMMANDS<span class="o">=</span>ON<span class="w"> </span>..
+clang-tidy<span class="w"> </span>-p<span class="w"> </span>build/<span class="w"> </span>source.cpp
+</code></pre></div>
+
+<h4 id="essential-clang-tidy-check-categories">Essential clang-tidy check categories:</h4>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Catches</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bugprone-*</code></td>
+<td>Likely bugs</td>
+<td>Dangling handles, infinite loops, misused <code>move</code></td>
+</tr>
+<tr>
+<td><code>cppcoreguidelines-*</code></td>
+<td>CppCoreGuidelines violations</td>
+<td>Owning raw pointers, C-arrays</td>
+</tr>
+<tr>
+<td><code>modernize-*</code></td>
+<td>Pre-C++11 patterns</td>
+<td><code>NULL</code> → <code>nullptr</code>, raw loops → algorithms</td>
+</tr>
+<tr>
+<td><code>performance-*</code></td>
+<td>Performance issues</td>
+<td>Unnecessary copies, move-eligible returns</td>
+</tr>
+<tr>
+<td><code>readability-*</code></td>
+<td>Readability</td>
+<td>Magic numbers, inconsistent naming</td>
+</tr>
+<tr>
+<td><code>cert-*</code></td>
+<td>CERT rules</td>
+<td>Security-related issues</td>
+</tr>
+<tr>
+<td><code>misc-*</code></td>
+<td>Miscellaneous</td>
+<td>Unused parameters, redundant expressions</td>
+</tr>
+<tr>
+<td><code>clang-analyzer-*</code></td>
+<td>Deep analysis</td>
+<td>Null deref paths, dead stores</td>
+</tr>
+</tbody>
+</table>
+<h4 id="configuration-file-clang-tidy">Configuration file (<code>.clang-tidy</code>):</h4>
+<div class="highlight"><pre><span></span><code><span class="nn">---</span>
+<span class="nt">Checks</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">&gt;</span>
+<span class="w">  </span><span class="no">-*,</span>
+<span class="w">  </span><span class="no">bugprone-*,</span>
+<span class="w">  </span><span class="no">cppcoreguidelines-*,</span>
+<span class="w">  </span><span class="no">modernize-*,</span>
+<span class="w">  </span><span class="no">performance-*,</span>
+<span class="w">  </span><span class="no">readability-*,</span>
+<span class="w">  </span><span class="no">cert-*,</span>
+<span class="w">  </span><span class="no">-modernize-use-trailing-return-type,</span>
+<span class="w">  </span><span class="no">-readability-magic-numbers,</span>
+<span class="w">  </span><span class="no">-cppcoreguidelines-avoid-magic-numbers</span>
+<span class="nt">WarningsAsErrors</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;bugprone-*,cert-*&#39;</span>
+<span class="nt">HeaderFilterRegex</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;.*&#39;</span>
+<span class="nt">CheckOptions</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">readability-identifier-naming.ClassCase</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CamelCase</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">readability-identifier-naming.FunctionCase</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">camelBack</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">readability-identifier-naming.VariableCase</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lower_case</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">readability-identifier-naming.MemberPrefix</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;&#39;</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">readability-identifier-naming.MemberSuffix</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;_&#39;</span>
+</code></pre></div>
+
+<hr />
+<h3 id="16-enforcing-standards-with-cppcheck">1.6 Enforcing Standards with cppcheck</h3>
+<p>cppcheck does pattern-based analysis (no Clang AST dependency):</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install</span>
+sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>cppcheck
+
+<span class="c1"># Basic analysis</span>
+cppcheck<span class="w"> </span>--enable<span class="o">=</span>all<span class="w"> </span>--std<span class="o">=</span>c++20<span class="w"> </span>source.cpp
+
+<span class="c1"># With suppression file</span>
+cppcheck<span class="w"> </span>--enable<span class="o">=</span>all<span class="w"> </span>--suppressions-list<span class="o">=</span>cppcheck.supp<span class="w"> </span>source.cpp
+
+<span class="c1"># Generate XML report (for CI integration)</span>
+cppcheck<span class="w"> </span>--enable<span class="o">=</span>all<span class="w"> </span>--xml<span class="w"> </span>source.cpp<span class="w"> </span><span class="m">2</span>&gt;<span class="w"> </span>cppcheck_report.xml
+
+<span class="c1"># Check a whole directory</span>
+cppcheck<span class="w"> </span>--enable<span class="o">=</span>all<span class="w"> </span>-I<span class="w"> </span>include/<span class="w"> </span>src/
+</code></pre></div>
+
+<h4 id="what-cppcheck-catches-that-clang-tidy-sometimes-misses">What cppcheck catches that clang-tidy sometimes misses:</h4>
+<table>
+<thead>
+<tr>
+<th>Issue</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Null pointer dereference paths</td>
+<td>Complex conditional chains</td>
+</tr>
+<tr>
+<td>Buffer overflows</td>
+<td>Array index out of bounds</td>
+</tr>
+<tr>
+<td>Uninitialized variables</td>
+<td>Conditional initialization paths</td>
+</tr>
+<tr>
+<td>Memory leaks</td>
+<td>Non-RAII allocation patterns</td>
+</tr>
+<tr>
+<td>Resource leaks</td>
+<td>File descriptors, sockets</td>
+</tr>
+<tr>
+<td>Redundant conditions</td>
+<td><code>if (p != NULL)</code> after <code>p = new X</code></td>
+</tr>
+<tr>
+<td>Portability issues</td>
+<td>Different behavior across compilers</td>
+</tr>
+</tbody>
+</table>
+<h4 id="suppression-file-cppchecksupp">Suppression file (<code>cppcheck.supp</code>):</h4>
+<div class="highlight"><pre><span></span><code>// Suppress specific findings
+unusedFunction:src/test_helper.cpp
+uninitvar:third_party/*.cpp
+// Suppress by ID
+memleak:src/legacy.cpp:42
+</code></pre></div>
+
+<hr />
+<h3 id="17-compiler-warnings-as-a-first-line-of-defence">1.7 Compiler Warnings as a First Line of Defence</h3>
+<p>The cheapest static analysis is your compiler&rsquo;s warning flags:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Recommended minimum for any project</span>
+-Wall<span class="w"> </span>-Wextra<span class="w"> </span>-Wpedantic
+
+<span class="c1"># Safety-critical / production quality</span>
+-Wall<span class="w"> </span>-Wextra<span class="w"> </span>-Wpedantic<span class="w"> </span>-Werror<span class="w"> </span><span class="se">\</span>
+-Wconversion<span class="w"> </span>-Wsign-conversion<span class="w"> </span><span class="se">\</span>
+-Wdouble-promotion<span class="w"> </span>-Wformat<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+-Wnull-dereference<span class="w"> </span>-Wold-style-cast<span class="w"> </span><span class="se">\</span>
+-Wshadow<span class="w"> </span>-Wunused
+
+<span class="c1"># GCC-specific extras</span>
+-Wlogical-op<span class="w"> </span>-Wduplicated-cond<span class="w"> </span>-Wduplicated-branches<span class="w"> </span><span class="se">\</span>
+-Wuseless-cast<span class="w"> </span>-Wrestrict
+
+<span class="c1"># Clang-specific extras</span>
+-Wmost<span class="w"> </span>-Weverything<span class="w">  </span><span class="c1"># (warning: very noisy)</span>
+</code></pre></div>
+
+<h4 id="what-each-flag-catches">What each flag catches:</h4>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Catches</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-Wconversion</code></td>
+<td>Implicit narrowing</td>
+<td><code>int x = 3.14;</code></td>
+</tr>
+<tr>
+<td><code>-Wsign-conversion</code></td>
+<td>Signed ↔ unsigned</td>
+<td><code>unsigned u = -1;</code></td>
+</tr>
+<tr>
+<td><code>-Wshadow</code></td>
+<td>Variable shadowing</td>
+<td>Inner <code>x</code> hides outer <code>x</code></td>
+</tr>
+<tr>
+<td><code>-Wdouble-promotion</code></td>
+<td>Float→double promotion</td>
+<td><code>float f; printf("%f", f);</code></td>
+</tr>
+<tr>
+<td><code>-Wold-style-cast</code></td>
+<td>C-style casts</td>
+<td><code>(int)ptr</code> instead of <code>static_cast</code></td>
+</tr>
+<tr>
+<td><code>-Wnull-dereference</code></td>
+<td>Potential null deref</td>
+<td>GCC path analysis</td>
+</tr>
+<tr>
+<td><code>-Wformat=2</code></td>
+<td>Printf format mismatches</td>
+<td><code>printf("%d", "hello")</code></td>
+</tr>
+<tr>
+<td><code>-Wduplicated-cond</code></td>
+<td>Duplicate <code>if</code> conditions</td>
+<td>Copy-paste bugs</td>
+</tr>
+</tbody>
+</table>
+<h4 id="include-what-you-use-iwyu">include-what-you-use (IWYU)</h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install</span>
+sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>iwyu
+
+<span class="c1"># Run (needs compile_commands.json)</span>
+iwyu_tool.py<span class="w"> </span>-p<span class="w"> </span>build/<span class="w"> </span>source.cpp
+
+<span class="c1"># IWYU output example:</span>
+<span class="c1"># source.cpp should add:    #include &lt;algorithm&gt;</span>
+<span class="c1"># source.cpp should remove:  #include &lt;iostream&gt;  // not used</span>
+</code></pre></div>
+
+<p>IWYU ensures each file includes exactly what it uses — no transitive include
+dependencies, no unused headers. This improves compile times and makes
+dependencies explicit.</p>
+<hr />
+<h2 id="part-2-profiling-performance-analysis">Part 2: Profiling &amp; Performance Analysis</h2>
+<h3 id="21-perf-linux-performance-counters">2.1 perf — Linux Performance Counters</h3>
+<p><code>perf</code> is the standard Linux profiling tool. It uses hardware performance
+counters (PMU — Performance Monitoring Unit) built into the CPU.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install</span>
+sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>linux-tools-common<span class="w"> </span>linux-tools-<span class="k">$(</span>uname<span class="w"> </span>-r<span class="k">)</span>
+
+<span class="c1"># Allow non-root profiling (set once)</span>
+<span class="nb">echo</span><span class="w"> </span>-1<span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tee<span class="w"> </span>/proc/sys/kernel/perf_event_paranoid
+</code></pre></div>
+
+<h4 id="perf-stat-count-events">perf stat — Count events</h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Count cache misses, branch mispredictions, instructions</span>
+perf<span class="w"> </span>stat<span class="w"> </span>./my_program
+
+<span class="c1"># Example output:</span>
+<span class="c1">#    1,234,567,890  instructions       #  2.50 IPC</span>
+<span class="c1">#       45,678,901  cache-misses       #  3.7% of all cache refs</span>
+<span class="c1">#       12,345,678  branch-misses      #  1.2% of all branches</span>
+<span class="c1">#            2.345  seconds time elapsed</span>
+
+<span class="c1"># Specific events</span>
+perf<span class="w"> </span>stat<span class="w"> </span>-e<span class="w"> </span>cache-misses,cache-references,L1-dcache-load-misses<span class="w"> </span>./my_program
+
+<span class="c1"># Repeat N times for statistical significance</span>
+perf<span class="w"> </span>stat<span class="w"> </span>-r<span class="w"> </span><span class="m">10</span><span class="w"> </span>./my_program
+</code></pre></div>
+
+<p><strong>Key metric</strong>: IPC (Instructions Per Cycle). An IPC &lt; 1.0 usually means
+the CPU is stalling on memory access (cache misses). IPC &gt; 2.0 is good.</p>
+<h4 id="perf-record-perf-report-profile">perf record + perf report — Profile</h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Record call stacks at 99 Hz (use prime numbers to avoid aliasing)</span>
+perf<span class="w"> </span>record<span class="w"> </span>-g<span class="w"> </span>-F<span class="w"> </span><span class="m">99</span><span class="w"> </span>./my_program
+
+<span class="c1"># Show interactive profile</span>
+perf<span class="w"> </span>report
+
+<span class="c1"># Show annotated source (requires -g debug info)</span>
+perf<span class="w"> </span>annotate
+
+<span class="c1"># Key perf report columns:</span>
+<span class="c1"># Overhead — % of total samples in this function</span>
+<span class="c1"># Children — % of total samples in this function + its callees</span>
+<span class="c1"># Self     — % of total samples ONLY in this function (excludes callees)</span>
+</code></pre></div>
+
+<h4 id="perf-record-tips">perf record tips:</h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Record for a running process</span>
+perf<span class="w"> </span>record<span class="w"> </span>-g<span class="w"> </span>-p<span class="w"> </span><span class="k">$(</span>pidof<span class="w"> </span>my_process<span class="k">)</span><span class="w"> </span>--<span class="w"> </span>sleep<span class="w"> </span><span class="m">10</span>
+
+<span class="c1"># Record specific events</span>
+perf<span class="w"> </span>record<span class="w"> </span>-e<span class="w"> </span>cache-misses<span class="w"> </span>-g<span class="w"> </span>./my_program
+
+<span class="c1"># Record with call graph (dwarf = most reliable, needs -g in compilation)</span>
+perf<span class="w"> </span>record<span class="w"> </span>--call-graph<span class="w"> </span>dwarf<span class="w"> </span>-F<span class="w"> </span><span class="m">99</span><span class="w"> </span>./my_program
+</code></pre></div>
+
+<hr />
+<h3 id="22-valgrind-callgrind-call-graph-profiling">2.2 Valgrind Callgrind — Call Graph Profiling</h3>
+<p>Callgrind simulates the CPU&rsquo;s cache hierarchy and counts instruction costs:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Profile</span>
+valgrind<span class="w"> </span>--tool<span class="o">=</span>callgrind<span class="w"> </span>./my_program
+
+<span class="c1"># Output: callgrind.out.&lt;pid&gt;</span>
+
+<span class="c1"># Annotate source (text)</span>
+callgrind_annotate<span class="w"> </span>callgrind.out.12345
+
+<span class="c1"># Visualize with KCachegrind (GUI)</span>
+kcachegrind<span class="w"> </span>callgrind.out.12345
+</code></pre></div>
+
+<h4 id="callgrind-vs-perf">Callgrind vs perf:</h4>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>perf</th>
+<th>Callgrind</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Speed</td>
+<td>~1x (hardware counters)</td>
+<td>~20-100x (simulation)</td>
+</tr>
+<tr>
+<td>Accuracy</td>
+<td>Statistical sampling</td>
+<td>Exact instruction count</td>
+</tr>
+<tr>
+<td>Cache model</td>
+<td>Real hardware</td>
+<td>Simulated (may differ)</td>
+</tr>
+<tr>
+<td>Call graph</td>
+<td>Yes (sampling)</td>
+<td>Yes (exact)</td>
+</tr>
+<tr>
+<td>Thread support</td>
+<td>Yes</td>
+<td>Limited</td>
+</tr>
+<tr>
+<td>Root required</td>
+<td>Usually no</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule of thumb</strong>: Use <code>perf</code> for quick profiling, <code>callgrind</code> when you need
+exact call counts or cache simulation details.</p>
+<hr />
+<h3 id="23-valgrind-cachegrind-cache-simulation">2.3 Valgrind Cachegrind — Cache Simulation</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Run cache simulation</span>
+valgrind<span class="w"> </span>--tool<span class="o">=</span>cachegrind<span class="w"> </span>./my_program
+
+<span class="c1"># Output example:</span>
+<span class="c1"># ==12345== D1  miss rate:  4.2% (  3.8% rd + 6.1% wr)</span>
+<span class="c1"># ==12345== LLd miss rate:  0.8% (  0.7% rd + 1.2% wr)</span>
+
+<span class="c1"># Annotate per-line cache misses</span>
+cg_annotate<span class="w"> </span>cachegrind.out.12345
+</code></pre></div>
+
+<p><strong>What to look for</strong>:
+- D1 miss rate &gt; 5% → data cache pressure, likely array access pattern issue
+- LLd (Last-Level cache) miss rate &gt; 2% → memory bandwidth bottleneck
+- High <code>Dw</code> (data writes) miss rate → false sharing in multi-threaded code</p>
+<hr />
+<h3 id="24-flamegraphs">2.4 Flamegraphs</h3>
+<p>Flamegraphs visualize profiling data as stacked function calls where width
+represents time. Created by Brendan Gregg.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install</span>
+git<span class="w"> </span>clone<span class="w"> </span>https://github.com/brendangregg/FlameGraph.git
+
+<span class="c1"># Generate from perf data</span>
+perf<span class="w"> </span>record<span class="w"> </span>-g<span class="w"> </span>-F<span class="w"> </span><span class="m">99</span><span class="w"> </span>./my_program
+perf<span class="w"> </span>script<span class="w"> </span>&gt;<span class="w"> </span>out.perf
+FlameGraph/stackcollapse-perf.pl<span class="w"> </span>out.perf<span class="w"> </span>&gt;<span class="w"> </span>out.folded
+FlameGraph/flamegraph.pl<span class="w"> </span>out.folded<span class="w"> </span>&gt;<span class="w"> </span>flamegraph.svg
+
+<span class="c1"># Open in browser</span>
+firefox<span class="w"> </span>flamegraph.svg
+</code></pre></div>
+
+<h4 id="reading-a-flamegraph">Reading a flamegraph:</h4>
+<div class="highlight"><pre><span></span><code>    ┌──────────── main() ────────────────────┐
+    │  ┌─── process_data() ────────────────┐ │
+    │  │  ┌── sort_items() ──────────┐     │ │  ← WIDEST = HOTTEST
+    │  │  │  ┌─ compare() ─────┐     │     │ │
+    │  │  │  └─────────────────┘     │     │ │
+    │  │  └──────────────────────────┘     │ │
+    │  │  ┌── validate() ─┐               │ │
+    │  │  └────────────────┘               │ │
+    │  └───────────────────────────────────┘ │
+    └────────────────────────────────────────┘
+</code></pre></div>
+
+<ul>
+<li><strong>Width</strong> = time spent. <code>sort_items()</code> is the hottest function.</li>
+<li><strong>Height</strong> = call depth. Read bottom (caller) to top (callee).</li>
+<li><strong>Colour</strong> is random (for visual separation), not meaningful.</li>
+<li>Look for <strong>wide plateaus</strong> — those are your optimization targets.</li>
+</ul>
+<hr />
+<h3 id="25-cpu-cache-effects-on-c-performance">2.5 CPU Cache Effects on C++ Performance</h3>
+<p>Cache-friendly code can be 10-100x faster than cache-unfriendly code for
+the same algorithmic complexity:</p>
+<h4 id="row-major-vs-column-major-the-classic-example">Row-major vs column-major (the classic example)</h4>
+<div class="highlight"><pre><span></span><code><span class="c1">// Cache-friendly: sequential access (row-major in C++)</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">N</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">N</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">j</span><span class="p">)</span>
+<span class="w">        </span><span class="n">matrix</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span><span class="w"> </span><span class="o">*=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w">  </span><span class="c1">// stride = sizeof(element)</span>
+
+<span class="c1">// Cache-HOSTILE: column-major access</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">N</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">j</span><span class="p">)</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">N</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span>
+<span class="w">        </span><span class="n">matrix</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span><span class="w"> </span><span class="o">*=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w">  </span><span class="c1">// stride = N * sizeof(element)</span>
+</code></pre></div>
+
+<p>For N=4096, column-major is ~10x slower due to L1 cache thrashing.</p>
+<h4 id="struct-of-arrays-soa-vs-array-of-structs-aos">Struct of Arrays (SoA) vs Array of Structs (AoS)</h4>
+<div class="highlight"><pre><span></span><code><span class="c1">// AoS — cache-unfriendly if you only access one field</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">Particle</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">y</span><span class="p">,</span><span class="w"> </span><span class="n">z</span><span class="p">,</span><span class="w"> </span><span class="n">mass</span><span class="p">,</span><span class="w"> </span><span class="n">charge</span><span class="p">,</span><span class="w"> </span><span class="n">radius</span><span class="p">;</span><span class="w"> </span><span class="p">};</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">Particle</span><span class="o">&gt;</span><span class="w"> </span><span class="n">particles</span><span class="p">(</span><span class="n">N</span><span class="p">);</span>
+
+<span class="c1">// Process only positions → loads mass, charge, radius into cache too (waste!)</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">particles</span><span class="p">)</span><span class="w"> </span><span class="n">p</span><span class="p">.</span><span class="n">x</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">p</span><span class="p">.</span><span class="n">vx</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">dt</span><span class="p">;</span>
+
+<span class="c1">// SoA — cache-friendly for single-field access</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">Particles</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">float</span><span class="o">&gt;</span><span class="w"> </span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">y</span><span class="p">,</span><span class="w"> </span><span class="n">z</span><span class="p">,</span><span class="w"> </span><span class="n">mass</span><span class="p">,</span><span class="w"> </span><span class="n">charge</span><span class="p">,</span><span class="w"> </span><span class="n">radius</span><span class="p">;</span>
+<span class="p">};</span>
+<span class="n">Particles</span><span class="w"> </span><span class="n">ps</span><span class="p">;</span>
+<span class="n">ps</span><span class="p">.</span><span class="n">x</span><span class="p">.</span><span class="n">resize</span><span class="p">(</span><span class="n">N</span><span class="p">);</span><span class="w"> </span><span class="n">ps</span><span class="p">.</span><span class="n">vx</span><span class="p">.</span><span class="n">resize</span><span class="p">(</span><span class="n">N</span><span class="p">);</span>
+
+<span class="c1">// Process only x → only x data in cache (no waste)</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">N</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="n">ps</span><span class="p">.</span><span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">ps</span><span class="p">.</span><span class="n">vx</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">dt</span><span class="p">;</span>
+</code></pre></div>
+
+<h4 id="false-sharing">False sharing</h4>
+<div class="highlight"><pre><span></span><code><span class="c1">// BAD: Two threads writing to adjacent cache lines</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">alignas</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="n">Counters</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">atomic</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">count_a</span><span class="p">;</span><span class="w">  </span><span class="c1">// thread 1 writes here</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">atomic</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">count_b</span><span class="p">;</span><span class="w">  </span><span class="c1">// thread 2 writes here</span>
+<span class="w">    </span><span class="c1">// Both fit in ONE 64-byte cache line → ping-pong between cores</span>
+<span class="p">};</span>
+
+<span class="c1">// GOOD: Pad to separate cache lines</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">Counters</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">alignas</span><span class="p">(</span><span class="mi">64</span><span class="p">)</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">atomic</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">count_a</span><span class="p">;</span><span class="w">  </span><span class="c1">// own cache line</span>
+<span class="w">    </span><span class="k">alignas</span><span class="p">(</span><span class="mi">64</span><span class="p">)</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">atomic</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">count_b</span><span class="p">;</span><span class="w">  </span><span class="c1">// own cache line</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p>False sharing can cause a 10x slowdown because every write by one thread
+invalidates the other thread&rsquo;s copy of the cache line.</p>
+<hr />
+<h2 id="part-3-system-tracing">Part 3: System Tracing</h2>
+<h3 id="31-lttng-linux-tracing-toolkit-next-generation">3.1 LTTng — Linux Tracing Toolkit next generation</h3>
+<p>LTTng is a high-performance tracing framework for Linux. It can trace:
+- <strong>Kernel</strong> events (syscalls, scheduling, interrupts, block I/O)
+- <strong>Userspace</strong> events (your application&rsquo;s tracepoints)</p>
+<p>LTTng&rsquo;s overhead is ~100ns per tracepoint — low enough for production use.
+This is 10-100x lower than printf-debugging or syslog.</p>
+<h4 id="architecture">Architecture:</h4>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────┐
+│  Your Application                       │
+│  ┌─────────────────────────────────┐    │
+│  │ TRACEPOINT(my_app, request_start│    │
+│  │   , size_t, req_id             │    │
+│  │   , int, priority              │    │
+│  │ )                               │    │
+│  └───────────┬─────────────────────┘    │
+│              │ ~100ns per tracepoint    │
+│  ┌───────────▼──────────────────────┐   │
+│  │  LTTng-UST (Userspace Tracer)   │   │
+│  └───────────┬──────────────────────┘   │
+└──────────────┼──────────────────────────┘
+               │ shared memory ring buffer
+┌──────────────▼──────────────────────────┐
+│  lttng-sessiond (Session Daemon)        │
+│  ┌──────────────────────────────────┐   │
+│  │ lttng-consumerd → trace files    │   │
+│  └──────────────────────────────────┘   │
+└─────────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────┐
+│  Analysis Tools                         │
+│  babeltrace2, Trace Compass, LTTng Live │
+└─────────────────────────────────────────┘
+</code></pre></div>
+
+<h4 id="installation">Installation:</h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Ubuntu 20.04+</span>
+sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>lttng-tools<span class="w"> </span>lttng-modules-dkms<span class="w"> </span>liblttng-ust-dev<span class="w"> </span>babeltrace2
+
+<span class="c1"># Verify</span>
+lttng<span class="w"> </span>version
+</code></pre></div>
+
+<h4 id="defining-userspace-tracepoints">Defining userspace tracepoints:</h4>
+<p>Create a tracepoint provider header (<code>my_tp.h</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="cm">/* my_tp.h */</span>
+<span class="cp">#undef TRACEPOINT_PROVIDER</span>
+<span class="cp">#define TRACEPOINT_PROVIDER my_app</span>
+
+<span class="cp">#undef TRACEPOINT_INCLUDE</span>
+<span class="cp">#define TRACEPOINT_INCLUDE &quot;./my_tp.h&quot;</span>
+
+<span class="cp">#if !defined(_MY_TP_H) || defined(TRACEPOINT_HEADER_MULTI_READ)</span>
+<span class="cp">#define _MY_TP_H</span>
+
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;lttng/tracepoint.h&gt;</span>
+
+<span class="n">TRACEPOINT_EVENT</span><span class="p">(</span>
+<span class="w">    </span><span class="n">my_app</span><span class="p">,</span><span class="w">            </span><span class="cm">/* provider name */</span>
+<span class="w">    </span><span class="n">request_start</span><span class="p">,</span><span class="w">     </span><span class="cm">/* event name */</span>
+<span class="w">    </span><span class="n">TP_ARGS</span><span class="p">(</span>
+<span class="w">        </span><span class="kt">size_t</span><span class="p">,</span><span class="w"> </span><span class="n">req_id</span><span class="p">,</span>
+<span class="w">        </span><span class="kt">int</span><span class="p">,</span><span class="w"> </span><span class="n">priority</span><span class="p">,</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="p">,</span><span class="w"> </span><span class="n">endpoint</span>
+<span class="w">    </span><span class="p">),</span>
+<span class="w">    </span><span class="n">TP_FIELDS</span><span class="p">(</span>
+<span class="w">        </span><span class="n">ctf_integer</span><span class="p">(</span><span class="kt">size_t</span><span class="p">,</span><span class="w"> </span><span class="n">req_id</span><span class="p">,</span><span class="w"> </span><span class="n">req_id</span><span class="p">)</span>
+<span class="w">        </span><span class="n">ctf_integer</span><span class="p">(</span><span class="kt">int</span><span class="p">,</span><span class="w"> </span><span class="n">priority</span><span class="p">,</span><span class="w"> </span><span class="n">priority</span><span class="p">)</span>
+<span class="w">        </span><span class="n">ctf_string</span><span class="p">(</span><span class="n">endpoint</span><span class="p">,</span><span class="w"> </span><span class="n">endpoint</span><span class="p">)</span>
+<span class="w">    </span><span class="p">)</span>
+<span class="p">)</span>
+
+<span class="n">TRACEPOINT_EVENT</span><span class="p">(</span>
+<span class="w">    </span><span class="n">my_app</span><span class="p">,</span>
+<span class="w">    </span><span class="n">request_end</span><span class="p">,</span>
+<span class="w">    </span><span class="n">TP_ARGS</span><span class="p">(</span>
+<span class="w">        </span><span class="kt">size_t</span><span class="p">,</span><span class="w"> </span><span class="n">req_id</span><span class="p">,</span>
+<span class="w">        </span><span class="kt">int</span><span class="p">,</span><span class="w"> </span><span class="n">status_code</span><span class="p">,</span>
+<span class="w">        </span><span class="kt">uint64_t</span><span class="p">,</span><span class="w"> </span><span class="n">duration_ns</span>
+<span class="w">    </span><span class="p">),</span>
+<span class="w">    </span><span class="n">TP_FIELDS</span><span class="p">(</span>
+<span class="w">        </span><span class="n">ctf_integer</span><span class="p">(</span><span class="kt">size_t</span><span class="p">,</span><span class="w"> </span><span class="n">req_id</span><span class="p">,</span><span class="w"> </span><span class="n">req_id</span><span class="p">)</span>
+<span class="w">        </span><span class="n">ctf_integer</span><span class="p">(</span><span class="kt">int</span><span class="p">,</span><span class="w"> </span><span class="n">status_code</span><span class="p">,</span><span class="w"> </span><span class="n">status_code</span><span class="p">)</span>
+<span class="w">        </span><span class="n">ctf_integer</span><span class="p">(</span><span class="kt">uint64_t</span><span class="p">,</span><span class="w"> </span><span class="n">duration_ns</span><span class="p">,</span><span class="w"> </span><span class="n">duration_ns</span><span class="p">)</span>
+<span class="w">    </span><span class="p">)</span>
+<span class="p">)</span>
+
+<span class="cp">#endif </span><span class="cm">/* _MY_TP_H */</span>
+
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;lttng/tracepoint-event.h&gt;</span>
+</code></pre></div>
+
+<p>Create the tracepoint provider source (<code>my_tp.c</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="cm">/* my_tp.c */</span>
+<span class="cp">#define TRACEPOINT_CREATE_PROBES</span>
+<span class="cp">#define TRACEPOINT_DEFINE</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;my_tp.h&quot;</span>
+</code></pre></div>
+
+<p>Use in your C++ code:</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;my_tp.h&quot;</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">handle_request</span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">priority</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">endpoint</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">tracepoint</span><span class="p">(</span><span class="n">my_app</span><span class="p">,</span><span class="w"> </span><span class="n">request_start</span><span class="p">,</span><span class="w"> </span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="n">priority</span><span class="p">,</span><span class="w"> </span><span class="n">endpoint</span><span class="p">);</span>
+<span class="w">    </span><span class="c1">// ... do work ...</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">steady_clock</span><span class="o">::</span><span class="n">now</span><span class="p">();</span>
+<span class="w">    </span><span class="n">process</span><span class="p">(</span><span class="n">id</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">elapsed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">steady_clock</span><span class="o">::</span><span class="n">now</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">start</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">ns</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">duration_cast</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">nanoseconds</span><span class="o">&gt;</span><span class="p">(</span><span class="n">elapsed</span><span class="p">).</span><span class="n">count</span><span class="p">();</span>
+<span class="w">    </span><span class="n">tracepoint</span><span class="p">(</span><span class="n">my_app</span><span class="p">,</span><span class="w"> </span><span class="n">request_end</span><span class="p">,</span><span class="w"> </span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="mi">200</span><span class="p">,</span><span class="w"> </span><span class="n">ns</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Compile:</p>
+<div class="highlight"><pre><span></span><code>gcc<span class="w"> </span>-c<span class="w"> </span>my_tp.c<span class="w"> </span>-I.
+g++<span class="w"> </span>-std<span class="o">=</span>c++2a<span class="w"> </span>-c<span class="w"> </span>main.cpp<span class="w"> </span>-I.
+g++<span class="w"> </span>main.o<span class="w"> </span>my_tp.o<span class="w"> </span>-ldl<span class="w"> </span>-llttng-ust<span class="w"> </span>-o<span class="w"> </span>my_app
+</code></pre></div>
+
+<h4 id="recording-traces">Recording traces:</h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Create a session</span>
+lttng<span class="w"> </span>create<span class="w"> </span>my-session<span class="w"> </span>--output<span class="o">=</span>/tmp/my-trace
+
+<span class="c1"># Enable userspace events</span>
+lttng<span class="w"> </span>enable-event<span class="w"> </span>--userspace<span class="w"> </span><span class="s1">&#39;my_app:*&#39;</span>
+
+<span class="c1"># Enable kernel events (optional, needs root)</span>
+sudo<span class="w"> </span>lttng<span class="w"> </span>enable-event<span class="w"> </span>--kernel<span class="w"> </span>sched_switch,sched_wakeup
+
+<span class="c1"># Start tracing</span>
+lttng<span class="w"> </span>start
+
+<span class="c1"># Run your application</span>
+./my_app
+
+<span class="c1"># Stop and destroy session</span>
+lttng<span class="w"> </span>stop
+lttng<span class="w"> </span>destroy
+
+<span class="c1"># View trace (text)</span>
+babeltrace2<span class="w"> </span>/tmp/my-trace
+
+<span class="c1"># Example output:</span>
+<span class="c1"># [10:30:01.123456789] my_app:request_start: req_id=42 priority=3 endpoint=&quot;/api/data&quot;</span>
+<span class="c1"># [10:30:01.124567890] my_app:request_end:   req_id=42 status_code=200 duration_ns=1111101</span>
+</code></pre></div>
+
+<h4 id="lttng-for-ros-systems">LTTng for ROS systems:</h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Trace ROS 2 DDS events + your custom tracepoints</span>
+lttng<span class="w"> </span>create<span class="w"> </span>ros-trace
+lttng<span class="w"> </span>enable-event<span class="w"> </span>--userspace<span class="w"> </span><span class="s1">&#39;ros2:*&#39;</span>
+lttng<span class="w"> </span>enable-event<span class="w"> </span>--userspace<span class="w"> </span><span class="s1">&#39;my_navigation:*&#39;</span>
+lttng<span class="w"> </span>enable-event<span class="w"> </span>--kernel<span class="w"> </span>sched_switch<span class="w">  </span><span class="c1"># see thread scheduling</span>
+lttng<span class="w"> </span>start
+
+ros2<span class="w"> </span>run<span class="w"> </span>my_package<span class="w"> </span>my_node
+<span class="c1"># ... reproduce issue ...</span>
+
+lttng<span class="w"> </span>stop<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>lttng<span class="w"> </span>destroy
+babeltrace2<span class="w"> </span>/tmp/ros-trace<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">&#39;callback|timer|my_navigation&#39;</span>
+</code></pre></div>
+
+<hr />
+<h3 id="32-strace-system-call-tracing">3.2 strace — System Call Tracing</h3>
+<p>strace intercepts all system calls made by a process. Invaluable for:
+- Understanding what files a program opens
+- Finding why a program hangs (stuck in <code>read()</code>, <code>futex()</code>, etc.)
+- Measuring syscall latency
+- Debugging permission errors</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Trace all syscalls</span>
+strace<span class="w"> </span>./my_program
+
+<span class="c1"># Trace specific syscall categories</span>
+strace<span class="w"> </span>-e<span class="w"> </span><span class="nv">trace</span><span class="o">=</span>file<span class="w"> </span>./my_program<span class="w">      </span><span class="c1"># open, read, write, stat, etc.</span>
+strace<span class="w"> </span>-e<span class="w"> </span><span class="nv">trace</span><span class="o">=</span>network<span class="w"> </span>./my_program<span class="w">   </span><span class="c1"># socket, connect, send, recv</span>
+strace<span class="w"> </span>-e<span class="w"> </span><span class="nv">trace</span><span class="o">=</span>process<span class="w"> </span>./my_program<span class="w">   </span><span class="c1"># fork, exec, exit</span>
+strace<span class="w"> </span>-e<span class="w"> </span><span class="nv">trace</span><span class="o">=</span>memory<span class="w"> </span>./my_program<span class="w">    </span><span class="c1"># mmap, brk, mprotect</span>
+
+<span class="c1"># Attach to running process</span>
+strace<span class="w"> </span>-p<span class="w"> </span><span class="k">$(</span>pidof<span class="w"> </span>my_process<span class="k">)</span>
+
+<span class="c1"># Count syscalls (summary)</span>
+strace<span class="w"> </span>-c<span class="w"> </span>./my_program
+<span class="c1"># Example output:</span>
+<span class="c1"># % time     seconds  calls  errors syscall</span>
+<span class="c1"># ------ ----------- ------ ------ --------</span>
+<span class="c1">#  45.23   0.002345   12345      0 write</span>
+<span class="c1">#  30.12   0.001567    8901      0 read</span>
+<span class="c1">#  10.45   0.000543    4567     23 open</span>
+<span class="c1">#   5.67   0.000294    2345      0 close</span>
+
+<span class="c1"># With timestamps (microsecond resolution)</span>
+strace<span class="w"> </span>-T<span class="w"> </span>-t<span class="w"> </span>./my_program
+<span class="c1"># 10:30:01 write(1, &quot;hello\n&quot;, 6) = 6 &lt;0.000015&gt;</span>
+<span class="c1">#                                       ^^^^^^^^^^^ syscall duration</span>
+
+<span class="c1"># Follow child processes</span>
+strace<span class="w"> </span>-f<span class="w"> </span>./my_program
+
+<span class="c1"># Output to file (stderr is trace output)</span>
+strace<span class="w"> </span>-o<span class="w"> </span>trace.log<span class="w"> </span>./my_program
+</code></pre></div>
+
+<h4 id="strace-patterns-for-robot-software">strace patterns for robot software:</h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Find which config files a ROS node reads</span>
+strace<span class="w"> </span>-e<span class="w"> </span><span class="nv">trace</span><span class="o">=</span>open,openat<span class="w"> </span>rosrun<span class="w"> </span>my_package<span class="w"> </span>my_node<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-v<span class="w"> </span>ENOENT
+
+<span class="c1"># Find why a node hangs on startup</span>
+strace<span class="w"> </span>-e<span class="w"> </span><span class="nv">trace</span><span class="o">=</span>futex,read,poll<span class="w"> </span>rosrun<span class="w"> </span>my_package<span class="w"> </span>my_node
+<span class="c1"># If stuck in futex() → waiting for a lock (mutex contention or deadlock)</span>
+<span class="c1"># If stuck in poll()  → waiting for network data (topic not published)</span>
+
+<span class="c1"># Measure I/O syscall counts for a log-heavy node</span>
+strace<span class="w"> </span>-c<span class="w"> </span>-e<span class="w"> </span><span class="nv">trace</span><span class="o">=</span>write<span class="w"> </span>rosrun<span class="w"> </span>my_package<span class="w"> </span>my_node
+</code></pre></div>
+
+<hr />
+<h3 id="33-ltrace-library-call-tracing">3.3 ltrace — Library Call Tracing</h3>
+<p>ltrace traces dynamic library calls (like strace for libc/libstdc++):</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Trace library calls</span>
+ltrace<span class="w"> </span>./my_program
+
+<span class="c1"># Example output:</span>
+<span class="c1"># malloc(64)                = 0x5555557b0260</span>
+<span class="c1"># memcpy(0x5555557b0260, &quot;hello&quot;, 5) = 0x5555557b0260</span>
+<span class="c1"># free(0x5555557b0260)</span>
+
+<span class="c1"># Trace specific libraries</span>
+ltrace<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;malloc+free&#39;</span><span class="w"> </span>./my_program
+
+<span class="c1"># Count calls</span>
+ltrace<span class="w"> </span>-c<span class="w"> </span>./my_program
+</code></pre></div>
+
+<p><strong>Use case</strong>: Finding unexpected allocations in a real-time code path.
+If you see <code>malloc</code> calls from a function that should be allocation-free,
+you have a latency problem.</p>
+<hr />
+<h3 id="34-ftrace-trace-cmd">3.4 ftrace &amp; trace-cmd</h3>
+<p>ftrace is the Linux kernel&rsquo;s built-in tracer. trace-cmd is its CLI:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install</span>
+sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>trace-cmd
+
+<span class="c1"># Record function tracer for 5 seconds</span>
+sudo<span class="w"> </span>trace-cmd<span class="w"> </span>record<span class="w"> </span>-p<span class="w"> </span><span class="k">function</span><span class="w"> </span>-l<span class="w"> </span><span class="s1">&#39;sched_*&#39;</span><span class="w"> </span>sleep<span class="w"> </span><span class="m">5</span>
+sudo<span class="w"> </span>trace-cmd<span class="w"> </span>report<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-50
+
+<span class="c1"># Record function graph (call tree with timing)</span>
+sudo<span class="w"> </span>trace-cmd<span class="w"> </span>record<span class="w"> </span>-p<span class="w"> </span>function_graph<span class="w"> </span>-l<span class="w"> </span><span class="s1">&#39;ext4_*&#39;</span><span class="w"> </span>--<span class="w"> </span>dd<span class="w"> </span><span class="k">if</span><span class="o">=</span>/dev/zero<span class="w"> </span><span class="nv">of</span><span class="o">=</span>/tmp/test<span class="w"> </span><span class="nv">bs</span><span class="o">=</span>4k<span class="w"> </span><span class="nv">count</span><span class="o">=</span><span class="m">1000</span>
+sudo<span class="w"> </span>trace-cmd<span class="w"> </span>report
+
+<span class="c1"># Trace scheduling events (who preempted whom)</span>
+sudo<span class="w"> </span>trace-cmd<span class="w"> </span>record<span class="w"> </span>-e<span class="w"> </span>sched:sched_switch<span class="w"> </span>-e<span class="w"> </span>sched:sched_wakeup<span class="w"> </span>sleep<span class="w"> </span><span class="m">5</span>
+sudo<span class="w"> </span>trace-cmd<span class="w"> </span>report
+</code></pre></div>
+
+<h4 id="why-ftrace-matters-for-real-time">Why ftrace matters for real-time:</h4>
+<p>In an OKS-style robot system, if your 100Hz control loop occasionally takes
+15ms instead of 10ms, ftrace can show you:
+- Which kernel thread preempted your RT thread
+- How long the preemption lasted
+- Whether it was a scheduling issue or I/O stall</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Trace scheduling of your RT thread</span>
+sudo<span class="w"> </span>trace-cmd<span class="w"> </span>record<span class="w"> </span>-e<span class="w"> </span>sched:sched_switch<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-f<span class="w"> </span><span class="s1">&#39;next_comm == &quot;my_rt_thread&quot; || prev_comm == &quot;my_rt_thread&quot;&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>sleep<span class="w"> </span><span class="m">10</span>
+</code></pre></div>
+
+<hr />
+<h3 id="35-ebpf-bpftrace">3.5 eBPF &amp; bpftrace</h3>
+<p>eBPF (extended Berkeley Packet Filter) runs sandboxed programs in the kernel.
+bpftrace provides a one-liner scripting interface:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install</span>
+sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>bpftrace<span class="w">  </span><span class="c1"># Ubuntu 20.04+</span>
+
+<span class="c1"># Count syscalls by type</span>
+sudo<span class="w"> </span>bpftrace<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;tracepoint:raw_syscalls:sys_enter { @[comm] = count(); }&#39;</span>
+
+<span class="c1"># Trace malloc sizes</span>
+sudo<span class="w"> </span>bpftrace<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;uprobe:/lib/x86_64-linux-gnu/libc.so.6:malloc {</span>
+<span class="s1">    @sizes = hist(arg0); }&#39;</span>
+
+<span class="c1"># Latency of read() syscall</span>
+sudo<span class="w"> </span>bpftrace<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;</span>
+<span class="s1">tracepoint:syscalls:sys_enter_read { @start[tid] = nsecs; }</span>
+<span class="s1">tracepoint:syscalls:sys_exit_read /@start[tid]/ {</span>
+<span class="s1">    @read_ns = hist(nsecs - @start[tid]);</span>
+<span class="s1">    delete(@start[tid]);</span>
+<span class="s1">}&#39;</span>
+
+<span class="c1"># Function call latency in YOUR binary</span>
+sudo<span class="w"> </span>bpftrace<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;uprobe:./my_program:process_frame {</span>
+<span class="s1">    @start[tid] = nsecs;</span>
+<span class="s1">}</span>
+<span class="s1">uretprobe:./my_program:process_frame /@start[tid]/ {</span>
+<span class="s1">    @latency_us = hist((nsecs - @start[tid]) / 1000);</span>
+<span class="s1">    delete(@start[tid]);</span>
+<span class="s1">}&#39;</span>
+</code></pre></div>
+
+<p><strong>eBPF advantages over strace/ftrace</strong>:
+- Near-zero overhead (JIT-compiled in kernel)
+- Can aggregate data in-kernel (histograms, counts)
+- No context-switch overhead per event
+- Programmable (complex logic without dumping everything)</p>
+<hr />
+<h2 id="part-4-advanced-debugging">Part 4: Advanced Debugging</h2>
+<h3 id="41-gdb-beyond-basics">4.1 GDB — Beyond Basics</h3>
+<p>Most developers use GDB for breakpoint → step → print. These advanced features
+solve problems that basic debugging cannot:</p>
+<h4 id="conditional-breakpoints">Conditional breakpoints</h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Break only when a condition is true</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span><span class="k">break</span><span class="w"> </span>process_frame<span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="nv">frame_id</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="m">42</span>
+
+<span class="c1"># Break only after N hits (skip startup)</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span><span class="k">break</span><span class="w"> </span>main.cpp:100
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>ignore<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="m">1000</span><span class="w">    </span><span class="c1"># skip first 1000 hits of breakpoint 1</span>
+
+<span class="c1"># Break when a variable changes (hardware watchpoint)</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>watch<span class="w"> </span>counter<span class="w">     </span><span class="c1"># break on ANY write to counter</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>rwatch<span class="w"> </span>buffer<span class="o">[</span><span class="m">10</span><span class="o">]</span><span class="w"> </span><span class="c1"># break on ANY read from buffer[10]</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>awatch<span class="w"> </span>flags<span class="w">      </span><span class="c1"># break on read OR write</span>
+
+<span class="c1"># Watch with condition</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>watch<span class="w"> </span>counter<span class="w"> </span><span class="k">if</span><span class="w"> </span>counter<span class="w"> </span>&gt;<span class="w"> </span><span class="m">100</span>
+</code></pre></div>
+
+<h4 id="watchpoints-hardware-assisted">Watchpoints (hardware-assisted)</h4>
+<p>Watchpoints are the <strong>killer feature</strong> for finding memory corruption:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Find who overwrites a variable</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span><span class="k">break</span><span class="w"> </span>main
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>run
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>watch<span class="w"> </span>*<span class="o">(</span>int*<span class="o">)</span>0x7fffffffde4c<span class="w">    </span><span class="c1"># watch specific address</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span><span class="k">continue</span>
+<span class="c1"># GDB stops at the EXACT instruction that modifies the address</span>
+
+<span class="c1"># Watch a struct member</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>watch<span class="w"> </span>my_object.state_
+<span class="c1"># Stops whenever state_ changes, shows old and new values</span>
+</code></pre></div>
+
+<p>Hardware watchpoints use CPU debug registers (limited to 4 on x86).
+Software watchpoints work for more locations but are extremely slow.</p>
+<h4 id="catchpoints">Catchpoints</h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Break on exception throw</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>catch<span class="w"> </span>throw
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>catch<span class="w"> </span>throw<span class="w"> </span>std::runtime_error<span class="w">  </span><span class="c1"># specific type</span>
+
+<span class="c1"># Break on exception catch</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>catch<span class="w"> </span>catch
+
+<span class="c1"># Break on syscall</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>catch<span class="w"> </span>syscall<span class="w"> </span>write
+
+<span class="c1"># Break on fork/exec</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>catch<span class="w"> </span>fork
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>catch<span class="w"> </span><span class="nb">exec</span>
+</code></pre></div>
+
+<h4 id="reverse-debugging">Reverse debugging</h4>
+<p>GDB can record execution and step backwards:</p>
+<div class="highlight"><pre><span></span><code><span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span><span class="k">break</span><span class="w"> </span>main
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>run
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>record<span class="w">              </span><span class="c1"># start recording</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span><span class="k">continue</span><span class="w">            </span><span class="c1"># run until crash/breakpoint</span>
+<span class="c1"># Now you can go BACKWARDS:</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>reverse-continue<span class="w">    </span><span class="c1"># run backwards until previous breakpoint</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>reverse-step<span class="w">        </span><span class="c1"># step backwards one line</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>reverse-next<span class="w">        </span><span class="c1"># step backwards over function calls</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>reverse-finish<span class="w">      </span><span class="c1"># run backwards until function entry</span>
+
+<span class="c1"># Find when a variable was last changed</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>watch<span class="w"> </span>-l<span class="w"> </span>my_var
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>reverse-continue<span class="w">    </span><span class="c1"># finds previous write to my_var</span>
+</code></pre></div>
+
+<p><strong>Limitation</strong>: Recording slows execution 10-100x. Best used with small
+reproduction cases, not full robot systems.</p>
+<h4 id="pretty-printers">Pretty-printers</h4>
+<p>Make GDB display STL containers and custom types readably:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># STL pretty printers (usually auto-loaded)</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>print<span class="w"> </span>my_vector
+<span class="c1"># $1 = std::vector of length 3, capacity 4 = {1, 2, 3}</span>
+
+<span class="c1"># Custom pretty-printer (Python, in ~/.gdbinit or .gdbinit)</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1"># ~/.gdbinit or project .gdbinit</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">gdb.printing</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">PosePrinter</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Pretty-print Pose2D(x, y, theta)&quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">val</span> <span class="o">=</span> <span class="n">val</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">to_string</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">val</span><span class="p">[</span><span class="s1">&#39;x_&#39;</span><span class="p">])</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">val</span><span class="p">[</span><span class="s1">&#39;y_&#39;</span><span class="p">])</span>
+        <span class="n">theta</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">val</span><span class="p">[</span><span class="s1">&#39;theta_&#39;</span><span class="p">])</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Pose2D(x=</span><span class="si">{</span><span class="n">x</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">, y=</span><span class="si">{</span><span class="n">y</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">, θ=</span><span class="si">{</span><span class="n">theta</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">)&quot;</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build_printer</span><span class="p">():</span>
+    <span class="n">pp</span> <span class="o">=</span> <span class="n">gdb</span><span class="o">.</span><span class="n">printing</span><span class="o">.</span><span class="n">RegexpCollectionPrettyPrinter</span><span class="p">(</span><span class="s2">&quot;my_project&quot;</span><span class="p">)</span>
+    <span class="n">pp</span><span class="o">.</span><span class="n">add_printer</span><span class="p">(</span><span class="s1">&#39;Pose2D&#39;</span><span class="p">,</span> <span class="s1">&#39;^Pose2D$&#39;</span><span class="p">,</span> <span class="n">PosePrinter</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">pp</span>
+
+<span class="n">gdb</span><span class="o">.</span><span class="n">printing</span><span class="o">.</span><span class="n">register_pretty_printer</span><span class="p">(</span><span class="n">gdb</span><span class="o">.</span><span class="n">current_objfile</span><span class="p">(),</span> <span class="n">build_printer</span><span class="p">())</span>
+</code></pre></div>
+
+<h4 id="remote-debugging-for-robot-targets">Remote debugging (for robot targets)</h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># On the robot (target)</span>
+gdbserver<span class="w"> </span>:2345<span class="w"> </span>./my_node
+
+<span class="c1"># On your dev machine</span>
+gdb<span class="w"> </span>./my_node
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>target<span class="w"> </span>remote<span class="w"> </span>robot_ip:2345
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span><span class="k">break</span><span class="w"> </span>main
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span><span class="k">continue</span>
+</code></pre></div>
+
+<hr />
+<h3 id="42-core-dump-analysis">4.2 Core Dump Analysis</h3>
+<p>When a program crashes, the kernel can save a core dump — a snapshot of
+the process&rsquo;s memory at the moment of death:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Enable core dumps</span>
+<span class="nb">ulimit</span><span class="w"> </span>-c<span class="w"> </span>unlimited
+
+<span class="c1"># Set core dump pattern (system-wide)</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;/tmp/core.%e.%p.%t&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tee<span class="w"> </span>/proc/sys/kernel/core_pattern
+
+<span class="c1"># Run the crashing program</span>
+./my_program<span class="w">    </span><span class="c1"># → segfault → /tmp/core.my_program.12345.1619280000</span>
+
+<span class="c1"># Analyze with GDB</span>
+gdb<span class="w"> </span>./my_program<span class="w"> </span>/tmp/core.my_program.12345.1619280000
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>bt<span class="w">                  </span><span class="c1"># backtrace — shows where it crashed</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>frame<span class="w"> </span><span class="m">3</span><span class="w">             </span><span class="c1"># switch to frame 3 in the backtrace</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>info<span class="w"> </span>locals<span class="w">         </span><span class="c1"># show local variables in that frame</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>print<span class="w"> </span>*this<span class="w">         </span><span class="c1"># if inside a member function</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>info<span class="w"> </span>threads<span class="w">        </span><span class="c1"># show all threads at crash time</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>thread<span class="w"> </span><span class="m">2</span><span class="w">            </span><span class="c1"># switch to thread 2</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>bt<span class="w">                  </span><span class="c1"># backtrace for thread 2</span>
+</code></pre></div>
+
+<h4 id="automated-core-dump-analysis-in-ci">Automated core dump analysis in CI:</h4>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/bin/bash</span>
+<span class="c1"># Run tests, check for core dumps</span>
+<span class="nb">ulimit</span><span class="w"> </span>-c<span class="w"> </span>unlimited
+./run_tests
+
+<span class="k">for</span><span class="w"> </span>core<span class="w"> </span><span class="k">in</span><span class="w"> </span>/tmp/core.*<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;=== CRASH DETECTED ===&quot;</span>
+<span class="w">    </span>gdb<span class="w"> </span>-batch<span class="w"> </span>-ex<span class="w"> </span><span class="s2">&quot;bt full&quot;</span><span class="w"> </span>-ex<span class="w"> </span><span class="s2">&quot;info threads&quot;</span><span class="w"> </span>-ex<span class="w"> </span><span class="s2">&quot;thread apply all bt&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>./my_test_binary<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$core</span><span class="s2">&quot;</span>
+<span class="k">done</span>
+</code></pre></div>
+
+<hr />
+<h3 id="43-post-mortem-tools">4.3 Post-Mortem Tools</h3>
+<p>When you don&rsquo;t have GDB or a core dump, these tools extract information from
+the binary itself:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># addr2line — convert address to file:line</span>
+addr2line<span class="w"> </span>-e<span class="w"> </span>./my_program<span class="w"> </span>-f<span class="w"> </span>0x4011a3
+<span class="c1"># process_frame</span>
+<span class="c1"># /home/user/src/main.cpp:42</span>
+
+<span class="c1"># nm — list symbols</span>
+nm<span class="w"> </span>./my_program<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s1">&#39; T &#39;</span><span class="w">    </span><span class="c1"># exported (Text) symbols</span>
+nm<span class="w"> </span>./my_program<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>process<span class="w">  </span><span class="c1"># find a specific symbol</span>
+nm<span class="w"> </span>-C<span class="w"> </span>./my_program<span class="w">              </span><span class="c1"># demangle C++ names</span>
+
+<span class="c1"># objdump — disassembly</span>
+objdump<span class="w"> </span>-d<span class="w"> </span>./my_program<span class="w"> </span><span class="p">|</span><span class="w"> </span>less
+objdump<span class="w"> </span>-d<span class="w"> </span>-S<span class="w"> </span>./my_program<span class="w">      </span><span class="c1"># interleave source (needs -g)</span>
+
+<span class="c1"># readelf — ELF header info</span>
+readelf<span class="w"> </span>-h<span class="w"> </span>./my_program<span class="w">         </span><span class="c1"># file header</span>
+readelf<span class="w"> </span>-S<span class="w"> </span>./my_program<span class="w">         </span><span class="c1"># section headers</span>
+readelf<span class="w"> </span>--debug-dump<span class="o">=</span>line<span class="w"> </span>./my_program<span class="w">  </span><span class="c1"># line number info</span>
+
+<span class="c1"># c++filt — demangle a single symbol</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;_ZN5MyApp12process_dataERKSt6vectorIiSaIiEE&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>c++filt
+<span class="c1"># MyApp::process_data(std::vector&lt;int, std::allocator&lt;int&gt;&gt; const&amp;)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="part-5-putting-it-all-together">Part 5: Putting It All Together</h2>
+<h3 id="51-ci-pipeline-design-for-quality-tools">5.1 CI Pipeline Design for Quality Tools</h3>
+<p>A production CI pipeline should run these tools in parallel:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># .github/workflows/quality.yml</span>
+<span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Quality Pipeline</span>
+
+<span class="nt">on</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">push</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pull_request</span><span class="p p-Indicator">]</span>
+
+<span class="nt">jobs</span><span class="p">:</span>
+<span class="w">  </span><span class="c1"># ── Static analysis (fast, run first) ──</span>
+<span class="w">  </span><span class="nt">static-analysis</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
+<span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@v4</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">clang-tidy</span>
+<span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<span class="w">          </span><span class="no">cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON</span>
+<span class="w">          </span><span class="no">clang-tidy -p build/ src/*.cpp</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cppcheck</span>
+<span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cppcheck --enable=all --error-exitcode=1 src/</span>
+
+<span class="w">  </span><span class="c1"># ── Sanitizers (parallel, separate jobs) ──</span>
+<span class="w">  </span><span class="nt">asan</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
+<span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cmake -B build -DCMAKE_CXX_FLAGS=&quot;-fsanitize=address,undefined -fno-omit-frame-pointer -g&quot;</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cmake --build build &amp;&amp; cd build &amp;&amp; ctest</span>
+
+<span class="w">  </span><span class="nt">tsan</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
+<span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cmake -B build -DCMAKE_CXX_FLAGS=&quot;-fsanitize=thread -g&quot;</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cmake --build build &amp;&amp; cd build &amp;&amp; ctest</span>
+
+<span class="w">  </span><span class="c1"># ── Profiling (nightly, expensive) ──</span>
+<span class="w">  </span><span class="nt">profile</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
+<span class="w">    </span><span class="nt">if</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github.event_name == &#39;schedule&#39;</span>
+<span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cmake -B build -DCMAKE_BUILD_TYPE=Release</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cmake --build build</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<span class="w">          </span><span class="no">perf stat ./build/my_benchmark</span>
+<span class="w">          </span><span class="no">valgrind --tool=callgrind --callgrind-out-file=callgrind.out ./build/my_benchmark</span>
+<span class="w">          </span><span class="no"># Compare against baseline</span>
+</code></pre></div>
+
+<h3 id="52-suppression-management-for-large-codebases">5.2 Suppression Management for Large Codebases</h3>
+<p>In a real robot codebase (ROS + custom code + third-party), expect noise:</p>
+<div class="highlight"><pre><span></span><code>project/
+├── sanitizer/
+│   ├── asan.supp           # ASan suppressions
+│   ├── tsan.supp           # TSan suppressions
+│   └── lsan.supp           # Leak suppressions
+├── .clang-tidy             # clang-tidy config
+├── cppcheck.supp           # cppcheck suppressions
+└── CMakeLists.txt          # Sanitizer targets
+</code></pre></div>
+
+<p><strong>Rule</strong>: Every suppression MUST have a comment explaining:
+1. Why it&rsquo;s suppressed (false positive? third-party? benign?)
+2. A link to the upstream issue if applicable
+3. When it can be removed</p>
+<div class="highlight"><pre><span></span><code># tsan.supp
+# Benign race in ros::init() counter — reported upstream as ros/ros_comm#2134
+race:ros::init
+# False positive: atomic&lt;bool&gt; with relaxed ordering — TSan doesn&#39;t model this
+race:StatusFlags::is_ready
+# Third-party: libcurl internal threading — we can&#39;t fix this
+race:libcurl*
+</code></pre></div>
+
+<h3 id="53-tool-selection-quick-reference">5.3 Tool Selection Quick Reference</h3>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>First tool</th>
+<th>Second tool</th>
+<th>Third tool</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Crash (segfault)</td>
+<td>Core dump + GDB</td>
+<td>ASan rebuild</td>
+<td>Valgrind memcheck</td>
+</tr>
+<tr>
+<td>Data corruption</td>
+<td>ASan</td>
+<td>GDB watchpoints</td>
+<td>UBSan</td>
+</tr>
+<tr>
+<td>Race condition</td>
+<td>TSan</td>
+<td>GDB with thread commands</td>
+<td>LTTng</td>
+</tr>
+<tr>
+<td>Deadlock</td>
+<td>TSan</td>
+<td><code>strace -e futex</code></td>
+<td>GDB <code>info threads</code></td>
+</tr>
+<tr>
+<td>Slow execution</td>
+<td><code>perf stat</code></td>
+<td><code>perf record</code> → flamegraph</td>
+<td>Callgrind</td>
+</tr>
+<tr>
+<td>Cache misses</td>
+<td><code>perf stat</code> cache events</td>
+<td>Cachegrind</td>
+<td>SoA refactor</td>
+</tr>
+<tr>
+<td>Syscall overhead</td>
+<td><code>strace -c</code></td>
+<td><code>bpftrace</code></td>
+<td>Buffering</td>
+</tr>
+<tr>
+<td>Memory leak</td>
+<td>ASan (LSan)</td>
+<td>Valgrind memcheck</td>
+<td><code>massif</code></td>
+</tr>
+<tr>
+<td>Undefined behavior</td>
+<td>UBSan</td>
+<td>ASan</td>
+<td>Code review</td>
+</tr>
+<tr>
+<td>Coding standard</td>
+<td>clang-tidy</td>
+<td>cppcheck</td>
+<td><code>-Wall -Werror</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="exercises-in-this-module">Exercises in This Module</h2>
+<table>
+<thead>
+<tr>
+<th>Exercise</th>
+<th>Focus</th>
+<th>Tools</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ex01</td>
+<td>Coding standards violations — detect and fix</td>
+<td>clang-tidy, compiler warnings</td>
+</tr>
+<tr>
+<td>ex02</td>
+<td>Static analysis traps — patterns that hide bugs</td>
+<td>cppcheck, code review</td>
+</tr>
+<tr>
+<td>ex03</td>
+<td>Cache profiling — AoS vs SoA, row vs column</td>
+<td>perf stat, cachegrind</td>
+</tr>
+<tr>
+<td>ex04</td>
+<td>Call-graph hotspot — find the bottleneck</td>
+<td>callgrind, perf record</td>
+</tr>
+<tr>
+<td>ex05</td>
+<td>Syscall audit — reduce I/O overhead</td>
+<td>strace -c</td>
+</tr>
+<tr>
+<td>ex06</td>
+<td>Tracepoint framework — build LTTng-style tracing</td>
+<td>LTTng concepts</td>
+</tr>
+<tr>
+<td>ex07</td>
+<td>Watchpoint hunting — find memory corruption</td>
+<td>GDB watchpoints</td>
+</tr>
+<tr>
+<td>ex08</td>
+<td>Flamegraph-driven optimization</td>
+<td>perf record + flamegraph</td>
+</tr>
+<tr>
+<td>puzzle01</td>
+<td>The observant profiler — cache line effects</td>
+<td>perf + false sharing</td>
+</tr>
+<tr>
+<td>puzzle02</td>
+<td>The invisible allocation — RT latency</td>
+<td>ltrace + perf</td>
+</tr>
+<tr>
+<td>puzzle03</td>
+<td>The lying benchmark — measurement traps</td>
+<td>perf stat</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

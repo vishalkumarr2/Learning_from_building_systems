@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>03 — Op-Amps, ADC, and Sampling Theory - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-amber-600 hover:text-amber-800 mb-4 inline-block">&larr; Back to Electronics</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="03-op-amps-adc-and-sampling-theory">03 — Op-Amps, ADC, and Sampling Theory</h1>
+<h3 id="signal-conditioning-getting-clean-numbers-from-messy-analog-signals">Signal conditioning: getting clean numbers from messy analog signals</h3>
+<p><strong>Prerequisites:</strong> Chapters 01 (R, C, filters) and 02 (diodes, transistors)
+<strong>Unlocks:</strong> Understanding IMU data paths, ADC configuration on STM32, anti-aliasing, why your accelerometer readings are noisy</p>
+<hr />
+<h2 id="why-should-i-care-stm32jetson-project-context">Why Should I Care? (STM32/Jetson Project Context)</h2>
+<p>Your ICM-42688 IMU has an internal ADC that samples the MEMS accelerometer/gyroscope elements. Understanding how ADCs work tells you:
+- Why the IMU has configurable ODR (Output Data Rate) and why higher isn&rsquo;t always better
+- What the noise floor is (quantization + thermal noise) and when you&rsquo;ve hit the hardware limit
+- Why reading the IMU at 100Hz via SPI when its internal ODR is 1kHz is decimation (good, not aliasing)
+- Why the MPU-6050&rsquo;s DLPF (Digital Low-Pass Filter) setting matters — it&rsquo;s the anti-alias filter</p>
+<p>Op-amps matter because the analog signal chain <em>before</em> any ADC determines the quality of the digital data you get out. Garbage in = garbage out.</p>
+<hr />
+<h1 id="part-1-op-amps-operational-amplifiers">PART 1 — OP-AMPS (OPERATIONAL AMPLIFIERS)</h1>
+<hr />
+<h2 id="11-what-an-op-amp-is">1.1 What an Op-Amp IS</h2>
+<p>An op-amp is a differential amplifier with:
+- <strong>Two inputs:</strong> V+ (non-inverting) and V- (inverting)
+- <strong>One output:</strong> tries to make Vout = A × (V+ - V-), where A is the open-loop gain (~100,000 to 1,000,000)
+- <strong>Two power supply pins:</strong> Vcc+ and Vcc- (or Vcc and GND for single-supply)</p>
+<div class="highlight"><pre><span></span><code>    Schematic symbol:
+
+            Vcc+
+             │
+         V+ ─┤\
+              │  &gt;── Vout
+         V- ─┤/
+             │
+            Vcc-
+            (or GND)
+</code></pre></div>
+
+<p><strong>ELI15 analogy — the differential thermostat:</strong></p>
+<p>Imagine a thermostat that compares two thermometers:
+- Thermometer V+ is in the room
+- Thermometer V- is on the thermostat dial (your setpoint)
+- The heater blasts at 100,000× the temperature difference</p>
+<p>If V+ is even 0.01° above V-: heater goes full blast → room gets very hot. If V+ is even 0.01° below V-: AC goes full blast → room gets very cold.</p>
+<p>This is useless on its own — the room either freezes or burns. You need <strong>negative feedback</strong> to make it useful: route the output back to the input to create self-regulation. This is exactly what happens when you connect the output back to V-.</p>
+<hr />
+<h2 id="12-the-two-golden-rules-with-negative-feedback">1.2 The Two Golden Rules (with Negative Feedback)</h2>
+<p>When negative feedback is present (output connected to V- through some network):</p>
+<div class="highlight"><pre><span></span><code>    RULE 1: No current flows into V+ or V-
+            (input impedance is &gt; 1TΩ)
+
+    RULE 2: V+ = V-
+            (the op-amp adjusts Vout to force its inputs equal)
+</code></pre></div>
+
+<p>These two rules let you analyze ANY op-amp circuit by:
+1. Writing V+ = V- (rule 2)
+2. Writing KCL (current equations) assuming no current into the inputs (rule 1)
+3. Solving for Vout</p>
+<p><strong>Where the rules break down:</strong>
+- Without feedback (comparator mode): V+ ≠ V-, output slams to rail
+- At very high frequencies: the op-amp can&rsquo;t respond fast enough → gain drops (GBW product)
+- Near the power rails: output can&rsquo;t go above Vcc or below GND (unless rail-to-rail op-amp)
+- Rule 1 is approximate: bias currents of a few nA flow in practice (matters for precision circuits)</p>
+<hr />
+<h2 id="13-inverting-amplifier">1.3 Inverting Amplifier</h2>
+<div class="highlight"><pre><span></span><code>            Rf
+    Vin ─┤Rin├──┬──┤Rf├──┬── Vout
+                │         │
+               V- ─┤\     │
+                   │  &gt;───┘
+               V+ ─┤/
+                │
+               GND
+</code></pre></div>
+
+<p><strong>Analysis using the golden rules:</strong></p>
+<ol>
+<li>V+ = 0V (connected to GND)</li>
+<li>V- = V+ = 0V (Rule 2 — the &ldquo;virtual ground&rdquo;)</li>
+<li>Current through Rin: I = (Vin - 0) / Rin = Vin / Rin</li>
+<li>No current into V- (Rule 1), so all of I flows through Rf</li>
+<li>Voltage at Vout: 0V - I × Rf = -Vin × (Rf / Rin)</li>
+</ol>
+<div class="highlight"><pre><span></span><code>    Gain = Vout/Vin = -Rf/Rin
+
+    The negative sign means the output is INVERTED
+    (positive input → negative output, and vice versa)
+</code></pre></div>
+
+<h3 id="worked-example-amplify-a-microphone-signal-by-10">Worked Example: Amplify a microphone signal by 10×</h3>
+<div class="highlight"><pre><span></span><code>    Rin = 10kΩ,  Rf = 100kΩ
+    Gain = -100k/10k = -10
+
+    Input: 50mV peak sine wave (from microphone)
+    Output: 500mV peak sine wave, inverted
+
+    Check: 500mV is well within a ±12V power supply → won&#39;t clip ✓
+</code></pre></div>
+
+<hr />
+<h2 id="14-non-inverting-amplifier">1.4 Non-Inverting Amplifier</h2>
+<div class="highlight"><pre><span></span><code>    Vin ──── V+ ─┤\
+                  │  &gt;──┬── Vout
+            V- ──┤/    │
+             │          │
+            ┌┴┐    ┌───┘
+            │Rin│   │
+            └┬┘   ┌┴┐
+             │    │Rf│
+            GND   └┬┘
+                   │
+                  GND ← wait, this connects Vout → Rf → Rin → GND
+</code></pre></div>
+
+<p>Let me redraw more clearly:</p>
+<div class="highlight"><pre><span></span><code>                   ┌──────────────────────┐
+                   │          Rf          │
+    Vin ── V+ ─┤\  │                      │
+                │  &gt;──┬───────────────────┘─── Vout
+           V- ─┤/    │
+            │         │
+            └──┤ Rin ├┘
+            │
+           GND
+</code></pre></div>
+
+<p><strong>Analysis:</strong></p>
+<ol>
+<li>V+ = Vin (directly connected)</li>
+<li>V- = V+ = Vin (Rule 2)</li>
+<li>Current through Rin: I = Vin / Rin (from V- to GND)</li>
+<li>Same current flows through Rf (Rule 1, no current into V-)</li>
+<li>Vout = V- + I × Rf = Vin + (Vin/Rin) × Rf = Vin × (1 + Rf/Rin)</li>
+</ol>
+<div class="highlight"><pre><span></span><code>    Gain = Vout/Vin = 1 + Rf/Rin
+
+    Always ≥ 1, non-inverting (same polarity as input)
+</code></pre></div>
+
+<h3 id="worked-example-gain-of-5">Worked Example: Gain of 5</h3>
+<div class="highlight"><pre><span></span><code>    Rf = 40kΩ,  Rin = 10kΩ
+    Gain = 1 + 40k/10k = 5
+
+    Input: 0.5V from sensor
+    Output: 2.5V → nice range for a 3.3V ADC
+</code></pre></div>
+
+<hr />
+<h2 id="15-voltage-follower-buffer-gain-1-but-why-its-useful">1.5 Voltage Follower (Buffer) — Gain = 1 but WHY It&rsquo;s Useful</h2>
+<div class="highlight"><pre><span></span><code>    Vin ── V+ ─┤\
+                │  &gt;──┬── Vout = Vin
+           V- ─┤/    │
+            │         │
+            └─────────┘    ← direct feedback, Rf = 0, Rin = ∞
+
+    Gain = 1 + 0/∞ = 1
+</code></pre></div>
+
+<p><strong>&ldquo;Why would I want gain = 1? I already have the voltage!&rdquo;</strong></p>
+<p>The answer is <strong>impedance matching</strong>. The op-amp has:
+- <strong>Extremely high input impedance</strong> (~TΩ): it draws NO current from the source
+- <strong>Very low output impedance</strong> (~Ω): it can drive significant current to the load</p>
+<p><strong>Real-world problem it solves:</strong></p>
+<div class="highlight"><pre><span></span><code>    PROBLEM:                           SOLUTION:
+
+    Sensor                              Sensor
+    (high impedance,    → ADC           (high impedance)  → Buffer → ADC
+     can only supply       (low                              (draws     (gets
+     10µA without          impedance,                        nothing    driven
+     voltage sagging)      demands                           from       properly)
+                           100µA                             sensor)
+                           during
+                           sampling)
+
+    Voltage SAGS!                       Voltage STABLE!
+</code></pre></div>
+
+<p>Remember the voltage divider loading problem in chapter 01? A buffer op-amp eliminates it entirely.</p>
+<p><strong>When to use it:</strong>
+- Thermistor (100kΩ) → ADC: buffer needed (thermistor can&rsquo;t source sampling current)
+- Voltage divider → ADC: buffer needed if divider uses high-value resistors
+- IMU digital output → MCU: buffer NOT needed (digital signals are driven hard)</p>
+<hr />
+<h2 id="16-summing-amplifier">1.6 Summing Amplifier</h2>
+<div class="highlight"><pre><span></span><code>    V1 ─┤R1├──┐
+               │      Rf
+    V2 ─┤R2├──┼──┤Rf├──┬── Vout
+               │         │
+    V3 ─┤R3├──┤   V- ─┤\ │
+               │       │ &gt;┘
+              GND  V+ ─┤/
+                    │
+                   GND
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>    Vout = -Rf × (V1/R1 + V2/R2 + V3/R3)
+</code></pre></div>
+
+<p>If all R values are equal: Vout = -(V1 + V2 + V3). It adds analog signals. Used in audio mixers, DAC circuits, and sensor fusion.</p>
+<hr />
+<h2 id="17-differential-amplifier">1.7 Differential Amplifier</h2>
+<div class="highlight"><pre><span></span><code>    V1 ─┤R1├──┬── V- ─┤\
+               │        │  &gt;── Vout
+              ┌┴┐       │
+              │Rf│  V+ ─┤/
+              └┬┘   │
+               │    ├┤R1├── V2
+              Vout  │
+                   ┌┴┐
+                   │Rf│
+                   └┬┘
+                    │
+                   GND
+</code></pre></div>
+
+<p>With matched resistors (R1 = R1, Rf = Rf):</p>
+<div class="highlight"><pre><span></span><code>    Vout = (Rf/R1) × (V2 - V1)
+</code></pre></div>
+
+<p><strong>Why should I care?</strong> This is the core of:
+- CAN bus receivers (measure differential signal)
+- Current sense amplifiers (measure voltage across a shunt resistor)
+- Bridge sensor amplifiers (Wheatstone bridge output)</p>
+<hr />
+<h2 id="18-comparator-op-amp-without-feedback">1.8 Comparator — Op-Amp Without Feedback</h2>
+<p>Remove the feedback path. Now V+ and V- can be different, and the enormous gain makes the output slam to one rail or the other:</p>
+<div class="highlight"><pre><span></span><code>    If V+ &gt; V-:   Vout = Vcc  (positive rail)
+    If V+ &lt; V-:   Vout = GND  (or negative rail)
+</code></pre></div>
+
+<p>Used for: zero-crossing detection, threshold detection, analog-to-digital conversion (SAR ADC uses a comparator internally!).</p>
+<p><strong>Practical tip:</strong> Don&rsquo;t use a regular op-amp as a comparator in high-speed circuits — dedicated comparator ICs (LM339, TLV3501) have faster response and proper output stages (often open-drain for logic-level compatibility).</p>
+<hr />
+<h2 id="19-common-op-amp-ics">1.9 Common Op-Amp ICs</h2>
+<table>
+<thead>
+<tr>
+<th>IC</th>
+<th>Supply</th>
+<th>Rail-to-Rail?</th>
+<th>Bandwidth</th>
+<th>Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LM358</td>
+<td>3-32V</td>
+<td>Output only</td>
+<td>1MHz</td>
+<td>General purpose, cheap</td>
+</tr>
+<tr>
+<td>MCP6002</td>
+<td>1.8-6V</td>
+<td>Input + Output</td>
+<td>1MHz</td>
+<td>Single-supply, battery circuits</td>
+</tr>
+<tr>
+<td>OPA2340</td>
+<td>2.5-5.5V</td>
+<td>Input + Output</td>
+<td>5.5MHz</td>
+<td>Precision ADC buffering</td>
+</tr>
+<tr>
+<td>AD8605</td>
+<td>2.7-5.5V</td>
+<td>Input + Output</td>
+<td>10MHz</td>
+<td>Low noise, precision</td>
+</tr>
+<tr>
+<td>LMV324</td>
+<td>2.7-5.5V</td>
+<td>Output only</td>
+<td>1MHz</td>
+<td>Quad op-amp, general</td>
+</tr>
+</tbody>
+</table>
+<p><strong>&ldquo;Rail-to-rail&rdquo; means:</strong> output can swing to within ~10mV of the supply rails. A non-rail-to-rail op-amp on a 3.3V supply might only output 0.2V to 3.1V. For single-supply embedded circuits, always use rail-to-rail.</p>
+<hr />
+<h2 id="110-practical-signal-chain-sensor-adc">1.10 Practical Signal Chain: Sensor → ADC</h2>
+<div class="highlight"><pre><span></span><code>    Analog Sensor ──→ [Anti-Alias Filter] ──→ [Buffer] ──→ [ADC]
+    (high impedance)    (RC low-pass)          (op-amp)     (STM32)
+    (noisy, out-of-     (removes freqs          (impedance   (needs stable,
+     range voltage)      above Nyquist/2)        matching)    low-Z input)
+</code></pre></div>
+
+<p><strong>Example for a force sensor (0-5V output, read by 3.3V STM32 ADC):</strong></p>
+<div class="highlight"><pre><span></span><code>    Sensor ─┤10k├──┬──┤10k├──┬──┤ 3.3kΩ ├──┬── STM32 ADC pin
+     (0-5V)        │          │              │
+                  ┌┴┐        ┌┴┐           ┌┴┐
+                  │20k│      op-amp        │100n│   (anti-alias RC filter)
+                  └┬┘  (buffer)           └┬┘     f_c = 1/(2π×3.3k×100n) ≈ 480Hz
+                   │                        │
+                  GND        Divider:      GND
+                             5V × 20k/(10k+20k) = 3.33V max ✓
+</code></pre></div>
+
+<hr />
+<h1 id="part-2-adc-analog-to-digital-converter">PART 2 — ADC (ANALOG-TO-DIGITAL CONVERTER)</h1>
+<hr />
+<h2 id="21-what-an-adc-does">2.1 What an ADC Does</h2>
+<p>An ADC takes a continuous analog voltage (e.g., 1.234V) and converts it to a discrete integer (e.g., 1530 out of 4095).</p>
+<div class="highlight"><pre><span></span><code>    Analog voltage                    Digital number
+    0V ──────── 3.3V     →      0 ──────── 4095
+    (continuous)                 (discrete, 12-bit)
+</code></pre></div>
+
+<p>The ADC is the bridge between the analog world (sensors, physics) and the digital world (MCU, math, software).</p>
+<hr />
+<h2 id="22-resolution-and-lsb">2.2 Resolution and LSB</h2>
+<p><strong>Resolution</strong> is the number of bits in the ADC output.</p>
+<div class="highlight"><pre><span></span><code>    Number of steps = 2^N     (N = number of bits)
+    LSB (Least Significant Bit) = Vref / 2^N
+</code></pre></div>
+
+<table>
+<thead>
+<tr>
+<th>Resolution</th>
+<th>Steps</th>
+<th>LSB at 3.3V Vref</th>
+<th>Comment</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>8-bit</td>
+<td>256</td>
+<td>12.9mV</td>
+<td>Coarse — suitable for temperature, battery level</td>
+</tr>
+<tr>
+<td>10-bit</td>
+<td>1024</td>
+<td>3.22mV</td>
+<td>Moderate — many Arduino ADCs</td>
+</tr>
+<tr>
+<td>12-bit</td>
+<td>4096</td>
+<td>0.806mV</td>
+<td>Good — most STM32 ADCs</td>
+</tr>
+<tr>
+<td>16-bit</td>
+<td>65536</td>
+<td>0.050mV</td>
+<td>High precision — external ADCs like ADS1115</td>
+</tr>
+<tr>
+<td>24-bit</td>
+<td>16,777,216</td>
+<td>0.197µV</td>
+<td>Extreme precision — load cells, strain gauges</td>
+</tr>
+</tbody>
+</table>
+<h3 id="worked-example">Worked Example</h3>
+<p>STM32H743 has a 16-bit ADC (but in 12-bit mode typically). With Vref = 3.3V and 12-bit mode:</p>
+<div class="highlight"><pre><span></span><code>    ADC reads 2048.
+    Voltage = 2048 × (3.3V / 4096) = 2048 × 0.000806V = 1.650V
+</code></pre></div>
+
+<p>If the actual voltage is 1.645V, the error is 5mV — less than 1 LSB. <strong>This is the best the ADC can do.</strong> You cannot measure more precisely than 1 LSB without oversampling or a higher-resolution ADC.</p>
+<hr />
+<h2 id="23-adc-architectures">2.3 ADC Architectures</h2>
+<h3 id="sar-successive-approximation-register-most-common-in-mcus">SAR (Successive Approximation Register) — Most Common in MCUs</h3>
+<p><strong>How it works — binary search:</strong></p>
+<div class="highlight"><pre><span></span><code>    Step 1: Is the input &gt; Vref/2?
+            YES → MSB = 1, subtract Vref/2
+    Step 2: Is the remainder &gt; Vref/4?
+            YES → next bit = 1, subtract
+            NO  → next bit = 0
+    Step 3: Continue for each bit...
+
+    12-bit SAR needs 12 comparisons → 12 clock cycles per conversion
+</code></pre></div>
+
+<p><strong>ELI15:</strong> You&rsquo;re guessing a number between 0 and 4095. You ask &ldquo;is it above 2048?&rdquo; Then &ldquo;is it above 3072 (or 1024)?&rdquo; Each question halves the range. After 12 questions, you know the exact number. This is exactly how a SAR ADC works, using a DAC + comparator internally.</p>
+<div class="highlight"><pre><span></span><code>    SAR ADC block diagram:
+
+    Vin ──→ [Sample &amp; Hold] ──→ [Comparator] ──→ [SAR Logic] ──→ Digital Output
+                                    ↑
+                                [Internal DAC]
+                                    ↑
+                              [SAR Register]
+                              (binary search)
+</code></pre></div>
+
+<ul>
+<li>Speed: 100ksps to 10Msps</li>
+<li>Resolution: 8-18 bits</li>
+<li>Power: moderate</li>
+<li><strong>This is what&rsquo;s inside your STM32H7</strong></li>
+</ul>
+<h3 id="sigma-delta-adc-high-resolution-slow">Sigma-Delta (ΔΣ) ADC — High Resolution, Slow</h3>
+<p>Uses oversampling and noise shaping. Samples at many MHz but outputs at kHz rates. Achieves 24-bit resolution.</p>
+<ul>
+<li>Speed: 10sps to 100ksps</li>
+<li>Resolution: 16-24 bits</li>
+<li>Power: low</li>
+<li>Used in: precision measurement (load cells, thermocouples, strain gauges)</li>
+</ul>
+<h3 id="flash-adc-fast-expensive">Flash ADC — Fast, Expensive</h3>
+<p>Uses 2^N comparators in parallel (a 8-bit flash ADC needs 255 comparators!). Converts in one clock cycle.</p>
+<ul>
+<li>Speed: 100Msps to 10Gsps</li>
+<li>Resolution: 6-10 bits</li>
+<li>Power: very high</li>
+<li>Used in: oscilloscopes, software-defined radio, high-speed data acquisition</li>
+</ul>
+<hr />
+<h2 id="24-reference-voltage-often-more-important-than-adc-bits">2.4 Reference Voltage — Often More Important Than ADC Bits</h2>
+<p>Every ADC compares the input to a reference voltage. If the reference drifts, ALL measurements drift.</p>
+<div class="highlight"><pre><span></span><code>    True voltage = ADC_reading × (Vref / 2^N)
+</code></pre></div>
+
+<p>If Vref has 1% error, ALL your readings have 1% error — no matter if you use 8-bit or 24-bit ADC. A perfect 24-bit ADC with a noisy Vref is worse than a 12-bit ADC with a stable Vref.</p>
+<p><strong>Sources of Vref:</strong>
+- <strong>Internal reference:</strong> STM32 has internal 1.2V reference. Accurate to ±1%. Convenient but limited precision.
+- <strong>VDDA pin:</strong> Many MCUs use the analog supply voltage as Vref. If VDDA = 3.3V ±5%, your readings are ±5%.
+- <strong>External reference IC:</strong> REF3030 provides 3.000V ±0.1%. Use for precision.</p>
+<hr />
+<h2 id="25-input-impedance-and-the-buffer-problem">2.5 Input Impedance and the Buffer Problem</h2>
+<p>SAR ADCs have a sample-and-hold circuit: a switch + small capacitor (~5pF internally). When the switch closes, the capacitor must charge to the input voltage within the sampling time (~100ns).</p>
+<div class="highlight"><pre><span></span><code>    [Source] ──┤R_source├── Switch ──┤ C_sample ├── GND
+                              │           (5pF)
+                              │
+                        Sampling happens here
+
+    The source must charge 5pF through R_source in ~100ns
+    If R_source is too high, the capacitor doesn&#39;t fully charge → reading is WRONG
+</code></pre></div>
+
+<p><strong>STM32 ADC rule:</strong> Source impedance must be &lt; 50kΩ for accurate readings at full speed.</p>
+<ul>
+<li><strong>Low-impedance source (voltage divider with 1kΩ resistors):</strong> ✓ Works directly</li>
+<li><strong>High-impedance source (100kΩ thermistor):</strong> ✗ Need a buffer op-amp (voltage follower) between sensor and ADC</li>
+<li><strong>Workaround:</strong> Increase sampling time in ADC configuration (STM32 lets you set 3 to 810.5 ADC clock cycles per sample). Longer time = more time for capacitor to charge = tolerates higher source impedance.</li>
+</ul>
+<hr />
+<h2 id="26-inl-and-dnl-nonlinearity">2.6 INL and DNL — Nonlinearity</h2>
+<p><strong>DNL (Differential Nonlinearity):</strong> Each step should be exactly 1 LSB wide. DNL tells you how much each step deviates. DNL = ±0.5 LSB means each step is between 0.5 and 1.5 LSB wide.</p>
+<p><strong>INL (Integral Nonlinearity):</strong> Over the full range, the transfer function should be a straight line. INL tells you the maximum deviation from ideal. INL = ±2 LSB means your readings might be off by 2 LSB from the &ldquo;true&rdquo; value.</p>
+<p><strong>Practical impact:</strong> A 12-bit ADC with ±3 LSB INL effectively has ~10-bit accuracy. The last 2 bits are meaningless.</p>
+<hr />
+<h2 id="27-stm32-adc-quick-reference">2.7 STM32 ADC Quick Reference</h2>
+<div class="highlight"><pre><span></span><code><span class="cm">/* Zephyr ADC configuration (devicetree overlay): */</span>
+<span class="o">&amp;</span><span class="n">adc1</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;okay&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="cp">#address-cells = &lt;1&gt;;</span>
+<span class="w">    </span><span class="cp">#size-cells = &lt;0&gt;;</span>
+
+<span class="w">    </span><span class="n">channel</span><span class="err">@</span><span class="mi">0</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">reg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">0</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">        </span><span class="n">zephyr</span><span class="p">,</span><span class="n">gain</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;ADC_GAIN_1&quot;</span><span class="p">;</span>
+<span class="w">        </span><span class="n">zephyr</span><span class="p">,</span><span class="n">reference</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;ADC_REF_INTERNAL&quot;</span><span class="p">;</span>
+<span class="w">        </span><span class="n">zephyr</span><span class="p">,</span><span class="n">acquisition</span><span class="o">-</span><span class="n">time</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="n">ADC_ACQ_TIME</span><span class="p">(</span><span class="n">ADC_ACQ_TIME_TICKS</span><span class="p">,</span><span class="w"> </span><span class="mi">480</span><span class="p">)</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">        </span><span class="n">zephyr</span><span class="p">,</span><span class="n">resolution</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">12</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="p">};</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p>STM32H7 ADC features:
+- <strong>DMA mode:</strong> DMA transfers ADC results to RAM without CPU intervention. Essential for continuous sampling.
+- <strong>Scan mode:</strong> Convert multiple channels in sequence automatically.
+- <strong>Injected channels:</strong> High-priority channels that interrupt ongoing scan (used for motor control).
+- <strong>Oversampling:</strong> Hardware 16× oversampling → 16-bit effective resolution from 12-bit ADC.</p>
+<hr />
+<h1 id="part-3-sampling-theory">PART 3 — SAMPLING THEORY</h1>
+<hr />
+<h2 id="31-nyquist-theorem-the-most-important-theory-youll-use">3.1 Nyquist Theorem — The Most Important Theory You&rsquo;ll Use</h2>
+<div class="highlight"><pre><span></span><code>    To accurately digitize a signal, you must sample at
+    LEAST 2× the highest frequency component in the signal.
+
+    f_sample ≥ 2 × f_max
+</code></pre></div>
+
+<p><strong>ELI15 — the dot-to-dot drawing:</strong></p>
+<p>Imagine drawing a sine wave using dots. If you place dots very close together (high sample rate), you can clearly see the wave shape. If you place dots far apart (low sample rate), you might connect the dots and see a completely different wave — or even a straight line.</p>
+<div class="highlight"><pre><span></span><code>    Original signal (10Hz sine):
+
+    ╱╲    ╱╲    ╱╲    ╱╲    ╱╲
+   ╱  ╲  ╱  ╲  ╱  ╲  ╱  ╲  ╱  ╲
+  ╱    ╲╱    ╲╱    ╲╱    ╲╱    ╲╱
+
+    Sampled at 30Hz (3× — well above Nyquist):
+    •   •   •   •   •   •   •   •   •
+    Clear wave shape visible when connecting dots ✓
+
+    Sampled at 12Hz (1.2× — barely above Nyquist):
+    •       •       •       •
+    Shape is ambiguous, edges are mushy
+
+    Sampled at 8Hz (0.8× — BELOW Nyquist):
+    •           •           •
+    Connecting these dots shows a DIFFERENT, SLOWER wave!
+    This is ALIASING — you see a ghost frequency that doesn&#39;t exist.
+</code></pre></div>
+
+<hr />
+<h2 id="32-aliasing-when-you-violate-nyquist">3.2 Aliasing — When You Violate Nyquist</h2>
+<p>When you sample below 2× the signal frequency, high-frequency content &ldquo;folds&rdquo; down into lower frequencies. The aliased frequency is:</p>
+<div class="highlight"><pre><span></span><code>    f_aliased = |f_signal - N × f_sample|
+
+    Where N is chosen to minimize f_aliased
+</code></pre></div>
+
+<h3 id="worked-example-the-wagon-wheel-effect">Worked Example: The Wagon Wheel Effect</h3>
+<p>A 150Hz signal sampled at 200Hz:</p>
+<div class="highlight"><pre><span></span><code>    f_aliased = |150 - 1 × 200| = 50Hz
+
+    You see a 50Hz signal that DOES NOT EXIST in the real world!
+</code></pre></div>
+
+<p>This is the same effect as a helicopter rotor appearing to spin backwards in video (frame rate &lt; 2× rotor frequency).</p>
+<div class="highlight"><pre><span></span><code>    Frequency domain view:
+
+    Real spectrum:                    Seen by ADC:
+
+    │                                 │
+    │       ╱╲                        │ ╱╲     ╱╲
+    │      ╱  ╲                       │╱  ╲   ╱  ╲
+    ├─────╱────╲──────────            ├────╲─╱────╲──
+    0   100  150  200  300   Hz       0  50 100 150   Hz
+           real signal                 alias! real
+                                      (ghost)
+
+    Nyquist frequency = f_sample/2 = 100Hz
+    Everything above 100Hz &quot;folds&quot; back below 100Hz
+</code></pre></div>
+
+<p><strong>This is IRREVERSIBLE.</strong> Once aliased, you cannot recover the original signal. No amount of digital filtering can undo it. You MUST filter BEFORE the ADC.</p>
+<hr />
+<h2 id="33-anti-aliasing-filter-must-come-before-the-adc">3.3 Anti-Aliasing Filter — MUST Come Before the ADC</h2>
+<p>An anti-aliasing filter is a low-pass filter placed between the analog signal and the ADC input. It removes all frequency content above f_sample/2.</p>
+<p><strong>The simplest: an RC low-pass filter:</strong></p>
+<div class="highlight"><pre><span></span><code>    Sensor ──┤ R ├──┬── ADC input
+                    │
+                   ┌┴┐
+                   │C│
+                   └┬┘
+                    │
+                   GND
+
+    f_cutoff = 1 / (2π × R × C)
+</code></pre></div>
+
+<h3 id="worked-example-anti-alias-for-1khz-sampling">Worked Example: Anti-alias for 1kHz sampling</h3>
+<div class="highlight"><pre><span></span><code>    f_sample = 1000Hz → Nyquist = 500Hz
+    Target cutoff: 500Hz (or slightly below for margin — say 450Hz)
+
+    Choose C = 100nF:
+    R = 1 / (2π × 450 × 100e-9) = 3.54kΩ → use 3.3kΩ
+
+    Actual cutoff = 1/(2π × 3300 × 100e-9) = 482Hz ✓
+</code></pre></div>
+
+<p>A single RC filter has -20dB/decade rolloff. At 1kHz (twice the cutoff), attenuation is only about -6dB (signal is halved). For stronger rejection, cascade two RC stages (-40dB/decade) or use a second-order active filter with an op-amp.</p>
+<hr />
+<h2 id="34-oversampling-trading-speed-for-resolution">3.4 Oversampling — Trading Speed for Resolution</h2>
+<p><strong>Key insight:</strong> If you sample much faster than Nyquist and average, you reduce noise and gain effective resolution.</p>
+<div class="highlight"><pre><span></span><code>    Extra bits = log₂(√(oversampling_ratio))
+
+    Oversample by 4× → √4 = 2 → log₂(2) = 1 extra bit
+    Oversample by 16× → √16 = 4 → log₂(4) = 2 extra bits
+    Oversample by 64× → √64 = 8 → log₂(8) = 3 extra bits
+</code></pre></div>
+
+<h3 id="worked-example_1">Worked Example</h3>
+<p>STM32 12-bit ADC, need 14-bit effective resolution:</p>
+<div class="highlight"><pre><span></span><code>    Extra bits needed = 2
+    Oversampling ratio = (2^2)² = 16×
+
+    Sample at 16× desired rate, average every 16 samples
+    If target output rate = 1kHz → sample at 16kHz
+</code></pre></div>
+
+<p>STM32H7 has this built in hardware (the oversampling engine in the ADC peripheral), so it&rsquo;s free in terms of CPU time.</p>
+<hr />
+<h2 id="35-quantization-noise">3.5 Quantization Noise</h2>
+<p>Even a perfect ADC has irreducible noise: the act of mapping a continuous voltage to a discrete integer loses information. The maximum error is ±0.5 LSB.</p>
+<div class="highlight"><pre><span></span><code>    Quantization noise RMS = LSB / √12
+
+    For 12-bit, 3.3V:
+    LSB = 3.3/4096 = 0.806mV
+    Noise RMS = 0.806mV / 3.464 = 0.233mV
+</code></pre></div>
+
+<p>This sets the fundamental noise floor. Your signal-to-noise ratio can never exceed:</p>
+<div class="highlight"><pre><span></span><code>    SNR_max = 6.02 × N + 1.76 dB
+
+    12-bit: SNR_max = 74dB
+    16-bit: SNR_max = 98dB
+</code></pre></div>
+
+<p>In practice, thermal noise and power supply noise push the actual SNR well below this.</p>
+<hr />
+<h2 id="36-your-imu-context-icm-42688-sampling">3.6 Your IMU Context: ICM-42688 Sampling</h2>
+<p>The ICM-42688 has:
+- Internal 16-bit ADC for accel and gyro
+- Configurable ODR: 1.6Hz to 32kHz
+- Internal digital low-pass filter (DLPF) — acts as anti-alias filter</p>
+<p>When you read it via SPI at 100Hz:</p>
+<div class="highlight"><pre><span></span><code>    IMU internal:   MEMS → [Anti-alias] → [16-bit ADC @ 32kHz] → [DLPF] → [FIFO]
+    You via SPI:    [FIFO] → SPI read at 100Hz → Jetson
+
+    This is DECIMATION (reading every Nth sample from a faster stream).
+    It&#39;s safe because the DLPF already removed frequencies above your 50Hz Nyquist.
+
+    Configure ODR=1kHz, DLPF bandwidth=100Hz → 
+    The IMU gives you 1kHz data, anti-aliased at 100Hz.
+    You read every 10th sample → 100Hz output, no aliasing. ✓
+</code></pre></div>
+
+<hr />
+<h1 id="part-4-digital-building-blocks">PART 4 — DIGITAL BUILDING BLOCKS</h1>
+<hr />
+<h2 id="41-multiplexer-mux">4.1 Multiplexer (MUX)</h2>
+<p>N inputs → 1 output, selected by address bits.</p>
+<div class="highlight"><pre><span></span><code>    Input 0 ──┐
+    Input 1 ──┤
+    Input 2 ──┤ MUX ──── Output
+    Input 3 ──┘
+              ↑  ↑
+             A1  A0  (address: 2 bits → select 1 of 4)
+</code></pre></div>
+
+<p><strong>Use cases:</strong>
+- Sharing one ADC across 8 analog sensors (read one at a time via address)
+- GPIO expansion: 4 buttons → 1 GPIO pin + 2 address pins
+- Audio routing: select one of N microphones</p>
+<p><strong>Common IC:</strong> CD4051 (8-channel analog MUX, I2C/GPIO-selectable)</p>
+<hr />
+<h2 id="42-serializer-and-deserializer">4.2 Serializer and Deserializer</h2>
+<p>These are the core building blocks inside EVERY serial interface (SPI, UART, I2C):</p>
+<div class="highlight"><pre><span></span><code>    SERIALIZER (parallel-to-serial):
+
+    8 parallel bits:  D7 D6 D5 D4 D3 D2 D1 D0
+                       │  │  │  │  │  │  │  │
+                       ▼  ▼  ▼  ▼  ▼  ▼  ▼  ▼
+                      ┌───────────────────────┐
+               CLK →  │    SHIFT REGISTER     │ → Serial out
+                      └───────────────────────┘
+
+    On each clock pulse, one bit shifts out on the serial line.
+    After 8 clocks, all bits have been transmitted.
+
+    This is EXACTLY what the SPI TX path does internally.
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>    DESERIALIZER (serial-to-parallel):
+
+    Serial in → ┌───────────────────────┐
+          CLK → │    SHIFT REGISTER     │
+                └───────────────────────┘
+                 │  │  │  │  │  │  │  │
+                 ▼  ▼  ▼  ▼  ▼  ▼  ▼  ▼
+                D7 D6 D5 D4 D3 D2 D1 D0
+
+    On each clock pulse, one bit shifts in from the serial line.
+    After 8 clocks, all 8 bits are available in parallel.
+
+    This is EXACTLY what the SPI RX path does internally.
+</code></pre></div>
+
+<hr />
+<h2 id="43-shift-register-the-core-building-block">4.3 Shift Register — The Core Building Block</h2>
+<p>The 74HC595 (serial-in, parallel-out) is the simplest example. You can chain them to get unlimited output pins from just 3 GPIO lines:</p>
+<div class="highlight"><pre><span></span><code>    MCU GPIO (Data) ──→ 74HC595 ──→ 74HC595 ──→ ... (daisy-chained)
+    MCU GPIO (Clock) ─→    ↑           ↑
+    MCU GPIO (Latch) ─→    ↑           ↑
+
+    8 outputs per chip. 3 chips = 24 outputs from 3 MCU pins.
+</code></pre></div>
+
+<p>The 74HC165 is the input equivalent (parallel-in, serial-out) — read 8 buttons from 3 pins.</p>
+<p><strong>This is exactly how SPI daisy-chain mode works:</strong> each slave device&rsquo;s shift register output feeds into the next slave&rsquo;s input.</p>
+<hr />
+<h2 id="44-integrated-circuits-ics-reading-datasheets">4.4 Integrated Circuits (ICs) — Reading Datasheets</h2>
+<p>An IC is any complex circuit packaged into a single component. When you encounter a new IC:</p>
+<p><strong>Read page 1 of the datasheet first.</strong> It tells you:
+1. <strong>What it does</strong> (op-amp, ADC, voltage regulator, IMU, etc.)
+2. <strong>Supply voltage range</strong> (e.g., 2.7V–5.5V → works on 3.3V ✓)
+3. <strong>Key parameter</strong> (bandwidth, resolution, Rds_on, etc.)
+4. <strong>Package</strong> (DIP, SOIC, QFP, BGA — determines how you solder/socket it)
+5. <strong>Pin count</strong> and <strong>pinout diagram</strong></p>
+<p><strong>Common packages:</strong></p>
+<div class="highlight"><pre><span></span><code>    DIP (Dual In-line Package) — through-hole, breadboard-friendly
+    ┌──────────────┐
+    │  1 ●         │ 8
+    │  2           │ 7
+    │  3    IC     │ 6
+    │  4           │ 5
+    └──────────────┘
+
+    SOIC (Small Outline IC) — SMD, same pinout as DIP but flat
+    QFP (Quad Flat Package) — pins on all 4 sides, used for MCUs (STM32)
+    BGA (Ball Grid Array) — solder balls on bottom, high pin count (Jetson Orin)
+</code></pre></div>
+
+<hr />
+<h1 id="gotcha-table">GOTCHA TABLE</h1>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely Cause</th>
+<th>How to Diagnose</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ADC reads 0 or 4095 always</td>
+<td>Input out of range, or pin not configured</td>
+<td>Measure actual voltage on ADC pin with multimeter</td>
+<td>Check voltage divider scaling, ADC channel config</td>
+</tr>
+<tr>
+<td>ADC readings are noisy (±10 LSB jitter)</td>
+<td>Poor decoupling on VDDA, no anti-alias filter, high-impedance source</td>
+<td>Scope VDDA for noise. Add 100nF+10µF. Check source impedance</td>
+<td>Decouple VDDA, add RC filter, add buffer op-amp</td>
+</tr>
+<tr>
+<td>ADC reads wrong voltage</td>
+<td>Wrong Vref assumption in software</td>
+<td>Measure actual Vref with multimeter. Check if using internal or external ref</td>
+<td>Use correct Vref in calculation</td>
+</tr>
+<tr>
+<td>See 50Hz in data (mains hum)</td>
+<td>Electromagnetic interference, poor grounding</td>
+<td>FFT the ADC data, look for 50/60Hz peak</td>
+<td>Shield sensor wires, improve grounding, add common-mode filter</td>
+</tr>
+<tr>
+<td>See unexpected low-frequency oscillation</td>
+<td>Aliasing — sampling below Nyquist</td>
+<td>Compare sample rate to anti-alias filter cutoff</td>
+<td>Add or fix anti-alias filter before ADC</td>
+</tr>
+<tr>
+<td>Op-amp output clips at ~1V below VCC</td>
+<td>Not a rail-to-rail op-amp</td>
+<td>Check datasheet for output swing specification</td>
+<td>Use rail-to-rail op-amp (MCP6002, OPA2340)</td>
+</tr>
+<tr>
+<td>Op-amp oscillates (squeals)</td>
+<td>Long feedback path, phase margin issue</td>
+<td>Scope the output — see oscillation at high freq</td>
+<td>Add 10-100pF cap across Rf. Shorter PCB traces.</td>
+</tr>
+<tr>
+<td>Buffer reads wrong voltage</td>
+<td>Op-amp offset voltage</td>
+<td>Measure with no input — should be 0V but shows a few mV</td>
+<td>Use precision op-amp with lower Vos</td>
+</tr>
+<tr>
+<td>Oversampled reading not improving</td>
+<td>Noise is not random (systematic offset)</td>
+<td>Averaging removes random noise, not offset</td>
+<td>Calibrate out the offset, check for systematic error source</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="quick-reference-card">QUICK REFERENCE CARD</h1>
+<div class="highlight"><pre><span></span><code>┌──────────────────────────── OP-AMP / ADC / SAMPLING CHEAT SHEET ─────────────────────────────┐
+│                                                                                               │
+│  OP-AMP GOLDEN RULES (with negative feedback):                                               │
+│    1. No current flows into V+ or V-                                                         │
+│    2. V+ = V-                                                                                │
+│                                                                                               │
+│  GAINS:   Inverting:      Av = -Rf/Rin                                                       │
+│           Non-inverting:  Av = 1 + Rf/Rin                                                    │
+│           Buffer:         Av = 1  (but transforms impedance!)                                │
+│                                                                                               │
+│  ADC:     Resolution:     LSB = Vref / 2^N                                                  │
+│           Voltage:        V = ADC_reading × Vref / 2^N                                      │
+│           STM32 12-bit:   LSB = 3.3V/4096 = 0.806mV                                        │
+│                                                                                               │
+│  NYQUIST:  f_sample ≥ 2 × f_max                                                             │
+│  ALIASED:  f_alias = |f_signal - N × f_sample|                                              │
+│                                                                                               │
+│  ANTI-ALIAS FILTER:  f_c = 1/(2πRC)  (place BEFORE ADC, always)                             │
+│  OVERSAMPLING BITS:  extra = log₂(√(OSR))   (4× = +1 bit, 16× = +2 bits)                  │
+│                                                                                               │
+│  SNR:     SNR_max = 6.02N + 1.76 dB   (theoretical best for N-bit ADC)                     │
+│  QUANT NOISE:  σ = LSB/√12                                                                  │
+│                                                                                               │
+│  COMMON OP-AMPS:  LM358 (cheap), MCP6002 (rail-to-rail), OPA2340 (precision)               │
+│  ADC TYPES:  SAR (fast, moderate res) | ΔΣ (slow, high res) | Flash (very fast, low res)    │
+│                                                                                               │
+└───────────────────────────────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

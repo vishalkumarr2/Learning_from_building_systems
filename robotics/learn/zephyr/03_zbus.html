@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZBus — Zephyr Message Bus - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="zbus-zephyr-message-bus">ZBus — Zephyr Message Bus</h1>
+<h2 id="what-problem-does-zbus-solve">What Problem Does ZBus Solve?</h2>
+<p>Without ZBus, sharing data between threads requires manual locking:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// WRONG — classic race condition</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">g_imu</span><span class="p">;</span>
+
+<span class="c1">// Thread A writes</span>
+<span class="n">g_imu</span><span class="p">.</span><span class="n">accel_x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">read_sensor</span><span class="p">();</span><span class="w">     </span><span class="c1">// what if Thread B reads mid-write?</span>
+
+<span class="c1">// Thread B reads</span>
+<span class="n">process</span><span class="p">(</span><span class="n">g_imu</span><span class="p">.</span><span class="n">accel_x</span><span class="p">);</span><span class="w">            </span><span class="c1">// may read half-written struct!</span>
+</code></pre></div>
+
+<p>With a mutex it&rsquo;s safe, but error-prone and verbose. ZBus wraps this safely with a clean API.</p>
+<hr />
+<h2 id="core-zbus-primitives">Core ZBus Primitives</h2>
+<table>
+<thead>
+<tr>
+<th>Primitive</th>
+<th>What it is</th>
+<th>Analogy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Channel</strong></td>
+<td>A typed, mutex-protected slot holding the latest value</td>
+<td>A mailbox slot</td>
+</tr>
+<tr>
+<td><strong>Publisher</strong></td>
+<td>Any thread that calls <code>zbus_chan_pub()</code></td>
+<td>Mail sender</td>
+</tr>
+<tr>
+<td><strong>Subscriber</strong></td>
+<td>Gets a queue entry when channel changes; reads at own pace</td>
+<td>Staff mailbox</td>
+</tr>
+<tr>
+<td><strong>Listener</strong></td>
+<td>Callback called synchronously in publisher&rsquo;s thread</td>
+<td>Receptionist</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="channel-definition">Channel Definition</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// sensors/channels.h — declare (usable from any file)</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/zbus/zbus.h&gt;</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">accel_x</span><span class="p">,</span><span class="w"> </span><span class="n">accel_y</span><span class="p">,</span><span class="w"> </span><span class="n">accel_z</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">gyro_x</span><span class="p">,</span><span class="w">  </span><span class="n">gyro_y</span><span class="p">,</span><span class="w">  </span><span class="n">gyro_z</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int64_t</span><span class="w"> </span><span class="n">timestamp_us</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">wheel_data</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">speed_fl</span><span class="p">,</span><span class="w"> </span><span class="n">speed_fr</span><span class="p">,</span><span class="w"> </span><span class="n">speed_rl</span><span class="p">,</span><span class="w"> </span><span class="n">speed_rr</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int64_t</span><span class="w"> </span><span class="n">timestamp_us</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="n">ZBUS_CHAN_DECLARE</span><span class="p">(</span><span class="n">imu_chan</span><span class="p">);</span>
+<span class="n">ZBUS_CHAN_DECLARE</span><span class="p">(</span><span class="n">wheel_chan</span><span class="p">);</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1">// sensors/channels.c — define (exactly once)</span>
+<span class="n">ZBUS_CHAN_DEFINE</span><span class="p">(</span>
+<span class="w">    </span><span class="n">imu_chan</span><span class="p">,</span><span class="w">              </span><span class="c1">// C symbol name</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="p">,</span><span class="w">       </span><span class="c1">// message type — must be plain data (no pointers)</span>
+<span class="w">    </span><span class="nb">NULL</span><span class="p">,</span><span class="w">                  </span><span class="c1">// validator: fn(chan, msg) returns bool — reject bad data</span>
+<span class="w">    </span><span class="nb">NULL</span><span class="p">,</span><span class="w">                  </span><span class="c1">// user_data pointer stored on channel</span>
+<span class="w">    </span><span class="n">ZBUS_OBSERVERS_EMPTY</span><span class="p">,</span><span class="w">  </span><span class="c1">// static observers (can add dynamically too)</span>
+<span class="w">    </span><span class="n">ZBUS_MSG_INIT</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w">       </span><span class="c1">// initial value</span>
+<span class="p">);</span>
+</code></pre></div>
+
+<p>What the macro expands to internally:
+- A mutex (or spinlock, configurable with <code>CONFIG_ZBUS_CHANNEL_ASSUME_LOCKED</code>)
+- A <code>void *</code> data pointer to channel&rsquo;s internal memory copy
+- Size of the message type
+- A linked list of observers</p>
+<hr />
+<h2 id="publish">Publish</h2>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">msg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">accel_x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1.23f</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k_ticks_to_us_near64</span><span class="p">(</span><span class="n">k_uptime_ticks</span><span class="p">()),</span>
+<span class="p">};</span>
+
+<span class="c1">// Publish — blocks for up to 1ms to acquire channel mutex</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">zbus_chan_pub</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">rc</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">-</span><span class="n">EAGAIN</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// mutex timeout — channel was held by someone else</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>What happens internally:</strong>
+1. Acquires channel mutex (blocks up to timeout)
+2. Runs validator (if set) — can reject bad message
+3. <code>memcpy</code> your struct into channel&rsquo;s internal buffer
+4. Notifies all observers (queues entries for subscribers, calls listener callbacks)
+5. Releases mutex</p>
+<p><strong>Key</strong>: channel holds only the <strong>latest value</strong>. Publish twice before subscriber reads → first value is overwritten. This is intentional for sensor data — you want fresh, not stale.</p>
+<hr />
+<h2 id="read-peek-at-latest-value-without-waiting">Read (peek at latest value without waiting)</h2>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">data</span><span class="p">;</span>
+
+<span class="c1">// Non-blocking read of latest value</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+
+<span class="c1">// Read with timeout (wait for mutex)</span>
+<span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span>
+</code></pre></div>
+
+<hr />
+<h2 id="subscriber-reads-at-its-own-pace">Subscriber — reads at its own pace</h2>
+<p>Subscriber gets a <strong>message queue entry</strong> when any subscribed channel is updated.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Define subscriber with queue depth 4</span>
+<span class="c1">// (if it&#39;s 4 slots deep and 5 publishes happen before it reads → oldest dropped)</span>
+<span class="n">ZBUS_SUBSCRIBER_DEFINE</span><span class="p">(</span><span class="n">imu_sub</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">);</span>
+
+<span class="c1">// Register observer on channel (priority 3)</span>
+<span class="n">ZBUS_CHAN_ADD_OBS</span><span class="p">(</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="n">imu_sub</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">);</span>
+
+<span class="c1">// Subscriber thread</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">sub_thread_fn</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">zbus_channel</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">;</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">data</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Block until any subscribed channel has new data</span>
+<span class="w">        </span><span class="n">zbus_sub_wait</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_sub</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">chan</span><span class="p">,</span><span class="w"> </span><span class="n">K_FOREVER</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// Which channel gave us the notification?</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">chan</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span>
+<span class="w">            </span><span class="n">process_imu</span><span class="p">(</span><span class="o">&amp;</span><span class="n">data</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="n">K_THREAD_DEFINE</span><span class="p">(</span><span class="n">sub_tid</span><span class="p">,</span><span class="w"> </span><span class="mi">1024</span><span class="p">,</span><span class="w"> </span><span class="n">sub_thread_fn</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">7</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+</code></pre></div>
+
+<p><strong>Use subscriber when</strong>: your processing might be slower than publish rate (it queues up), or you want to do work in your own thread.</p>
+<hr />
+<h2 id="listener-synchronous-callback">Listener — synchronous callback</h2>
+<p>Listener callback runs <strong>inside the publisher&rsquo;s thread context</strong>, synchronously.</p>
+<div class="highlight"><pre><span></span><code><span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">imu_log_cb</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">zbus_channel</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">data</span><span class="p">;</span>
+<span class="w">    </span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="n">chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// WARNING: this runs in the publisher&#39;s thread!</span>
+<span class="w">    </span><span class="c1">// Must be fast — blocking here blocks the publisher</span>
+<span class="w">    </span><span class="n">printk</span><span class="p">(</span><span class="s">&quot;IMU: ax=%.2f</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">.</span><span class="n">accel_x</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">ZBUS_LISTENER_DEFINE</span><span class="p">(</span><span class="n">imu_logger</span><span class="p">,</span><span class="w"> </span><span class="n">imu_log_cb</span><span class="p">);</span>
+<span class="n">ZBUS_CHAN_ADD_OBS</span><span class="p">(</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="n">imu_logger</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+</code></pre></div>
+
+<p><strong>Use listener when</strong>: you need zero-latency reaction AND you can guarantee the callback is fast (microseconds, not milliseconds).</p>
+<hr />
+<h2 id="subscriber-vs-listener-decision-guide">Subscriber vs Listener — Decision Guide</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Subscriber</th>
+<th>Listener</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Runs in</td>
+<td>Own thread</td>
+<td>Publisher&rsquo;s thread</td>
+</tr>
+<tr>
+<td>Latency</td>
+<td>Higher (queue + thread switch)</td>
+<td>Zero (synchronous)</td>
+</tr>
+<tr>
+<td>Can block</td>
+<td>Yes (won&rsquo;t block publisher)</td>
+<td>No (blocks publisher!)</td>
+</tr>
+<tr>
+<td>Can miss data</td>
+<td>Yes (queue overflow)</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Use for</td>
+<td>Processing, logging, slow operations</td>
+<td>Fast reactions (set a flag, write register)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="multiple-producers-to-same-channel">Multiple Producers to Same Channel</h2>
+<p>ZBus handles this naturally — mutex prevents concurrent writes:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Thread A: raw IMU from hardware</span>
+<span class="n">zbus_chan_pub</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">raw_imu</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span>
+
+<span class="c1">// Thread B: Kalman filter reads raw, publishes filtered</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">raw</span><span class="p">,</span><span class="w"> </span><span class="n">filtered</span><span class="p">;</span>
+<span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">raw</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span>
+<span class="n">kalman_update</span><span class="p">(</span><span class="o">&amp;</span><span class="n">raw</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">filtered</span><span class="p">);</span>
+<span class="n">zbus_chan_pub</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_filtered_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">filtered</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span>
+</code></pre></div>
+
+<hr />
+<h2 id="full-example-imu-packer">Full Example: IMU → Packer</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// === imu_thread.c ===</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">imu_thread_fn</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">i2c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">i2c1</span><span class="p">));</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">msg</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Read ICM-42688 over I2C</span>
+<span class="w">        </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">12</span><span class="p">];</span>
+<span class="w">        </span><span class="n">i2c_burst_read</span><span class="p">(</span><span class="n">i2c</span><span class="p">,</span><span class="w"> </span><span class="mh">0x68</span><span class="p">,</span><span class="w"> </span><span class="mh">0x1F</span><span class="w"> </span><span class="cm">/* ACCEL_XOUT_H */</span><span class="p">,</span><span class="w"> </span><span class="n">raw</span><span class="p">,</span><span class="w"> </span><span class="mi">12</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">accel_x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">2048.0f</span><span class="p">;</span><span class="w"> </span><span class="c1">// ±16g range</span>
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">accel_y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">3</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">2048.0f</span><span class="p">;</span>
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">accel_z</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">5</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">2048.0f</span><span class="p">;</span>
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">gyro_x</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">6</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">7</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">16.4f</span><span class="p">;</span><span class="w">   </span><span class="c1">// ±2000dps</span>
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">gyro_y</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">8</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">9</span><span class="p">])</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">16.4f</span><span class="p">;</span>
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">gyro_z</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">10</span><span class="p">]</span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">11</span><span class="p">])</span><span class="o">/</span><span class="w"> </span><span class="mf">16.4f</span><span class="p">;</span>
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k_ticks_to_us_near64</span><span class="p">(</span><span class="n">k_uptime_ticks</span><span class="p">());</span>
+
+<span class="w">        </span><span class="n">zbus_chan_pub</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+<span class="w">        </span><span class="n">k_msleep</span><span class="p">(</span><span class="mi">10</span><span class="p">);</span><span class="w">  </span><span class="c1">// 100Hz</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// === packer_thread.c ===</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">packer_thread_fn</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">imu</span><span class="p">;</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">wheel_data</span><span class="w"> </span><span class="n">wheel</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Grab latest values — non-blocking, use whatever is current</span>
+<span class="w">        </span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w">   </span><span class="o">&amp;</span><span class="n">imu</span><span class="p">,</span><span class="w">   </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+<span class="w">        </span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">wheel_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">wheel</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// Encode and swap buffer (see 05_spi_slave_dma.md)</span>
+<span class="w">        </span><span class="n">pack_and_swap</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">wheel</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">k_msleep</span><span class="p">(</span><span class="mi">10</span><span class="p">);</span><span class="w">  </span><span class="c1">// 100Hz</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="enabling-zbus-in-prjconf">Enabling ZBus in prj.conf</h2>
+<div class="highlight"><pre><span></span><code>CONFIG_ZBUS=y
+CONFIG_ZBUS_CHANNEL_NAME=y<span class="w">   </span><span class="c1"># optional: name channels for debug</span>
+CONFIG_ZBUS_RUNTIME_OBSERVERS=y<span class="w">  </span><span class="c1"># allow ZBUS_CHAN_ADD_OBS at runtime</span>
+</code></pre></div>
+
+<hr />
+<h2 id="common-mistakes">Common Mistakes</h2>
+<table>
+<thead>
+<tr>
+<th>Mistake</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Listener does slow work (flash write, I2C)</td>
+<td>Use subscriber instead</td>
+</tr>
+<tr>
+<td><code>K_NO_WAIT</code> on pub — channel always busy</td>
+<td>Check if something holds mutex too long</td>
+</tr>
+<tr>
+<td>Reading stale data and assuming it&rsquo;s fresh</td>
+<td>Check <code>timestamp_us</code> field</td>
+</tr>
+<tr>
+<td>Pointer in message struct</td>
+<td>ZBus copies by value — pointers become dangling</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

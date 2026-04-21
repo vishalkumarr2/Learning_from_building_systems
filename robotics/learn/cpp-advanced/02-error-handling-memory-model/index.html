@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Week 2: Error Handling Without Exceptions &amp; The C++ Memory Model - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-indigo-600 hover:text-indigo-800 mb-4 inline-block">&larr; Back to C++ Advanced</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="week-2-error-handling-without-exceptions-the-c-memory-model">Week 2: Error Handling Without Exceptions &amp; The C++ Memory Model</h1>
+<hr />
+<h2 id="part-a-why-exceptions-are-banned-in-rtsafety-critical-code">Part A — Why Exceptions Are Banned in RT/Safety-Critical Code</h2>
+<p>If you&rsquo;ve written C++ in application-land, <code>try/catch</code> feels natural. In real-time and safety-critical systems (automotive, robotics firmware, avionics), exceptions are almost universally banned. Here&rsquo;s why — and what you use instead.</p>
+<h3 id="1-stack-unwinding-is-non-deterministic">1. Stack Unwinding Is Non-Deterministic</h3>
+<p>When an exception is thrown, the runtime must:
+1. Walk the call stack frame-by-frame
+2. Find a matching <code>catch</code> handler (potentially many frames up)
+3. Invoke destructors for every automatic object in each unwound frame
+4. De-allocate stack frames</p>
+<p>The cost depends on <strong>how deep the stack is at throw-time</strong> — something you cannot bound at compile time.</p>
+<div class="highlight"><pre><span></span><code>throw site                        catch site
+   |                                 |
+   v                                 v
+ [ frame 7 ] --dtor--&gt; [ frame 6 ] --dtor--&gt; ... --dtor--&gt; [ frame 1 ]
+              ~Widget()              ~Buffer()               ~Lock()
+</code></pre></div>
+
+<p>In a hard-RT loop running at 1 kHz, you have a 1 ms budget. Stack unwinding through 5+ frames with destructors can easily blow that. Worse, the cost <strong>varies per invocation</strong> — it&rsquo;s data-dependent, not just code-dependent.</p>
+<h3 id="2-rtti-overhead">2. RTTI Overhead</h3>
+<p>Exception matching uses Run-Time Type Information. The compiler emits type metadata for every class hierarchy involved in <code>catch</code> clauses. This:
+- Bloats binary size (matters on MCUs with 256 KB flash)
+- Adds indirection through type-info tables at catch time
+- Is incompatible with <code>-fno-rtti</code> (which many embedded toolchains require)</p>
+<h3 id="3-misra-c-and-autosar-prohibition">3. MISRA C++ and AUTOSAR Prohibition</h3>
+<p>MISRA C++:2023 Rule 18.3.1: <em>&ldquo;An exception shall not be thrown.&rdquo;</em> AUTOSAR AP R20-11 similarly prohibits exceptions in adaptive-platform code. These aren&rsquo;t style preferences — they&rsquo;re certification requirements. If your code needs ISO 26262 ASIL-D or DO-178C Level A, exceptions are a non-starter.</p>
+<h3 id="4-hidden-control-flow">4. Hidden Control Flow</h3>
+<p>Exceptions create invisible <code>goto</code> paths. Any function call can jump to an arbitrary catch handler. In safety-critical code, <strong>every control path must be analysed</strong> — exceptions make that combinatorially harder.</p>
+<hr />
+<h2 id="part-b-error-handling-alternatives">Part B — Error Handling Alternatives</h2>
+<h3 id="error-codes-c-style">Error Codes (C-style)</h3>
+<p>The simplest pattern. Every function returns a status:</p>
+<div class="highlight"><pre><span></span><code><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">ErrCode</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">Ok</span><span class="p">,</span><span class="w"> </span><span class="n">Timeout</span><span class="p">,</span><span class="w"> </span><span class="n">BadParam</span><span class="p">,</span><span class="w"> </span><span class="n">HwFault</span><span class="w"> </span><span class="p">};</span>
+
+<span class="n">ErrCode</span><span class="w"> </span><span class="nf">read_sensor</span><span class="p">(</span><span class="kt">float</span><span class="o">*</span><span class="w"> </span><span class="n">out</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">hw_ready</span><span class="p">())</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">ErrCode</span><span class="o">::</span><span class="n">HwFault</span><span class="p">;</span>
+<span class="w">    </span><span class="o">*</span><span class="n">out</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">hw_read</span><span class="p">();</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">ErrCode</span><span class="o">::</span><span class="n">Ok</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Pros:</strong> Zero overhead, fully deterministic, trivially analysable.
+<strong>Cons:</strong> Caller can silently ignore the return. The &ldquo;real&rdquo; return must go through an out-parameter. Composing multiple fallible calls is verbose.</p>
+<h3 id="stdoptional-value-or-nothing">std::optional — &ldquo;Value or Nothing&rdquo;</h3>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">optional</span><span class="o">&lt;</span><span class="kt">float</span><span class="o">&gt;</span><span class="w"> </span><span class="n">read_sensor</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">hw_ready</span><span class="p">())</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">nullopt</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">hw_read</span><span class="p">();</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Good when the <strong>only failure mode is &ldquo;absent.&rdquo;</strong> No room to say <em>why</em> it failed.</p>
+<h3 id="stdvariant-as-sum-type-value-or-error">std::variant as Sum Type — &ldquo;Value or Error&rdquo;</h3>
+<div class="highlight"><pre><span></span><code><span class="k">using</span><span class="w"> </span><span class="n">SensorResult</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">variant</span><span class="o">&lt;</span><span class="kt">float</span><span class="p">,</span><span class="w"> </span><span class="n">ErrCode</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="n">SensorResult</span><span class="w"> </span><span class="nf">read_sensor</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">hw_ready</span><span class="p">())</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">ErrCode</span><span class="o">::</span><span class="n">HwFault</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">hw_read</span><span class="p">();</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Now we can carry <strong>which</strong> error. But <code>std::visit</code> is clunky.</p>
+<h3 id="expected-railway-oriented-programming">Expected<T, E> — Railway-Oriented Programming</h3>
+<p>C++23 gives us <code>std::expected&lt;T, E&gt;</code>. Before that, use <code>tl::expected</code> or roll your own:</p>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">expected</span><span class="o">&lt;</span><span class="kt">float</span><span class="p">,</span><span class="w"> </span><span class="n">ErrCode</span><span class="o">&gt;</span><span class="w"> </span><span class="n">read_sensor</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">hw_ready</span><span class="p">())</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">unexpected</span><span class="p">(</span><span class="n">ErrCode</span><span class="o">::</span><span class="n">HwFault</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">hw_read</span><span class="p">();</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The killer feature is <code>and_then</code> / <code>transform</code> chaining (railway-oriented programming):</p>
+<div class="highlight"><pre><span></span><code> read_sensor() --[ok]--&gt; calibrate() --[ok]--&gt; filter() --[ok]--&gt; publish()
+       |                     |                    |
+       +---[err]-------------+------[err]---------+-------&gt; handle error once
+</code></pre></div>
+
+<p>Each step only runs if the previous succeeded. Errors skip forward like a railway switch. <strong>One error-handling site at the end</strong>, not interleaved checks:</p>
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">read_sensor</span><span class="p">()</span>
+<span class="w">    </span><span class="p">.</span><span class="n">and_then</span><span class="p">(</span><span class="n">calibrate</span><span class="p">)</span>
+<span class="w">    </span><span class="p">.</span><span class="n">and_then</span><span class="p">(</span><span class="n">filter</span><span class="p">)</span>
+<span class="w">    </span><span class="p">.</span><span class="n">transform</span><span class="p">(</span><span class="n">to_message</span><span class="p">);</span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">result</span><span class="p">)</span><span class="w"> </span><span class="n">log_error</span><span class="p">(</span><span class="n">result</span><span class="p">.</span><span class="n">error</span><span class="p">());</span>
+</code></pre></div>
+
+<p>This is the dominant pattern in modern safety-critical C++: deterministic, zero-overhead, composable, and every error path is explicit.</p>
+<hr />
+<h2 id="part-c-the-c-memory-model-from-first-principles">Part C — The C++ Memory Model from First Principles</h2>
+<h3 id="what-is-a-memory-location">What Is a &ldquo;Memory Location&rdquo;?</h3>
+<p>The C++ standard (§6.7.1) defines a memory location as:
+- A scalar object (int, float, pointer), OR
+- A maximal sequence of adjacent bit-fields of non-zero width</p>
+<p>Two threads accessing <strong>the same memory location</strong> where at least one is a write, and they&rsquo;re not ordered by synchronization → <strong>data race → undefined behavior.</strong></p>
+<p>This is the entire foundation. Everything below exists to establish ordering.</p>
+<h3 id="sequenced-before-single-thread">Sequenced-Before (Single Thread)</h3>
+<p>Within one thread, statements execute in order:</p>
+<div class="highlight"><pre><span></span><code>Thread 1:
+  a = 1;          // A
+  b = 2;          // B
+
+  A sequenced-before B  (always)
+</code></pre></div>
+
+<h3 id="happens-before-cross-thread">Happens-Before (Cross Thread)</h3>
+<p>The hard part. Two operations in different threads have <strong>no inherent ordering</strong> unless you create one:</p>
+<div class="highlight"><pre><span></span><code>Thread 1              Thread 2
+---------             ---------
+x = 42;               ???
+flag = true;           if (flag)
+                         use(x);   // is x guaranteed to be 42?
+</code></pre></div>
+
+<p>With plain (non-atomic) variables: <strong>NO.</strong> This is a data race. The compiler and CPU can both reorder.</p>
+<h3 id="why-reordering-happens-store-buffers">Why Reordering Happens: Store Buffers</h3>
+<p>Modern CPUs don&rsquo;t write directly to cache. They write to a <strong>store buffer</strong> first:</p>
+<div class="highlight"><pre><span></span><code>  CPU Core 0                        CPU Core 1
+ +-----------+                     +-----------+
+ | registers |                     | registers |
+ +-----+-----+                     +-----+-----+
+       |                                 |
+ +-----v-----+                     +-----v-----+
+ | STORE BUF |                     | STORE BUF |
+ | x=42      |  (not yet visible)  |           |
+ | flag=true  |                     |           |
+ +-----+-----+                     +-----+-----+
+       |                                 |
+ +=====v=================================v=====+
+ |              SHARED CACHE (L3)              |
+ |  x = 0 (stale!)    flag = false (stale!)   |
+ +==============================================+
+</code></pre></div>
+
+<p>Core 0 wrote <code>x=42</code> then <code>flag=true</code> into its store buffer. Core 1 reads from shared cache and might see <code>flag=true</code> (drained) but <code>x=0</code> (not yet drained). <strong>The stores can become visible out of order.</strong></p>
+<h3 id="mesi-cache-coherence-protocol">MESI Cache Coherence Protocol</h3>
+<p>Caches maintain coherence via MESI states for each cache line:</p>
+<div class="highlight"><pre><span></span><code> +----------+----------------------------------------------------+
+ | State    | Meaning                                            |
+ +----------+----------------------------------------------------+
+ | Modified | I have the only copy, it&#39;s dirty (newer than RAM)  |
+ | Exclusive| I have the only copy, it&#39;s clean                   |
+ | Shared   | Multiple caches have clean copies                  |
+ | Invalid  | My copy is stale, must re-fetch                    |
+ +----------+----------------------------------------------------+
+
+  Core 0 writes x:
+    Core 0: x line -&gt; Modified
+    Core 1: x line -&gt; Invalid  (snooped invalidation)
+
+  Core 1 reads x:
+    Core 1 sees Invalid -&gt; requests from Core 0
+    Core 0 flushes Modified line -&gt; both go to Shared
+</code></pre></div>
+
+<p>MESI guarantees <strong>eventual</strong> coherence per cache line. But &ldquo;eventual&rdquo; isn&rsquo;t ordered. The store buffer sits <em>between</em> the core and the cache — that&rsquo;s where reordering sneaks in.</p>
+<h3 id="happens-before-graph">Happens-Before Graph</h3>
+<div class="highlight"><pre><span></span><code>  Thread 1                  Thread 2
+  --------                  --------
+  x.store(42, release)  
+         \                
+          \  synchronizes-with
+           \              
+            +---&gt; flag.load(acquire)
+                  if true:
+                    x.load(relaxed) == 42  ✓ guaranteed
+</code></pre></div>
+
+<p>The <code>release</code> store <strong>publishes</strong> everything before it. The <code>acquire</code> load <strong>subscribes</strong> to everything the release published. Together they form a <strong>happens-before</strong> edge.</p>
+<hr />
+<h2 id="part-d-acquire-release-semantics">Part D — Acquire-Release Semantics</h2>
+<h3 id="what-the-cpu-actually-does">What the CPU Actually Does</h3>
+<p><code>memory_order_release</code> on a store = <strong>&ldquo;drain my store buffer before (or as part of) making this store visible.&rdquo;</strong></p>
+<p><code>memory_order_acquire</code> on a load = <strong>&ldquo;don&rsquo;t let any of my subsequent reads/writes execute before this load completes.&rdquo;</strong></p>
+<p>On x86, stores already have release semantics (Total Store Order). On ARM/RISC-V, the compiler emits actual fence instructions (<code>dmb ish</code> on ARM).</p>
+<h3 id="store-buffer-drain-diagram">Store Buffer Drain Diagram</h3>
+<div class="highlight"><pre><span></span><code> BEFORE release fence:
+ +-------------+
+ | Store Buffer|     Cache
+ | x = 42      |    [stale]
+ | y = 7       |    [stale]
+ +-------------+
+
+ release store of flag=true triggers drain:
+
+ +-------------+
+ | Store Buffer|     Cache
+ | (empty)     |    x = 42  ✓
+ |             |    y = 7   ✓
+ |             |    flag=true ✓
+ +-------------+
+
+ Other cores doing acquire-load of flag will now
+ also see x=42 and y=7  (happens-before guarantee)
+</code></pre></div>
+
+<h3 id="the-canonical-pattern">The Canonical Pattern</h3>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">atomic</span><span class="o">&lt;</span><span class="kt">bool</span><span class="o">&gt;</span><span class="w"> </span><span class="n">ready</span><span class="p">{</span><span class="nb">false</span><span class="p">};</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">                      </span><span class="c1">// non-atomic!</span>
+
+<span class="c1">// Producer (Thread 1)</span>
+<span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">42</span><span class="p">;</span><span class="w">                         </span><span class="c1">// ordinary write</span>
+<span class="n">ready</span><span class="p">.</span><span class="n">store</span><span class="p">(</span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">memory_order_release</span><span class="p">);</span><span class="w">  </span><span class="c1">// publish</span>
+
+<span class="c1">// Consumer (Thread 2)</span>
+<span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">ready</span><span class="p">.</span><span class="n">load</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">memory_order_acquire</span><span class="p">))</span><span class="w">  </span><span class="c1">// subscribe</span>
+<span class="w">    </span><span class="p">;</span><span class="w">  </span><span class="c1">// spin</span>
+<span class="n">assert</span><span class="p">(</span><span class="n">data</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">42</span><span class="p">);</span><span class="w">  </span><span class="c1">// GUARANTEED — happens-before established</span>
+</code></pre></div>
+
+<p>This is safe <strong>without making <code>data</code> atomic</strong>. The acquire-release pair on <code>ready</code> orders everything before the release against everything after the acquire.</p>
+<hr />
+<h2 id="part-e-compare-and-swap-cas">Part E — Compare-And-Swap (CAS)</h2>
+<h3 id="the-cas-loop-pattern">The CAS Loop Pattern</h3>
+<p>CAS is the fundamental lock-free building block. It atomically does:</p>
+<blockquote>
+<p>&ldquo;If the value at address X is what I expect, replace it with my new value. Otherwise, tell me what it actually is.&rdquo;</p>
+</blockquote>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">atomic</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">counter</span><span class="p">{</span><span class="mi">0</span><span class="p">};</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">increment</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">expected</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">counter</span><span class="p">.</span><span class="n">load</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">memory_order_relaxed</span><span class="p">);</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">counter</span><span class="p">.</span><span class="n">compare_exchange_weak</span><span class="p">(</span>
+<span class="w">               </span><span class="n">expected</span><span class="p">,</span><span class="w">              </span><span class="c1">// read &amp; updated on failure</span>
+<span class="w">               </span><span class="n">expected</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w">          </span><span class="c1">// desired</span>
+<span class="w">               </span><span class="n">std</span><span class="o">::</span><span class="n">memory_order_acq_rel</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// expected was updated to the current value — retry</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Why <code>weak</code>?</strong> On ARM/RISC-V, CAS is implemented as LL/SC (load-linked/store-conditional). <code>weak</code> allows spurious failure (the LL/SC window expired), which is fine inside a loop. <code>strong</code> adds a retry internally — wasteful in a CAS loop.</p>
+<h3 id="the-aba-problem">The ABA Problem</h3>
+<div class="highlight"><pre><span></span><code> Thread 1:                    Thread 2:
+ read A (value = ptr_X)       
+                              pop X
+                              push Y
+                              push X back  (same address!)
+ CAS(expected=ptr_X,          
+     desired=ptr_Z)           
+ =&gt; SUCCEEDS!  (X is back)   
+ =&gt; But the stack changed underneath!
+</code></pre></div>
+
+<p>CAS only compares <strong>the value</strong>, not the history. If a value goes A→B→A, CAS thinks nothing changed. Solutions:
+- <strong>Tagged pointers:</strong> Pack a version counter into the pointer (use upper bits on 64-bit)
+- <strong>Hazard pointers:</strong> Protect nodes from reclamation while in use
+- <strong>Epoch-based reclamation:</strong> Defer frees until safe</p>
+<hr />
+<h2 id="part-f-lock-free-spsc-queue">Part F — Lock-Free SPSC Queue</h2>
+<h3 id="ring-buffer-layout">Ring Buffer Layout</h3>
+<p>A Single-Producer Single-Consumer queue is the simplest useful lock-free structure. One thread writes, one reads — no CAS needed, just acquire-release on the indices.</p>
+<div class="highlight"><pre><span></span><code>  Buffer (capacity = 8, only 7 usable to distinguish full from empty):
+
+  Index:   0   1   2   3   4   5   6   7
+         +---+---+---+---+---+---+---+---+
+  Data:  |   | D | E | F |   |   |   |   |
+         +---+---+---+---+---+---+---+---+
+               ^           ^
+               |           |
+             head=1      tail=4
+             (consumer)  (producer)
+
+  Readable slots: [head, tail)  = {1, 2, 3} → D, E, F
+  Writable slots: [tail, head) with wrap = {4, 5, 6, 7, 0}
+
+  Full when:  (tail + 1) % cap == head
+  Empty when: tail == head
+</code></pre></div>
+
+<h3 id="why-it-works-without-cas">Why It Works Without CAS</h3>
+<ul>
+<li><strong>Producer only writes <code>tail</code></strong> (after writing data into <code>buf[tail]</code>)</li>
+<li><strong>Consumer only writes <code>head</code></strong> (after reading data from <code>buf[head]</code>)</li>
+<li>Each index is <strong>written by exactly one thread</strong> → no contention</li>
+</ul>
+<p>The ordering contract:</p>
+<div class="highlight"><pre><span></span><code> Producer:                             Consumer:
+ ---------                             ---------
+ buf[tail] = item;     // ordinary     auto item = buf[head]; // ordinary
+ tail.store(                           head.store(
+   next_tail,                            next_head,
+   memory_order_release);  // publish    memory_order_release);  // publish
+
+ // reads head with acquire            // reads tail with acquire
+ // to check &quot;is there space?&quot;         // to check &quot;is there data?&quot;
+</code></pre></div>
+
+<p><strong>Correctness argument:</strong>
+1. Producer stores data, then release-stores <code>tail</code>. Consumer acquire-loads <code>tail</code>, then reads data. The acquire-release pair guarantees the consumer sees the data.
+2. Consumer reads data, then release-stores <code>head</code>. Producer acquire-loads <code>head</code>, then writes new data to the freed slot. The acquire-release pair guarantees the producer doesn&rsquo;t overwrite data the consumer hasn&rsquo;t read yet.
+3. No two threads write the same index → no CAS, no ABA.</p>
+<h3 id="happens-before-graph-for-one-pushpop-cycle">Happens-Before Graph for One Push/Pop Cycle</h3>
+<div class="highlight"><pre><span></span><code>  Producer Thread                Consumer Thread
+  ---------------                ---------------
+  buf[1] = &#39;D&#39;        (A)
+        |
+        | seq-before
+        v
+  tail.store(2, rel)  (B) ----synchronizes-with----&gt; tail.load(acq) (C)
+                                                           |
+                                                           | seq-before
+                                                           v
+                                                     read buf[1]   (D)
+
+  A happens-before B  (sequenced-before)
+  B happens-before C  (synchronizes-with: release/acquire)
+  C happens-before D  (sequenced-before)
+
+  Therefore: A happens-before D  ✓  (data is visible)
+</code></pre></div>
+
+<h3 id="sizing-and-cache-considerations">Sizing and Cache Considerations</h3>
+<ul>
+<li><strong>Power-of-2 capacity</strong> — replace modulo with bitmask: <code>idx &amp; (cap - 1)</code></li>
+<li><strong>Pad head and tail to separate cache lines</strong> — prevents false sharing:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">alignas</span><span class="p">(</span><span class="mi">64</span><span class="p">)</span><span class="w"> </span><span class="n">SPSCQueue</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">alignas</span><span class="p">(</span><span class="mi">64</span><span class="p">)</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">atomic</span><span class="o">&lt;</span><span class="kt">size_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">head</span><span class="p">{</span><span class="mi">0</span><span class="p">};</span><span class="w">  </span><span class="c1">// consumer cache line</span>
+<span class="w">    </span><span class="k">alignas</span><span class="p">(</span><span class="mi">64</span><span class="p">)</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">atomic</span><span class="o">&lt;</span><span class="kt">size_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">tail</span><span class="p">{</span><span class="mi">0</span><span class="p">};</span><span class="w">  </span><span class="c1">// producer cache line</span>
+<span class="w">    </span><span class="k">alignas</span><span class="p">(</span><span class="mi">64</span><span class="p">)</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="n">buf</span><span class="p">[</span><span class="n">N</span><span class="p">];</span><span class="w">                      </span><span class="c1">// data cache lines</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p>Without the padding, <code>head</code> and <code>tail</code> sit on the same cache line. Every write by the producer invalidates the consumer&rsquo;s cache line (and vice versa) — destroying performance despite being logically contention-free.</p>
+<hr />
+<h2 id="summary-table">Summary Table</h2>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>Key Insight</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No exceptions in RT</td>
+<td>Non-deterministic timing, RTTI bloat, MISRA ban</td>
+</tr>
+<tr>
+<td>Expected&lt;T,E&gt;</td>
+<td>Deterministic, composable, zero-overhead error handling</td>
+</tr>
+<tr>
+<td>Memory location</td>
+<td>C++ unit of data-race analysis</td>
+</tr>
+<tr>
+<td>Store buffer</td>
+<td>Why writes become visible out of order</td>
+</tr>
+<tr>
+<td>MESI</td>
+<td>Cache-line level coherence, not ordering</td>
+</tr>
+<tr>
+<td>Release</td>
+<td>&ldquo;Drain my store buffer, publish everything before me&rdquo;</td>
+</tr>
+<tr>
+<td>Acquire</td>
+<td>&ldquo;Don&rsquo;t move anything past me until I complete&rdquo;</td>
+</tr>
+<tr>
+<td>CAS</td>
+<td>Atomic read-modify-write; ABA is the trap</td>
+</tr>
+<tr>
+<td>SPSC queue</td>
+<td>acquire-release on indices, no CAS needed</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="exercises-in-exercises-directory">Exercises (in <code>exercises/</code> directory)</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Topic</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ex01_expected.cpp</code></td>
+<td>Implement <code>Expected&lt;T,E&gt;</code> with <code>and_then</code> chaining</td>
+</tr>
+<tr>
+<td><code>ex02_error_pipeline.cpp</code></td>
+<td>Build a 4-stage processing pipeline using Expected</td>
+</tr>
+<tr>
+<td><code>ex03_variant_visitor.cpp</code></td>
+<td>Error handling with <code>std::variant</code> and <code>std::visit</code></td>
+</tr>
+<tr>
+<td><code>ex04_store_buffer_demo.cpp</code></td>
+<td>Demonstrate store-buffer reordering (run under TSan)</td>
+</tr>
+<tr>
+<td><code>ex05_acquire_release.cpp</code></td>
+<td>Publish/subscribe pattern with acquire-release</td>
+</tr>
+<tr>
+<td><code>ex06_cas_counter.cpp</code></td>
+<td>Lock-free counter using CAS loop</td>
+</tr>
+<tr>
+<td><code>ex07_spsc_queue.cpp</code></td>
+<td>Implement and test a lock-free SPSC ring buffer</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

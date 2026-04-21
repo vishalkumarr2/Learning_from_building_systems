@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Week 5: Production Build Systems, Testing &amp; Tooling - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-indigo-600 hover:text-indigo-800 mb-4 inline-block">&larr; Back to C++ Advanced</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="week-5-production-build-systems-testing-tooling">Week 5: Production Build Systems, Testing &amp; Tooling</h1>
+<h2 id="1-modern-cmake-philosophy-targets-not-variables">1. Modern CMake Philosophy: Targets, Not Variables</h2>
+<p>The single most important shift in modern CMake (3.0+) is thinking in <strong>targets</strong> instead of
+global variables. Legacy CMake used <code>include_directories()</code>, <code>add_definitions()</code>, and
+<code>link_libraries()</code> — all of which pollute the global scope. Modern CMake attaches properties
+to targets, and those properties propagate through the dependency graph.</p>
+<h3 id="private-public-interface">PRIVATE / PUBLIC / INTERFACE</h3>
+<p>These keywords control <strong>transitive propagation</strong> of compile flags, include paths, and
+link dependencies:</p>
+<table>
+<thead>
+<tr>
+<th>Keyword</th>
+<th style="text-align: center;">Used by target itself?</th>
+<th style="text-align: center;">Propagated to dependents?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PRIVATE</td>
+<td style="text-align: center;">Yes</td>
+<td style="text-align: center;">No</td>
+</tr>
+<tr>
+<td>PUBLIC</td>
+<td style="text-align: center;">Yes</td>
+<td style="text-align: center;">Yes</td>
+</tr>
+<tr>
+<td>INTERFACE</td>
+<td style="text-align: center;">No</td>
+<td style="text-align: center;">Yes</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="c"># rt_core is a library. Its headers live in include/</span>
+<span class="nb">add_library</span><span class="p">(</span><span class="s">rt_core</span><span class="w"> </span><span class="s">src/cyclic_executive.cpp</span><span class="p">)</span>
+
+<span class="c"># PUBLIC: dependents also need these headers (they #include them)</span>
+<span class="nb">target_include_directories</span><span class="p">(</span><span class="s">rt_core</span><span class="w"> </span><span class="s">PUBLIC</span>
+<span class="w">    </span><span class="o">$&lt;</span><span class="nv">BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include</span><span class="o">&gt;</span>
+<span class="w">    </span><span class="o">$&lt;</span><span class="nv">INSTALL_INTERFACE:include</span><span class="o">&gt;</span><span class="p">)</span>
+
+<span class="c"># PRIVATE: only rt_core itself needs pthreads at link time</span>
+<span class="nb">target_link_libraries</span><span class="p">(</span><span class="s">rt_core</span><span class="w"> </span><span class="s">PRIVATE</span><span class="w"> </span><span class="s">Threads::Threads</span><span class="p">)</span>
+
+<span class="c"># INTERFACE: rt_core is header-only for template parts — consumers</span>
+<span class="c"># need C++20 but rt_core.cpp doesn&#39;t use C++20 features itself</span>
+<span class="nb">target_compile_features</span><span class="p">(</span><span class="s">rt_core</span><span class="w"> </span><span class="s">INTERFACE</span><span class="w"> </span><span class="s">cxx_std_20</span><span class="p">)</span>
+</code></pre></div>
+
+<p>The generator expressions <code>$&lt;BUILD_INTERFACE:...&gt;</code> and <code>$&lt;INSTALL_INTERFACE:...&gt;</code> let the
+same target work both when building in-tree and after <code>make install</code>.</p>
+<h3 id="why-this-matters-for-embeddedsafety-critical">Why This Matters for Embedded/Safety-Critical</h3>
+<p>In an OKS-style project with <code>rt_core</code>, <code>navigation</code>, <code>serial_datalink</code>, etc., each library
+declares its own requirements. When you <code>target_link_libraries(navigation PUBLIC rt_core)</code>,
+CMake automatically propagates rt_core&rsquo;s PUBLIC include paths and compile flags to navigation
+and anything that depends on navigation. No manual tracking.</p>
+<hr />
+<h2 id="2-cmakepresetsjson-reproducible-configurations">2. CMakePresets.json — Reproducible Configurations</h2>
+<p>CMakePresets.json (CMake 3.19+) replaces the old <code>cmake -DCMAKE_BUILD_TYPE=Debug</code> dance.
+It defines named configurations that anyone can use:</p>
+<div class="highlight"><pre><span></span><code>cmake --preset debug        # Debug build
+cmake --preset asan         # AddressSanitizer
+cmake --preset tsan         # ThreadSanitizer
+cmake --build --preset debug
+</code></pre></div>
+
+<p>Key preset types:
+- <strong>configurePresets</strong>: set generator, build dir, cache variables, environment
+- <strong>buildPresets</strong>: set build parallelism, targets
+- <strong>testPresets</strong>: set test filters, timeout, output format</p>
+<p>A typical safety-critical project has at minimum:</p>
+<table>
+<thead>
+<tr>
+<th>Preset</th>
+<th>Purpose</th>
+<th>Key Flags</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>debug</td>
+<td>Development</td>
+<td><code>-O0 -g -DDEBUG</code></td>
+</tr>
+<tr>
+<td>release</td>
+<td>Production</td>
+<td><code>-O2 -DNDEBUG</code></td>
+</tr>
+<tr>
+<td>asan</td>
+<td>Memory errors</td>
+<td><code>-fsanitize=address,undefined</code></td>
+</tr>
+<tr>
+<td>tsan</td>
+<td>Data races</td>
+<td><code>-fsanitize=thread</code></td>
+</tr>
+<tr>
+<td>ubsan</td>
+<td>Undefined behavior</td>
+<td><code>-fsanitize=undefined -fno-sanitize-recover</code></td>
+</tr>
+<tr>
+<td>fuzz</td>
+<td>Coverage-guided fuzzing</td>
+<td><code>-fsanitize=fuzzer,address</code></td>
+</tr>
+<tr>
+<td>arm</td>
+<td>Cross-compile for target HW</td>
+<td>Toolchain file + <code>CMAKE_SYSTEM_NAME</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Critical</strong>: ASan and TSan are <strong>mutually exclusive</strong> — they instrument memory differently.
+You must run them as separate CI jobs.</p>
+<hr />
+<h2 id="3-googletest-googlemock">3. GoogleTest &amp; GoogleMock</h2>
+<h3 id="test-macros">Test Macros</h3>
+<div class="highlight"><pre><span></span><code><span class="n">TEST</span><span class="p">(</span><span class="n">SuiteName</span><span class="p">,</span><span class="w"> </span><span class="n">TestName</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">           </span><span class="c1">// standalone test</span>
+<span class="w">    </span><span class="n">EXPECT_EQ</span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">);</span><span class="w">             </span><span class="c1">// non-fatal: continues on failure</span>
+<span class="w">    </span><span class="n">ASSERT_NE</span><span class="p">(</span><span class="n">ptr</span><span class="p">,</span><span class="w"> </span><span class="k">nullptr</span><span class="p">);</span><span class="w">          </span><span class="c1">// fatal: aborts this test</span>
+<span class="p">}</span>
+
+<span class="n">TEST_F</span><span class="p">(</span><span class="n">FixtureClass</span><span class="p">,</span><span class="w"> </span><span class="n">TestName</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">      </span><span class="c1">// uses SetUp()/TearDown()</span>
+<span class="w">    </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">fixture_member_</span><span class="p">.</span><span class="n">isValid</span><span class="p">());</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><code>EXPECT_*</code> vs <code>ASSERT_*</code>: Use EXPECT by default (reports all failures). Use ASSERT only
+when continuing would crash (e.g., null pointer you&rsquo;re about to deref).</p>
+<h3 id="parameterized-tests">Parameterized Tests</h3>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">QueueSizeTest</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="o">::</span><span class="n">testing</span><span class="o">::</span><span class="n">TestWithParam</span><span class="o">&lt;</span><span class="kt">size_t</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{};</span>
+
+<span class="n">TEST_P</span><span class="p">(</span><span class="n">QueueSizeTest</span><span class="p">,</span><span class="w"> </span><span class="n">PushPopRoundTrip</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">SpscQueue</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">q</span><span class="p">(</span><span class="n">GetParam</span><span class="p">());</span>
+<span class="w">    </span><span class="n">q</span><span class="p">.</span><span class="n">push</span><span class="p">(</span><span class="mi">42</span><span class="p">);</span>
+<span class="w">    </span><span class="n">EXPECT_EQ</span><span class="p">(</span><span class="n">q</span><span class="p">.</span><span class="n">pop</span><span class="p">(),</span><span class="w"> </span><span class="mi">42</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">INSTANTIATE_TEST_SUITE_P</span><span class="p">(</span><span class="n">Sizes</span><span class="p">,</span><span class="w"> </span><span class="n">QueueSizeTest</span><span class="p">,</span>
+<span class="w">    </span><span class="o">::</span><span class="n">testing</span><span class="o">::</span><span class="n">Values</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">64</span><span class="p">,</span><span class="w"> </span><span class="mi">1024</span><span class="p">,</span><span class="w"> </span><span class="mi">65536</span><span class="p">));</span>
+</code></pre></div>
+
+<h3 id="googlemock">GoogleMock</h3>
+<p>Mock objects verify <strong>interactions</strong> — did function X get called with argument Y?</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MockSensor</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">ISensor</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="n">MOCK_METHOD</span><span class="p">(</span><span class="kt">float</span><span class="p">,</span><span class="w"> </span><span class="n">read</span><span class="p">,</span><span class="w"> </span><span class="p">(),</span><span class="w"> </span><span class="p">(</span><span class="k">override</span><span class="p">));</span>
+<span class="w">    </span><span class="n">MOCK_METHOD</span><span class="p">(</span><span class="kt">bool</span><span class="p">,</span><span class="w"> </span><span class="n">calibrate</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">level</span><span class="p">),</span><span class="w"> </span><span class="p">(</span><span class="k">override</span><span class="p">));</span>
+<span class="p">};</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">Controller</span><span class="p">,</span><span class="w"> </span><span class="n">ReadsFromSensor</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">MockSensor</span><span class="w"> </span><span class="n">sensor</span><span class="p">;</span>
+<span class="w">    </span><span class="n">EXPECT_CALL</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span><span class="w"> </span><span class="n">read</span><span class="p">()).</span><span class="n">Times</span><span class="p">(</span><span class="mi">1</span><span class="p">).</span><span class="n">WillOnce</span><span class="p">(</span><span class="n">Return</span><span class="p">(</span><span class="mf">3.14f</span><span class="p">));</span>
+<span class="w">    </span><span class="n">Controller</span><span class="w"> </span><span class="nf">ctrl</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sensor</span><span class="p">);</span>
+<span class="w">    </span><span class="n">ctrl</span><span class="p">.</span><span class="n">update</span><span class="p">();</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="death-tests">Death Tests</h3>
+<p>Verify that assertion failures / aborts actually fire:</p>
+<div class="highlight"><pre><span></span><code><span class="n">TEST</span><span class="p">(</span><span class="n">QueueDeathTest</span><span class="p">,</span><span class="w"> </span><span class="n">PopFromEmpty</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">SpscQueue</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">q</span><span class="p">(</span><span class="mi">4</span><span class="p">);</span>
+<span class="w">    </span><span class="n">EXPECT_DEATH</span><span class="p">(</span><span class="n">q</span><span class="p">.</span><span class="n">pop</span><span class="p">(),</span><span class="w"> </span><span class="s">&quot;Queue is empty&quot;</span><span class="p">);</span><span class="w">  </span><span class="c1">// regex match on stderr</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="4-fuzzing-with-libfuzzer">4. Fuzzing with libFuzzer</h2>
+<h3 id="how-coverage-guided-fuzzing-works">How Coverage-Guided Fuzzing Works</h3>
+<ol>
+<li>Compile with <code>-fsanitize=fuzzer,address</code> — clang instruments every branch edge</li>
+<li>Fuzzer generates random byte sequences, feeds them to <code>LLVMFuzzerTestOneInput</code></li>
+<li>After each run, it checks which <strong>new code paths</strong> were reached</li>
+<li>Inputs that trigger new coverage are added to the <strong>corpus</strong></li>
+<li>Corpus grows over time, exploring deeper code paths</li>
+<li>Crashes (ASan violations, asserts, timeouts) are saved as reproducer files</li>
+</ol>
+<h3 id="writing-a-harness">Writing a Harness</h3>
+<div class="highlight"><pre><span></span><code><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">LLVMFuzzerTestOneInput</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="o">*</span><span class="w"> </span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">size</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">size</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">4</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">  </span><span class="c1">// need minimum header</span>
+<span class="w">    </span><span class="n">ParseMessage</span><span class="p">({</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">size</span><span class="p">});</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Key rules</strong>:
+- Return 0 (non-zero = &ldquo;skip this input&rdquo; in newer libFuzzer)
+- Don&rsquo;t call <code>exit()</code> — fuzzer runs thousands of iterations per second in-process
+- Handle inputs smaller than your minimum gracefully (return 0)
+- Don&rsquo;t use global mutable state (fuzzer is single-threaded but rapid)</p>
+<h3 id="corpus-management">Corpus Management</h3>
+<div class="highlight"><pre><span></span><code>mkdir<span class="w"> </span>corpus
+<span class="c1"># Run fuzzer, writing new corpus entries:</span>
+./fuzz_parser<span class="w"> </span>corpus/<span class="w"> </span>-max_total_time<span class="o">=</span><span class="m">300</span>
+
+<span class="c1"># Minimize corpus (remove redundant inputs):</span>
+./fuzz_parser<span class="w"> </span>-merge<span class="o">=</span><span class="m">1</span><span class="w"> </span>corpus_minimized/<span class="w"> </span>corpus/
+
+<span class="c1"># Reproduce a crash:</span>
+./fuzz_parser<span class="w"> </span>crash-abc123def
+</code></pre></div>
+
+<h3 id="what-fuzzing-finds">What Fuzzing Finds</h3>
+<ul>
+<li>Buffer overflows (reading past input end)</li>
+<li>Integer overflows in length calculations</li>
+<li>Null derefs from unchecked parse results</li>
+<li>Infinite loops / excessive memory from crafted inputs</li>
+<li>Format string vulnerabilities</li>
+</ul>
+<hr />
+<h2 id="5-profiling">5. Profiling</h2>
+<h3 id="perf-linux">perf (Linux)</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Record 10 seconds of a running process:</span>
+perf<span class="w"> </span>record<span class="w"> </span>-g<span class="w"> </span>./my_program<span class="w">       </span><span class="c1"># -g = call graph (frame pointers)</span>
+perf<span class="w"> </span>report<span class="w">                        </span><span class="c1"># interactive TUI</span>
+
+<span class="c1"># Generate flame graph (requires brendangregg/FlameGraph):</span>
+perf<span class="w"> </span>script<span class="w"> </span><span class="p">|</span><span class="w"> </span>stackcollapse-perf.pl<span class="w"> </span><span class="p">|</span><span class="w"> </span>flamegraph.pl<span class="w"> </span>&gt;<span class="w"> </span>flame.svg
+</code></pre></div>
+
+<p>A <strong>flame graph</strong> shows call stacks on the X-axis (width = time spent) and call depth on
+the Y-axis. Wide bars at the top are your hot functions.</p>
+<h3 id="valgrind-callgrind-instruction-level-profiling">Valgrind Callgrind (Instruction-Level Profiling)</h3>
+<div class="highlight"><pre><span></span><code>valgrind<span class="w"> </span>--tool<span class="o">=</span>callgrind<span class="w"> </span>./my_program
+callgrind_annotate<span class="w"> </span>callgrind.out.*<span class="w">    </span><span class="c1"># text report</span>
+kcachegrind<span class="w"> </span>callgrind.out.*<span class="w">           </span><span class="c1"># GUI visualization</span>
+</code></pre></div>
+
+<p>Callgrind counts every instruction, so it&rsquo;s ~20-50× slower but deterministic (no sampling
+noise). Good for comparing before/after.</p>
+<h3 id="valgrind-cachegrind-cache-analysis">Valgrind Cachegrind (Cache Analysis)</h3>
+<div class="highlight"><pre><span></span><code>valgrind<span class="w"> </span>--tool<span class="o">=</span>cachegrind<span class="w"> </span>./my_program
+cg_annotate<span class="w"> </span>cachegrind.out.*
+</code></pre></div>
+
+<p>Reports L1/LL cache miss rates per function. When you see a function with 40% L1 miss rate,
+that&rsquo;s your cache-unfriendly access pattern.</p>
+<hr />
+<h2 id="6-code-coverage-with-gcovlcov">6. Code Coverage with gcov/lcov</h2>
+<h3 id="how-it-works">How It Works</h3>
+<ol>
+<li>Compile with <code>--coverage</code> (adds <code>-fprofile-arcs -ftest-coverage</code>)</li>
+<li>Run your tests — this generates <code>.gcda</code> files (execution counts per branch)</li>
+<li><code>gcov</code> reads <code>.gcda</code> + <code>.gcno</code> (program structure) → per-file reports</li>
+<li><code>lcov</code> aggregates into HTML reports</li>
+</ol>
+<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Debug<span class="w"> </span>-DCMAKE_CXX_FLAGS<span class="o">=</span><span class="s2">&quot;--coverage&quot;</span><span class="w"> </span>..
+make<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>ctest
+lcov<span class="w"> </span>--capture<span class="w"> </span>--directory<span class="w"> </span>.<span class="w"> </span>--output-file<span class="w"> </span>coverage.info
+lcov<span class="w"> </span>--remove<span class="w"> </span>coverage.info<span class="w"> </span><span class="s1">&#39;/usr/*&#39;</span><span class="w"> </span><span class="s1">&#39;*/test/*&#39;</span><span class="w"> </span>-o<span class="w"> </span>filtered.info
+genhtml<span class="w"> </span>filtered.info<span class="w"> </span>--output-directory<span class="w"> </span>coverage_html
+</code></pre></div>
+
+<h3 id="what-80-coverage-actually-means">What 80% Coverage Actually Means</h3>
+<p>80% <strong>line coverage</strong> means 80% of executable lines were hit by at least one test. But:</p>
+<ul>
+<li><strong>Line coverage ≠ branch coverage</strong>: <code>if (a &amp;&amp; b)</code> is one line but two branch conditions.
+  100% line coverage can miss the <code>a=true, b=false</code> path entirely.</li>
+<li><strong>MC/DC (Modified Condition/Decision Coverage)</strong>: required by DO-178C Level A. Each
+  condition must independently affect the outcome. For <code>if (a &amp;&amp; b)</code>:</li>
+<li>Need: <code>(T,T)→T</code>, <code>(F,T)→F</code> (a decides), <code>(T,F)→F</code> (b decides) — minimum 3 tests.</li>
+<li><strong>Coverage is necessary but not sufficient</strong>: puzzle01 demonstrates 100% line coverage
+  with a real bug. Coverage tells you what you DIDN&rsquo;T test, not that what you DID test is
+  correct.</li>
+</ul>
+<hr />
+<h2 id="7-cicd-pipeline-for-c-projects">7. CI/CD Pipeline for C++ Projects</h2>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────────────────────────────┐
+│                        CI Pipeline                              │
+├──────────┬──────────┬──────────┬──────────┬──────────┬─────────┤
+│  Stage 1 │  Stage 2 │  Stage 3 │  Stage 4 │  Stage 5 │ Stage 6 │
+│  Build   │  Test    │  ASan    │  TSan    │ Coverage │  Fuzz   │
+│          │          │          │          │          │         │
+│ Debug +  │ ctest    │ asan     │ tsan     │ gcov +   │ 5-min   │
+│ Release  │ --output │ build +  │ build +  │ lcov     │ libfuzz │
+│ compile  │ -on-fail │ full     │ full     │ gate:    │ corpus  │
+│          │          │ suite    │ suite    │ ≥80%     │ check   │
+│          │          │          │          │          │         │
+│ ✓ Both   │ ✓ All   │ ✓ Zero  │ ✓ Zero  │ ✓ ≥80%  │ ✓ Zero  │
+│ compile  │ pass     │ errors   │ races    │ lines    │ crashes │
+└──────────┴──────────┴──────────┴──────────┴──────────┴─────────┘
+         │           │           │           │           │
+         ▼           ▼           ▼           ▼           ▼
+    ALL GATES MUST PASS ──────────────────────────────► Deploy/
+                                                        Package
+</code></pre></div>
+
+<h3 id="build-matrix">Build Matrix</h3>
+<p>A typical GitHub Actions matrix for a C++ project:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">strategy</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">matrix</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">os</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">ubuntu-22.04</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ubuntu-24.04</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">compiler</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">gcc-12</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">gcc-13</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">clang-16</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">clang-17</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">build_type</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Debug</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Release</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+
+<p>That&rsquo;s 2×4×2 = 16 combinations. Sanitizer jobs run separately (different compile flags).</p>
+<h3 id="sanitizer-gates">Sanitizer Gates</h3>
+<p>Each sanitizer is a <strong>hard gate</strong> — any finding blocks the merge:</p>
+<ul>
+<li><strong>ASan</strong> (Address Sanitizer): heap-buffer-overflow, use-after-free, stack-buffer-overflow,
+  memory leaks (<code>detect_leaks=1</code>). Runtime overhead: ~2×.</li>
+<li><strong>TSan</strong> (Thread Sanitizer): data races, lock-order-inversion. Overhead: ~5-15×.
+  <strong>Cannot run with ASan simultaneously.</strong></li>
+<li><strong>UBSan</strong> (Undefined Behavior Sanitizer): signed overflow, null deref, alignment
+  violations, shift out of range. Minimal overhead. Combine with ASan.</li>
+</ul>
+<h3 id="coverage-reporting">Coverage Reporting</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># In CI, fail if coverage drops below threshold:</span>
+lcov<span class="w"> </span>...<span class="w"> </span>-o<span class="w"> </span>coverage.info
+<span class="nv">COVERAGE</span><span class="o">=</span><span class="k">$(</span>lcov<span class="w"> </span>--summary<span class="w"> </span>coverage.info<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s1">&#39;lines&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-oP<span class="w"> </span><span class="s1">&#39;\d+\.\d+&#39;</span><span class="k">)</span>
+<span class="k">if</span><span class="w"> </span><span class="o">((</span><span class="w"> </span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$COVERAGE</span><span class="s2"> &lt; 80.0&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>bc<span class="w"> </span>-l<span class="k">)</span><span class="w"> </span><span class="o">))</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;Coverage </span><span class="nv">$COVERAGE</span><span class="s2">% &lt; 80% — FAILING&quot;</span>
+<span class="w">    </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span>
+<span class="k">fi</span>
+</code></pre></div>
+
+<hr />
+<h2 id="8-putting-it-all-together">8. Putting It All Together</h2>
+<p>The exercises in this week build a complete production setup:</p>
+<ol>
+<li><strong>ex01</strong> — A three-tier CMake project with presets, install rules, and cross-compile stub</li>
+<li><strong>ex02</strong> — GoogleTest suite for an SPSC queue (concurrent, parameterized, death tests)</li>
+<li><strong>ex03</strong> — Fuzzer harness for a binary message parser</li>
+<li><strong>ex04</strong> — A profiling target with three intentional performance bugs</li>
+<li><strong>ex05</strong> — A full CI-ready project with a <code>run_all_checks.sh</code> script</li>
+</ol>
+<p>The puzzles demonstrate why individual tools are insufficient:
+- <strong>puzzle01</strong>: 100% line coverage hides a real bug (MC/DC gap)
+- <strong>puzzle02</strong>: ASan passes but TSan catches a data race (no heap corruption, just UB)</p>
+<h3 id="recommended-workflow">Recommended Workflow</h3>
+<div class="highlight"><pre><span></span><code>1. Write code
+2. Write tests (≥80% coverage)
+3. Run ASan build → fix memory bugs
+4. Run TSan build → fix races
+5. Run UBSan build → fix UB
+6. Run fuzzer on parsers/deserializers → fix edge cases
+7. Profile → optimize hot paths
+8. CI enforces all of the above on every PR
+</code></pre></div>
+
+<p>This order is deliberate: correctness first (tests + sanitizers), then performance
+(profiling). Optimizing buggy code is wasted effort.</p>
+<hr />
+<h2 id="references">References</h2>
+<ul>
+<li><a href="https://cliutils.gitlab.io/modern-cmake/">Modern CMake</a> — Henry Schreiner</li>
+<li><a href="https://google.github.io/googletest/primer.html">GoogleTest Primer</a></li>
+<li><a href="https://github.com/google/fuzzing/blob/master/tutorial/libFuzzerTutorial.md">libFuzzer Tutorial</a></li>
+<li>Brendan Gregg — <a href="https://www.brendangregg.com/flamegraphs.html">Flame Graphs</a></li>
+<li><a href="https://en.wikipedia.org/wiki/Modified_condition/decision_coverage">DO-178C and MC/DC</a></li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

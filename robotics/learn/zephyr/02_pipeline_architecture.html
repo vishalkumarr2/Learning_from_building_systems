@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STM32 → Jetson Orin — Full Pipeline Architecture - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="stm32-jetson-orin-full-pipeline-architecture">STM32 → Jetson Orin — Full Pipeline Architecture</h1>
+<h2 id="overview">Overview</h2>
+<p>A sensor aggregation system running at <strong>100Hz</strong> (one complete data frame every 10ms):</p>
+<ul>
+<li><strong>STM32</strong> (Zephyr RTOS) — real-time sensor hub</li>
+<li>Reads IMU over I2C at 100Hz</li>
+<li>Receives wheel speed over CAN (event-driven)</li>
+<li>Aggregates via ZBus, serializes with nanopb</li>
+<li>
+<p>Sends over SPI as slave</p>
+</li>
+<li>
+<p><strong>Jetson Orin</strong> (Linux + ROS2) — high-level compute node</p>
+</li>
+<li>SPI master — drives 100Hz clock</li>
+<li>Deserializes nanopb frames</li>
+<li>Publishes to ROS2 topics</li>
+</ul>
+<hr />
+<h2 id="system-diagram">System Diagram</h2>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────────────────────────────────┐
+│                        STM32 (Zephyr RTOS)                          │
+│                                                                     │
+│  ┌──────────┐  I2C    ┌─────────────┐                              │
+│  │ IMU      │────────►│ imu_thread  │──► zbus_chan_pub(imu_chan)    │
+│  │ ICM42688 │         │  (100Hz)    │                    │          │
+│  └──────────┘         └─────────────┘                    │          │
+│                                                           ▼          │
+│  ┌──────────┐  CAN    ┌─────────────┐          ┌──────────────────┐│
+│  │ Wheel    │────────►│ can_thread  │──────────►│  packer_thread   ││
+│  │ encoders │         │  (event)    │           │  (100Hz, 10ms)   ││
+│  └──────────┘         └─────────────┘           │  nanopb encode   ││
+│                                                  │  buffer swap     ││
+│  ┌──────────┐  UART   ┌─────────────┐           └────────┬─────────┘│
+│  │ GPS/etc  │────────►│ uart_thread │──────────►         │          │
+│  └──────────┘         └─────────────┘                    │          │
+│                                                           ▼          │
+│                                                  ┌──────────────────┐│
+│                                                  │  SPI slave + DMA ││
+│                                                  │  double buffer   ││
+│                                                  └────────┬─────────┘│
+└───────────────────────────────────────────────────────────┼──────────┘
+                                                            │ SPI
+                                                            │ 10MHz
+                                                            │ 10ms frames
+┌───────────────────────────────────────────────────────────┼──────────┐
+│                      Jetson Orin (Linux + ROS2)            │          │
+│                                                            ▼          │
+│                                                  ┌──────────────────┐│
+│                                                  │  spidev master   ││
+│                                                  │  100Hz timer     ││
+│                                                  └────────┬─────────┘│
+│                                                           │           │
+│                                                           ▼           │
+│                                                  ┌──────────────────┐│
+│                                                  │  nanopb decode   ││
+│                                                  └────────┬─────────┘│
+│                                                           │           │
+│                              ┌────────────────────────────┤           │
+│                              ▼                            ▼           │
+│                    /imu/raw (100Hz)          /wheel_speed (100Hz)     │
+│                    sensor_msgs/Imu           geometry_msgs/Twist      │
+└─────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+
+<hr />
+<h2 id="data-flow-per-10ms-frame">Data Flow Per 10ms Frame</h2>
+<div class="highlight"><pre><span></span><code>t = 0ms   : k_msleep(10) expires — IMU thread wakes
+t = 0.5ms : I2C read completes → zbus_chan_pub(&amp;imu_chan, &amp;msg)
+t = 0.5ms : CAN event may arrive any time → zbus_chan_pub(&amp;wheel_chan, &amp;msg)
+t = 1.0ms : packer_thread wakes (periodic 10ms)
+t = 1.0ms : zbus_chan_read(&amp;imu_chan)  — grab latest IMU
+t = 1.0ms : zbus_chan_read(&amp;wheel_chan) — grab latest wheel data
+t = 1.2ms : nanopb pb_encode() → ~150 bytes
+t = 1.5ms : buffer swap — idle buffer becomes DMA active buffer
+            (3.5ms safety margin before Jetson reads)
+t = 5.0ms : Jetson 100Hz ROS2 timer fires
+t = 5.0ms : Jetson asserts CS low
+t = 5.0ms : CS ISR on STM32 — DMA already loaded, starts shifting
+t = 5.05ms: SPI transfer complete (~50µs for 150 bytes @ 10MHz)
+t = 5.1ms : Jetson nanopb decode — ~0.1ms (Python)
+t = 5.2ms : rclpy publisher.publish() — ROS2 topic updated
+t = 10ms  : cycle repeats
+</code></pre></div>
+
+<p><strong>3.5ms safety margin</strong> between STM32 finishing the frame and Jetson reading it.</p>
+<hr />
+<h2 id="thread-architecture-on-stm32">Thread Architecture on STM32</h2>
+<table>
+<thead>
+<tr>
+<th>Thread</th>
+<th>Priority</th>
+<th>Stack</th>
+<th>Wakeup</th>
+<th>Job</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SPI CS ISR</td>
+<td>2 (highest)</td>
+<td>ISR stack</td>
+<td>CS GPIO falling edge</td>
+<td>Reload DMA pointer</td>
+</tr>
+<tr>
+<td>CAN RX</td>
+<td>3</td>
+<td>512B</td>
+<td>CAN frame interrupt</td>
+<td>Decode → zbus pub</td>
+</tr>
+<tr>
+<td>IMU (I2C)</td>
+<td>5</td>
+<td>1024B</td>
+<td>k_msleep(10)</td>
+<td>Read sensor → zbus pub</td>
+</tr>
+<tr>
+<td>Other sensors</td>
+<td>6</td>
+<td>1024B</td>
+<td>k_msleep(10)</td>
+<td>Read → zbus pub</td>
+</tr>
+<tr>
+<td>Packer</td>
+<td>8</td>
+<td>2048B</td>
+<td>k_msleep(10)</td>
+<td>Read zbus → nanopb encode → buffer swap</td>
+</tr>
+<tr>
+<td>Logger</td>
+<td>10 (lowest)</td>
+<td>1024B</td>
+<td>zbus subscriber</td>
+<td>Log to flash/UART</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Lower priority number = higher priority in Zephyr.
+Packer is lower priority than sensors so sensors always finish writing before packer reads.</p>
+</blockquote>
+<hr />
+<h2 id="why-these-design-choices">Why These Design Choices?</h2>
+<h3 id="why-spi-master-on-jetson-not-stm32">Why SPI master on Jetson (not STM32)?</h3>
+<ul>
+<li>Jetson controls the clock → deterministic 100Hz on the ROS2 side</li>
+<li>STM32 just needs data ready before CS goes low — easier to guarantee with double buffering</li>
+<li>If STM32 were master: needs a &ldquo;ready&rdquo; handshake GPIO, adds 2-way complexity</li>
+</ul>
+<h3 id="why-zbus-instead-of-shared-globals-mutex">Why ZBus instead of shared globals + mutex?</h3>
+<ul>
+<li>Thread-safe by design — no manual locking in application code</li>
+<li>Multiple threads can subscribe to same channel (packer + logger both read IMU)</li>
+<li>Decouples sensor drivers from packer completely — swap out IMU driver without touching packer</li>
+</ul>
+<h3 id="why-nanopb-instead-of-raw-structs">Why nanopb instead of raw structs?</h3>
+<ul>
+<li>Endianness handled automatically</li>
+<li>Versioning: add a field → old receivers ignore it safely</li>
+<li>Self-framing: receiver doesn&rsquo;t need to know struct layout out-of-band</li>
+<li>Compact encoding: small numbers use fewer bytes (varint)</li>
+</ul>
+<h3 id="why-double-buffering-for-spi">Why double buffering for SPI?</h3>
+<ul>
+<li>Jetson clocks data out immediately when CS goes low</li>
+<li>CPU and DMA cannot safely write to the same buffer at the same time</li>
+<li>Double buffer: DMA reads buffer A while CPU writes buffer B → zero race condition</li>
+</ul>
+<hr />
+<h2 id="protobuf-schema-the-shared-contract">Protobuf Schema (the shared contract)</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// sensor_frame.proto — shared between STM32 firmare and Jetson software</span>
+<span class="k">syntax</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;proto3&quot;</span><span class="p">;</span>
+
+<span class="kd">message</span><span class="w"> </span><span class="nc">ImuData</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">accel_x</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">accel_y</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">accel_z</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">gyro_x</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">gyro_y</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">gyro_z</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="mi">6</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint64</span><span class="w"> </span><span class="na">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">7</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kd">message</span><span class="w"> </span><span class="nc">WheelData</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">speed_fl</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">speed_fr</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">speed_rl</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">speed_rr</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint64</span><span class="w"> </span><span class="na">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kd">message</span><span class="w"> </span><span class="nc">SensorFrame</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint32</span><span class="w"> </span><span class="na">seq</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">    </span><span class="n">ImuData</span><span class="w"> </span><span class="na">imu</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="n">WheelData</span><span class="w"> </span><span class="na">wheel</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Field numbers (1, 2, 3&hellip;) are permanent — never reuse a retired number.</p>
+<hr />
+<h2 id="wire-frame-format-spi-packet">Wire Frame Format (SPI packet)</h2>
+<div class="highlight"><pre><span></span><code>Byte 0:        0xAA          — sync byte (detect desync)
+Byte 1-2:      length        — big-endian uint16, payload size
+Byte 3..N+2:   nanopb payload — SensorFrame encoded bytes
+Byte N+3..N+4: CRC16-CCITT   — integrity check
+
+Total: 5 + payload bytes
+Typical payload: ~120-200 bytes depending on how many fields present
+</code></pre></div>
+
+<p>The sync byte lets the Jetson detect if it missed a byte and needs to re-lock.</p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ROS2 Fundamentals — Robot Operating System 2 - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="ros2-fundamentals-robot-operating-system-2">ROS2 Fundamentals — Robot Operating System 2</h1>
+<h2 id="what-is-ros2">What Is ROS2?</h2>
+<p>ROS2 (Robot Operating System 2) is a <strong>middleware and toolset</strong> for robotics software.
+It is <strong>not</strong> an OS — it runs on Linux (or Windows/macOS). It provides:</p>
+<ul>
+<li>Structured <strong>communication</strong> between software modules (publish/subscribe, services, actions)</li>
+<li><strong>Build system</strong> (colcon + ament_cmake)</li>
+<li><strong>CLI tools</strong> for debugging (<code>ros2 topic echo</code>, <code>ros2 node list</code>)</li>
+<li>Large ecosystem of <strong>ready-made packages</strong>: navigation, visualization, sensor drivers, simulation</li>
+</ul>
+<p>In our pipeline: Jetson Orin runs ROS2. It reads SPI data from STM32, decodes protobuf, and publishes <code>sensor_msgs/Imu</code> messages at 100Hz for the navigation stack to consume.</p>
+<hr />
+<h2 id="core-concepts-the-5-building-blocks">Core Concepts — The 5 Building Blocks</h2>
+<h3 id="1-nodes">1. Nodes</h3>
+<p>A <strong>node</strong> is a process that does one thing. The fundamental unit.</p>
+<p>Good: one node per sensor, one node for navigation, one node for visualization.
+Bad: one giant node that does everything.</p>
+<div class="highlight"><pre><span></span><code>stm32_bridge_node     → reads SPI, publishes /imu/raw at 100Hz
+imu_filter_node       → subscribes /imu/raw, publishes /imu/filtered
+nav_stack_node        → subscribes /imu/filtered, /odom, publishes /cmd_vel
+motor_driver_node     → subscribes /cmd_vel, writes to CAN
+</code></pre></div>
+
+<h3 id="2-topics">2. Topics</h3>
+<p>A <strong>topic</strong> is a named channel for streaming data. <strong>Publish/subscribe</strong> model.</p>
+<div class="highlight"><pre><span></span><code>Publisher                                    Subscriber(s)
+─────────                                   ──────────────
+stm32_bridge_node ──/imu/raw──────────────► imu_filter_node
+                                           ► imu_logger_node
+                                           ► rviz2 (visualizer)
+</code></pre></div>
+
+<p>Key properties:
+- <strong>Decoupled</strong>: publisher doesn&rsquo;t know who subscribes
+- <strong>Asynchronous</strong>: publisher doesn&rsquo;t wait for subscriber
+- <strong>N-to-M</strong>: many publishers, many subscribers on same topic</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Publisher</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sensor_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Imu</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">ImuPublisher</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;stm32_bridge&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">Imu</span><span class="p">,</span> <span class="s1">&#39;/imu/raw&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+        <span class="c1"># 10 = queue depth (how many messages to buffer)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">publish_imu</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="n">msg</span> <span class="o">=</span> <span class="n">Imu</span><span class="p">()</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_clock</span><span class="p">()</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">to_msg</span><span class="p">()</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">frame_id</span> <span class="o">=</span> <span class="s1">&#39;imu_link&#39;</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">accel_x</span>
+        <span class="c1"># ...</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1"># Subscriber</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">ImuFilter</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;imu_filter&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_subscription</span><span class="p">(</span><span class="n">Imu</span><span class="p">,</span> <span class="s1">&#39;/imu/raw&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">callback</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">callback</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">):</span>
+        <span class="c1"># Called in executor thread when message arrives</span>
+        <span class="n">filtered</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">apply_filter</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+        <span class="c1"># process...</span>
+</code></pre></div>
+
+<h3 id="3-services">3. Services</h3>
+<p>A <strong>service</strong> is a request-reply pattern. One node asks, another answers — synchronous.</p>
+<div class="highlight"><pre><span></span><code>Client:         &quot;set_motor_speed(1.5)&quot;   ──►  Service server:  processes, returns OK
+                &quot;get_battery_status()&quot;  ──►  Service server:  returns 87%
+</code></pre></div>
+
+<p>Use for: configuration changes, one-time commands, status queries.
+Do NOT use for: high-rate sensor data (use topics instead — services are slow).</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">std_srvs.srv</span><span class="w"> </span><span class="kn">import</span> <span class="n">SetBool</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MotorNode</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;motor_driver&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">srv</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_service</span><span class="p">(</span><span class="n">SetBool</span><span class="p">,</span> <span class="s1">&#39;enable_motors&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">handle_enable</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">handle_enable</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">,</span> <span class="n">response</span><span class="p">):</span>
+        <span class="n">enabled</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">data</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set_motor_power</span><span class="p">(</span><span class="n">enabled</span><span class="p">)</span>
+        <span class="n">response</span><span class="o">.</span><span class="n">success</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">response</span><span class="o">.</span><span class="n">message</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Motors </span><span class="si">{</span><span class="s1">&#39;on&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">enabled</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;off&#39;</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="k">return</span> <span class="n">response</span>
+</code></pre></div>
+
+<h3 id="4-actions">4. Actions</h3>
+<p>An <strong>action</strong> is like a service, but for <strong>long-running tasks</strong> with progress feedback.</p>
+<div class="highlight"><pre><span></span><code>Client:    &quot;navigate_to(x=5, y=3)&quot;  ──►  Server starts moving robot
+           ← &quot;feedback: 30% done&quot;
+           ← &quot;feedback: 60% done&quot;
+           ← &quot;result: arrived&quot; (or &quot;result: failed&quot;)
+Client can cancel at any time.
+</code></pre></div>
+
+<p>Use for: navigation goals, arm movements, multi-second operations.</p>
+<h3 id="5-parameters">5. Parameters</h3>
+<p>Nodes can have <strong>parameters</strong> — configuration values you can change at runtime without restarting.</p>
+<div class="highlight"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">declare_parameter</span><span class="p">(</span><span class="s1">&#39;imu_frame&#39;</span><span class="p">,</span> <span class="s1">&#39;imu_link&#39;</span><span class="p">)</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">declare_parameter</span><span class="p">(</span><span class="s1">&#39;publish_rate_hz&#39;</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">)</span>
+
+<span class="n">frame</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_parameter</span><span class="p">(</span><span class="s1">&#39;imu_frame&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">get_parameter_value</span><span class="p">()</span><span class="o">.</span><span class="n">string_value</span>
+<span class="n">rate</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_parameter</span><span class="p">(</span><span class="s1">&#39;publish_rate_hz&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">get_parameter_value</span><span class="p">()</span><span class="o">.</span><span class="n">double_value</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>ros2<span class="w"> </span>param<span class="w"> </span><span class="nb">set</span><span class="w"> </span>/stm32_bridge<span class="w"> </span>imu_frame<span class="w"> </span>base_imu_link
+ros2<span class="w"> </span>param<span class="w"> </span>get<span class="w"> </span>/stm32_bridge<span class="w"> </span>publish_rate_hz
+</code></pre></div>
+
+<hr />
+<h2 id="qos-quality-of-service">QoS — Quality of Service</h2>
+<p>ROS2 lets you configure reliability, durability, and deadline of message delivery.</p>
+<h3 id="key-qos-profiles">Key QoS profiles</h3>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.qos</span><span class="w"> </span><span class="kn">import</span> <span class="n">QoSProfile</span><span class="p">,</span> <span class="n">ReliabilityPolicy</span><span class="p">,</span> <span class="n">DurabilityPolicy</span><span class="p">,</span> <span class="n">HistoryPolicy</span>
+
+<span class="c1"># BEST_EFFORT: don&#39;t retry dropped messages — use for sensors (lidar, IMU, cameras)</span>
+<span class="n">sensor_qos</span> <span class="o">=</span> <span class="n">QoSProfile</span><span class="p">(</span>
+    <span class="n">reliability</span><span class="o">=</span><span class="n">ReliabilityPolicy</span><span class="o">.</span><span class="n">BEST_EFFORT</span><span class="p">,</span>
+    <span class="n">durability</span><span class="o">=</span><span class="n">DurabilityPolicy</span><span class="o">.</span><span class="n">VOLATILE</span><span class="p">,</span>
+    <span class="n">history</span><span class="o">=</span><span class="n">HistoryPolicy</span><span class="o">.</span><span class="n">KEEP_LAST</span><span class="p">,</span>
+    <span class="n">depth</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># RELIABLE: retry until delivered — use for commands, events</span>
+<span class="n">reliable_qos</span> <span class="o">=</span> <span class="n">QoSProfile</span><span class="p">(</span>
+    <span class="n">reliability</span><span class="o">=</span><span class="n">ReliabilityPolicy</span><span class="o">.</span><span class="n">RELIABLE</span><span class="p">,</span>
+    <span class="o">...</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<p><strong>Rule for our IMU</strong>: use <code>BEST_EFFORT</code>. At 100Hz, a dropped message is 10ms old — it&rsquo;s better to skip and show the next fresh one than to retry stale data.</p>
+<div class="highlight"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">Imu</span><span class="p">,</span> <span class="s1">&#39;/imu/raw&#39;</span><span class="p">,</span> <span class="n">sensor_qos</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="complete-stm32-bridge-node">Complete STM32 Bridge Node</h2>
+<p>This is the real node that reads from SPI and publishes to ROS2:</p>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env python3</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.qos</span><span class="w"> </span><span class="kn">import</span> <span class="n">QoSProfile</span><span class="p">,</span> <span class="n">ReliabilityPolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sensor_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Imu</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">geometry_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Vector3</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">spidev</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">struct</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">robot_msgs.pb2</span><span class="w"> </span><span class="kn">import</span> <span class="n">RobotFrame</span>  <span class="c1"># generated from .proto</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Stm32BridgeNode</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;stm32_bridge&#39;</span><span class="p">)</span>
+
+        <span class="c1"># SPI setup</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span> <span class="o">=</span> <span class="n">spidev</span><span class="o">.</span><span class="n">SpiDev</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>              <span class="c1"># /dev/spidev1.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">max_speed_hz</span> <span class="o">=</span> <span class="mi">10_000_000</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">mode</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="c1"># Publisher with BEST_EFFORT QoS</span>
+        <span class="n">sensor_qos</span> <span class="o">=</span> <span class="n">QoSProfile</span><span class="p">(</span>
+            <span class="n">reliability</span><span class="o">=</span><span class="n">ReliabilityPolicy</span><span class="o">.</span><span class="n">BEST_EFFORT</span><span class="p">,</span>
+            <span class="n">depth</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">imu_pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">Imu</span><span class="p">,</span> <span class="s1">&#39;/imu/raw&#39;</span><span class="p">,</span> <span class="n">sensor_qos</span><span class="p">)</span>
+
+        <span class="c1"># Timer at 100Hz</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">timer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_timer</span><span class="p">(</span><span class="mf">0.01</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">read_and_publish</span><span class="p">)</span>
+
+        <span class="c1"># Stats</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">frame_count</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">error_count</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;STM32 bridge node started&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">read_and_publish</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Called every 10ms by timer&quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="c1"># Read 150-byte SPI frame</span>
+            <span class="n">raw</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">readbytes</span><span class="p">(</span><span class="mi">150</span><span class="p">))</span>
+
+            <span class="c1"># Validate header</span>
+            <span class="k">if</span> <span class="n">raw</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="mh">0xAA</span> <span class="ow">or</span> <span class="n">raw</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">!=</span> <span class="mh">0x55</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">error_count</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">return</span>
+
+            <span class="c1"># Length field</span>
+            <span class="n">payload_len</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s1">&#39;&gt;H&#39;</span><span class="p">,</span> <span class="n">raw</span><span class="p">,</span> <span class="mi">2</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">payload</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="mi">4</span><span class="p">:</span><span class="mi">4</span> <span class="o">+</span> <span class="n">payload_len</span><span class="p">]</span>
+
+            <span class="c1"># Decode protobuf</span>
+            <span class="n">frame</span> <span class="o">=</span> <span class="n">RobotFrame</span><span class="p">()</span>
+            <span class="n">frame</span><span class="o">.</span><span class="n">ParseFromString</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+
+            <span class="c1"># Build Imu message</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="n">Imu</span><span class="p">()</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_clock</span><span class="p">()</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">to_msg</span><span class="p">()</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">frame_id</span> <span class="o">=</span> <span class="s1">&#39;imu_link&#39;</span>
+
+            <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">accel_x</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">accel_y</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">z</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">accel_z</span>
+
+            <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">gyro_x</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">gyro_y</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity</span><span class="o">.</span><span class="n">z</span> <span class="o">=</span> <span class="n">frame</span><span class="o">.</span><span class="n">gyro_z</span>
+
+            <span class="c1"># Covariances unknown (-1 diagonal = unknown)</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration_covariance</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="mf">1.0</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">imu_pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">frame_count</span> <span class="o">+=</span> <span class="mi">1</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame_count</span> <span class="o">%</span> <span class="mi">1000</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s1">&#39;Published </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">frame_count</span><span class="si">}</span><span class="s1"> frames, errors=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">error_count</span><span class="si">}</span><span class="s1">&#39;</span>
+                <span class="p">)</span>
+
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Bridge error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">error_count</span> <span class="o">+=</span> <span class="mi">1</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="n">args</span><span class="p">)</span>
+    <span class="n">node</span> <span class="o">=</span> <span class="n">Stm32BridgeNode</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">spin</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>     <span class="c1"># runs the executor, calls callbacks</span>
+    <span class="n">node</span><span class="o">.</span><span class="n">destroy_node</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h2 id="package-structure">Package Structure</h2>
+<div class="highlight"><pre><span></span><code>my_robot/
+├── CMakeLists.txt         ← ament_cmake build
+├── package.xml            ← metadata, dependencies
+├── my_robot/
+│   ├── __init__.py
+│   ├── stm32_bridge_node.py
+│   └── imu_filter_node.py
+├── launch/
+│   └── robot.launch.py
+├── config/
+│   └── params.yaml
+└── msg/
+    └── WheelSpeed.msg     ← custom message type
+</code></pre></div>
+
+<p><strong>package.xml</strong> (declare dependencies):</p>
+<div class="highlight"><pre><span></span><code><span class="cp">&lt;?xml version=&quot;1.0&quot;?&gt;</span>
+<span class="nt">&lt;package</span><span class="w"> </span><span class="na">format=</span><span class="s">&quot;3&quot;</span><span class="nt">&gt;</span>
+<span class="w">  </span><span class="nt">&lt;name&gt;</span>my_robot<span class="nt">&lt;/name&gt;</span>
+<span class="w">  </span><span class="nt">&lt;version&gt;</span>0.1.0<span class="nt">&lt;/version&gt;</span>
+<span class="w">  </span><span class="nt">&lt;description&gt;</span>My<span class="w"> </span>robot<span class="nt">&lt;/description&gt;</span>
+<span class="w">  </span><span class="nt">&lt;license&gt;</span>Apache-2.0<span class="nt">&lt;/license&gt;</span>
+
+<span class="w">  </span><span class="nt">&lt;depend&gt;</span>rclpy<span class="nt">&lt;/depend&gt;</span>
+<span class="w">  </span><span class="nt">&lt;depend&gt;</span>sensor_msgs<span class="nt">&lt;/depend&gt;</span>
+<span class="w">  </span><span class="nt">&lt;depend&gt;</span>geometry_msgs<span class="nt">&lt;/depend&gt;</span>
+
+<span class="w">  </span><span class="nt">&lt;export&gt;</span>
+<span class="w">    </span><span class="nt">&lt;build_type&gt;</span>ament_python<span class="nt">&lt;/build_type&gt;</span>
+<span class="w">  </span><span class="nt">&lt;/export&gt;</span>
+<span class="nt">&lt;/package&gt;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="launch-files">Launch Files</h2>
+<p>A launch file starts multiple nodes at once with configured parameters:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># launch/robot.launch.py</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">launch</span><span class="w"> </span><span class="kn">import</span> <span class="n">LaunchDescription</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">launch_ros.actions</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">generate_launch_description</span><span class="p">():</span>
+    <span class="k">return</span> <span class="n">LaunchDescription</span><span class="p">([</span>
+        <span class="n">Node</span><span class="p">(</span>
+            <span class="n">package</span><span class="o">=</span><span class="s1">&#39;my_robot&#39;</span><span class="p">,</span>
+            <span class="n">executable</span><span class="o">=</span><span class="s1">&#39;stm32_bridge&#39;</span><span class="p">,</span>
+            <span class="n">name</span><span class="o">=</span><span class="s1">&#39;stm32_bridge&#39;</span><span class="p">,</span>
+            <span class="n">parameters</span><span class="o">=</span><span class="p">[{</span><span class="s1">&#39;publish_rate_hz&#39;</span><span class="p">:</span> <span class="mf">100.0</span><span class="p">,</span> <span class="s1">&#39;imu_frame&#39;</span><span class="p">:</span> <span class="s1">&#39;imu_link&#39;</span><span class="p">}],</span>
+        <span class="p">),</span>
+        <span class="n">Node</span><span class="p">(</span>
+            <span class="n">package</span><span class="o">=</span><span class="s1">&#39;my_robot&#39;</span><span class="p">,</span>
+            <span class="n">executable</span><span class="o">=</span><span class="s1">&#39;imu_filter&#39;</span><span class="p">,</span>
+            <span class="n">name</span><span class="o">=</span><span class="s1">&#39;imu_filter&#39;</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">Node</span><span class="p">(</span>
+            <span class="n">package</span><span class="o">=</span><span class="s1">&#39;nav2_amcl&#39;</span><span class="p">,</span>
+            <span class="n">executable</span><span class="o">=</span><span class="s1">&#39;amcl&#39;</span><span class="p">,</span>
+            <span class="n">name</span><span class="o">=</span><span class="s1">&#39;amcl&#39;</span><span class="p">,</span>
+            <span class="n">parameters</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;/path/to/amcl_params.yaml&#39;</span><span class="p">],</span>
+        <span class="p">),</span>
+    <span class="p">])</span>
+</code></pre></div>
+
+<p>Run: <code>ros2 launch my_robot robot.launch.py</code></p>
+<hr />
+<h2 id="build-and-run">Build and Run</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Build</span>
+<span class="nb">cd</span><span class="w"> </span>~/ros2_ws
+colcon<span class="w"> </span>build<span class="w"> </span>--packages-select<span class="w"> </span>my_robot
+<span class="nb">source</span><span class="w"> </span>install/setup.bash
+
+<span class="c1"># Run single node</span>
+ros2<span class="w"> </span>run<span class="w"> </span>my_robot<span class="w"> </span>stm32_bridge
+
+<span class="c1"># Run launch file</span>
+ros2<span class="w"> </span>launch<span class="w"> </span>my_robot<span class="w"> </span>robot.launch.py
+
+<span class="c1"># Debug</span>
+ros2<span class="w"> </span>node<span class="w"> </span>list<span class="w">                     </span><span class="c1"># show running nodes</span>
+ros2<span class="w"> </span>topic<span class="w"> </span>list<span class="w">                    </span><span class="c1"># show all topics</span>
+ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/imu/raw<span class="w">           </span><span class="c1"># print messages live</span>
+ros2<span class="w"> </span>topic<span class="w"> </span>hz<span class="w"> </span>/imu/raw<span class="w">             </span><span class="c1"># measure publish frequency</span>
+ros2<span class="w"> </span>topic<span class="w"> </span>bw<span class="w"> </span>/imu/raw<span class="w">             </span><span class="c1"># measure bandwidth</span>
+ros2<span class="w"> </span>param<span class="w"> </span>list<span class="w"> </span>/stm32_bridge<span class="w">      </span><span class="c1"># list parameters</span>
+</code></pre></div>
+
+<hr />
+<h2 id="common-ros2-mistakes">Common ROS2 Mistakes</h2>
+<table>
+<thead>
+<tr>
+<th>Mistake</th>
+<th>Symptom</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Missing <code>source install/setup.bash</code></td>
+<td>Package not found</td>
+<td>Run after every <code>colcon build</code></td>
+</tr>
+<tr>
+<td>QoS mismatch publisher/subscriber</td>
+<td>No messages received</td>
+<td>Both must use compatible QoS (BEST_EFFORT matches BEST_EFFORT, RELIABLE matches RELIABLE)</td>
+</tr>
+<tr>
+<td>Heavy work in callback</td>
+<td>100Hz drops to 10Hz</td>
+<td>Move heavy work to separate thread, use timer callback only for receiving</td>
+</tr>
+<tr>
+<td>Not calling <code>rclpy.spin()</code></td>
+<td>Callbacks never fire</td>
+<td><code>spin()</code> runs the event loop</td>
+</tr>
+<tr>
+<td>Wrong topic name (typo)</td>
+<td>Subscriber never receives</td>
+<td><code>ros2 topic list</code> to verify</td>
+</tr>
+<tr>
+<td>Using Python GIL for parallelism</td>
+<td>Callbacks block each other</td>
+<td>Use <code>MultiThreadedExecutor</code> for concurrent callbacks</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

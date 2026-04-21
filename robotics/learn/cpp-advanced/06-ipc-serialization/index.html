@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Week 6 — IPC, Serialization &amp; Software-Defined Patterns - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-indigo-600 hover:text-indigo-800 mb-4 inline-block">&larr; Back to C++ Advanced</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="week-6-ipc-serialization-software-defined-patterns">Week 6 — IPC, Serialization &amp; Software-Defined Patterns</h1>
+<h2 id="1-inter-process-communication-with-posix-shared-memory">1. Inter-Process Communication with POSIX Shared Memory</h2>
+<p>IPC lets separate processes exchange data without going through the kernel on every
+message.  Shared memory is the fastest IPC primitive because, after the initial
+<code>mmap</code>, reads and writes touch the same physical pages — zero syscalls on the hot
+path.</p>
+<h3 id="11-the-shm_open-mmap-dance">1.1 The shm_open + mmap Dance</h3>
+<div class="highlight"><pre><span></span><code>Process A                          Process B
+────────                          ────────
+shm_open(&quot;/my_shm&quot;, O_CREAT|O_RDWR)
+ftruncate(fd, size)
+ptr = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0)
+                                   fd = shm_open(&quot;/my_shm&quot;, O_RDWR)
+                                   ptr = mmap(..., MAP_SHARED, fd, 0)
+*ptr = 42;                         printf(&quot;%d\n&quot;, *ptr);  // 42
+munmap(ptr, size)                  munmap(ptr, size)
+shm_unlink(&quot;/my_shm&quot;)
+</code></pre></div>
+
+<p>Key API summary:</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>shm_open</code></td>
+<td>Create/open a named shared memory object</td>
+</tr>
+<tr>
+<td><code>ftruncate</code></td>
+<td>Set the size of the shared region</td>
+</tr>
+<tr>
+<td><code>mmap</code></td>
+<td>Map the object into process address space</td>
+</tr>
+<tr>
+<td><code>munmap</code></td>
+<td>Unmap the region</td>
+</tr>
+<tr>
+<td><code>shm_unlink</code></td>
+<td>Remove the named object from <code>/dev/shm</code></td>
+</tr>
+</tbody>
+</table>
+<p>Link with <code>-lrt</code> on Linux (the POSIX realtime library).</p>
+<h3 id="12-shared-memory-layout">1.2 Shared Memory Layout</h3>
+<p>When placing structs in shared memory, alignment matters.  The standard approach is
+to define a header struct and use <code>placement new</code> to construct it at the mapped
+address.</p>
+<div class="highlight"><pre><span></span><code>Shared Memory Region (4096 bytes mapped)
+┌─────────────────────────────────────────────────────────┐
+│ offset 0: SharedHeader                                  │
+│   ┌──────────────────────────────────────────────────┐  │
+│   │ magic       : uint32_t  (0xDEADBEEF)            │  │
+│   │ version     : uint32_t  (1)                      │  │
+│   │ write_seq   : atomic&lt;uint64_t&gt;                   │  │
+│   │ read_seq    : atomic&lt;uint64_t&gt;                   │  │
+│   │ payload_off : uint32_t  (offset to data region)  │  │
+│   └──────────────────────────────────────────────────┘  │
+│ offset 64: Data region                                  │
+│   ┌──────────────────────────────────────────────────┐  │
+│   │ Payload[0] ... Payload[N-1]                      │  │
+│   │ (ring buffer of fixed-size messages)             │  │
+│   └──────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+</code></pre></div>
+
+<h3 id="13-seqlock-pattern-for-lock-free-reads">1.3 Seqlock Pattern for Lock-Free Reads</h3>
+<p>A seqlock lets one writer publish data and many readers consume it without
+mutexes.  The writer increments a sequence counter before and after writing.
+The reader checks the counter: if it changed or is odd, the read was torn —
+retry.</p>
+<div class="highlight"><pre><span></span><code>Writer:                           Reader:
+  seq.store(seq+1, release)         do {
+  &lt;write payload&gt;                     s1 = seq.load(acquire)
+  seq.store(seq+1, release)           &lt;read payload&gt;
+                                      s2 = seq.load(acquire)
+                                    } while (s1 != s2 || s1 &amp; 1)
+</code></pre></div>
+
+<p>This gives sub-microsecond IPC latency because the reader never blocks.</p>
+<h3 id="14-producer-consumer-with-ring-buffer">1.4 Producer-Consumer with Ring Buffer</h3>
+<div class="highlight"><pre><span></span><code>        Producer                     Consumer
+        ────────                     ────────
+           │                            │
+           ▼                            ▼
+    ┌──write_idx──┐             ┌──read_idx───┐
+    │             │             │             │
+    ▼             │             ▼             │
+┌───┬───┬───┬───┬───┬───┬───┬───┐           │
+│ 0 │ 1 │ 2 │ 3 │ 4 │ 5 │ 6 │ 7 │  (slots)  │
+└───┴───┴───┴───┴───┴───┴───┴───┘           │
+    ▲                       ▲                │
+    └───── data region ─────┘                │
+                                             │
+    Full when: (write_idx + 1) % N == read_idx
+    Empty when: write_idx == read_idx
+</code></pre></div>
+
+<p>The producer writes to <code>slots[write_idx % N]</code> and then advances <code>write_idx</code>.
+The consumer reads from <code>slots[read_idx % N]</code> and then advances <code>read_idx</code>.
+Both indices are <code>std::atomic&lt;uint64_t&gt;</code> with monotonically increasing values.</p>
+<hr />
+<h2 id="2-serialization-from-memcpy-to-schema-driven">2. Serialization: From memcpy to Schema-Driven</h2>
+<p>Serialization is the bridge between in-memory layout and wire/disk format.
+The choice profoundly affects IPC throughput.</p>
+<h3 id="21-method-comparison">2.1 Method Comparison</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Encode ns/msg</th>
+<th>Decode ns/msg</th>
+<th>Zero-copy</th>
+<th>Schema</th>
+<th>Human-readable</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Raw memcpy</td>
+<td>~2–5</td>
+<td>~2–5</td>
+<td>Yes*</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Hand-rolled binary</td>
+<td>~5–15</td>
+<td>~5–15</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td>FlatBuffers-style</td>
+<td>~10–30</td>
+<td>~1–5</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>No</td>
+</tr>
+<tr>
+<td>JSON (sprintf)</td>
+<td>~200–800</td>
+<td>~300–1000</td>
+<td>No</td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Protobuf</td>
+<td>~50–150</td>
+<td>~50–150</td>
+<td>No</td>
+<td>Yes</td>
+<td>Semi</td>
+</tr>
+</tbody>
+</table>
+<p>*memcpy is &ldquo;zero-copy&rdquo; only when the struct is POD and layout matches on both sides.</p>
+<h3 id="22-raw-memcpy-the-fastest-and-most-fragile">2.2 Raw memcpy — The Fastest and Most Fragile</h3>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">Msg</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">ts</span><span class="p">;</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">y</span><span class="p">,</span><span class="w"> </span><span class="n">z</span><span class="p">;</span><span class="w"> </span><span class="p">};</span>
+<span class="kt">char</span><span class="w"> </span><span class="n">buf</span><span class="p">[</span><span class="k">sizeof</span><span class="p">(</span><span class="n">Msg</span><span class="p">)];</span>
+<span class="n">std</span><span class="o">::</span><span class="n">memcpy</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">Msg</span><span class="p">));</span><span class="w">   </span><span class="c1">// serialize</span>
+<span class="n">std</span><span class="o">::</span><span class="n">memcpy</span><span class="p">(</span><span class="o">&amp;</span><span class="n">msg2</span><span class="p">,</span><span class="w"> </span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">Msg</span><span class="p">));</span><span class="w">  </span><span class="c1">// deserialize</span>
+</code></pre></div>
+
+<p>Pros: Fastest possible.  Cons: Tied to one platform, one compiler, one ABI.
+Adding a field breaks all readers.</p>
+<h3 id="23-flatbuffer-like-zero-copy">2.3 FlatBuffer-like Zero-Copy</h3>
+<p>The key insight: write fields at known byte offsets into a pre-allocated buffer.
+Readers cast directly from the buffer without copying.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Write:  [ts:8][x:8][y:8][z:8]  = 32 bytes</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">encode</span><span class="p">(</span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">ts</span><span class="p">,</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">y</span><span class="p">,</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">z</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">memcpy</span><span class="p">(</span><span class="n">buf</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">  </span><span class="o">&amp;</span><span class="n">ts</span><span class="p">,</span><span class="w"> </span><span class="mi">8</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">memcpy</span><span class="p">(</span><span class="n">buf</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w">  </span><span class="o">&amp;</span><span class="n">x</span><span class="p">,</span><span class="w">  </span><span class="mi">8</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">memcpy</span><span class="p">(</span><span class="n">buf</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">16</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">y</span><span class="p">,</span><span class="w">  </span><span class="mi">8</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">memcpy</span><span class="p">(</span><span class="n">buf</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">24</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">z</span><span class="p">,</span><span class="w">  </span><span class="mi">8</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Readers access fields by offset without deserializing the whole message.
+This is essentially what FlatBuffers and Cap&rsquo;n Proto do at scale.</p>
+<h3 id="24-json-the-universal-tax">2.4 JSON — The Universal Tax</h3>
+<p>JSON trades 10–100× performance for human-readability and language
+interoperability.  Fine for config files and REST APIs, painful for
+high-frequency IPC.  <code>sprintf</code>/<code>sscanf</code> is the simplest JSON-ish approach
+without pulling in a library.</p>
+<hr />
+<h2 id="3-type-erasure-conceptmodel-pattern">3. Type Erasure: Concept/Model Pattern</h2>
+<p>Type erasure lets you store objects of any type behind a uniform interface
+without inheritance at the user&rsquo;s call site.</p>
+<h3 id="31-the-classic-conceptmodel">3.1 The Classic Concept/Model</h3>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">AnyDrawable</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">Concept</span><span class="w"> </span><span class="p">{</span><span class="w">                     </span><span class="c1">// Abstract interface</span>
+<span class="w">        </span><span class="k">virtual</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">draw</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">        </span><span class="k">virtual</span><span class="w"> </span><span class="o">~</span><span class="n">Concept</span><span class="p">()</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">default</span><span class="p">;</span>
+<span class="w">    </span><span class="p">};</span>
+<span class="w">    </span><span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">Model</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Concept</span><span class="w"> </span><span class="p">{</span><span class="w">             </span><span class="c1">// Wraps any T with draw()</span>
+<span class="w">        </span><span class="n">T</span><span class="w"> </span><span class="n">obj</span><span class="p">;</span>
+<span class="w">        </span><span class="n">Model</span><span class="p">(</span><span class="n">T</span><span class="w"> </span><span class="n">o</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">obj</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">o</span><span class="p">))</span><span class="w"> </span><span class="p">{}</span>
+<span class="w">        </span><span class="kt">void</span><span class="w"> </span><span class="n">draw</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">obj</span><span class="p">.</span><span class="n">draw</span><span class="p">();</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="p">};</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">Concept</span><span class="o">&gt;</span><span class="w"> </span><span class="n">pimpl_</span><span class="p">;</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="w">    </span><span class="n">AnyDrawable</span><span class="p">(</span><span class="n">T</span><span class="w"> </span><span class="n">obj</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">pimpl_</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">Model</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;&gt;</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">obj</span><span class="p">)))</span><span class="w"> </span><span class="p">{}</span>
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">draw</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">pimpl_</span><span class="o">-&gt;</span><span class="n">draw</span><span class="p">();</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p>This is how <code>std::function</code>, <code>std::any</code>, and <code>std::move_only_function</code> work
+internally.  The user never writes a base class — the Model wrapper
+generates the vtable automatically.</p>
+<h3 id="32-small-buffer-optimization-sbo">3.2 Small Buffer Optimization (SBO)</h3>
+<p>Heap allocation on every type-erased construction is expensive.  SBO stores
+small objects inline in a fixed buffer:</p>
+<div class="highlight"><pre><span></span><code>AnyCallable layout with SBO:
+┌────────────────────────────────────────┐
+│ vtable_ptr (8 bytes)                   │
+│ ┌────────────────────────────────────┐ │
+│ │ inline buffer (32 bytes)           │ │  ← small objects live here
+│ │ [                                ] │ │
+│ └────────────────────────────────────┘ │
+│ is_local flag (1 byte)                 │
+└────────────────────────────────────────┘
+
+If sizeof(T) &lt;= 32 &amp;&amp; alignof(T) &lt;= alignof(max_align_t):
+    placement-new into inline buffer
+Else:
+    heap-allocate via new Model&lt;T&gt;(...)
+</code></pre></div>
+
+<p><code>std::function</code> typically uses SBO with a 16–32 byte buffer.  Lambdas that
+capture only a pointer or two fit inline; larger captures spill to the heap.</p>
+<h3 id="33-performance-hierarchy">3.3 Performance Hierarchy</h3>
+<table>
+<thead>
+<tr>
+<th>Mechanism</th>
+<th>Indirection</th>
+<th>Allocation</th>
+<th>Typical ns/call</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Direct call</td>
+<td>None</td>
+<td>None</td>
+<td>~1</td>
+</tr>
+<tr>
+<td><code>std::function</code></td>
+<td>vtable + SBO</td>
+<td>Possible</td>
+<td>~3–8</td>
+</tr>
+<tr>
+<td>Type-erased SBO</td>
+<td>vtable</td>
+<td>None (SBO)</td>
+<td>~3–5</td>
+</tr>
+<tr>
+<td>Virtual dispatch</td>
+<td>vtable</td>
+<td>Heap</td>
+<td>~2–4</td>
+</tr>
+<tr>
+<td><code>std::function</code> (heap)</td>
+<td>vtable</td>
+<td>Always</td>
+<td>~8–15</td>
+</tr>
+</tbody>
+</table>
+<p>The SBO path is competitive with raw virtual dispatch when the object fits
+in the inline buffer.</p>
+<hr />
+<h2 id="4-plugin-architecture-with-dlopen">4. Plugin Architecture with dlopen</h2>
+<p>Dynamic loading lets a program discover and load code at runtime without
+recompilation.</p>
+<h3 id="41-the-dlopen-api">4.1 The dlopen API</h3>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">handle</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">dlopen</span><span class="p">(</span><span class="s">&quot;./libplugin.so&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">RTLD_LAZY</span><span class="p">);</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">create</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">Widget</span><span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="p">)())</span><span class="w"> </span><span class="n">dlsym</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;create_widget&quot;</span><span class="p">);</span>
+<span class="n">Widget</span><span class="o">*</span><span class="w"> </span><span class="n">w</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">create</span><span class="p">();</span>
+<span class="n">w</span><span class="o">-&gt;</span><span class="n">run</span><span class="p">();</span>
+<span class="n">dlclose</span><span class="p">(</span><span class="n">handle</span><span class="p">);</span>
+</code></pre></div>
+
+<p>Link with <code>-ldl</code>.</p>
+<h3 id="42-plugin-contract-pattern">4.2 Plugin Contract Pattern</h3>
+<p>Define a C-linkage factory function that plugins must export:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// plugin_api.h — shared between host and plugins</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">Plugin</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">virtual</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">execute</span><span class="p">()</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">virtual</span><span class="w"> </span><span class="o">~</span><span class="n">Plugin</span><span class="p">()</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">default</span><span class="p">;</span>
+<span class="p">};</span>
+<span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="n">Plugin</span><span class="o">*</span><span class="w"> </span><span class="n">create_plugin</span><span class="p">();</span><span class="w">  </span><span class="c1">// each .so implements this</span>
+</code></pre></div>
+
+<p>The host <code>dlopen</code>s each <code>.so</code>, calls <code>dlsym("create_plugin")</code>, and gets back
+a polymorphic object.  This is how audio plugins (VST), game engines, and
+database extensions work.</p>
+<h3 id="43-safety-considerations">4.3 Safety Considerations</h3>
+<ul>
+<li>Always check <code>dlerror()</code> after <code>dlopen</code>/<code>dlsym</code>.</li>
+<li>Use <code>RTLD_NOW</code> during development to catch missing symbols early.</li>
+<li>Never <code>dlclose</code> while objects from the plugin are still alive.</li>
+<li>Plugin ABI must match the host — same compiler, same stdlib, same flags.</li>
+</ul>
+<hr />
+<h2 id="5-ipc-latency-comparison">5. IPC Latency Comparison</h2>
+<p>Practical measurements on a typical Linux x86-64 system:</p>
+<table>
+<thead>
+<tr>
+<th>IPC Method</th>
+<th>Latency (one-way)</th>
+<th>Throughput (msgs/s)</th>
+<th>Kernel crossings</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Shared memory + atomic</td>
+<td>50–200 ns</td>
+<td>5–20 M</td>
+<td>0</td>
+</tr>
+<tr>
+<td>Unix domain socket</td>
+<td>1–5 µs</td>
+<td>200k–1M</td>
+<td>2</td>
+</tr>
+<tr>
+<td>TCP loopback</td>
+<td>5–20 µs</td>
+<td>50k–200k</td>
+<td>2+</td>
+</tr>
+<tr>
+<td>Pipe</td>
+<td>2–8 µs</td>
+<td>100k–500k</td>
+<td>2</td>
+</tr>
+<tr>
+<td>POSIX message queue</td>
+<td>1–5 µs</td>
+<td>200k–1M</td>
+<td>2</td>
+</tr>
+<tr>
+<td>D-Bus</td>
+<td>50–200 µs</td>
+<td>5k–20k</td>
+<td>4+</td>
+</tr>
+<tr>
+<td>gRPC (loopback)</td>
+<td>100–500 µs</td>
+<td>2k–10k</td>
+<td>2+ (+ proto)</td>
+</tr>
+</tbody>
+</table>
+<p>Shared memory wins by 10–1000× because there are zero kernel crossings after
+the initial mmap.  This is why robotics middleware (ROS 2 Fast-DDS with SHM
+transport, Iceoryx) and financial trading systems prefer shared memory IPC.</p>
+<hr />
+<h2 id="6-putting-it-together-software-defined-architecture">6. Putting It Together: Software-Defined Architecture</h2>
+<p>Modern C++ systems combine these patterns:</p>
+<ol>
+<li><strong>Shared memory ring buffer</strong> for zero-copy IPC between processes</li>
+<li><strong>FlatBuffer-style serialization</strong> for schema evolution without copying</li>
+<li><strong>Type erasure</strong> for plugin interfaces without forcing inheritance on users</li>
+<li><strong>dlopen</strong> for runtime extensibility</li>
+</ol>
+<p>Example: a sensor fusion pipeline where each stage is a plugin loaded at
+startup, communicating via shared memory ring buffers with FlatBuffer messages.
+The host knows nothing about the concrete sensor types — type erasure hides
+the details behind a uniform <code>SensorReader</code> interface.</p>
+<hr />
+<h2 id="exercises-this-week">Exercises This Week</h2>
+<table>
+<thead>
+<tr>
+<th>Exercise</th>
+<th>Topic</th>
+<th>Key Concepts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ex01</td>
+<td>Shared memory IPC</td>
+<td>shm_open, mmap, seqlock, placement new</td>
+</tr>
+<tr>
+<td>ex02</td>
+<td>Serialization benchmark</td>
+<td>memcpy, binary, zero-copy, JSON</td>
+</tr>
+<tr>
+<td>ex03</td>
+<td>Type erasure</td>
+<td>Concept/Model, SBO, move-only erasure</td>
+</tr>
+<tr>
+<td>ex04</td>
+<td>Plugin loader (future)</td>
+<td>dlopen, dlsym, factory pattern</td>
+</tr>
+<tr>
+<td>ex05</td>
+<td>Ring buffer IPC (future)</td>
+<td>SPSC lock-free, cache-line padding</td>
+</tr>
+<tr>
+<td>puzzle01</td>
+<td>ABI mismatch trap</td>
+<td>struct padding across compilers</td>
+</tr>
+<tr>
+<td>puzzle02</td>
+<td>False sharing in shared memory</td>
+<td>cache-line contention measurement</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="references">References</h2>
+<ul>
+<li><em>C++ Software Design</em> — Klaus Iglberger (Type Erasure chapters)</li>
+<li><em>The Linux Programming Interface</em> — Michael Kerrisk (Ch. 49–54: Shared Memory, Semaphores)</li>
+<li>FlatBuffers internals: https://flatbuffers.dev/flatbuffers_internals.html</li>
+<li>Iceoryx (zero-copy IPC for robotics): https://iceoryx.io</li>
+<li>Sean Parent&rsquo;s &ldquo;Inheritance Is The Base Class of Evil&rdquo; talk (type erasure motivation)</li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

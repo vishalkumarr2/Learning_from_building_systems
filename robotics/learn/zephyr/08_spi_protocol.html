@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SPI — Serial Peripheral Interface - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="spi-serial-peripheral-interface">SPI — Serial Peripheral Interface</h1>
+<h2 id="what-is-spi">What Is SPI?</h2>
+<p>SPI is a <strong>synchronous serial communication protocol</strong> for short-distance communication between a master (controller) and one or more slaves (peripherals).</p>
+<p>&ldquo;Synchronous&rdquo; means both devices share a <strong>clock signal</strong> — unlike UART which each device generates its own clock and they must agree on speed.</p>
+<p>Used for: displays, IMUs, flash memory, SD cards, ADCs, sensor hubs — anything that needs fast, simple wired communication.</p>
+<hr />
+<h2 id="physical-wires-the-4-lines">Physical Wires — The 4 Lines</h2>
+<div class="highlight"><pre><span></span><code>Master (Jetson / STM32)          Slave (STM32 / sensor)
+────────────────────────────────────────────────────────
+SCLK  ──────────────────────────►  SCLK   (clock, driven by master)
+MOSI  ──────────────────────────►  MOSI   (Master Out Slave In)
+MISO  ◄──────────────────────────  MISO   (Master In Slave Out)
+CS/NSS ─────────────────────────►  CS     (Chip Select, active LOW)
+GND   ────────────────────────────  GND   (always connect ground!)
+</code></pre></div>
+
+<p><strong>MOSI</strong>: master sends data to slave on this wire
+<strong>MISO</strong>: slave sends data back to master on this wire
+<strong>SCLK</strong>: master pulses this to clock bits through
+<strong>CS</strong>: master pulls this LOW to select the slave before transfer, HIGH after</p>
+<hr />
+<h2 id="how-a-transfer-works-step-by-step">How a Transfer Works — Step by Step</h2>
+<div class="highlight"><pre><span></span><code>Master wants to send byte 0b10110101 (0xB5) to slave:
+
+1. Master pulls CS LOW          ← &quot;I&#39;m talking to you&quot;
+
+2. Master drives SCLK LOW (idle state)
+
+3. For each of 8 bits (MSB first):
+   a. Master puts bit on MOSI line  (1 or 0)
+   b. Slave puts its response bit on MISO
+   c. Master pulses SCLK HIGH       ← both sides SAMPLE here
+   d. Master pulls SCLK LOW
+
+4. After 8 pulses: 1 byte sent, 1 byte received simultaneously
+
+5. Master pulls CS HIGH         ← &quot;Transfer done&quot;
+
+Timeline:
+CS:   ─┐                                              ┌─
+       └──────────────────────────────────────────────┘
+CLK:       ┌─┐  ┌─┐  ┌─┐  ┌─┐  ┌─┐  ┌─┐  ┌─┐  ┌─┐
+           └─┘  └─┘  └─┘  └─┘  └─┘  └─┘  └─┘  └─┘
+MOSI:  ─1──────0────────1───────1───────0──── ...
+MISO:  ─?──────?────────?───────?───────?──── ... (slave responding)
+            b7   b6      b5      b4      b3   ...
+</code></pre></div>
+
+<p><strong>Key insight</strong>: SPI is <strong>full-duplex</strong> — master and slave send bits simultaneously. Every transfer is an exchange. If you only care about one direction, the other side sends dummy bytes (usually 0x00 or 0xFF).</p>
+<hr />
+<h2 id="multiple-slaves-one-bus-many-cs-lines">Multiple Slaves — One Bus, Many CS Lines</h2>
+<div class="highlight"><pre><span></span><code>Master
+├── CS0 ──► Slave A (IMU)
+├── CS1 ──► Slave B (Flash)
+├── CS2 ──► Slave C (Display)
+│
+MOSI ────────────────────────── (shared)
+MISO ────────────────────────── (shared, slaves must tri-state when not selected)
+SCLK ────────────────────────── (shared)
+</code></pre></div>
+
+<p>Only one slave can be active (CS low) at a time. All others float their MISO line (high-impedance).</p>
+<hr />
+<h2 id="the-4-spi-modes-cpol-and-cpha">The 4 SPI Modes — CPOL and CPHA</h2>
+<p>This is the most confusing part. Each device has a preference for:
+- <strong>CPOL</strong> (Clock Polarity): is the clock idle HIGH or LOW?
+- <strong>CPHA</strong> (Clock Phase): does data get sampled on the RISING or FALLING edge?</p>
+<div class="highlight"><pre><span></span><code>Mode 0 (CPOL=0, CPHA=0):  clock idle LOW,  sample on RISING  edge  ← most common
+Mode 1 (CPOL=0, CPHA=1):  clock idle LOW,  sample on FALLING edge
+Mode 2 (CPOL=1, CPHA=0):  clock idle HIGH, sample on FALLING edge
+Mode 3 (CPOL=1, CPHA=1):  clock idle HIGH, sample on RISING  edge
+</code></pre></div>
+
+<p>Visual for Mode 0 vs Mode 1:</p>
+<div class="highlight"><pre><span></span><code>Mode 0 (CPHA=0): sample on FIRST edge (rising):
+CLK:  ─┐  ┌──      MOSI must be valid BEFORE first edge
+       └──┘
+         ↑ sample here
+
+Mode 1 (CPHA=1): sample on SECOND edge (falling):
+CLK:  ─┐  ┌──      MOSI can change WITH first edge
+       └──┘
+              ↑ sample here
+</code></pre></div>
+
+<p><strong>Rule</strong>: check the sensor datasheet, find its SPI mode, set your controller to match. If mode is wrong, you&rsquo;ll read garbage with no error messages.</p>
+<p>Common modes by device:
+- ICM-42688 IMU: Mode 0 or Mode 3
+- W25Q flash: Mode 0 or Mode 3
+- SD cards: Mode 0
+- MAX31855 thermocouple: Mode 0</p>
+<hr />
+<h2 id="spi-speed">SPI Speed</h2>
+<p>SPI can run very fast — limited by wire capacitance and buffer drive strength:</p>
+<table>
+<thead>
+<tr>
+<th>Distance</th>
+<th>Max reliable speed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>On-PCB traces (&lt;5cm)</td>
+<td>50-80 MHz</td>
+</tr>
+<tr>
+<td>Short cable (&lt;30cm)</td>
+<td>10-20 MHz</td>
+</tr>
+<tr>
+<td>Long cable (&gt;30cm)</td>
+<td>1-5 MHz</td>
+</tr>
+</tbody>
+</table>
+<p>Our STM32↔Jetson pipeline uses <strong>10 MHz</strong> — appropriate for ~20cm cable with some margin.</p>
+<p>At 10 MHz: 1 byte = 800ns. 150-byte frame = 120µs.</p>
+<hr />
+<h2 id="spi-vs-i2c-vs-uart-when-to-use-which">SPI vs I2C vs UART — When to Use Which</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>SPI</th>
+<th>I2C</th>
+<th>UART</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Wires</td>
+<td>4 (+ 1 CS per slave)</td>
+<td>2</td>
+<td>2</td>
+</tr>
+<tr>
+<td>Speed</td>
+<td>Fast (1-80 MHz)</td>
+<td>Slow (100k-3.4 MHz)</td>
+<td>Medium (9.6k-921.6k baud)</td>
+</tr>
+<tr>
+<td>Multi-slave</td>
+<td>Yes (one CS per slave)</td>
+<td>Yes (7-bit address)</td>
+<td>Point-to-point only</td>
+</tr>
+<tr>
+<td>Full duplex</td>
+<td>Yes</td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Distance</td>
+<td>Short (&lt;1m)</td>
+<td>Very short (&lt;30cm)</td>
+<td>Medium (meters with RS-232)</td>
+</tr>
+<tr>
+<td>Use for</td>
+<td>Fast sensors, displays, flash</td>
+<td>Slow sensors, config registers</td>
+<td>GPS, debug, host PC</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="spi-in-zephyr">SPI in Zephyr</h2>
+<h3 id="devicetree-configuration">Devicetree configuration</h3>
+<div class="highlight"><pre><span></span><code><span class="cm">/* app.overlay */</span>
+<span class="o">&amp;</span><span class="na">spi1</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kr">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;okay&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">spi1_default</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;default&quot;</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/* Slave device — IMU on CS pin PA4 */</span>
+<span class="w">    </span><span class="nl">imu</span><span class="p">:</span><span class="w"> </span><span class="nf">icm42688</span><span class="o">@</span><span class="mi">0</span><span class="cm"> </span><span class="p">{</span><span class="w">            </span><span class="cm">/* @0 = CS index 0 */</span>
+<span class="w">        </span><span class="kr">compatible</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;invensense,icm42688p&quot;</span><span class="p">;</span>
+<span class="w">        </span><span class="kr">reg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">0</span><span class="o">&gt;</span><span class="p">;</span><span class="w">               </span><span class="cm">/* CS index */</span>
+<span class="w">        </span><span class="n">spi-max-frequency</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">10000000</span><span class="o">&gt;</span><span class="p">;</span><span class="w">  </span><span class="cm">/* 10 MHz */</span>
+<span class="w">        </span><span class="cm">/* mode 0 is default (CPOL=0, CPHA=0) */</span>
+<span class="w">    </span><span class="p">};</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<h3 id="master-transfer-zephyr-api">Master transfer (Zephyr API)</h3>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/spi.h&gt;</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">spi_dev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">spi1</span><span class="p">));</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_config</span><span class="w"> </span><span class="n">spi_cfg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">frequency</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10000000</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">operation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SPI_WORD_SET</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">SPI_OP_MODE_MASTER</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">SPI_TRANSFER_MSB</span><span class="p">,</span>
+<span class="w">    </span><span class="cm">/* No .cs here — handled by CS GPIO defined in devicetree */</span>
+<span class="p">};</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">spi_read_register</span><span class="p">(</span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">reg_addr</span><span class="p">,</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">out</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">len</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">reg_addr</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="mh">0x80</span><span class="w"> </span><span class="p">};</span><span class="w">  </span><span class="cm">/* set read bit */</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">[</span><span class="n">len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">];</span>
+
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf</span><span class="w"> </span><span class="n">tx</span><span class="p">[]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{{</span><span class="w"> </span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">}};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf</span><span class="w"> </span><span class="n">rx</span><span class="p">[]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{{</span><span class="w"> </span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">}};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf_set</span><span class="w"> </span><span class="n">tx_set</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buffers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tx</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf_set</span><span class="w"> </span><span class="n">rx_set</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buffers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">rx</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+
+<span class="w">    </span><span class="n">spi_transceive</span><span class="p">(</span><span class="n">spi_dev</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">spi_cfg</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx_set</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rx_set</span><span class="p">);</span>
+
+<span class="w">    </span><span class="cm">/* rx_buf[0] is the response to tx_buf[0] — skip it (command echo) */</span>
+<span class="w">    </span><span class="n">memcpy</span><span class="p">(</span><span class="n">out</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rx_buf</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span><span class="w"> </span><span class="n">len</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="slave-mode-zephyr-api">Slave mode (Zephyr API)</h3>
+<div class="highlight"><pre><span></span><code><span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_config</span><span class="w"> </span><span class="n">slave_cfg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">operation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SPI_WORD_SET</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">SPI_OP_MODE_SLAVE</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">frequency</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">   </span><span class="cm">/* slave doesn&#39;t set frequency — master drives it */</span>
+<span class="p">};</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">spi_slave_receive</span><span class="p">(</span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">rx_buf</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">len</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">tx_dummy</span><span class="p">[</span><span class="n">len</span><span class="p">];</span><span class="w">    </span><span class="cm">/* send zeros while receiving */</span>
+<span class="w">    </span><span class="n">memset</span><span class="p">(</span><span class="n">tx_dummy</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">len</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf</span><span class="w"> </span><span class="n">tx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tx_dummy</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">len</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf</span><span class="w"> </span><span class="n">rx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">,</span><span class="w">   </span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">len</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf_set</span><span class="w"> </span><span class="n">tx_set</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buffers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf_set</span><span class="w"> </span><span class="n">rx_set</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buffers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rx</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+
+<span class="w">    </span><span class="cm">/* Blocks until master sends `len` bytes */</span>
+<span class="w">    </span><span class="n">spi_transceive</span><span class="p">(</span><span class="n">spi_dev</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">slave_cfg</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx_set</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rx_set</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="common-mistakes">Common Mistakes</h2>
+<table>
+<thead>
+<tr>
+<th>Mistake</th>
+<th>Symptom</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Wrong SPI mode</td>
+<td>Read garbage, no errors</td>
+<td>Check datasheet CPOL/CPHA, set <code>spi.mode</code> to match</td>
+</tr>
+<tr>
+<td>MSB/LSB wrong</td>
+<td>Bits appear reversed</td>
+<td>Most devices are MSB-first; check datasheet</td>
+</tr>
+<tr>
+<td>CS not connected to ground</td>
+<td>Random behavior</td>
+<td>Always tie CS to GND reference</td>
+</tr>
+<tr>
+<td>No shared GND</td>
+<td>Random bit errors</td>
+<td>Connect GND between master and slave</td>
+</tr>
+<tr>
+<td>Speed too high for cable length</td>
+<td>Intermittent errors</td>
+<td>Reduce speed or add 33Ω series resistors</td>
+</tr>
+<tr>
+<td><code>xfer</code> instead of <code>xfer2</code></td>
+<td>CS pulses between bytes</td>
+<td>Use <code>xfer2</code> for multi-byte transfers</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAN Bus — Controller Area Network - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="can-bus-controller-area-network">CAN Bus — Controller Area Network</h1>
+<h2 id="what-is-can">What Is CAN?</h2>
+<p>CAN is a <strong>differential, multi-master, broadcast serial protocol</strong> invented by Bosch in 1983 for automotive use.</p>
+<p>&ldquo;Controller Area Network&rdquo; — originally designed so ECUs (engine control units) in cars could talk to each other without a central computer.</p>
+<p>Used for: wheel speed sensors, motor controllers (BLDC, servo), steering modules, brake controllers, battery management systems, industrial sensors — anything that needs <strong>high reliability</strong> and <strong>long cables</strong> in noisy electrical environments.</p>
+<p>In our robot: CAN is how the STM32 reads <strong>wheel encoders</strong> and <strong>motor controller feedback</strong> at 100Hz.</p>
+<hr />
+<h2 id="physical-layer-differential-signaling">Physical Layer — Differential Signaling</h2>
+<div class="highlight"><pre><span></span><code>STM32 CAN             Wheel Encoder           Motor Controller
+────────────────────────────────────────────────────────────────
+CAN_H ──────────────────────────────────────────────────────► 120Ω ◄─
+                                                              terminator
+CAN_L ──────────────────────────────────────────────────────► 120Ω ◄─
+                                                              terminator
+</code></pre></div>
+
+<p><strong>CAN_H</strong> and <strong>CAN_L</strong> are always used as a pair. The signal is the <strong>voltage difference</strong> between them:</p>
+<div class="highlight"><pre><span></span><code>Recessive (logical 1):  CAN_H = 2.5V,  CAN_L = 2.5V   → difference = 0V
+Dominant  (logical 0):  CAN_H = 3.5V,  CAN_L = 1.5V   → difference = 2V
+</code></pre></div>
+
+<p>Why differential? If a motor injects noise onto the cable, <strong>both wires are affected equally</strong>. The receiver sees the difference, so noise cancels out. A single-ended wire (like UART) would be corrupted.</p>
+<p><strong>Termination resistors</strong> (120Ω) at each end of the bus prevent signal reflections at high speeds.</p>
+<hr />
+<h2 id="can-frame-format">CAN Frame Format</h2>
+<p>Every message on CAN has this format:</p>
+<div class="highlight"><pre><span></span><code>┌─────┬───────────────┬─────┬──────────────────────┬─────┬──────┐
+│ SOF │  ID (11 bits) │ RTR │  DLC (4 bits)         │DATA │ CRC  │
+│  1  │  (or 29 bits) │  1  │  0-8 = bytes of data  │0-64B│ 15+1 │
+└─────┴───────────────┴─────┴──────────────────────┴─────┴──────┘
+ SOF: Start of Frame
+ ID:  Arbitration ID (who is this message from / what type)
+ RTR: Remote Transmission Request  (0=data, 1=request)
+ DLC: Data Length Code
+ CRC: Cyclic Redundancy Check (error detection)
+</code></pre></div>
+
+<p><strong>Standard CAN</strong> (CAN 2.0A): 11-bit ID → 2048 unique message IDs<br />
+<strong>Extended CAN</strong> (CAN 2.0B): 29-bit ID → 536 million unique message IDs<br />
+<strong>CAN FD</strong>: Up to 64 bytes data (vs 8 bytes in classic), up to 8 Mbps</p>
+<p>In classic CAN, <strong>max 8 bytes per frame</strong>. For more data, you send multiple frames (CANopen, J1939 handle this).</p>
+<hr />
+<h2 id="bus-arbitration-how-multiple-masters-coexist">Bus Arbitration — How Multiple Masters Coexist</h2>
+<p>CAN has no master. Any node can transmit whenever the bus is idle. If two nodes start at the same time:</p>
+<div class="highlight"><pre><span></span><code>Node A transmits ID: 0b00001000010 = 0x042
+Node B transmits ID: 0b00000100001 = 0x021
+
+Bit 10: A=0, B=0  same, both continue
+Bit  9: A=0, B=0  same, both continue
+...
+Bit  6: A=1, B=0  ← A transmits recessive (1), B transmits dominant (0)
+</code></pre></div>
+
+<p><strong>Dominant (0) wins</strong>. Node A sees the bus doesn&rsquo;t match what it sent → <strong>A stops and waits</strong>.<br />
+Node B wins and continues transmission. <strong>Node with lower ID (higher priority) always wins</strong>.</p>
+<p>Zero collisions. Zero data corruption. Node A automatically retransmits when bus is free.</p>
+<p><strong>Why this matters</strong>: in a robot, you can assign IDs by priority:
+- ID 0x001: Emergency stop → always gets through first
+- ID 0x010: Wheel speed → high priority<br />
+- ID 0x100: Status heartbeat → low priority, can be delayed</p>
+<hr />
+<h2 id="speeds">Speeds</h2>
+<table>
+<thead>
+<tr>
+<th>Speed</th>
+<th>Max Cable Length</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 Mbps</td>
+<td>~25m</td>
+<td>Industrial automation, robotics</td>
+</tr>
+<tr>
+<td>500 kbps</td>
+<td>~100m</td>
+<td>Automotive (most common)</td>
+</tr>
+<tr>
+<td>250 kbps</td>
+<td>~250m</td>
+<td>Agriculture, slow processes</td>
+</tr>
+<tr>
+<td>125 kbps</td>
+<td>~500m</td>
+<td>Building automation</td>
+</tr>
+</tbody>
+</table>
+<p>At 1 Mbps, <strong>one 8-byte frame takes ~120µs</strong>. Sending wheel speed at 100Hz = 1.2% bus utilization.</p>
+<hr />
+<h2 id="can-in-zephyr">CAN in Zephyr</h2>
+<h3 id="devicetree">Devicetree</h3>
+<div class="highlight"><pre><span></span><code><span class="cm">/* app.overlay */</span>
+<span class="o">&amp;</span><span class="na">can1</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kr">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;okay&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">can1_default</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;default&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">bus-speed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">1000000</span><span class="o">&gt;</span><span class="p">;</span><span class="w">  </span><span class="cm">/* 1 Mbps */</span>
+<span class="w">    </span><span class="n">sjw</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">1</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">sample-point</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">875</span><span class="o">&gt;</span><span class="p">;</span><span class="w">  </span><span class="cm">/* 87.5% sample point */</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<h3 id="sending-a-can-frame">Sending a CAN frame</h3>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/can.h&gt;</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">can_dev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">can1</span><span class="p">));</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">can_send_wheelspeed</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">left_mps</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">right_mps</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Pack 2x float into 8 bytes — or use fixed-point for precision */</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">left_fixed</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)(</span><span class="n">left_mps</span><span class="w">  </span><span class="o">*</span><span class="w"> </span><span class="mi">100</span><span class="p">);</span><span class="w">   </span><span class="cm">/* 0.01 m/s resolution */</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">right_fixed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)(</span><span class="n">right_mps</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">100</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">can_frame</span><span class="w"> </span><span class="n">frame</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="p">.</span><span class="n">flags</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">  </span><span class="cm">/* standard ID, data frame */</span>
+<span class="w">        </span><span class="p">.</span><span class="n">id</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mh">0x010</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">dlc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="p">(</span><span class="n">left_fixed</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">,</span>
+<span class="w">            </span><span class="n">left_fixed</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">,</span>
+<span class="w">            </span><span class="p">(</span><span class="n">right_fixed</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">,</span>
+<span class="w">            </span><span class="n">right_fixed</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">,</span>
+<span class="w">        </span><span class="p">},</span>
+<span class="w">    </span><span class="p">};</span>
+
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">can_send</span><span class="p">(</span><span class="n">can_dev</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">frame</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">10</span><span class="p">),</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">rc</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;CAN send failed: %d&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">rc</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="receiving-can-frames-with-a-filter">Receiving CAN frames with a filter</h3>
+<div class="highlight"><pre><span></span><code><span class="k">static</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">can_filter</span><span class="w"> </span><span class="n">wheel_filter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">flags</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">id</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mh">0x010</span><span class="p">,</span><span class="w">       </span><span class="cm">/* accept only ID 0x010 */</span>
+<span class="w">    </span><span class="p">.</span><span class="n">mask</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">CAN_STD_ID_MASK</span><span class="w">  </span><span class="cm">/* all 11 bits must match */</span>
+<span class="p">};</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">wheel_rx_callback</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span>
+<span class="w">                               </span><span class="k">struct</span><span class="w"> </span><span class="nc">can_frame</span><span class="w"> </span><span class="o">*</span><span class="n">frame</span><span class="p">,</span>
+<span class="w">                               </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">user_data</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Called from CAN interrupt/thread — keep short */</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">left_fixed</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">frame</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">frame</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">[</span><span class="mi">1</span><span class="p">];</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">right_fixed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">frame</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">frame</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">[</span><span class="mi">3</span><span class="p">];</span>
+
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">wheel_msg</span><span class="w"> </span><span class="n">msg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="p">.</span><span class="n">left_mps</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">left_fixed</span><span class="w">  </span><span class="o">/</span><span class="w"> </span><span class="mf">100.0f</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">right_mps</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">right_fixed</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">100.0f</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">ts</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k_uptime_get_32</span><span class="p">(),</span>
+<span class="w">    </span><span class="p">};</span>
+
+<span class="w">    </span><span class="n">zbus_chan_pub</span><span class="p">(</span><span class="o">&amp;</span><span class="n">wheel_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">can_init</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Start CAN controller */</span>
+<span class="w">    </span><span class="n">can_start</span><span class="p">(</span><span class="n">can_dev</span><span class="p">);</span>
+
+<span class="w">    </span><span class="cm">/* Register filter — only frames matching filter call our callback */</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">filter_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">can_add_rx_filter</span><span class="p">(</span><span class="n">can_dev</span><span class="p">,</span><span class="w"> </span><span class="n">wheel_rx_callback</span><span class="p">,</span>
+<span class="w">                                      </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">wheel_filter</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">filter_id</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;Failed to add CAN filter: %d&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">filter_id</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="reading-wheel-encoder-real-robot-example">Reading wheel encoder — real robot example</h3>
+<div class="highlight"><pre><span></span><code><span class="cm">/* Motor controller broadcasts ID=0x201 containing:</span>
+<span class="cm"> *   bytes 0-1: actual position (int16, encoder ticks)</span>
+<span class="cm"> *   bytes 2-3: actual velocity (int16, RPM)</span>
+<span class="cm"> *   bytes 4-5: actual current  (int16, mA)</span>
+<span class="cm"> *   bytes 6-7: temperature     (int16, 0.1°C)</span>
+<span class="cm"> *</span>
+<span class="cm"> * This is inspired by Roboteq MDC2450 protocol</span>
+<span class="cm"> */</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">can_filter</span><span class="w"> </span><span class="n">motor_filter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">id</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="mh">0x201</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">mask</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CAN_STD_ID_MASK</span><span class="p">,</span>
+<span class="p">};</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">motor_feedback_cb</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span>
+<span class="w">                               </span><span class="k">struct</span><span class="w"> </span><span class="nc">can_frame</span><span class="w"> </span><span class="o">*</span><span class="n">frame</span><span class="p">,</span>
+<span class="w">                               </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">user_data</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">frame</span><span class="o">-&gt;</span><span class="n">dlc</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">ticks</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)</span><span class="n">sys_get_be16</span><span class="p">(</span><span class="o">&amp;</span><span class="n">frame</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">rpm</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)</span><span class="n">sys_get_be16</span><span class="p">(</span><span class="o">&amp;</span><span class="n">frame</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">[</span><span class="mi">2</span><span class="p">]);</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">ma</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)</span><span class="n">sys_get_be16</span><span class="p">(</span><span class="o">&amp;</span><span class="n">frame</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">[</span><span class="mi">4</span><span class="p">]);</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">temp</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)</span><span class="n">sys_get_be16</span><span class="p">(</span><span class="o">&amp;</span><span class="n">frame</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">[</span><span class="mi">6</span><span class="p">]);</span>
+
+<span class="w">    </span><span class="cm">/* Convert */</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">velocity_mps</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">rpm</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">60.0f</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">WHEEL_CIRCUMFERENCE_M</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">current_a</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="n">ma</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">1000.0f</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">temp_c</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="n">temp</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">10.0f</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/* Overheat check */</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">temp_c</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mf">80.0f</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_WRN</span><span class="p">(</span><span class="s">&quot;Motor hot: %.1f°C&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">double</span><span class="p">)</span><span class="n">temp_c</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="cm">/* Publish to ZBus */</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">motor_state</span><span class="w"> </span><span class="n">msg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">vel_mps</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">velocity_mps</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">current_a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">current_a</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="n">zbus_chan_pub</span><span class="p">(</span><span class="o">&amp;</span><span class="n">motor_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="can-error-handling">CAN Error Handling</h2>
+<p>CAN has built-in <strong>Error Confinement</strong> — nodes that keep causing errors automatically shut down:</p>
+<div class="highlight"><pre><span></span><code>Error Active   → Error Passive   → Bus Off
+(normal)           (TEC &gt; 127)    (TEC &gt; 255, node goes silent)
+                 (sends passive   (must be manually restarted)
+                  error flags)
+</code></pre></div>
+
+<p>TEC = Transmit Error Counter. Every consecutive TX error increments it.</p>
+<p>In Zephyr, monitor state:</p>
+<div class="highlight"><pre><span></span><code><span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">can_state_change_cb</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span>
+<span class="w">                                 </span><span class="k">enum</span><span class="w"> </span><span class="n">can_state</span><span class="w"> </span><span class="n">state</span><span class="p">,</span>
+<span class="w">                                 </span><span class="k">struct</span><span class="w"> </span><span class="nc">can_bus_err_cnt</span><span class="w"> </span><span class="n">err</span><span class="p">,</span>
+<span class="w">                                 </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">user_data</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;CAN state: %d TEC=%d REC=%d&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="n">state</span><span class="p">,</span><span class="w"> </span><span class="n">err</span><span class="p">.</span><span class="n">tx_err_cnt</span><span class="p">,</span><span class="w"> </span><span class="n">err</span><span class="p">.</span><span class="n">rx_err_cnt</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">state</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">CAN_STATE_BUS_OFF</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;CAN bus off! Recovering...&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">can_recover</span><span class="p">(</span><span class="n">dev</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">100</span><span class="p">));</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="n">can_set_state_change_callback</span><span class="p">(</span><span class="n">can_dev</span><span class="p">,</span><span class="w"> </span><span class="n">can_state_change_cb</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">);</span>
+</code></pre></div>
+
+<hr />
+<h2 id="can-vs-i2c-vs-spi">CAN vs I2C vs SPI</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>CAN</th>
+<th>I2C</th>
+<th>SPI</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Wires</td>
+<td>2 (differential)</td>
+<td>2 (single-ended)</td>
+<td>4+</td>
+</tr>
+<tr>
+<td>Speed</td>
+<td>Up to 1 Mbps (8 Mbps FD)</td>
+<td>Up to 1 MHz</td>
+<td>Up to 50+ MHz</td>
+</tr>
+<tr>
+<td>Distance</td>
+<td>~25m at 1 Mbps</td>
+<td>&lt;1m</td>
+<td>&lt;1m</td>
+</tr>
+<tr>
+<td>Error detection</td>
+<td>CRC + ACK + bit stuffing</td>
+<td>ACK only</td>
+<td>None</td>
+</tr>
+<tr>
+<td>Multi-master</td>
+<td>Yes (arbitration)</td>
+<td>Yes (but rare)</td>
+<td>No (one master)</td>
+</tr>
+<tr>
+<td>Noise immunity</td>
+<td>Excellent (differential)</td>
+<td>Poor</td>
+<td>Poor</td>
+</tr>
+<tr>
+<td>Use in robot</td>
+<td>Wheel encoders, motor control</td>
+<td>Onboard sensors</td>
+<td>Fast IMU, camera</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule of thumb</strong>: Use CAN when cables are long, environment is noisy, or nodes need to be hot-pluggable.</p>
+<hr />
+<h2 id="common-mistakes">Common Mistakes</h2>
+<table>
+<thead>
+<tr>
+<th>Mistake</th>
+<th>Symptom</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Missing termination resistors</td>
+<td>Bus works at 1 node, fails with &gt;2</td>
+<td>Add 120Ω at each end</td>
+</tr>
+<tr>
+<td>CAN_H/CAN_L swapped</td>
+<td>Nothing works</td>
+<td>Check wiring polarity</td>
+</tr>
+<tr>
+<td>Only one terminator</td>
+<td>Works initially, fails at higher speeds</td>
+<td>Both ends must have 120Ω</td>
+</tr>
+<tr>
+<td>Not starting CAN controller</td>
+<td><code>-ENETDOWN</code> on send</td>
+<td>Call <code>can_start()</code> before use</td>
+</tr>
+<tr>
+<td>Blocking in rx callback</td>
+<td>Other frames dropped</td>
+<td>Publish to ZBus and return immediately</td>
+</tr>
+<tr>
+<td>Not filtering by ID</td>
+<td>CPU overwhelmed by all frames</td>
+<td>Always install an rx filter</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

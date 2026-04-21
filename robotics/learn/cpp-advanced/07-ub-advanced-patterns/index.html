@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Week 7: Undefined Behavior Deep Dive &amp; Advanced Patterns - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-indigo-600 hover:text-indigo-800 mb-4 inline-block">&larr; Back to C++ Advanced</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="week-7-undefined-behavior-deep-dive-advanced-patterns">Week 7: Undefined Behavior Deep Dive &amp; Advanced Patterns</h1>
+<h2 id="1-the-20-most-dangerous-forms-of-undefined-behavior">1. The 20 Most Dangerous Forms of Undefined Behavior</h2>
+<p>Undefined Behavior (UB) is not &ldquo;implementation-defined&rdquo; or &ldquo;unspecified&rdquo; — it means the C++ standard imposes <strong>no requirements whatsoever</strong> on what happens. The compiler is free to assume UB never occurs and optimize accordingly. This is not theoretical: modern compilers aggressively exploit UB assumptions for optimization, and the results can be catastrophic.</p>
+<h3 id="category-a-memory-ub">Category A: Memory UB</h3>
+<p><strong>UB-01: Use-After-Free.</strong> Accessing heap memory after <code>delete</code> or <code>free()</code>. The allocator may have returned that memory to someone else, or the page may be unmapped. With AddressSanitizer (ASan), this is caught immediately. Without it, you get silent corruption or a delayed crash hundreds of lines later. [CWE-416]</p>
+<p><strong>UB-02: Buffer Overflow (Out-of-Bounds Access).</strong> Reading or writing past the end of an array or buffer. This is the single most exploited vulnerability class in history. Stack buffer overflows enable return-address overwrites; heap overflows corrupt allocator metadata. <code>operator[]</code> on <code>std::vector</code> does NOT bounds-check; use <code>.at()</code> or ASan. [CWE-787]</p>
+<p><strong>UB-03: Null Pointer Dereference.</strong> Dereferencing a null pointer is UB, not a guaranteed segfault. The compiler may remove null checks if it can prove the pointer was already dereferenced (see Puzzle 1). On embedded systems without an MMU, null deref silently reads address 0x0. [CWE-476]</p>
+<p><strong>UB-04: Dangling Reference.</strong> A reference bound to a local variable that has gone out of scope. Unlike pointers, references cannot be null-checked — they&rsquo;re assumed valid. Returning <code>const std::string&amp;</code> from a function that builds the string locally is a classic instance.</p>
+<p><strong>UB-05: Uninitialized Read.</strong> Reading from an uninitialized variable of automatic storage duration. The compiler may propagate &ldquo;undef&rdquo; through the entire computation, making ALL downstream values undefined. MemorySanitizer (MSan) catches this, but it&rsquo;s the hardest sanitizer to deploy because it requires an instrumented libc.</p>
+<h3 id="category-b-arithmetic-ub">Category B: Arithmetic UB</h3>
+<p><strong>UB-06: Signed Integer Overflow.</strong> <code>INT_MAX + 1</code> is UB for signed integers (but well-defined wrapping for unsigned). GCC with <code>-O2</code> will assume signed overflow never happens and may transform <code>if (x + 1 &gt; x)</code> into <code>if (true)</code>. Use <code>__builtin_add_overflow()</code> or <code>&lt;numeric&gt;</code> safe arithmetic.</p>
+<p><strong>UB-07: Division by Zero.</strong> <code>x / 0</code> and <code>x % 0</code> for integer types. Floating-point division by zero is NOT UB — it produces <code>inf</code> or <code>NaN</code> per IEEE 754. Integer division by zero may raise SIGFPE on x86 or silently produce garbage on ARM.</p>
+<p><strong>UB-08: Shift UB.</strong> Shifting by a negative amount, shifting by ≥ the bit-width, or shifting a negative signed value left. <code>1 &lt;&lt; 32</code> is UB on a 32-bit int. <code>1 &lt;&lt; 31</code> was UB in C++17 and earlier; C++20 mandates two&rsquo;s complement, making it well-defined as <code>INT_MIN</code>.</p>
+<h3 id="category-c-type-system-ub">Category C: Type System UB</h3>
+<p><strong>UB-09: Strict Aliasing Violation.</strong> Accessing an object through a pointer of incompatible type. The classic: casting <code>float*</code> to <code>int*</code> to inspect the bit pattern. The compiler assumes pointers to different types don&rsquo;t alias, enabling powerful optimizations. Use <code>std::memcpy</code> or <code>std::bit_cast</code> (C++20) instead.</p>
+<p><strong>UB-10: Type Punning via Union.</strong> In C99/C11, reading a different union member than last written is explicitly permitted (not just implementation-defined) as long as the value is a valid representation. In C++, it&rsquo;s UB (with narrow exceptions for common initial sequences). Use <code>std::bit_cast</code> or <code>memcpy</code>.</p>
+<p><strong>UB-11: Alignment Violation.</strong> Accessing data through a misaligned pointer. <code>reinterpret_cast&lt;int*&gt;(char_ptr + 1)</code> may work on x86 (with a performance penalty) but will SIGBUS on ARM/RISC-V. Use <code>alignas</code> and <code>std::assume_aligned</code> (C++20).</p>
+<h3 id="category-d-sequence-evaluation-ub">Category D: Sequence &amp; Evaluation UB</h3>
+<p><strong>UB-12: Unsequenced Modification.</strong> <code>i = i++ + ++i</code> — modifying a scalar variable twice without an intervening sequence point (C++17 refined this with &ldquo;sequenced before&rdquo; rules, but many forms remain UB). Rule: never modify and read the same variable in one expression without a clear sequence.</p>
+<p><strong>UB-13: Order of Evaluation of Function Arguments.</strong> <code>f(g(), h())</code> — the order of <code>g()</code> and <code>h()</code> is unspecified (not UB, but surprising). If <code>g()</code> and <code>h()</code> have side effects on shared state, results vary between compilers. C++17 fixed some cases (e.g., <code>a.b(c)</code> evaluates <code>a.b</code> before <code>c</code>).</p>
+<h3 id="category-e-lifetime-ub">Category E: Lifetime UB</h3>
+<p><strong>UB-14: Returning Reference to Local.</strong> <code>int&amp; f() { int x = 42; return x; }</code> — the reference dangles immediately. GCC warns (<code>-Wreturn-local-addr</code>), but templates can hide this.</p>
+<p><strong>UB-15: Temporary Lifetime Extension Failure.</strong> <code>const std::string&amp; r = get_string();</code> extends the temporary&rsquo;s lifetime ONLY if <code>get_string()</code> returns by value. If it returns <code>const std::string&amp;</code>, no extension happens and <code>r</code> may dangle. See Puzzle 2 for detailed scenarios.</p>
+<p><strong>UB-16: Use After <code>std::move</code>.</strong> Reading a moved-from object is not technically UB (it&rsquo;s in a &ldquo;valid but unspecified&rdquo; state), but calling anything except assignment or destruction on it is usually a bug. For <code>std::unique_ptr</code>, the moved-from state IS specified (null), but for <code>std::string</code> it could be empty or contain the original data.</p>
+<h3 id="category-f-miscellaneous-lethal-ub">Category F: Miscellaneous Lethal UB</h3>
+<p><strong>UB-17: Infinite Loop Without Side Effects.</strong> A loop like <code>while (true) {}</code> with no observable side effects (no I/O, no volatile access, no atomics) is UB in C++11 and later. The compiler may assume it terminates and delete it entirely.</p>
+<p><strong>UB-18: Violating <code>[[noreturn]]</code> by Returning.</strong> If a function marked <code>[[noreturn]]</code> does return, the behavior is undefined.</p>
+<p><strong>UB-19: Double Free / Double Delete.</strong> Freeing the same memory twice corrupts the allocator&rsquo;s internal data structures. Can manifest as a crash in a completely unrelated allocation. ASan catches this instantly.</p>
+<p><strong>UB-20: ODR Violation (One Definition Rule).</strong> Having two different definitions of the same entity across translation units. The linker picks one silently. Different optimization levels, different <code>#defines</code>, or template specializations in different TUs can trigger this. No sanitizer catches it at runtime — only careful code review and <code>-flto</code> help.</p>
+<hr />
+<h2 id="2-crtp-curiously-recurring-template-pattern">2. CRTP: Curiously Recurring Template Pattern</h2>
+<p>CRTP enables <strong>static polymorphism</strong> — dispatching to derived class methods at compile time, with zero runtime overhead (no vtable, no indirect call).</p>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">Derived</span><span class="o">&gt;</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">SensorBase</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="nf">read</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">Derived</span><span class="o">*&gt;</span><span class="p">(</span><span class="k">this</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">read_impl</span><span class="p">();</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">IMU</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">SensorBase</span><span class="o">&lt;</span><span class="n">IMU</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="nf">read_impl</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="mf">9.81</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p><strong>When to use CRTP vs virtual:</strong>
+- CRTP: hot path, embedded, real-time, millions of calls per second, type known at compile time
+- Virtual: plugin systems, runtime configuration, heterogeneous containers, ABI stability</p>
+<p>The key trade-off: CRTP requires the concrete type at compile time, so you can&rsquo;t store <code>SensorBase&lt;IMU&gt;</code> and <code>SensorBase&lt;Lidar&gt;</code> in the same container without type erasure.</p>
+<p><strong>CRTP Mixin pattern</strong> — adding behavior to classes via CRTP base:</p>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">Derived</span><span class="o">&gt;</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">Counted</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="kr">inline</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">Counted</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="o">++</span><span class="n">count</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="o">~</span><span class="n">Counted</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="o">--</span><span class="n">count</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">instance_count</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">count</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">Widget</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Counted</span><span class="o">&lt;</span><span class="n">Widget</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{};</span><span class="w">  </span><span class="c1">// Widget now has instance_count()</span>
+</code></pre></div>
+
+<hr />
+<h2 id="3-policy-based-design">3. Policy-Based Design</h2>
+<p>Alexandrescu&rsquo;s policy-based design uses templates to compose behavior from small, orthogonal policy classes:</p>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">IntegrationPolicy</span><span class="p">,</span><span class="w"> </span><span class="k">typename</span><span class="w"> </span><span class="nc">SaturationPolicy</span><span class="o">&gt;</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">PIDController</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">private</span><span class="w"> </span><span class="n">IntegrationPolicy</span><span class="p">,</span><span class="w"> </span><span class="k">private</span><span class="w"> </span><span class="n">SaturationPolicy</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="nf">compute</span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="n">error</span><span class="p">,</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">dt</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">integral_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">IntegrationPolicy</span><span class="o">::</span><span class="n">integrate</span><span class="p">(</span><span class="n">integral_</span><span class="p">,</span><span class="w"> </span><span class="n">error</span><span class="p">,</span><span class="w"> </span><span class="n">dt</span><span class="p">);</span>
+<span class="w">        </span><span class="n">integral_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SaturationPolicy</span><span class="o">::</span><span class="n">clamp</span><span class="p">(</span><span class="n">integral_</span><span class="p">,</span><span class="w"> </span><span class="o">-</span><span class="n">limit_</span><span class="p">,</span><span class="w"> </span><span class="n">limit_</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">kp_</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">ki_</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">integral_</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p>Each policy is a small struct with a single static or non-virtual method. The compiler inlines everything — zero overhead compared to hand-written code, but fully composable.</p>
+<p>This is the C++ answer to the Strategy pattern when runtime selection isn&rsquo;t needed.</p>
+<hr />
+<h2 id="4-structured-logging-for-production-real-time">4. Structured Logging for Production &amp; Real-Time</h2>
+<p>Traditional logging (<code>printf</code>, <code>spdlog</code>, <code>std::cout</code>) is <strong>not RT-safe</strong> because:
+- Format strings cause allocation
+- File I/O causes syscalls (unbounded latency)
+- Mutex contention from multiple threads</p>
+<p>The RT-safe pattern: <strong>SPSC ring buffer with deferred formatting</strong>.</p>
+<div class="highlight"><pre><span></span><code>┌──────────────────────────────────────────────────────────────┐
+│                 RT-SAFE LOGGING PIPELINE                      │
+│                                                              │
+│  RT Thread          Ring Buffer           Background Thread  │
+│  ┌─────────┐       ┌──────────────┐      ┌───────────────┐  │
+│  │ record() │──────▶│ TraceBuffer  │─────▶│ drain_and_    │  │
+│  │ (no      │ push  │ {ts, id,     │ pop  │ format()      │  │
+│  │  alloc,  │       │  payload}    │      │ (allocation   │  │
+│  │  no      │       │              │      │  OK here)     │  │
+│  │  syscall)│       │ Atomic idx   │      │               │  │
+│  └─────────┘       └──────────────┘      └───────┬───────┘  │
+│                                                   │          │
+│                                           ┌───────▼───────┐  │
+│                                           │  File / Net   │  │
+│                                           │  (non-RT)     │  │
+│                                           └───────────────┘  │
+└──────────────────────────────────────────────────────────────┘
+</code></pre></div>
+
+<p>Key design:
+- <code>TraceBuffer&lt;N&gt;</code>: fixed-size circular buffer, power-of-2 size for fast modulo
+- Each entry: <code>{uint64_t timestamp_ns, uint16_t event_id, uint64_t payload}</code> — 18 bytes, padded to 32
+- <code>record()</code>: single atomic fetch_add on write index, no mutex, no allocation
+- <code>dump()</code>: copy the buffer, sort by timestamp, format offline
+- <code>LogLevel</code> as <code>std::atomic&lt;int&gt;</code>: check level before recording, changeable at runtime</p>
+<p>This is the &ldquo;flight data recorder&rdquo; pattern used in avionics and robotics: always capture the last N thousand events, and when something goes wrong, you have the trace.</p>
+<hr />
+<h2 id="5-how-compilers-exploit-ub-for-optimization">5. How Compilers Exploit UB for Optimization</h2>
+<p>This is the crucial insight: UB is not just &ldquo;anything might happen&rdquo; — it&rsquo;s <strong>a contract between you and the compiler</strong>. You promise certain things never happen; the compiler uses those promises to generate faster code.</p>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────────────────────────┐
+│           COMPILER UB EXPLOITATION PIPELINE                  │
+│                                                             │
+│  Source Code                                                │
+│      │                                                      │
+│      ▼                                                      │
+│  ┌──────────────────────────────────┐                       │
+│  │ 1. PARSE &amp; BUILD IR             │                       │
+│  │    (SSA form, all UB present)   │                       │
+│  └──────────────┬───────────────────┘                       │
+│                 ▼                                            │
+│  ┌──────────────────────────────────┐                       │
+│  │ 2. ASSUME UB NEVER HAPPENS      │                       │
+│  │                                  │                       │
+│  │  • signed overflow → impossible  │  ◀── This is where   │
+│  │  • null deref → impossible       │      your bugs become │
+│  │  • aliasing rules hold           │      &quot;optimizations&quot;  │
+│  │  • loops terminate               │                       │
+│  └──────────────┬───────────────────┘                       │
+│                 ▼                                            │
+│  ┌──────────────────────────────────┐                       │
+│  │ 3. OPTIMIZE BASED ON ASSUMPTIONS│                       │
+│  │                                  │                       │
+│  │  • Delete &quot;dead&quot; null checks    │                       │
+│  │  • Vectorize &quot;bounded&quot; loops    │                       │
+│  │  • Reorder aliased loads/stores │                       │
+│  │  • Fold &quot;can&#39;t overflow&quot; math   │                       │
+│  └──────────────┬───────────────────┘                       │
+│                 ▼                                            │
+│  ┌──────────────────────────────────┐                       │
+│  │ 4. EMIT MACHINE CODE            │                       │
+│  │    (runs &quot;wrong&quot; if UB existed) │                       │
+│  └──────────────────────────────────┘                       │
+└─────────────────────────────────────────────────────────────┘
+</code></pre></div>
+
+<h3 id="concrete-example-1-null-check-elimination">Concrete Example 1: Null Check Elimination</h3>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">*</span><span class="n">p</span><span class="p">;</span><span class="w">        </span><span class="c1">// Dereference — compiler assumes p != null</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">p</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="k">nullptr</span><span class="p">)</span><span class="w">  </span><span class="c1">// Dead code! Compiler proved p != null above</span>
+<span class="w">        </span><span class="n">handle_error</span><span class="p">();</span>
+<span class="w">    </span><span class="n">use</span><span class="p">(</span><span class="n">x</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>At <code>-O2</code>, GCC/Clang will <strong>delete the entire <code>if</code> block</strong>. The dereference on line 2 is only valid if <code>p</code> is non-null, so the compiler assumes it is, making the null check on line 3 provably false.</p>
+<h3 id="concrete-example-2-signed-overflow-loop-transformation">Concrete Example 2: Signed Overflow Loop Transformation</h3>
+<div class="highlight"><pre><span></span><code><span class="kt">bool</span><span class="w"> </span><span class="nf">check</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">x</span><span class="p">;</span><span class="w">  </span><span class="c1">// Always true if no overflow</span>
+<span class="p">}</span>
+<span class="c1">// GCC -O2 compiles this to: return true;</span>
+</code></pre></div>
+
+<p>Since signed overflow is UB, the compiler assumes <code>x + 1</code> never overflows, therefore <code>x + 1 &gt; x</code> is always true. The function becomes <code>return true;</code> — a single <code>mov eax, 1; ret</code>.</p>
+<h3 id="concrete-example-3-strict-aliasing-load-elimination">Concrete Example 3: Strict Aliasing Load Elimination</h3>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">ip</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="o">*</span><span class="w"> </span><span class="n">fp</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="o">*</span><span class="n">ip</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">42</span><span class="p">;</span>
+<span class="w">    </span><span class="o">*</span><span class="n">fp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">3.14f</span><span class="p">;</span>
+<span class="w">    </span><span class="n">printf</span><span class="p">(</span><span class="s">&quot;%d</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"> </span><span class="o">*</span><span class="n">ip</span><span class="p">);</span><span class="w">  </span><span class="c1">// Compiler can print 42 without reloading</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Since <code>int*</code> and <code>float*</code> cannot alias (strict aliasing rule), the compiler knows the store to <code>*fp</code> cannot affect <code>*ip</code>. It skips the reload of <code>*ip</code> and directly uses the value <code>42</code>. If <code>ip</code> and <code>fp</code> actually point to the same memory (via a cast), the printed value is <code>42</code> not the bit pattern of <code>3.14f</code> — silent, terrifying wrongness.</p>
+<hr />
+<h2 id="summary">Summary</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Key Takeaway</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Memory UB</td>
+<td>Use ASan + MSan in CI; never ship without sanitizer runs</td>
+</tr>
+<tr>
+<td>Arithmetic UB</td>
+<td>Use unsigned for wrapping; builtins for checked arithmetic</td>
+</tr>
+<tr>
+<td>Type UB</td>
+<td>Use <code>std::bit_cast</code> / <code>memcpy</code> — never raw casts for type punning</td>
+</tr>
+<tr>
+<td>CRTP</td>
+<td>Static polymorphism for hot paths; virtual for flexibility</td>
+</tr>
+<tr>
+<td>Policy Design</td>
+<td>Compile-time strategy pattern — zero overhead composition</td>
+</tr>
+<tr>
+<td>RT-safe logging</td>
+<td>SPSC ring buffer; format offline; no allocation on hot path</td>
+</tr>
+<tr>
+<td>Compiler + UB</td>
+<td>The compiler is your adversary if you write UB — it will exploit every loophole</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Build command for this week&rsquo;s exercises:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>exercises<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span>build<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>build
+cmake<span class="w"> </span>..<span class="w"> </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Debug
+make<span class="w"> </span>-j<span class="k">$(</span>nproc<span class="k">)</span>
+</code></pre></div>
+
+<p>Run with sanitizers: each exercise has a sanitizer target (e.g., <code>ex01_ub_catalog_asan</code>).</p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

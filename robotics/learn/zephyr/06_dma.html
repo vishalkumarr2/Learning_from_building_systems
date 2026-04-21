@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DMA — Direct Memory Access - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="dma-direct-memory-access">DMA — Direct Memory Access</h1>
+<h2 id="the-core-problem">The Core Problem</h2>
+<p>Without DMA, the CPU copies every byte manually:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Sending 256 bytes over SPI — CPU-driven (polling)</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">256</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">SPI</span><span class="o">-&gt;</span><span class="n">DR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">buffer</span><span class="p">[</span><span class="n">i</span><span class="p">];</span><span class="w">           </span><span class="c1">// CPU writes byte to SPI hardware register</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="p">(</span><span class="n">SPI</span><span class="o">-&gt;</span><span class="n">SR</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">TXE</span><span class="p">));</span><span class="w">      </span><span class="c1">// CPU spins waiting for SPI hardware to be ready</span>
+<span class="p">}</span>
+<span class="c1">// CPU is 100% occupied for the entire transfer — can&#39;t do anything else</span>
+</code></pre></div>
+
+<p>At 10MHz SPI, 256 bytes = ~205 microseconds of CPU doing nothing but waiting.
+At 100Hz (10ms frame), that&rsquo;s <strong>2% of your CPU budget</strong> just on copying bytes.</p>
+<hr />
+<h2 id="what-dma-does">What DMA Does</h2>
+<p>DMA is a <strong>separate hardware engine</strong> on the chip. You point it at source + destination + count, say &ldquo;go&rdquo;, and the CPU is free.</p>
+<div class="highlight"><pre><span></span><code>Without DMA:
+  CPU ──► copies byte 0 to SPI_DR ──► waits ──► byte 1 ──► waits ──► ...
+  (CPU blocked entire time)
+
+With DMA:
+  CPU: &quot;DMA: copy buffer[0..255] → SPI_DR, tell me when done&quot; (takes ~200ns)
+  CPU: goes and runs other threads
+  DMA: quietly feeds bytes to SPI at wire speed
+  DMA: fires interrupt when done
+  CPU: handles completion ISR (takes ~500ns)
+</code></pre></div>
+
+<hr />
+<h2 id="physically-what-happens">Physically What Happens</h2>
+<div class="highlight"><pre><span></span><code>┌─────────────┐  system bus  ┌─────────┐  peripheral bus  ┌──────────────┐
+│    SRAM     │ ────────────►│   DMA   │ ────────────────► │  SPI_DR reg  │──► MOSI pin
+│  (buffer)   │              │ engine  │                   │  (hardware)  │
+└─────────────┘              └─────────┘                   └──────────────┘
+                                  │
+                        No CPU involved at all
+</code></pre></div>
+
+<p>The DMA controller has registers you configure:
+- <strong>Source address (M0AR)</strong> — where to read (your buffer in SRAM)
+- <strong>Destination address (PAR)</strong> — where to write (SPI_DR — fixed)
+- <strong>Count (NDTR)</strong> — how many bytes to transfer
+- <strong>Increment flags</strong> — auto-increment source address; keep destination fixed</p>
+<hr />
+<h2 id="dma-transfer-modes">DMA Transfer Modes</h2>
+<h3 id="mode-1-memory-peripheral-tx-sending-data-out">Mode 1: Memory → Peripheral (TX) — sending data out</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// Example: send buffer over SPI</span>
+<span class="n">DMA1_Stream3</span><span class="o">-&gt;</span><span class="n">PAR</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="o">&amp;</span><span class="n">SPI1</span><span class="o">-&gt;</span><span class="n">DR</span><span class="p">;</span><span class="w">  </span><span class="c1">// dest: SPI data register (fixed)</span>
+<span class="n">DMA1_Stream3</span><span class="o">-&gt;</span><span class="n">M0AR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="n">tx_buf</span><span class="p">;</span><span class="w">      </span><span class="c1">// src: your buffer (auto-increments)</span>
+<span class="n">DMA1_Stream3</span><span class="o">-&gt;</span><span class="n">NDTR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">256</span><span class="p">;</span><span class="w">                   </span><span class="c1">// count: 256 bytes</span>
+<span class="n">DMA1_Stream3</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w">  </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_DIR_0</span><span class="p">;</span><span class="w">       </span><span class="c1">// direction: memory to peripheral</span>
+<span class="n">DMA1_Stream3</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w">  </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_EN</span><span class="p">;</span><span class="w">          </span><span class="c1">// GO</span>
+</code></pre></div>
+
+<h3 id="mode-2-peripheral-memory-rx-receiving-data-in">Mode 2: Peripheral → Memory (RX) — receiving data in</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// Example: receive into buffer from SPI</span>
+<span class="n">DMA1_Stream2</span><span class="o">-&gt;</span><span class="n">PAR</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="o">&amp;</span><span class="n">SPI1</span><span class="o">-&gt;</span><span class="n">DR</span><span class="p">;</span><span class="w">  </span><span class="c1">// src: SPI data register</span>
+<span class="n">DMA1_Stream2</span><span class="o">-&gt;</span><span class="n">M0AR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="n">rx_buf</span><span class="p">;</span><span class="w">      </span><span class="c1">// dest: your buffer</span>
+<span class="n">DMA1_Stream2</span><span class="o">-&gt;</span><span class="n">NDTR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">256</span><span class="p">;</span>
+<span class="c1">// Direction default (0) = peripheral to memory</span>
+<span class="n">DMA1_Stream2</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w">  </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_EN</span><span class="p">;</span>
+</code></pre></div>
+
+<h3 id="mode-3-memory-memory-fast-memcpy">Mode 3: Memory → Memory — fast memcpy</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// Hardware-accelerated copy between two SRAM regions</span>
+<span class="n">DMA2_Stream0</span><span class="o">-&gt;</span><span class="n">PAR</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="n">src_buf</span><span class="p">;</span>
+<span class="n">DMA2_Stream0</span><span class="o">-&gt;</span><span class="n">M0AR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="n">dst_buf</span><span class="p">;</span>
+<span class="n">DMA2_Stream0</span><span class="o">-&gt;</span><span class="n">NDTR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1024</span><span class="p">;</span>
+<span class="n">DMA2_Stream0</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w">  </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_MEM2MEM</span><span class="p">;</span><span class="w">  </span><span class="c1">// M2M mode</span>
+<span class="n">DMA2_Stream0</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w">  </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_EN</span><span class="p">;</span>
+</code></pre></div>
+
+<p>Transfer width options (source and destination can differ):</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// 8-bit bytes (default)  — normal for SPI/UART</span>
+<span class="c1">// 16-bit half-words       — I2S audio, ADC</span>
+<span class="c1">// 32-bit words            — fast memcpy, ADC burst</span>
+<span class="n">DMA1_Stream0</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_MSIZE_1</span><span class="p">;</span><span class="w">   </span><span class="c1">// memory width: 16-bit</span>
+<span class="n">DMA1_Stream0</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_PSIZE_0</span><span class="p">;</span><span class="w">   </span><span class="c1">// peripheral width: 8-bit</span>
+<span class="c1">// DMA automatically packs/unpacks</span>
+</code></pre></div>
+
+<hr />
+<h2 id="dma-interrupts">DMA Interrupts</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// DMA interrupt flags (fire an ISR when set):</span>
+<span class="n">DMA_IT_TC</span><span class="w">   </span><span class="c1">// Transfer Complete  — all N bytes done               ← use this most</span>
+<span class="n">DMA_IT_HT</span><span class="w">   </span><span class="c1">// Half Transfer      — N/2 bytes done (start processing early)</span>
+<span class="n">DMA_IT_TE</span><span class="w">   </span><span class="c1">// Transfer Error     — bus error, invalid address     ← always handle</span>
+<span class="n">DMA_IT_FE</span><span class="w">   </span><span class="c1">// FIFO Error</span>
+
+<span class="c1">// Enable in CR before starting DMA</span>
+<span class="n">DMA1_Stream3</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_TCIE</span><span class="p">;</span><span class="w">   </span><span class="c1">// enable TC interrupt</span>
+<span class="n">DMA1_Stream3</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_TEIE</span><span class="p">;</span><span class="w">   </span><span class="c1">// enable TE interrupt</span>
+
+<span class="c1">// ISR</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">DMA1_Stream3_IRQHandler</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">DMA1</span><span class="o">-&gt;</span><span class="n">LISR</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">DMA_LISR_TCIF3</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">DMA1</span><span class="o">-&gt;</span><span class="n">LIFCR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DMA_LIFCR_CTCIF3</span><span class="p">;</span><span class="w">  </span><span class="c1">// clear flag (must do this!)</span>
+<span class="w">        </span><span class="n">on_spi_tx_complete</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">DMA1</span><span class="o">-&gt;</span><span class="n">LISR</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">DMA_LISR_TEIF3</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">DMA1</span><span class="o">-&gt;</span><span class="n">LIFCR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DMA_LIFCR_CTEIF3</span><span class="p">;</span>
+<span class="w">        </span><span class="n">log_error</span><span class="p">(</span><span class="s">&quot;DMA bus error&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="circular-mode-free-running-buffer">Circular Mode — Free-Running Buffer</h2>
+<p>Normal mode: transfer N bytes → stop → CPU must restart.
+Circular mode: wrap back to start automatically — runs <strong>forever</strong>.</p>
+<p>Perfect for ADC, microphone, UART receive — anything continuous.</p>
+<div class="highlight"><pre><span></span><code><span class="n">DMA1_Stream0</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_CIRC</span><span class="p">;</span><span class="w">   </span><span class="c1">// enable circular mode</span>
+<span class="n">DMA1_Stream0</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_HTIE</span><span class="p">;</span><span class="w">   </span><span class="c1">// half-transfer interrupt</span>
+<span class="n">DMA1_Stream0</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_TCIE</span><span class="p">;</span><span class="w">   </span><span class="c1">// full-transfer interrupt</span>
+<span class="n">DMA1_Stream0</span><span class="o">-&gt;</span><span class="n">NDTR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">256</span><span class="p">;</span><span class="w">             </span><span class="c1">// total buffer size</span>
+<span class="n">DMA1_Stream0</span><span class="o">-&gt;</span><span class="n">M0AR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="n">audio_buf</span><span class="p">;</span>
+<span class="n">DMA1_Stream0</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w">  </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_EN</span><span class="p">;</span><span class="w">    </span><span class="c1">// starts forever</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>DMA fills:  [0─────────127][128──────255][0─────────127][128──────255]...
+                ↑HT ISR               ↑TC ISR
+CPU processes:       [128──────255]          [0─────────127]
+
+CPU always processes the HALF that DMA is NOT currently writing.
+Zero gaps, zero dropped samples.
+</code></pre></div>
+
+<p><strong>Real use</strong>: microphone input (I2S), GPS UART RX, encoder pulse counting.</p>
+<hr />
+<h2 id="hardware-double-buffer-mode-dbm">Hardware Double Buffer Mode (DBM)</h2>
+<p>STM32 DMA can automatically alternate between two buffers — no software swap needed:</p>
+<div class="highlight"><pre><span></span><code><span class="n">DMA1_Stream1</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w">  </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_DBM</span><span class="p">;</span><span class="w">          </span><span class="c1">// enable double buffer mode</span>
+<span class="n">DMA1_Stream1</span><span class="o">-&gt;</span><span class="n">M0AR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="n">buf_A</span><span class="p">;</span><span class="w">        </span><span class="c1">// first buffer</span>
+<span class="n">DMA1_Stream1</span><span class="o">-&gt;</span><span class="n">M1AR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="n">buf_B</span><span class="p">;</span><span class="w">        </span><span class="c1">// second buffer</span>
+<span class="n">DMA1_Stream1</span><span class="o">-&gt;</span><span class="n">NDTR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">512</span><span class="p">;</span>
+<span class="n">DMA1_Stream1</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w">  </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_EN</span><span class="p">;</span>
+
+<span class="c1">// DMA fills buf_A completely, fires TC, switches to buf_B automatically</span>
+<span class="c1">// CPU can safely read buf_A while DMA fills buf_B</span>
+<span class="c1">// No software pointer swap needed</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">DMA1_Stream1_IRQHandler</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">TC</span><span class="w"> </span><span class="n">flag</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// CT bit tells you which buffer DMA just FINISHED (now writing the other)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">DMA1_Stream1</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">DMA_SxCR_CT</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">process_buffer</span><span class="p">(</span><span class="n">buf_A</span><span class="p">);</span><span class="w">  </span><span class="c1">// DMA moved to buf_B, so buf_A is safe</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">process_buffer</span><span class="p">(</span><span class="n">buf_B</span><span class="p">);</span><span class="w">  </span><span class="c1">// DMA moved to buf_A, so buf_B is safe</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="the-cache-coherency-bug-cortex-m7-cortex-a">The Cache Coherency Bug (Cortex-M7 / Cortex-A)</h2>
+<p><strong>Affects</strong>: STM32H7, STM32F7, Jetson, Raspberry Pi CM4 — any chip with D-cache enabled.</p>
+<div class="highlight"><pre><span></span><code>The bug:
+  1. CPU writes new data to tx_buf        → goes into L1 D-cache (fast path)
+                                            SRAM is NOT updated yet!
+  2. You start DMA TX                     → DMA reads from SRAM
+                                            SRAM has the OLD data
+  3. DMA sends old/garbage data over SPI  → Jetson decodes garbage
+  4. No error flag anywhere               → silent corruption!
+
+Symptom: first 32 bytes correct (within one cache line), rest is garbage.
+         This is the tell-tale sign of a cache coherency bug.
+</code></pre></div>
+
+<p><strong>Fix A — Flush cache before DMA TX</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Force CPU cache → SRAM so DMA sees fresh data</span>
+<span class="n">SCB_CleanDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="o">*</span><span class="p">)</span><span class="n">tx_buf</span><span class="p">,</span><span class="w"> </span><span class="n">tx_len</span><span class="p">);</span>
+<span class="c1">// NOW start DMA</span>
+<span class="n">start_dma_tx</span><span class="p">(</span><span class="n">tx_buf</span><span class="p">,</span><span class="w"> </span><span class="n">tx_len</span><span class="p">);</span>
+</code></pre></div>
+
+<p><strong>Fix B — Invalidate cache after DMA RX</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// After DMA fills rx_buf, CPU cache may still have old data</span>
+<span class="c1">// Invalidate: force CPU to re-read from SRAM on next access</span>
+<span class="n">start_dma_rx</span><span class="p">(</span><span class="n">rx_buf</span><span class="p">,</span><span class="w"> </span><span class="n">rx_len</span><span class="p">);</span>
+<span class="c1">// ... wait for TC ISR ...</span>
+<span class="n">SCB_InvalidateDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="o">*</span><span class="p">)</span><span class="n">rx_buf</span><span class="p">,</span><span class="w"> </span><span class="n">rx_len</span><span class="p">);</span>
+<span class="c1">// NOW read rx_buf in CPU code</span>
+</code></pre></div>
+
+<p><strong>Fix C (best) — Non-cacheable SRAM section</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Put DMA buffers in a region the MPU marks as non-cacheable</span>
+<span class="c1">// Linker places them in a dedicated section</span>
+<span class="n">__attribute__</span><span class="p">((</span><span class="n">section</span><span class="p">(</span><span class="s">&quot;.noncacheable&quot;</span><span class="p">)))</span>
+<span class="n">__attribute__</span><span class="p">((</span><span class="n">aligned</span><span class="p">(</span><span class="mi">32</span><span class="p">)))</span><span class="w">          </span><span class="c1">// must align to cache line size</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">[</span><span class="mi">256</span><span class="p">];</span>
+
+<span class="c1">// No cache flush/invalidate ever needed for this buffer</span>
+<span class="c1">// CPU reads/writes go directly to SRAM, DMA always sees correct data</span>
+</code></pre></div>
+
+<hr />
+<h2 id="fifo-burst-mode">FIFO + Burst Mode</h2>
+<p>Normal (direct) mode: each peripheral request → one bus transaction.
+FIFO mode: DMA collects bytes internally, then does one burst → fewer bus transactions.</p>
+<div class="highlight"><pre><span></span><code>Direct mode (single beat):
+  ADC ready → DMA: one 16-bit read → one 16-bit write to SRAM
+  100,000 bus transactions/sec for 100kHz ADC
+
+FIFO + burst mode:
+  DMA accumulates 4 samples in 16-byte FIFO
+  → one 64-bit burst write to SRAM
+  25,000 bus transactions/sec (4× reduction)
+  → less bus contention → other DMA channels get more bandwidth
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1">// Enable FIFO and burst</span>
+<span class="n">DMA1_Stream0</span><span class="o">-&gt;</span><span class="n">FCR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxFCR_DMDIS</span><span class="p">;</span><span class="w">    </span><span class="c1">// disable direct mode (= enable FIFO)</span>
+<span class="n">DMA1_Stream0</span><span class="o">-&gt;</span><span class="n">FCR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxFCR_FTH_1</span><span class="p">;</span><span class="w">   </span><span class="c1">// fire when FIFO 1/2 full</span>
+<span class="n">DMA1_Stream0</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w">  </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_MBURST_0</span><span class="p">;</span><span class="w"> </span><span class="c1">// memory burst: 4 beats</span>
+<span class="n">DMA1_Stream0</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w">  </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_MSIZE_1</span><span class="p">;</span><span class="w">  </span><span class="c1">// memory width: 16-bit</span>
+</code></pre></div>
+
+<p>Use FIFO+burst for: ADC, audio (I2S), camera, USB — sustained high throughput.
+Keep direct mode for: SPI/UART bytes — irregular timing, small packets.</p>
+<hr />
+<h2 id="real-world-use-cases">Real-World Use Cases</h2>
+<h3 id="1-spi-display-240240-lcd-115200-bytesframe">1. SPI Display — 240×240 LCD (115,200 bytes/frame)</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// Without DMA: CPU spends 200ms/frame pushing pixels at 10MHz → nothing else runs</span>
+<span class="c1">// With DMA: arm transfer, CPU updates game/UI logic, ISR flips framebuffer</span>
+<span class="n">HAL_SPI_Transmit_DMA</span><span class="p">(</span><span class="o">&amp;</span><span class="n">hspi1</span><span class="p">,</span><span class="w"> </span><span class="n">framebuffer</span><span class="p">,</span><span class="w"> </span><span class="mi">240</span><span class="o">*</span><span class="mi">240</span><span class="o">*</span><span class="mi">2</span><span class="p">);</span>
+<span class="c1">// CPU free immediately</span>
+</code></pre></div>
+
+<h3 id="2-gps-uart-circular-dma-never-stops">2. GPS UART — Circular DMA (never stops)</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// NMEA sentences at 115200 baud — ~11,500 interrupts/sec without DMA</span>
+<span class="c1">// With circular DMA: zero interrupts while receiving, CPU parses at leisure</span>
+<span class="n">HAL_UART_Receive_DMA</span><span class="p">(</span><span class="o">&amp;</span><span class="n">huart1</span><span class="p">,</span><span class="w"> </span><span class="n">gps_ring_buf</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">gps_ring_buf</span><span class="p">));</span>
+<span class="c1">// Parser thread scans ring buffer for complete sentences</span>
+</code></pre></div>
+
+<h3 id="3-microphone-i2s-double-buffer-real-time-audio">3. Microphone — I2S Double Buffer (real-time audio)</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// 16kHz, 16-bit = 32,000 bytes/sec forever</span>
+<span class="c1">// Half-transfer ISR: process first half while DMA fills second half</span>
+<span class="n">HAL_I2S_Receive_DMA</span><span class="p">(</span><span class="o">&amp;</span><span class="n">hi2s2</span><span class="p">,</span><span class="w"> </span><span class="n">audio_buf</span><span class="p">,</span><span class="w"> </span><span class="n">AUDIO_BUF_SAMPLES</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">2</span><span class="p">);</span>
+<span class="c1">// Wake-word detector processes 32ms chunks with zero gaps</span>
+</code></pre></div>
+
+<h3 id="4-motor-control-adc-100khz-3-phases">4. Motor Control ADC — 100kHz @ 3 phases</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// 300,000 samples/sec total, must complete current loop in &lt;10µs</span>
+<span class="c1">// ADC scan mode + DMA circular: samples land in buffer, ISR runs FOC algorithm</span>
+<span class="n">HAL_ADC_Start_DMA</span><span class="p">(</span><span class="o">&amp;</span><span class="n">hadc1</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="o">*</span><span class="p">)</span><span class="n">adc_buf</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">);</span>
+<span class="c1">// Each ISR: Clarke/Park transform → PI controller → PWM output</span>
+</code></pre></div>
+
+<h3 id="5-camera-frame-crop-memory-to-memory">5. Camera Frame Crop — Memory-to-Memory</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// Copy center 160×120 region from 320×240 raw frame</span>
+<span class="c1">// DMA handles 57,600 bytes while CPU sets up next frame processing</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">row</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">60</span><span class="p">;</span><span class="w"> </span><span class="n">row</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">180</span><span class="p">;</span><span class="w"> </span><span class="n">row</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">src</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">full_frame</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">row</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">320</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">80</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">dst</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">crop_buf</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">((</span><span class="n">row</span><span class="mi">-60</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">160</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">    </span><span class="n">HAL_DMA_Start_IT</span><span class="p">(</span><span class="o">&amp;</span><span class="n">hdma_m2m</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="n">src</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="n">dst</span><span class="p">,</span><span class="w"> </span><span class="mi">480</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="6-the-cache-bug-in-production-stm32h7-ethernet">6. The Cache Bug in Production — STM32H7 Ethernet</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// Real bug: engineer prepares Ethernet TX buffer, CPU writes to cache</span>
+<span class="c1">// DMA reads SRAM (not cache) — sends old packet</span>
+<span class="c1">// Symptom: first 32 bytes correct, rest garbage — exactly one cache line</span>
+<span class="c1">// Fix: SCB_CleanDCache_by_Addr() before transmit</span>
+<span class="c1">// Time to find: 3 days (no error flags anywhere)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="summary-table">Summary Table</h2>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Use Case</th>
+<th>Key Property</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Normal M→P</td>
+<td>SPI frame TX, UART TX</td>
+<td>Stops after N bytes, fires TC ISR</td>
+</tr>
+<tr>
+<td>Normal P→M</td>
+<td>SPI frame RX, I2C RX</td>
+<td>Same, fills your buffer</td>
+</tr>
+<tr>
+<td>Circular</td>
+<td>ADC, audio, GPS UART RX</td>
+<td>Wraps forever, HT+TC ISR</td>
+</tr>
+<tr>
+<td>Double buffer (DBM)</td>
+<td>High-speed RX, video</td>
+<td>HW alternates M0AR/M1AR — no SW swap</td>
+</tr>
+<tr>
+<td>FIFO + burst</td>
+<td>ADC at 100kHz+, camera</td>
+<td>Batches bus transactions for throughput</td>
+</tr>
+<tr>
+<td>Memory → Memory</td>
+<td>Fast memcpy, crop</td>
+<td>No peripheral clock gating</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The one-line summary</strong>: DMA is a hired helper that moves data between memory and peripherals while the CPU thinks about something else — essential for anything faster than ~10kHz.</p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

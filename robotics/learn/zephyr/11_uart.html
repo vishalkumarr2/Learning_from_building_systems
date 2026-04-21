@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UART — Universal Asynchronous Receiver-Transmitter - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="uart-universal-asynchronous-receiver-transmitter">UART — Universal Asynchronous Receiver-Transmitter</h1>
+<h2 id="what-is-uart">What Is UART?</h2>
+<p>UART is the <strong>simplest serial protocol</strong> — just two wires, no clock, no address, point-to-point only.</p>
+<p>&ldquo;Asynchronous&rdquo; means there&rsquo;s no shared clock signal. Both sides agree on speed beforehand (the baud rate) and each side has its own clock. The protocol includes start/stop bits to signal when bytes begin and end.</p>
+<p>Used for: GPS modules, Bluetooth modules (HC-05, HM-10), WiFi modules (ESP8266), debug consoles, legacy sensors, LoRa modules, GNSS receivers — anything that sends ASCII text or simple binary frames at moderate speeds and doesn&rsquo;t need to be fast.</p>
+<p>In our robot: UART is how the STM32 receives <strong>GPS/GNSS data</strong> ($GPRMC sentences at 10Hz) and outputs <strong>debug logs</strong> to a laptop.</p>
+<hr />
+<h2 id="physical-wires-just-2">Physical Wires — Just 2</h2>
+<div class="highlight"><pre><span></span><code>STM32 TX ──────────────────────► GPS RX
+STM32 RX ◄────────────────────── GPS TX
+GND ────────────────────────────── GND
+</code></pre></div>
+
+<p>TX/RX are <strong>crossed</strong>: STM32&rsquo;s TX goes to the other device&rsquo;s RX, and vice versa.</p>
+<p>No pull-up resistors needed (unlike I2C). Voltage is actively driven HIGH or LOW.</p>
+<p><strong>RS-232</strong> (older standard): ±12V swings. Needs level converter MAX232.<br />
+<strong>TTL serial</strong> (modern embedded): 0V / 3.3V or 0V / 5V. Direct connection between boards.</p>
+<hr />
+<h2 id="baud-rate-speed-contract">Baud Rate — Speed Contract</h2>
+<p>Baud = symbols per second. For UART, 1 baud = 1 bit per second.</p>
+<p>Both sender and receiver must be configured to the same baud rate. If mismatched, you get garbage.</p>
+<p>Common baud rates:</p>
+<table>
+<thead>
+<tr>
+<th>Baud</th>
+<th>Bytes/sec (approx)</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>9600</td>
+<td>960</td>
+<td>Legacy, slow sensors</td>
+</tr>
+<tr>
+<td>115200</td>
+<td>11520</td>
+<td>Debug console ← most common</td>
+</tr>
+<tr>
+<td>230400</td>
+<td>23040</td>
+<td>Faster debug</td>
+</tr>
+<tr>
+<td>921600</td>
+<td>92160</td>
+<td>High-speed binary</td>
+</tr>
+<tr>
+<td>1000000</td>
+<td>100000</td>
+<td>Custom high-speed link</td>
+</tr>
+</tbody>
+</table>
+<p>At 115200 baud, a 80-byte GPS sentence takes ~7ms. At 10Hz GPS, that&rsquo;s 7% bus utilization — fine.</p>
+<hr />
+<h2 id="frame-format">Frame Format</h2>
+<p>Each byte is wrapped in start/stop bits:</p>
+<div class="highlight"><pre><span></span><code>Idle:  1 1 1 1 1 1 1 1 1 1 1 1...
+       ↑
+       Line is HIGH at idle
+
+One byte:
+       ┌──────────────────────────────────────┐
+ Line: │S│ D0│ D1│ D2│ D3│ D4│ D5│ D6│ D7│ P│ STOP │
+       └──────────────────────────────────────┘
+        ↑                                   ↑  ↑
+        Start bit (LOW)                  Parity Stop bit(s) → HIGH
+</code></pre></div>
+
+<ul>
+<li><strong>Start bit</strong>: line goes LOW → receiver starts its internal bit timer</li>
+<li><strong>Data bits</strong>: 5-9 bits, typically 8 (one byte)</li>
+<li><strong>Parity bit</strong>: optional error detection (None/Odd/Even)</li>
+<li><strong>Stop bits</strong>: 1 or 2 HIGH bits → separator between bytes</li>
+</ul>
+<p>&ldquo;9600 8N1&rdquo; means: 9600 baud, 8 data bits, No parity, 1 stop bit. The most common default.</p>
+<hr />
+<h2 id="uart-in-zephyr">UART in Zephyr</h2>
+<h3 id="devicetree">Devicetree</h3>
+<div class="highlight"><pre><span></span><code><span class="cm">/* app.overlay */</span>
+<span class="o">&amp;</span><span class="na">usart1</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kr">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;okay&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">usart1_default</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;default&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">current-speed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">9600</span><span class="o">&gt;</span><span class="p">;</span><span class="w">   </span><span class="cm">/* GPS modules often default to 9600 */</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<h3 id="polling-api-simple-ok-for-low-rate">Polling API (simple, OK for low rate)</h3>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/uart.h&gt;</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">gps_uart</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">usart1</span><span class="p">));</span>
+
+<span class="cm">/* Send a string */</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">uart_send_str</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">s</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="n">s</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">uart_poll_out</span><span class="p">(</span><span class="n">gps_uart</span><span class="p">,</span><span class="w"> </span><span class="o">*</span><span class="n">s</span><span class="o">++</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="cm">/* Read one byte (blocks until available) */</span>
+<span class="kt">int</span><span class="w"> </span><span class="nf">uart_recv_byte</span><span class="p">(</span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">out</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">uart_poll_in</span><span class="p">(</span><span class="n">gps_uart</span><span class="p">,</span><span class="w"> </span><span class="n">out</span><span class="p">);</span>
+<span class="w">    </span><span class="cm">/* returns 0 if byte ready, -1 if no data yet */</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Warning</strong>: <code>uart_poll_in</code> is non-blocking (returns -1 if nothing ready). You&rsquo;d need a loop to actually block. For real use, use the interrupt-driven API below.</p>
+<h3 id="interrupt-driven-ring-buffer-production-approach">Interrupt-Driven + Ring Buffer (production approach)</h3>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/uart.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/sys/ring_buffer.h&gt;</span>
+
+<span class="cp">#define RING_BUF_SIZE 512</span>
+<span class="n">RING_BUF_ITEM_DECLARE</span><span class="p">(</span><span class="n">uart_rb</span><span class="p">,</span><span class="w"> </span><span class="n">RING_BUF_SIZE</span><span class="p">);</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">gps_uart</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">usart1</span><span class="p">));</span>
+<span class="k">static</span><span class="w"> </span><span class="n">K_SEM_DEFINE</span><span class="p">(</span><span class="n">uart_rx_sem</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+
+<span class="cm">/* Called from ISR when RX data arrives */</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">uart_rx_isr</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">user_data</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">uart_irq_update</span><span class="p">(</span><span class="n">dev</span><span class="p">))</span><span class="w"> </span><span class="k">return</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">uart_irq_rx_ready</span><span class="p">(</span><span class="n">dev</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">byte</span><span class="p">;</span>
+
+<span class="w">        </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">uart_fifo_read</span><span class="p">(</span><span class="n">dev</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">byte</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">ring_buf_put</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uart_rb</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">byte</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">LOG_WRN</span><span class="p">(</span><span class="s">&quot;UART ring buffer full&quot;</span><span class="p">);</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">k_sem_give</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uart_rx_sem</span><span class="p">);</span><span class="w">  </span><span class="cm">/* wake reader thread */</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">uart_init</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">uart_irq_callback_set</span><span class="p">(</span><span class="n">gps_uart</span><span class="p">,</span><span class="w"> </span><span class="n">uart_rx_isr</span><span class="p">);</span>
+<span class="w">    </span><span class="n">uart_irq_rx_enable</span><span class="p">(</span><span class="n">gps_uart</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="cm">/* Read one complete NMEA line (blocks until &#39;\n&#39;) */</span>
+<span class="kt">int</span><span class="w"> </span><span class="nf">uart_read_line</span><span class="p">(</span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">max_len</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="kt">size_t</span><span class="w"> </span><span class="n">idx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">idx</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">max_len</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">k_sem_take</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uart_rx_sem</span><span class="p">,</span><span class="w"> </span><span class="n">K_FOREVER</span><span class="p">);</span>
+
+<span class="w">        </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">byte</span><span class="p">;</span>
+<span class="w">        </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">ring_buf_get</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uart_rb</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">byte</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">buf</span><span class="p">[</span><span class="n">idx</span><span class="o">++</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">byte</span><span class="p">;</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">byte</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="sc">&#39;\n&#39;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">buf</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="sc">&#39;\0&#39;</span><span class="p">;</span>
+<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="n">idx</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="o">-</span><span class="n">ENOSPC</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="parsing-gps-nmea-sentences">Parsing GPS NMEA Sentences</h3>
+<p>GPS modules output ASCII sentences at 1Hz or 10Hz:</p>
+<div class="highlight"><pre><span></span><code>$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A
+        ↑       ↑  ↑         ↑           ↑         ↑
+       time  status lat      lon        speed    date
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">gps_thread_fn</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="kt">char</span><span class="w"> </span><span class="n">line</span><span class="p">[</span><span class="mi">128</span><span class="p">];</span>
+
+<span class="w">    </span><span class="n">uart_init</span><span class="p">();</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">uart_read_line</span><span class="p">(</span><span class="n">line</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">line</span><span class="p">));</span>
+
+<span class="w">        </span><span class="cm">/* Only care about $GPRMC (recommended minimum) */</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">strncmp</span><span class="p">(</span><span class="n">line</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;$GPRMC&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">6</span><span class="p">)</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="k">continue</span><span class="p">;</span>
+
+<span class="w">        </span><span class="cm">/* Simple parser — production code would use minmea library */</span>
+<span class="w">        </span><span class="kt">float</span><span class="w"> </span><span class="n">lat</span><span class="p">,</span><span class="w"> </span><span class="n">lon</span><span class="p">,</span><span class="w"> </span><span class="n">speed_kn</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">char</span><span class="w"> </span><span class="n">ns</span><span class="p">,</span><span class="w"> </span><span class="n">ew</span><span class="p">,</span><span class="w"> </span><span class="n">date</span><span class="p">[</span><span class="mi">7</span><span class="p">],</span><span class="w"> </span><span class="n">status</span><span class="p">;</span>
+
+<span class="w">        </span><span class="cm">/* sscanf is OK for NMEA strings under Zephyr */</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sscanf</span><span class="p">(</span><span class="n">line</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;$GPRMC,%*6s,%c,%f,%c,%f,%c,%f&quot;</span><span class="p">,</span>
+<span class="w">                       </span><span class="o">&amp;</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">lat</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">ns</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">lon</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">ew</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">speed_kn</span><span class="p">);</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">6</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="sc">&#39;A&#39;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">  </span><span class="cm">/* A = active/valid fix */</span>
+<span class="w">            </span><span class="cm">/* Convert DDDMM.MMMMM → decimal degrees */</span>
+<span class="w">            </span><span class="kt">float</span><span class="w"> </span><span class="n">lat_deg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="p">)(</span><span class="n">lat</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">100</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">fmod</span><span class="p">(</span><span class="n">lat</span><span class="p">,</span><span class="w"> </span><span class="mi">100</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">60.0f</span><span class="p">;</span>
+<span class="w">            </span><span class="kt">float</span><span class="w"> </span><span class="n">lon_deg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="p">)(</span><span class="n">lon</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">100</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">fmod</span><span class="p">(</span><span class="n">lon</span><span class="p">,</span><span class="w"> </span><span class="mi">100</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">60.0f</span><span class="p">;</span>
+
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ns</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="sc">&#39;S&#39;</span><span class="p">)</span><span class="w"> </span><span class="n">lat_deg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">-</span><span class="n">lat_deg</span><span class="p">;</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ew</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="sc">&#39;W&#39;</span><span class="p">)</span><span class="w"> </span><span class="n">lon_deg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">-</span><span class="n">lon_deg</span><span class="p">;</span>
+
+<span class="w">            </span><span class="k">struct</span><span class="w"> </span><span class="nc">gps_msg</span><span class="w"> </span><span class="n">msg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="p">.</span><span class="n">lat_deg</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">lat_deg</span><span class="p">,</span>
+<span class="w">                </span><span class="p">.</span><span class="n">lon_deg</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">lon_deg</span><span class="p">,</span>
+<span class="w">                </span><span class="p">.</span><span class="n">speed_mps</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">speed_kn</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">0.514444f</span><span class="p">,</span>
+<span class="w">            </span><span class="p">};</span>
+<span class="w">            </span><span class="n">zbus_chan_pub</span><span class="p">(</span><span class="o">&amp;</span><span class="n">gps_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="using-uart-for-debug-console">Using UART for Debug Console</h3>
+<div class="highlight"><pre><span></span><code><span class="cm">/* prj.conf */</span>
+<span class="cm">/* CONFIG_UART_CONSOLE=y      (default — uses UART for printk) */</span>
+<span class="cm">/* CONFIG_LOG=y               */</span>
+<span class="cm">/* CONFIG_LOG_BACKEND_UART=y  */</span>
+
+<span class="cm">/* Your code */</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/logging/log.h&gt;</span>
+<span class="n">LOG_MODULE_REGISTER</span><span class="p">(</span><span class="n">main</span><span class="p">,</span><span class="w"> </span><span class="n">LOG_LEVEL_DBG</span><span class="p">);</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;System started&quot;</span><span class="p">);</span><span class="w">          </span><span class="cm">/* → UART0 at 115200: &quot;main: System started&quot; */</span>
+<span class="w">    </span><span class="n">LOG_DBG</span><span class="p">(</span><span class="s">&quot;Sensor value: %d&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">42</span><span class="p">);</span>
+<span class="w">    </span><span class="n">LOG_WRN</span><span class="p">(</span><span class="s">&quot;Buffer nearly full&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;Init failed: %d&quot;</span><span class="p">,</span><span class="w"> </span><span class="o">-</span><span class="n">EIO</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Plug in a USB-UART adapter (CP2102, CH340) to see logs on laptop with <code>minicom</code> or <code>picocom</code>:</p>
+<div class="highlight"><pre><span></span><code>picocom<span class="w"> </span>-b<span class="w"> </span><span class="m">115200</span><span class="w"> </span>/dev/ttyUSB0
+</code></pre></div>
+
+<hr />
+<h2 id="uart-vs-i2c-vs-spi-vs-can">UART vs I2C vs SPI vs CAN</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>UART</th>
+<th>I2C</th>
+<th>SPI</th>
+<th>CAN</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Wires</td>
+<td>2</td>
+<td>2</td>
+<td>4+</td>
+<td>2 (differential)</td>
+</tr>
+<tr>
+<td>Max speed</td>
+<td>~10 Mbps</td>
+<td>1 MHz</td>
+<td>50+ MHz</td>
+<td>8 Mbps (FD)</td>
+</tr>
+<tr>
+<td>Multi-slave</td>
+<td>No</td>
+<td>Yes (address)</td>
+<td>Yes (CS per slave)</td>
+<td>Yes (arbitration)</td>
+</tr>
+<tr>
+<td>Cable length</td>
+<td>~15m</td>
+<td>&lt;1m</td>
+<td>&lt;1m</td>
+<td>~25m</td>
+</tr>
+<tr>
+<td>Clock</td>
+<td>None (async)</td>
+<td>Master</td>
+<td>Master</td>
+<td>None (async, NRZ)</td>
+</tr>
+<tr>
+<td>Error detection</td>
+<td>Optional parity</td>
+<td>ACK/NACK</td>
+<td>None</td>
+<td>CRC+ACK</td>
+</tr>
+<tr>
+<td>Best for</td>
+<td>GPS, BT, debug</td>
+<td>Onboard sensors</td>
+<td>Fast IMU</td>
+<td>Long cables, motors</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="common-mistakes">Common Mistakes</h2>
+<table>
+<thead>
+<tr>
+<th>Mistake</th>
+<th>Symptom</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TX→TX, RX→RX (not crossed)</td>
+<td>Nothing received</td>
+<td>Cross TX↔RX</td>
+</tr>
+<tr>
+<td>Baud rate mismatch</td>
+<td>Garbage characters</td>
+<td>Set same baud on both sides</td>
+</tr>
+<tr>
+<td>Blocking in ISR</td>
+<td>System freezes</td>
+<td>ISR just puts byte in ring buffer</td>
+</tr>
+<tr>
+<td>Reading before <code>uart_irq_rx_enable</code></td>
+<td>No interrupts fire</td>
+<td>Call irq enable at startup</td>
+</tr>
+<tr>
+<td>No ring buffer → byte overrun at 115200</td>
+<td>Data loss</td>
+<td>Use ring buffer, never poll from thread loop</td>
+</tr>
+<tr>
+<td>Missing common GND</td>
+<td>Works nearby, fails far</td>
+<td>Always connect GND</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

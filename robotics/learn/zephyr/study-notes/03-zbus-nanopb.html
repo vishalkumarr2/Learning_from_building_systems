@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZBus + nanopb — Study Notes - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="zbus-nanopb-study-notes">ZBus + nanopb — Study Notes</h1>
+<h3 id="project-5-sensor-packer-pipeline-zbus-nanopb-spi">Project 5: Sensor Packer Pipeline (ZBus → nanopb → SPI)</h3>
+<p><strong>Hardware:</strong> STM32 Nucleo-H743ZI2 · ICM-42688-P · Jetson Orin · Zephyr RTOS</p>
+<blockquote>
+<p><strong>Electronics prerequisite:</strong> Understanding the SPI frame framing (header + length + CRC) assumes you&rsquo;ve read:
+- SPI protocol framing → <code>electronics/05-spi-deep-dive.md</code> (why raw SPI has no message boundaries)
+- Serialization concept → <code>electronics/03-opamps-adc-sampling.md</code> § Serializer/Deserializer</p>
+</blockquote>
+<hr />
+<h2 id="part-1-eli15-concept-explanations">PART 1 — ELI15 Concept Explanations</h2>
+<hr />
+<h3 id="11-why-you-need-zbus-what-happens-without-it">1.1 Why you need ZBus — what happens without it</h3>
+<p><strong>The problem: shared state in a concurrent world</strong></p>
+<p>Imagine a whiteboard in an office. Three employees write on it at different times. Now imagine two of them try to write on it simultaneously — you get a half-written mess no one can read.</p>
+<p>In an embedded system with multiple threads, a global struct is that whiteboard. Thread A is reading <code>imu.accel_x</code> right as Thread B is writing a new measurement. The read gets half the old value and half the new value. Not garbage-looking garbage — plausible-looking garbage. The worst kind.</p>
+<p>Here is <em>exactly</em> what can go wrong on a 32-bit ARM without protection:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// A 24-byte struct on ARM Cortex-M</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">accel_x</span><span class="p">;</span><span class="w">    </span><span class="c1">// 4 bytes</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">accel_y</span><span class="p">;</span><span class="w">    </span><span class="c1">// 4 bytes</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">accel_z</span><span class="p">;</span><span class="w">    </span><span class="c1">// 4 bytes</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">gyro_x</span><span class="p">;</span><span class="w">     </span><span class="c1">// 4 bytes</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">gyro_y</span><span class="p">;</span><span class="w">     </span><span class="c1">// 4 bytes</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">gyro_z</span><span class="p">;</span><span class="w">     </span><span class="c1">// 4 bytes</span>
+<span class="p">};</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">g_imu</span><span class="p">;</span><span class="w">           </span><span class="c1">// global — shared between threads</span>
+
+<span class="c1">// Thread A writes (runs every 10ms, IRQ-driven)</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">imu_irq_handler</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">g_imu</span><span class="p">.</span><span class="n">accel_x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">read_reg</span><span class="p">(</span><span class="n">ACCEL_X</span><span class="p">);</span><span class="w">  </span><span class="c1">// 4 bytes</span>
+<span class="w">    </span><span class="n">g_imu</span><span class="p">.</span><span class="n">accel_y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">read_reg</span><span class="p">(</span><span class="n">ACCEL_Y</span><span class="p">);</span><span class="w">  </span><span class="c1">// 4 bytes</span>
+<span class="w">    </span><span class="c1">// ← Preemption can happen HERE, between fields</span>
+<span class="w">    </span><span class="n">g_imu</span><span class="p">.</span><span class="n">accel_z</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">read_reg</span><span class="p">(</span><span class="n">ACCEL_Z</span><span class="p">);</span><span class="w">  </span><span class="c1">// 4 bytes</span>
+<span class="p">}</span>
+
+<span class="c1">// Thread B reads (packer thread)</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">pack_fn</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// If preempted mid-write above, accel_z is still from the PREVIOUS measurement</span>
+<span class="w">    </span><span class="c1">// accel_x and accel_y are new, accel_z is old</span>
+<span class="w">    </span><span class="c1">// The struct is internally inconsistent</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">ax</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">g_imu</span><span class="p">.</span><span class="n">accel_x</span><span class="p">;</span><span class="w">    </span><span class="c1">// new value ✓</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">az</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">g_imu</span><span class="p">.</span><span class="n">accel_z</span><span class="p">;</span><span class="w">    </span><span class="c1">// OLD value from 10ms ago ✗</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>The &ldquo;just use a mutex&rdquo; trap:</strong></p>
+<p>You could fix this with a mutex, but now you&rsquo;ve created two new problems:
+1. Every reader and every writer must remember to lock/unlock. Forget once = bug.
+2. The writer (often the IMU thread needing to be fast) now blocks on <em>every single write</em> waiting for all readers to finish. If any reader holds the lock too long, you miss samples.</p>
+<p>ZBus solves both. It wraps the mutex internally so you can never forget it, and its model is <em>copy-on-publish</em> — the channel holds one latest copy, and ZBus handles the locking.</p>
+<p><strong>The signal-that-also-carries-data problem:</strong></p>
+<p>In ROS you&rsquo;re used to: &ldquo;subscribe to <code>/imu/data</code>&rdquo; — you get both the <em>notification</em> that data arrived AND the data itself, bundled. In bare RTOS code without ZBus, there&rsquo;s a mismatch. A semaphore gives you the notification. A mutex-protected struct gives you the data. You need both, and you need them to stay in sync. ZBus provides both together.</p>
+<hr />
+<h3 id="12-the-pubsub-mental-model-vs-calling-a-function-decoupling">1.2 The pub/sub mental model vs calling a function — decoupling</h3>
+<p><strong>Calling a function: tight coupling</strong></p>
+<p>When Module A calls <code>packer_handle_imu(&amp;data)</code> directly:
+- A must know B exists
+- A must know B&rsquo;s function signature
+- If B changes, A must change too
+- A blocks while B runs
+- You cannot add a third consumer of IMU data without modifying A</p>
+<p>This is like a food vendor who personally hand-delivers food to only the three customers he knows. To add a fourth customer he has to change his route. If customer 2 is slow eating, he waits.</p>
+<p><strong>Pub/sub: loose coupling</strong></p>
+<p>ZBus is a bulletin board. The IMU thread pins a note on the board (<code>zbus_chan_pub</code>). It walks away immediately and never looks back. It doesn&rsquo;t know — or care — who reads the note.</p>
+<p>The packer thread, the logger thread, and a new debug-visualizer thread can ALL read the same bulletin board entry, independently. The IMU thread&rsquo;s code is identical whether 0, 1, or 10 consumers exist.</p>
+<div class="highlight"><pre><span></span><code>            ┌─────────────────────────────────┐
+            │         ZBus Channel             │
+            │                                  │
+    IMU     │  pub()    ┌─────────────────┐    │
+    thread ──────────► │  latest imu_data │    │
+            │           └─────────────────┘    │
+            │                  │               │
+            │         ┌────────┴──────────────────────────┐
+            │         │        │               │           │
+            │      packer   logger         debugger   future_thread
+            │      thread   thread         thread     (doesn&#39;t exist yet)
+            └─────────────────────────────────┘
+</code></pre></div>
+
+<p>The IMU thread has zero dependencies on any downstream consumer. Add or remove consumers → zero changes to the publisher.</p>
+<hr />
+<h3 id="13-zbus-channel-vs-subscriber-vs-listener-three-notification-mechanisms">1.3 ZBus channel vs subscriber vs listener — three notification mechanisms</h3>
+<p><strong>Channel — the storage</strong></p>
+<p>The channel is just the data slot. Think of it as a lockable cubby hole. Anyone can peek in (read) or replace what&rsquo;s inside (publish), as long as they use the provided lock. The channel doesn&rsquo;t actively <em>do</em> anything — it just holds the latest value.</p>
+<p><strong>Subscriber — asynchronous, queued, runs in its own thread</strong></p>
+<p>Imagine you subscribe to a YouTube channel. When a new video is uploaded you get a notification in your inbox. You read it when you have time. If 5 videos are uploaded while you&rsquo;re offline, you have 5 pending notifications — up to your inbox size. If your inbox is full (subscriber queue depth reached), the oldest notification is dropped.</p>
+<div class="highlight"><pre><span></span><code>                   ┌──────────────┐
+  Channel pub() ──► Notification  │= message queue (depth 4)
+                   │ queue       ├──► subscriber thread reads when it wakes
+                   └──────────────┘
+</code></pre></div>
+
+<p>Use a subscriber when your processing might take longer than the publish period, or when you want the processing to run in a dedicated thread.</p>
+<p><strong>Listener — synchronous, no queue, runs in the publisher&rsquo;s thread</strong></p>
+<p>A listener is not a separate inbox — it&rsquo;s a callback that gets called <em>inside</em> the publisher&rsquo;s thread, <em>right now</em>, before <code>zbus_chan_pub()</code> even returns. Like a boss who says &ldquo;whenever an order comes in, immediately tell Sophie&rdquo; — Sophie stops what she&rsquo;s doing, does the thing, then the order process continues.</p>
+<div class="highlight"><pre><span></span><code>  Publisher                           Listener callback
+  calls pub()
+       │
+       ▼
+  lock channel
+  copy data in
+  notify observers ──────────────► imu_log_cb() runs HERE (in publisher&#39;s thread!)
+  ◄──────────────────────────────── callback returns
+  unlock channel
+  pub() returns to publisher
+</code></pre></div>
+
+<p><strong>This has a critical consequence:</strong> if your listener does ANYTHING slow — an I2C write, a flash operation, even a heavy calculation — you are blocking the publisher. At 100Hz, blocking for 5ms means you&rsquo;ve just broken your timing budget.</p>
+<p><strong>Quick decision guide:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Need</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Record data in a file or database</td>
+<td>Subscriber</td>
+</tr>
+<tr>
+<td>Compute a running average</td>
+<td>Subscriber</td>
+</tr>
+<tr>
+<td>Set a flag so another thread wakes</td>
+<td>Listener</td>
+</tr>
+<tr>
+<td>Increment a packet counter</td>
+<td>Listener</td>
+</tr>
+<tr>
+<td>Encode protobuf and write to SPI</td>
+<td>Subscriber</td>
+</tr>
+<tr>
+<td>Blink a status LED</td>
+<td>Listener</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="14-what-zbus_observer_define-does-under-the-hood">1.4 What ZBUS_OBSERVER_DEFINE does under the hood</h3>
+<p><strong>The compile-time list trick</strong></p>
+<p>ZBus uses a C99 feature called <em>linker sections</em> to build its observer registry at compile time with zero runtime overhead. Understanding this prevents confusion about why things work even without any explicit &ldquo;register&rdquo; call.</p>
+<p>When you write:</p>
+<div class="highlight"><pre><span></span><code><span class="n">ZBUS_SUBSCRIBER_DEFINE</span><span class="p">(</span><span class="n">imu_sub</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">);</span>
+</code></pre></div>
+
+<p>The macro expands to roughly:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// A k_msgq is defined for the notification queue</span>
+<span class="n">K_MSGQ_DEFINE</span><span class="p">(</span><span class="n">_imu_sub_queue</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="p">),</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">);</span>
+
+<span class="c1">// An observer struct is created and placed in a special linker section</span>
+<span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">zbus_observer</span><span class="w"> </span><span class="n">imu_sub</span>
+<span class="w">    </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">section</span><span class="p">(</span><span class="s">&quot;.zbus.observer.imu_sub&quot;</span><span class="p">)))</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;imu_sub&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ZBUS_OBSERVER_SUBSCRIBER_TYPE</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">data</span><span class="p">.</span><span class="n">queue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">_imu_sub_queue</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ATOMIC_INIT</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p>That <code>__attribute__((section(...)))</code> places the struct into a named region of flash memory. The linker collects <em>all</em> structs placed in any <code>.zbus.observer.*</code> section and arranges them consecutively in flash. Zephyr&rsquo;s ZBus code then iterates this array at notification time.</p>
+<p><strong>What does this mean for you?</strong>
+- You never need to register observers in an init function — the linker does it
+- The list is fully known at compile time — no dynamic allocation occurs when <code>zbus_chan_pub</code> runs
+- Adding a new observer nowhere near the channel definition works because the linker sees all sections</p>
+<p>When you add <code>ZBUS_CHAN_ADD_OBS(imu_chan, imu_sub, 3)</code> with priority 3, ZBus records in the channel&rsquo;s observer list that <code>imu_sub</code> should be notified. This can be done at compile time (via <code>ZBUS_OBSERVERS(...)</code> in <code>ZBUS_CHAN_DEFINE</code>) or at runtime (via <code>ZBUS_CHAN_ADD_OBS</code> with <code>CONFIG_ZBUS_RUNTIME_OBSERVERS=y</code>).</p>
+<hr />
+<h3 id="15-thread-safety-guarantees-zbus-provides-and-what-it-does-not-protect">1.5 Thread-safety guarantees ZBus provides — and what it does NOT protect</h3>
+<p><strong>What ZBus guarantees:</strong></p>
+<p>Every <code>zbus_chan_pub()</code> and <code>zbus_chan_read()</code> takes a mutex on the channel before touching its data. This means:
+- Two threads can never simultaneously write the channel — one blocks on the mutex
+- A reader and a writer cannot race — one blocks
+- The data you read is always a complete, consistent struct (all fields from the same publish call)</p>
+<p><strong>What ZBus does NOT protect:</strong></p>
+<p>The mutex only covers the <em>channel&rsquo;s internal buffer copy</em>. The struct you pass TO <code>pub()</code> or receive FROM <code>read()</code> is your local copy — ZBus copies it in or out atomically, but after the copy, the mutex is released. What you do with your local copy is your problem.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// This is SAFE — ZBus copies atomically</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">local_copy</span><span class="p">;</span>
+<span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">local_copy</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span><span class="w">  </span><span class="c1">// mutex held during copy</span>
+<span class="c1">// local_copy is now consistent — all fields from one publish call</span>
+<span class="kt">float</span><span class="w"> </span><span class="n">ax</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">local_copy</span><span class="p">.</span><span class="n">accel_x</span><span class="p">;</span><span class="w">  </span><span class="c1">// safe</span>
+
+<span class="c1">// This would be UNSAFE — but only if you shared local_copy with another thread:</span>
+<span class="c1">// Don&#39;t pass &amp;local_copy to another thread and read while they mutate it</span>
+</code></pre></div>
+
+<p><strong>The &ldquo;only latest value&rdquo; contract:</strong></p>
+<p>ZBus channels are NOT a ring buffer. Publishing twice before anyone reads means the first value is silently overwritten. This is correct behavior for sensor data (you want the most recent reading), but surprising if you&rsquo;re used to a message queue model. If you need every message delivered, use a subscriber&rsquo;s queue, and size it for the burst rate you expect.</p>
+<hr />
+<h3 id="16-what-protobuf-is-binary-serialization-vs-jsontext">1.6 What protobuf is — binary serialization vs JSON/text</h3>
+<p><strong>The problem with raw C structs over a wire:</strong></p>
+<p>A <code>struct imu_data</code> is just bytes in memory. If you <code>memcpy</code> it and send it over SPI, the receiver must know:
+- Exactly how large the struct is
+- The byte order of each field (little-endian vs big-endian)
+- The exact compiler padding between fields (depends on compiler, architecture, and flags)
+- What each offset means</p>
+<p>Change any compiler flag on either side → corruption. Add a field to the struct → every receiver must be recompiled simulataneously.</p>
+<p><strong>Why not JSON?</strong></p>
+<p>JSON is human-readable but expensive: <code>{"accel_x": 1.234567}</code> is 18 bytes to encode one float. On a microcontroller at 100Hz, this means parsing and formatting strings 100 times per second. Text serialization also requires a dynamic allocator or a very large stack for <code>sprintf</code>.</p>
+<p><strong>What protobuf does instead:</strong></p>
+<p>Protobuf encodes data as a binary stream of Tag-Value pairs. Each field has a numeric ID (defined in the <code>.proto</code> file). The receiver uses the IDs — not field positions — to decode. This means:</p>
+<div class="highlight"><pre><span></span><code>accel_x = 1.234567 encoded as:
+  [0x0D]  ← tag byte: field 1, wire type 5 (32-bit)
+  [3F 9E F9 DB]  ← IEEE 754 little-endian for 1.234567f
+  Total: 5 bytes
+
+vs
+
+&quot;accel_x&quot;: 1.234567  ← 18 bytes as text
+</code></pre></div>
+
+<p><strong>The field-number-based encoding</strong> is the key to safe versioning. Field 1 always means <code>accel_x</code> — not &ldquo;the first field in memory.&rdquo; So:
+- Old firmware sends fields 1–7. New firmware adds field 8 for temperature.
+- Old Jetson software receives field 8 → it sees an unknown tag → skips it silently. No crash.
+- New Jetson software receives from old firmware → field 8 is missing → decoded as 0 (numeric default). No crash.</p>
+<p>You can evolve the protocol independently on each side.</p>
+<hr />
+<h3 id="17-why-proto3-omits-default-zero-values-and-the-spi-frame-size-problem">1.7 Why proto3 omits default (zero) values — and the SPI frame size problem</h3>
+<p><strong>Proto3&rsquo;s space-saving rule:</strong></p>
+<p>In proto3, any field that equals its default value is <strong>not encoded</strong>. The default for all numeric types is zero. The default for strings is empty string.</p>
+<p>This seems like a great idea — why transmit zeros? A <code>SensorFrame</code> with only <code>seq=5</code> and all sensor data zero would encode to just 2 bytes (the seq tag + value), instead of 64 bytes.</p>
+<p><strong>The SPI framing problem this creates:</strong></p>
+<p>SPI is a fixed-frame protocol in your system design. You have a DMA buffer of, say, 128 bytes. The Jetson expects every transfer to carry exactly 128 bytes. But <code>pb_encode()</code> produces output of variable size depending on the data:</p>
+<div class="highlight"><pre><span></span><code>GPS has fix:  SensorFrame with GPS lat/lon/alt all non-zero
+              → pb_encode writes ~90 bytes to buffer
+
+GPS loses fix: SensorFrame with GPS lat=0, lon=0, alt=0 (all default)
+               → GPS sub-message fields are ALL OMITTED
+               → pb_encode writes only ~64 bytes to buffer
+
+The Jetson still reads 128 bytes of SPI (that&#39;s what the DMA transfer is sized for).
+The last 64 bytes of the buffer are from the PREVIOUS transfer (DMA buffer was not cleared).
+The Jetson runs pb_decode on 128 bytes where only 64 are valid → garbage decoded fields.
+</code></pre></div>
+
+<p>This is not a theoretical problem — it appeared in the OKS sensorbar investigation (#98301). Identical values across 3–4 consecutive 10ms windows is the symptom: the Jetson is reading stale bytes from the DMA buffer.</p>
+<p><strong>The fix: explicit <code>payload_length</code>:</strong></p>
+<p>Every SPI frame MUST include a length prefix. The packer thread writes the encoded byte count into the first 2 bytes (or into a dedicated header field). The Jetson reads the length first, then decodes only that many bytes:</p>
+<div class="highlight"><pre><span></span><code>Frame layout in the 128-byte DMA buffer:
+  Bytes 0-1:   payload_length (uint16_t, little-endian)  ← always present
+  Bytes 2-N:   protobuf payload (variable, exactly payload_length bytes)
+  Bytes N+1-127: unused / zero padding
+</code></pre></div>
+
+<p>This is why the <code>.proto</code> for <code>SensorFrame</code> always has a <code>payload_length</code> field — it exists outside protobuf encoding so the framing layer can determine decode boundaries before the protobuf decoder even starts.</p>
+<hr />
+<h3 id="18-what-nanopb-is-heap-free-static-allocation-only">1.8 What nanopb is — heap-free, static allocation only</h3>
+<p><strong>Standard protobuf libraries (protobuf-c, Google&rsquo;s C++ impl) use malloc:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Standard protobuf-c — NOT suitable for embedded:</span>
+<span class="n">SensorFrame</span><span class="w"> </span><span class="o">*</span><span class="n">frame</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sensor_frame__unpack</span><span class="p">(</span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="n">len</span><span class="p">,</span><span class="w"> </span><span class="n">buf</span><span class="p">);</span>
+<span class="c1">// ^ calls malloc() internally</span>
+<span class="c1">// On STM32H7 with 1MB flash and Zephyr kernel, you might not have a heap configured at all</span>
+<span class="n">sensor_frame__free_unpacked</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">);</span><span class="w">  </span><span class="c1">// must free or you leak</span>
+</code></pre></div>
+
+<p>On a microcontroller, <code>malloc</code> has three problems:
+1. The heap may not exist or may be too small
+2. Malloc has non-deterministic latency (depends on heap fragmentation)
+3. Free-then-malloc cycles cause fragmentation over hours — your robot crashes at 3am</p>
+<p><strong>nanopb allocates everything statically:</strong></p>
+<p>nanopb generates C structs where all arrays have fixed maximum sizes. You allocate the struct on the stack or as a global — no <code>malloc</code> is ever called during encode or decode. The codec is purely deterministic — same input always takes the same path and the same time.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// nanopb — safe for embedded:</span>
+<span class="n">SensorFrame</span><span class="w"> </span><span class="n">frame</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SensorFrame_init_zero</span><span class="p">;</span><span class="w">  </span><span class="c1">// stack allocation, fixed size</span>
+<span class="n">pb_ostream_t</span><span class="w"> </span><span class="n">stream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_ostream_from_buffer</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">));</span><span class="w">  </span><span class="c1">// static buffer</span>
+<span class="n">pb_encode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stream</span><span class="p">,</span><span class="w"> </span><span class="n">SensorFrame_fields</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">frame</span><span class="p">);</span><span class="w">  </span><span class="c1">// zero malloc calls</span>
+</code></pre></div>
+
+<p>The tradeoff: you must declare max sizes for variable-length fields (strings, byte arrays) at code-generation time using a <code>.options</code> file. If runtime data exceeds that max, encode fails — but predictably, not with a heap corruption.</p>
+<hr />
+<h3 id="19-the-proto-file-options-file-combo">1.9 The .proto file + .options file combo</h3>
+<p><strong>The .proto file defines the logical schema:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="kd">message</span><span class="w"> </span><span class="nc">GpsData</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="na">latitude</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="na">longitude</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">altitude_m</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">string</span><span class="w"> </span><span class="na">fix_type</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span><span class="w">   </span><span class="c1">// &quot;no_fix&quot;, &quot;2D&quot;, &quot;3D&quot;</span>
+<span class="w">    </span><span class="kt">uint32</span><span class="w"> </span><span class="na">satellites</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The problem: <code>string fix_type = 4</code> is a variable-length string. nanopb cannot generate a struct without knowing the maximum length. nanopb can guess, but the guess is wrong.</p>
+<p><strong>The .options file sets nanopb-specific constraints:</strong></p>
+<p>Create a file with the same name as the .proto but <code>.options</code> extension:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># sensor_frame.options</span>
+<span class="na">GpsData.fix_type    max_size</span><span class="o">:</span><span class="s">8</span><span class="w">    </span><span class="c1"># &quot;no_fix&quot; is 6 chars; max 7 + null = 8</span>
+</code></pre></div>
+
+<p>Without this:</p>
+<div class="highlight"><pre><span></span><code>error: Field &#39;fix_type&#39; requires option max_size
+nanopb_generator.py fails
+</code></pre></div>
+
+<p>With this, the generated struct has:</p>
+<div class="highlight"><pre><span></span><code><span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="n">latitude</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="n">longitude</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="n">altitude_m</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">char</span><span class="w">   </span><span class="n">fix_type</span><span class="p">[</span><span class="mi">8</span><span class="p">];</span><span class="w">   </span><span class="c1">// exactly 8 bytes, no malloc</span>
+<span class="w">    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">satellites</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="n">GpsData</span><span class="p">;</span>
+</code></pre></div>
+
+<p><strong>The general rule:</strong> for every <code>string</code> or <code>bytes</code> field in your .proto, you must add a <code>max_size</code> line in <code>.options</code>. For repeated fields (arrays), you need <code>max_count</code>. These are nanopb-specific annotations that don&rsquo;t appear in standard protobuf — they exist only to make static allocation possible.</p>
+<hr />
+<h3 id="110-pb_encode-return-value-what-it-means-when-it-returns-true">1.10 pb_encode return value — what it means when it returns true</h3>
+<p><strong>The intuition that&rsquo;s wrong:</strong></p>
+<p>Many beginners check <code>pb_encode()</code> return value and think: &ldquo;if it returns <code>true</code>, the output buffer contains a complete, valid message.&rdquo; This is almost correct, but missing a critical detail.</p>
+<p><code>pb_encode()</code> returns <code>true</code> if encoding completed <strong>without error</strong>. But the output buffer may be SMALLER than its maximum allocated size. The number of bytes actually written is in <code>stream.bytes_written</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="kt">uint8_t</span><span class="w"> </span><span class="n">buf</span><span class="p">[</span><span class="mi">128</span><span class="p">];</span><span class="w">  </span><span class="c1">// allocated 128 bytes</span>
+<span class="n">pb_ostream_t</span><span class="w"> </span><span class="n">stream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_ostream_from_buffer</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">));</span>
+
+<span class="n">SensorFrame</span><span class="w"> </span><span class="n">frame</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SensorFrame_init_zero</span><span class="p">;</span>
+<span class="n">frame</span><span class="p">.</span><span class="n">seq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">42</span><span class="p">;</span>
+<span class="c1">// (other fields left zero)</span>
+
+<span class="kt">bool</span><span class="w"> </span><span class="n">ok</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_encode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stream</span><span class="p">,</span><span class="w"> </span><span class="n">SensorFrame_fields</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">frame</span><span class="p">);</span>
+
+<span class="c1">// ok == true, BUT:</span>
+<span class="c1">// stream.bytes_written might be 4 (only seq field was encoded)</span>
+<span class="c1">// buf[4..127] still has whatever was there before (uninitialized / previous transfer data)</span>
+</code></pre></div>
+
+<p>If you tell the SPI DMA to send all 128 bytes, the Jetson receives 4 valid bytes and 124 bytes of garbage.</p>
+<p><strong>The correct pattern:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="kt">bool</span><span class="w"> </span><span class="n">ok</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_encode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stream</span><span class="p">,</span><span class="w"> </span><span class="n">SensorFrame_fields</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">frame</span><span class="p">);</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">ok</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;encode failed: %s&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">PB_GET_ERROR</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stream</span><span class="p">));</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+<span class="c1">// Use stream.bytes_written — NOT sizeof(buf)</span>
+<span class="kt">uint16_t</span><span class="w"> </span><span class="n">payload_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint16_t</span><span class="p">)</span><span class="n">stream</span><span class="p">.</span><span class="n">bytes_written</span><span class="p">;</span>
+<span class="c1">// Write payload_len to frame header so receiver knows how many bytes to decode</span>
+</code></pre></div>
+
+<hr />
+<h3 id="111-the-payload_length-design-pattern">1.11 The payload_length design pattern</h3>
+<p><strong>The invariant you need:</strong></p>
+<p>Every SPI frame your STM32 sends must allow the Jetson to determine: &ldquo;how many bytes of this 128-byte buffer are valid protobuf data?&rdquo;</p>
+<p>The standard solution is a fixed-format 4-byte header before the protobuf payload:</p>
+<div class="highlight"><pre><span></span><code>┌────────────────────────────────────────────────────┐
+│  BYTE 0   │  BYTE 1   │  BYTE 2   │  BYTE 3        │
+│  0xAB     │  0xCD     │  len_hi   │  len_lo        │
+│  (magic)  │  (magic)  │           │                │
+└────────────────────────────────────────────────────┘
+│  BYTES 4..(4+len-1): protobuf payload              │
+│  BYTES (4+len)..127: padding zeros                 │
+└────────────────────────────────────────────────────┘
+</code></pre></div>
+
+<p>The magic bytes (0xAB 0xCD) help the Jetson detect frame alignment errors: if byte 0 is NOT 0xAB, the SPI receiver is out-of-sync. Reset and re-sync rather than decode garbage.</p>
+<p>On the Jetson side:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># After reading 128-byte SPI frame:</span>
+<span class="k">if</span> <span class="n">buf</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="mh">0xAB</span> <span class="ow">or</span> <span class="n">buf</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">!=</span> <span class="mh">0xCD</span><span class="p">:</span>
+    <span class="n">stats</span><span class="o">.</span><span class="n">desync_count</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="kc">None</span>  <span class="c1"># skip this frame, wait for sync</span>
+
+<span class="n">payload_len</span> <span class="o">=</span> <span class="p">(</span><span class="n">buf</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">&lt;&lt;</span> <span class="mi">8</span><span class="p">)</span> <span class="o">|</span> <span class="n">buf</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="k">if</span> <span class="n">payload_len</span> <span class="o">&gt;</span> <span class="mi">124</span><span class="p">:</span>   <span class="c1"># 128 - 4 byte header</span>
+    <span class="k">return</span> <span class="kc">None</span>  <span class="c1"># corrupt</span>
+
+<span class="n">payload</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="n">buf</span><span class="p">[</span><span class="mi">4</span> <span class="p">:</span> <span class="mi">4</span> <span class="o">+</span> <span class="n">payload_len</span><span class="p">])</span>
+<span class="n">frame</span> <span class="o">=</span> <span class="n">SensorFrame</span><span class="p">()</span>
+<span class="n">frame</span><span class="o">.</span><span class="n">ParseFromString</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h3 id="112-what-zbus-message-drops-look-like-the-silent-3-4-window-pattern">1.12 What ZBus message drops look like — the silent 3-4 window pattern</h3>
+<p><strong>Why drops happen at 100Hz:</strong></p>
+<p>A subscriber has a queue with depth N (e.g. depth 4). The IMU thread publishes every 10ms. If the subscriber thread is busy for longer than N×10ms (40ms for depth 4), the notification queue fills up. The next <code>zbus_chan_pub()</code> tries to queue a notification → queue is full → notification silently dropped.</p>
+<p><strong>What you see in the data:</strong></p>
+<p>The subscriber reads the <em>channel</em> (not the queue notification). When it finally gets a notification, it reads the current channel value — the latest one. The intermediate values are gone. But the Jetson doesn&rsquo;t know values were skipped. It sees:</p>
+<div class="highlight"><pre><span></span><code>t=0ms:   frame.seq=100, accel_x=1.23
+t=10ms:  frame.seq=101, accel_x=1.24
+t=20ms:  frame.seq=102, accel_x=1.23
+t=30ms:  frame.seq=103, accel_x=1.23  ← same, benign?
+t=40ms:  frame.seq=104, accel_x=1.23  ← same again
+t=50ms:  frame.seq=105, accel_x=1.23  ← same again
+t=60ms:  frame.seq=110, accel_x=1.31  ← seq jumped by 5
+</code></pre></div>
+
+<p>The seq jump from 105 to 110 tells you 5 notifications were dropped. On the Jetson side if you&rsquo;re not looking at <code>seq</code>, you just see 3–4 identical accel_x values — which could look like the sensor is stuck, or like the robot stopped moving.</p>
+<p>This is exactly the sensorbar duplicate-reading pattern from incident #99185: <code>is_reliable=True</code> on all readings, but byte-identical consecutive values at 30ms intervals instead of the expected 10ms. Identical values across 3–4 consecutive windows is the diagnostic signature of a dropped notification OR a stale DMA buffer.</p>
+<p><strong>Prevention:</strong>
+- Size the subscriber queue for burst depth: <code>ZBUS_SUBSCRIBER_DEFINE(packer_sub, 10)</code> for 100ms burst tolerance
+- Check <code>seq</code> on the Jetson side and alert if <code>delta_seq &gt; 1</code>
+- Monitor <code>zbus_obs_get_chan_drop_cnt()</code> in your Zephyr shell</p>
+<hr />
+<h3 id="113-stack-usage-from-pb_encode-why-your-thread-stack-is-too-small">1.13 Stack usage from pb_encode — why your thread stack is too small</h3>
+<p><strong>What pb_encode actually does on the stack:</strong></p>
+<p><code>pb_encode()</code> is a recursive function. For each sub-message field it encounters, it recurses into a nested encode call. Each recursive call pushes its own local variables, state, and the <code>pb_ostream_t</code> onto the stack.</p>
+<p>For a <code>SensorFrame</code> with <code>ImuData</code> and <code>WheelData</code> sub-messages:</p>
+<div class="highlight"><pre><span></span><code>Call stack during pb_encode(SensorFrame):
+  pb_encode(SensorFrame)          ← ~120 bytes of locals
+    pb_encode_tag_for_field()     ← ~24 bytes
+    pb_encode_submessage(ImuData) ← ~80 bytes
+      pb_encode(ImuData)          ← another ~120 bytes of locals
+        pb_encode_tag_for_field() ← ~24 bytes (×7 for 7 fields)
+        pb_encode_fixed32()       ← ~16 bytes
+  ← back from ImuData
+    pb_encode_submessage(WheelData) ← ~80 bytes
+      pb_encode(WheelData)          ← another ~120 bytes of locals
+</code></pre></div>
+
+<p>A two-level nested message can consume ~500–750 bytes of stack just for pb_encode, before your own function&rsquo;s locals are counted.</p>
+<p><strong>The minimum thread stack for a packer thread:</strong></p>
+<table>
+<thead>
+<tr>
+<th>What&rsquo;s on the stack</th>
+<th>Bytes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Thread function locals</td>
+<td>64</td>
+</tr>
+<tr>
+<td><code>pb_encode()</code> for outer SensorFrame</td>
+<td>120</td>
+</tr>
+<tr>
+<td><code>pb_encode()</code> for ImuData sub-msg</td>
+<td>200</td>
+</tr>
+<tr>
+<td><code>pb_encode()</code> for WheelData sub-msg</td>
+<td>200</td>
+</tr>
+<tr>
+<td><code>zbus_chan_read()</code> overhead</td>
+<td>64</td>
+</tr>
+<tr>
+<td>LOG_ERR() if encode fails</td>
+<td>400</td>
+</tr>
+<tr>
+<td>Safety margin (20%)</td>
+<td>210</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>~1,258</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Start at 2048 bytes. Use <code>k_thread_stack_space_get()</code> after 5 minutes of operation to verify unused space.</p>
+<hr />
+<h2 id="part-2-annotated-code-reference">PART 2 — Annotated Code Reference</h2>
+<hr />
+<h3 id="21-zbus-channel-subscriber-definition-h-and-c-full">2.1 ZBus channel + subscriber definition (.h and .c, full)</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// ============================================================</span>
+<span class="c1">// sensors/channels.h — channel declarations visible to all files</span>
+<span class="c1">// Include guard prevents double-inclusion</span>
+<span class="c1">// ============================================================</span>
+<span class="cp">#ifndef SENSORS_CHANNELS_H</span>
+<span class="cp">#define SENSORS_CHANNELS_H</span>
+
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/zbus/zbus.h&gt;</span>
+
+<span class="c1">// Message structs — only plain data (no pointers! ZBus copies by value).</span>
+<span class="c1">// Pointers would become dangling after the publish memcpy.</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">    </span><span class="n">accel_x</span><span class="p">,</span><span class="w"> </span><span class="n">accel_y</span><span class="p">,</span><span class="w"> </span><span class="n">accel_z</span><span class="p">;</span><span class="w">   </span><span class="c1">// m/s² after scaling</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">    </span><span class="n">gyro_x</span><span class="p">,</span><span class="w">  </span><span class="n">gyro_y</span><span class="p">,</span><span class="w">  </span><span class="n">gyro_z</span><span class="p">;</span><span class="w">    </span><span class="c1">// rad/s after scaling</span>
+<span class="w">    </span><span class="kt">int64_t</span><span class="w">  </span><span class="n">timestamp_us</span><span class="p">;</span><span class="w">                </span><span class="c1">// k_ticks_to_us_near64 at read time</span>
+<span class="p">};</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">gps_data</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">double</span><span class="w">   </span><span class="n">latitude</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">double</span><span class="w">   </span><span class="n">longitude</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">    </span><span class="n">altitude_m</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w">  </span><span class="n">satellites</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w">     </span><span class="n">has_fix</span><span class="p">;</span><span class="w">                     </span><span class="c1">// false = all lat/lon/alt are zero/invalid</span>
+<span class="w">    </span><span class="kt">int64_t</span><span class="w">  </span><span class="n">timestamp_us</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="c1">// ZBUS_CHAN_DECLARE: declares the channel symbol as extern.</span>
+<span class="c1">// This lets any .c file that includes this header call zbus_chan_pub/read on it.</span>
+<span class="c1">// The actual memory lives in channels.c (defined with ZBUS_CHAN_DEFINE there).</span>
+<span class="n">ZBUS_CHAN_DECLARE</span><span class="p">(</span><span class="n">imu_chan</span><span class="p">);</span>
+<span class="n">ZBUS_CHAN_DECLARE</span><span class="p">(</span><span class="n">gps_chan</span><span class="p">);</span>
+
+<span class="cp">#endif </span><span class="cm">/* SENSORS_CHANNELS_H */</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1">// ============================================================</span>
+<span class="c1">// sensors/channels.c — channel definitions (compiled exactly once)</span>
+<span class="c1">// ============================================================</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;channels.h&quot;</span>
+
+<span class="c1">// ZBUS_CHAN_DEFINE(name, msg_type, validator_fn, user_data, observers, init_val)</span>
+<span class="c1">//</span>
+<span class="c1">// name:         C symbol name — must match ZBUS_CHAN_DECLARE in the header</span>
+<span class="c1">// msg_type:     the struct type this channel carries</span>
+<span class="c1">// validator_fn: called on pub() before storing; NULL = accept all</span>
+<span class="c1">//               signature: bool fn(const struct zbus_channel *chan);</span>
+<span class="c1">// user_data:    arbitrary pointer attached to channel (NULL if unused)</span>
+<span class="c1">// observers:    compile-time observer list. Use ZBUS_OBSERVERS_EMPTY if adding</span>
+<span class="c1">//               observers at runtime via ZBUS_CHAN_ADD_OBS</span>
+<span class="c1">// init_val:     ZBUS_MSG_INIT(0) zero-initializes the channel&#39;s internal copy</span>
+<span class="c1">//</span>
+<span class="n">ZBUS_CHAN_DEFINE</span><span class="p">(</span>
+<span class="w">    </span><span class="n">imu_chan</span><span class="p">,</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="p">,</span>
+<span class="w">    </span><span class="nb">NULL</span><span class="p">,</span>
+<span class="w">    </span><span class="nb">NULL</span><span class="p">,</span>
+<span class="w">    </span><span class="n">ZBUS_OBSERVERS_EMPTY</span><span class="p">,</span>
+<span class="w">    </span><span class="n">ZBUS_MSG_INIT</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="p">);</span>
+
+<span class="n">ZBUS_CHAN_DEFINE</span><span class="p">(</span>
+<span class="w">    </span><span class="n">gps_chan</span><span class="p">,</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">gps_data</span><span class="p">,</span>
+<span class="w">    </span><span class="nb">NULL</span><span class="p">,</span>
+<span class="w">    </span><span class="nb">NULL</span><span class="p">,</span>
+<span class="w">    </span><span class="n">ZBUS_OBSERVERS_EMPTY</span><span class="p">,</span>
+<span class="w">    </span><span class="n">ZBUS_MSG_INIT</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="p">);</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1">// ============================================================</span>
+<span class="c1">// packer/packer.c — subscriber definition and registration</span>
+<span class="c1">// ============================================================</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/zbus/zbus.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;channels.h&quot;</span>
+
+<span class="c1">// ZBUS_SUBSCRIBER_DEFINE(name, queue_depth)</span>
+<span class="c1">//</span>
+<span class="c1">// name:        C symbol name — the observer&#39;s identity</span>
+<span class="c1">// queue_depth: how many pending notifications can queue up before oldest is dropped.</span>
+<span class="c1">//              At 100Hz, depth=10 tolerates up to 100ms of subscriber backlog.</span>
+<span class="c1">//              Depth=1 means: if the subscriber misses one publish, it loses the notification.</span>
+<span class="c1">//</span>
+<span class="n">ZBUS_SUBSCRIBER_DEFINE</span><span class="p">(</span><span class="n">packer_sub</span><span class="p">,</span><span class="w"> </span><span class="mi">10</span><span class="p">);</span>
+
+<span class="c1">// ZBUS_CHAN_ADD_OBS(channel, observer, priority)</span>
+<span class="c1">//</span>
+<span class="c1">// Registers packer_sub as an observer of imu_chan at observation priority 5.</span>
+<span class="c1">// Priority controls the order callbacks fire when multiple observers exist.</span>
+<span class="c1">// Lower priority number = earlier notification.</span>
+<span class="c1">//</span>
+<span class="c1">// This is a RUNTIME registration — requires CONFIG_ZBUS_RUNTIME_OBSERVERS=y in prj.conf.</span>
+<span class="c1">// For compile-time registration on the channel itself, use ZBUS_CHAN_DEFINE with</span>
+<span class="c1">// ZBUS_OBSERVERS(packer_sub) instead of ZBUS_OBSERVERS_EMPTY.</span>
+<span class="c1">//</span>
+<span class="c1">// We call this from an init function rather than using compile-time registration</span>
+<span class="c1">// so channels.c doesn&#39;t need to know about packer.c (maintains separation of concerns).</span>
+<span class="c1">//</span>
+<span class="kt">int</span><span class="w"> </span><span class="nf">packer_init</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">rc</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">zbus_chan_add_obs</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">packer_sub</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">10</span><span class="p">));</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">rc</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;Failed to register packer_sub on imu_chan: %d&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">rc</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">rc</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">zbus_chan_add_obs</span><span class="p">(</span><span class="o">&amp;</span><span class="n">gps_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">packer_sub</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">10</span><span class="p">));</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">rc</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;Failed to register packer_sub on gps_chan: %d&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">rc</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">rc</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h3 id="22-safe-publish-from-thread-and-the-wrong-pattern-publish-from-isr-with-listener">2.2 Safe publish from thread — and the WRONG pattern (publish from ISR with listener)</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// ============================================================</span>
+<span class="c1">// CORRECT: publish from a thread with appropriate timeout</span>
+<span class="c1">// ============================================================</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">imu_thread_fn</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">msg</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// ... read ICM-42688 registers ...</span>
+
+<span class="w">        </span><span class="n">msg</span><span class="p">.</span><span class="n">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k_ticks_to_us_near64</span><span class="p">(</span><span class="n">k_uptime_ticks</span><span class="p">());</span>
+<span class="w">        </span><span class="c1">// k_uptime_ticks() is the highest-resolution time source.</span>
+<span class="w">        </span><span class="c1">// Convert to microseconds for the Jetson&#39;s ROS2 timestamp field.</span>
+
+<span class="w">        </span><span class="c1">// K_MSEC(1): wait up to 1ms for the channel mutex.</span>
+<span class="w">        </span><span class="c1">// If another thread holds the mutex, we wait rather than dropping data.</span>
+<span class="w">        </span><span class="c1">// For a 100Hz sensor, 1ms wait is fine — we never miss our next sample window.</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">zbus_chan_pub</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">rc</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">-</span><span class="n">EAGAIN</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// Mutex was held for &gt;1ms — something is wrong.</span>
+<span class="w">            </span><span class="c1">// A listener callback might be blocking (see WRONG pattern below).</span>
+<span class="w">            </span><span class="n">LOG_WRN</span><span class="p">(</span><span class="s">&quot;imu_chan pub timeout — check listeners&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">rc</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">-</span><span class="n">ENOMSG</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// Validator rejected the message (if you have a validator).</span>
+<span class="w">            </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;imu_chan validator rejected message&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="n">k_msleep</span><span class="p">(</span><span class="mi">10</span><span class="p">);</span><span class="w">   </span><span class="c1">// 100Hz</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1">// ============================================================</span>
+<span class="c1">// WRONG: listener that does slow work</span>
+<span class="c1">//</span>
+<span class="c1">// This listener is called inside zbus_chan_pub(), in imu_thread&#39;s context.</span>
+<span class="c1">// If it takes &gt;1ms, imu_thread&#39;s pub() call returns -EAGAIN on the next tick.</span>
+<span class="c1">// ============================================================</span>
+
+<span class="c1">// DON&#39;T DO THIS — listener doing slow I2C or logging</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">wrong_listener_cb</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">zbus_channel</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">ARG_UNUSED</span><span class="p">(</span><span class="n">chan</span><span class="p">);</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">data</span><span class="p">;</span>
+<span class="w">    </span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="n">chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// WRONG: printk acquires a UART lock internally — can take 1-5ms</span>
+<span class="w">    </span><span class="n">printk</span><span class="p">(</span><span class="s">&quot;IMU: ax=%.3f ay=%.3f az=%.3f</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span>
+<span class="w">           </span><span class="n">data</span><span class="p">.</span><span class="n">accel_x</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">.</span><span class="n">accel_y</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">.</span><span class="n">accel_z</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// WRONG: SPI write from a listener also takes time and may sleep</span>
+<span class="w">    </span><span class="c1">// spi_write(...);</span>
+<span class="p">}</span>
+<span class="n">ZBUS_LISTENER_DEFINE</span><span class="p">(</span><span class="n">wrong_logger</span><span class="p">,</span><span class="w"> </span><span class="n">wrong_listener_cb</span><span class="p">);</span>
+
+<span class="c1">// ============================================================</span>
+<span class="c1">// CORRECT: listener that only sets an atomic flag</span>
+<span class="c1">// The actual logging runs in a separate thread that reads the flag.</span>
+<span class="c1">// ============================================================</span>
+<span class="k">static</span><span class="w"> </span><span class="n">atomic_t</span><span class="w"> </span><span class="n">imu_ready_flag</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ATOMIC_INIT</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">correct_listener_cb</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">zbus_channel</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">ARG_UNUSED</span><span class="p">(</span><span class="n">chan</span><span class="p">);</span>
+<span class="w">    </span><span class="c1">// atomic_set is lock-free and takes ~1 CPU cycle</span>
+<span class="w">    </span><span class="n">atomic_set</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_ready_flag</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="p">}</span>
+<span class="n">ZBUS_LISTENER_DEFINE</span><span class="p">(</span><span class="n">imu_flagger</span><span class="p">,</span><span class="w"> </span><span class="n">correct_listener_cb</span><span class="p">);</span>
+</code></pre></div>
+
+<hr />
+<h3 id="23-zbus-subscribe-in-a-thread-the-blocking-zbus_sub_wait-loop">2.3 ZBus subscribe in a thread — the blocking zbus_sub_wait() loop</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// ============================================================</span>
+<span class="c1">// packer/packer_thread.c — the canonical subscriber thread pattern</span>
+<span class="c1">// ============================================================</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/kernel.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/zbus/zbus.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/logging/log.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;channels.h&quot;</span>
+
+<span class="n">LOG_MODULE_REGISTER</span><span class="p">(</span><span class="n">packer</span><span class="p">,</span><span class="w"> </span><span class="n">LOG_LEVEL_DBG</span><span class="p">);</span>
+
+<span class="c1">// packer_sub was defined in packer.c (section 2.1)</span>
+<span class="c1">// The EXTERN declaration makes it visible here</span>
+<span class="k">extern</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">zbus_observer</span><span class="w"> </span><span class="n">packer_sub</span><span class="p">;</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">packer_thread_fn</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">zbus_channel</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">;</span><span class="w">  </span><span class="c1">// will point to whatever channel notified us</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">imu</span><span class="p">;</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">gps_data</span><span class="w"> </span><span class="n">gps</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">imu_fresh</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span><span class="w">          </span><span class="c1">// track whether we have new data to encode</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// zbus_sub_wait: blocks until ANY channel we&#39;ve subscribed to publishes.</span>
+<span class="w">        </span><span class="c1">// K_FOREVER: no timeout — wait as long as needed.</span>
+<span class="w">        </span><span class="c1">// chan: output — tells us WHICH channel triggered this wake.</span>
+<span class="w">        </span><span class="c1">//</span>
+<span class="w">        </span><span class="c1">// At 100Hz IMU, this wakes approximately every 10ms.</span>
+<span class="w">        </span><span class="c1">// Multiple channels can fire between wakes — zbus_sub_wait returns</span>
+<span class="w">        </span><span class="c1">// one notification at a time. The while(1) loop handles the rest.</span>
+<span class="w">        </span><span class="c1">//</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">zbus_sub_wait</span><span class="p">(</span><span class="o">&amp;</span><span class="n">packer_sub</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">chan</span><span class="p">,</span><span class="w"> </span><span class="n">K_FOREVER</span><span class="p">);</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">rc</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">LOG_WRN</span><span class="p">(</span><span class="s">&quot;zbus_sub_wait error: %d&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">rc</span><span class="p">);</span>
+<span class="w">            </span><span class="k">continue</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="c1">// Determine which channel fired and read its latest value.</span>
+<span class="w">        </span><span class="c1">// We must still call zbus_chan_read — the notification only wakes us,</span>
+<span class="w">        </span><span class="c1">// it does NOT automatically hand us the data.</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">chan</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// K_NO_WAIT: channel was just published and mutex should be available.</span>
+<span class="w">            </span><span class="c1">// If we get -EAGAIN here, something is very wrong; log and continue.</span>
+<span class="w">            </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">imu</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">rc</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">imu_fresh</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">chan</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">&amp;</span><span class="n">gps_chan</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">gps_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">gps</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+<span class="w">            </span><span class="c1">// GPS at 1Hz — just store it; use it in the next encode cycle</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="c1">// Only encode when we have a fresh IMU reading</span>
+<span class="w">        </span><span class="c1">// (GPS might not have arrived yet on the first few ticks)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">imu_fresh</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">encode_and_swap</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">gps</span><span class="p">);</span>
+<span class="w">            </span><span class="n">imu_fresh</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// Stack of 2048 bytes: pb_encode needs ~500, LOG_ERR needs ~400, rest is margin</span>
+<span class="c1">// Priority 5: lower than IMU thread (IMU should publish before we try to read)</span>
+<span class="n">K_THREAD_DEFINE</span><span class="p">(</span><span class="n">packer_tid</span><span class="p">,</span><span class="w"> </span><span class="mi">2048</span><span class="p">,</span><span class="w"> </span><span class="n">packer_thread_fn</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+</code></pre></div>
+
+<hr />
+<h3 id="24-complete-proto-file-for-the-sensor-message">2.4 Complete .proto file for the sensor message</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// proto/sensor_frame.proto</span>
+<span class="c1">//</span>
+<span class="c1">// This file is the contract between the STM32 firmware and the Jetson ROS2 node.</span>
+<span class="c1">// NEVER change a field number. NEVER remove a field. Add new fields at the end only.</span>
+<span class="c1">//</span>
+<span class="k">syntax</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;proto3&quot;</span><span class="p">;</span>
+
+<span class="c1">// ImuData: accelerometer + gyroscope from ICM-42688</span>
+<span class="c1">// Field numbers are permanent identifiers — they determine wire encoding.</span>
+<span class="c1">// The names are for humans only; on the wire, only the numbers travel.</span>
+<span class="kd">message</span><span class="w"> </span><span class="nc">ImuData</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">accel_x</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">   </span><span class="c1">// m/s² — scaled from raw ADC by firmware</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">accel_y</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">accel_z</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">gyro_x</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span><span class="w">   </span><span class="c1">// rad/s</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">gyro_y</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">gyro_z</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mi">6</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint64</span><span class="w"> </span><span class="na">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">7</span><span class="p">;</span><span class="w">   </span><span class="c1">// microseconds since Zephyr boot (k_uptime_ticks)</span>
+<span class="p">}</span>
+
+<span class="c1">// GpsData: NMEA GPGGA sentence parsed on STM32</span>
+<span class="kd">message</span><span class="w"> </span><span class="nc">GpsData</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="na">latitude</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">   </span><span class="c1">// degrees, positive=N, negative=S</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="na">longitude</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w">   </span><span class="c1">// degrees, positive=E, negative=W</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">altitude_m</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span><span class="w">   </span><span class="c1">// meters above MSL</span>
+<span class="w">    </span><span class="kt">uint32</span><span class="w"> </span><span class="na">satellites</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span><span class="w">   </span><span class="c1">// number of satellites in fix</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w">   </span><span class="na">has_fix</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span><span class="w">   </span><span class="c1">// FALSE → all position fields are zero/invalid</span>
+<span class="w">    </span><span class="kt">string</span><span class="w"> </span><span class="na">fix_type</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mi">6</span><span class="p">;</span><span class="w">   </span><span class="c1">// &quot;no_fix&quot;, &quot;2D&quot;, &quot;3D&quot; — max_size set in .options</span>
+<span class="w">    </span><span class="kt">uint64</span><span class="w"> </span><span class="na">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">7</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// OdomData: wheel encoder odometry</span>
+<span class="kd">message</span><span class="w"> </span><span class="nc">OdomData</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">speed_fl</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">   </span><span class="c1">// m/s, front-left wheel</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">speed_fr</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">speed_rl</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">speed_rr</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">heading_rad</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span><span class="w">   </span><span class="c1">// integrated yaw from encoders</span>
+<span class="w">    </span><span class="kt">uint64</span><span class="w"> </span><span class="na">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">6</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// SensorFrame: top-level message sent every 10ms over SPI</span>
+<span class="kd">message</span><span class="w"> </span><span class="nc">SensorFrame</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint32</span><span class="w">  </span><span class="na">seq</span><span class="w">            </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">   </span><span class="c1">// sequence counter, wraps at 2^32. Jetson uses this</span>
+<span class="w">                                  </span><span class="c1">// to detect drops (delta_seq &gt; 1 = missing frames).</span>
+<span class="w">    </span><span class="n">ImuData</span><span class="w">   </span><span class="na">imu</span><span class="w">          </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w">   </span><span class="c1">// always present</span>
+<span class="w">    </span><span class="n">GpsData</span><span class="w">   </span><span class="na">gps</span><span class="w">          </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span><span class="w">   </span><span class="c1">// present if GPS module connected</span>
+<span class="w">    </span><span class="n">OdomData</span><span class="w">  </span><span class="na">odom</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span><span class="w">   </span><span class="c1">// present if wheel encoders available</span>
+<span class="w">    </span><span class="kt">uint32</span><span class="w">    </span><span class="na">fw_version</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span><span class="w">   </span><span class="c1">// firmware build version for compatibility check</span>
+<span class="w">    </span><span class="c1">// Field 6 reserved for future use — do not add here until needed</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1"># proto/sensor_frame.options</span>
+<span class="c1"># nanopb-specific size constraints.</span>
+<span class="c1"># Without these, nanopb_generator fails on string fields with:</span>
+<span class="c1">#   &quot;Field GpsData.fix_type requires option max_size&quot;</span>
+<span class="c1">#</span>
+<span class="c1"># max_size includes the null terminator.</span>
+<span class="c1"># &quot;no_fix&quot; = 6 chars + 1 null = 7 → round up to 8.</span>
+<span class="c1">#</span>
+<span class="na">GpsData.fix_type    max_size</span><span class="o">:</span><span class="s">8</span>
+</code></pre></div>
+
+<hr />
+<h3 id="25-nanopb-cmake-integration-the-code-generation-custom-command">2.5 nanopb CMake integration — the code generation custom command</h3>
+<div class="highlight"><pre><span></span><code><span class="c"># CMakeLists.txt</span>
+
+<span class="nb">cmake_minimum_required</span><span class="p">(</span><span class="s">VERSION</span><span class="w"> </span><span class="s">3.20.0</span><span class="p">)</span>
+<span class="nb">find_package</span><span class="p">(</span><span class="s">Zephyr</span><span class="w"> </span><span class="s">REQUIRED</span><span class="w"> </span><span class="s">HINTS</span><span class="w"> </span><span class="o">$ENV{</span><span class="nv">ZEPHYR_BASE</span><span class="o">}</span><span class="p">)</span>
+<span class="nb">project</span><span class="p">(</span><span class="s">sensor_packer</span><span class="p">)</span>
+
+<span class="c"># --- nanopb code generation ---</span>
+<span class="c">#</span>
+<span class="c"># nanopb ships with a CMake helper (nanopb.cmake) that adds:</span>
+<span class="c">#   nanopb_generate_cpp(SRCS HDRS &lt;proto_files...&gt;)</span>
+<span class="c">#</span>
+<span class="c"># Under the hood, this creates a custom_command that runs:</span>
+<span class="c">#   python -m nanopb_generator --output-dir=&lt;build_dir&gt; &lt;proto_file&gt;</span>
+<span class="c"># producing sensor_frame.pb.c and sensor_frame.pb.h in the build directory.</span>
+<span class="c">#</span>
+<span class="c"># If nanopb is not in path, set NANOPB_SRC_ROOT_FOLDER before find_package.</span>
+<span class="c">#</span>
+
+<span class="c"># Tell nanopb where to find the .options file (same dir as .proto)</span>
+<span class="nb">set</span><span class="p">(</span><span class="s">NANOPB_OPTIONS_DIRS</span><span class="w"> </span><span class="o">${</span><span class="nv">CMAKE_CURRENT_SOURCE_DIR</span><span class="o">}</span><span class="s">/proto</span><span class="p">)</span>
+
+<span class="c"># Generate .pb.c and .pb.h from our .proto</span>
+<span class="nb">nanopb_generate_cpp</span><span class="p">(</span><span class="s">PROTO_SRCS</span><span class="w"> </span><span class="s">PROTO_HDRS</span>
+<span class="w">    </span><span class="s">proto/sensor_frame.proto</span>
+<span class="p">)</span>
+
+<span class="c"># App sources</span>
+<span class="nb">target_sources</span><span class="p">(</span><span class="s">app</span><span class="w"> </span><span class="s">PRIVATE</span>
+<span class="w">    </span><span class="s">src/main.c</span>
+<span class="w">    </span><span class="s">src/imu_thread.c</span>
+<span class="w">    </span><span class="s">src/packer_thread.c</span>
+<span class="w">    </span><span class="s">src/channels.c</span>
+<span class="w">    </span><span class="o">${</span><span class="nv">PROTO_SRCS</span><span class="o">}</span><span class="w">            </span><span class="c"># the generated sensor_frame.pb.c</span>
+<span class="p">)</span>
+
+<span class="c"># Generated headers land in the build directory — add it to include path</span>
+<span class="c"># so #include &quot;sensor_frame.pb.h&quot; works without specifying a path</span>
+<span class="nb">target_include_directories</span><span class="p">(</span><span class="s">app</span><span class="w"> </span><span class="s">PRIVATE</span>
+<span class="w">    </span><span class="o">${</span><span class="nv">CMAKE_CURRENT_BINARY_DIR</span><span class="o">}</span>
+<span class="w">    </span><span class="s">src/</span>
+<span class="w">    </span><span class="s">proto/</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1"># prj.conf additions for ZBus + nanopb</span>
+<span class="na">CONFIG_ZBUS</span><span class="o">=</span><span class="s">y</span>
+<span class="na">CONFIG_ZBUS_RUNTIME_OBSERVERS</span><span class="o">=</span><span class="s">y</span><span class="w">    </span><span class="c1"># allow ZBUS_CHAN_ADD_OBS at runtime</span>
+<span class="na">CONFIG_ZBUS_CHANNEL_NAME</span><span class="o">=</span><span class="s">y</span><span class="w">         </span><span class="c1"># include channel names in observer debug output</span>
+<span class="na">CONFIG_NANOPB</span><span class="o">=</span><span class="s">y</span><span class="w">                    </span><span class="c1"># link nanopb encode/decode library</span>
+</code></pre></div>
+
+<hr />
+<h3 id="26-pb_encode-with-pb_ostream_from_buffer-annotated-with-pb_get_error">2.6 pb_encode() with pb_ostream_from_buffer() — annotated with PB_GET_ERROR</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// ============================================================</span>
+<span class="c1">// packer/encoder.c — the encode() function used by packer_thread</span>
+<span class="c1">// Returns number of bytes written, or 0 on error.</span>
+<span class="c1">// ============================================================</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;pb_encode.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;sensor_frame.pb.h&quot;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;channels.h&quot;</span>
+
+<span class="c1">// Maximum frame size: 4-byte header + protobuf payload</span>
+<span class="c1">// Calculated: SensorFrame max ~128 bytes protobuf + 4 header = 132.</span>
+<span class="c1">// Round up to 160 for safety.</span>
+<span class="cp">#define FRAME_HEADER_SIZE  4</span>
+<span class="cp">#define PROTO_BUF_MAX     160</span>
+<span class="cp">#define FRAME_TOTAL_SIZE  (FRAME_HEADER_SIZE + PROTO_BUF_MAX)</span>
+
+<span class="c1">// encode_sensor_frame: fills out_frame and returns total frame bytes written.</span>
+<span class="c1">// out_frame must be at least FRAME_TOTAL_SIZE bytes.</span>
+<span class="kt">uint16_t</span><span class="w"> </span><span class="nf">encode_sensor_frame</span><span class="p">(</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w">   </span><span class="o">*</span><span class="n">imu</span><span class="p">,</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gps_data</span><span class="w">   </span><span class="o">*</span><span class="n">gps</span><span class="p">,</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w">                 </span><span class="o">*</span><span class="n">out_frame</span><span class="p">,</span>
+<span class="w">    </span><span class="kt">uint16_t</span><span class="w">                 </span><span class="n">out_frame_size</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">out_frame_size</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">FRAME_TOTAL_SIZE</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">  </span><span class="c1">// caller&#39;s buffer too small</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// ---- 1. Build the protobuf data structure ----</span>
+<span class="w">    </span><span class="c1">// SensorFrame_init_zero is generated by nanopb and sets ALL fields to zero</span>
+<span class="w">    </span><span class="c1">// AND all has_* flags to false. ALWAYS start with this.</span>
+<span class="w">    </span><span class="c1">// If you use an uninitialized struct, leftover stack bytes look like valid fields.</span>
+<span class="w">    </span><span class="n">SensorFrame</span><span class="w"> </span><span class="n">frame</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SensorFrame_init_zero</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Monotonically increasing sequence number.</span>
+<span class="w">    </span><span class="c1">// Static so it persists across calls.</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">seq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">seq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">seq</span><span class="o">++</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// IMU sub-message: always present</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">has_imu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span><span class="w">               </span><span class="c1">// set the has_ flag — without this, ImuData is skipped</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">accel_x</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">accel_x</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">accel_y</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">accel_y</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">accel_z</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">accel_z</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">gyro_x</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">gyro_x</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">gyro_y</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">gyro_y</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">gyro_z</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">gyro_z</span><span class="p">;</span>
+<span class="w">    </span><span class="n">frame</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="o">-&gt;</span><span class="n">timestamp_us</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// GPS sub-message: only include if we have a fix</span>
+<span class="w">    </span><span class="c1">// If gps-&gt;has_fix is false, we still include the sub-message</span>
+<span class="w">    </span><span class="c1">// but populate has_fix=false so the Jetson knows to ignore lat/lon/alt.</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">gps</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="nb">NULL</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">frame</span><span class="p">.</span><span class="n">has_gps</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">        </span><span class="n">frame</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">latitude</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="n">gps</span><span class="o">-&gt;</span><span class="n">latitude</span><span class="p">;</span>
+<span class="w">        </span><span class="n">frame</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">longitude</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="n">gps</span><span class="o">-&gt;</span><span class="n">longitude</span><span class="p">;</span>
+<span class="w">        </span><span class="n">frame</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">altitude_m</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">gps</span><span class="o">-&gt;</span><span class="n">altitude_m</span><span class="p">;</span>
+<span class="w">        </span><span class="n">frame</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">satellites</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">gps</span><span class="o">-&gt;</span><span class="n">satellites</span><span class="p">;</span>
+<span class="w">        </span><span class="n">frame</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">has_fix</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="n">gps</span><span class="o">-&gt;</span><span class="n">has_fix</span><span class="p">;</span>
+<span class="w">        </span><span class="n">strncpy</span><span class="p">(</span><span class="n">frame</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">fix_type</span><span class="p">,</span><span class="w"> </span><span class="n">gps</span><span class="o">-&gt;</span><span class="n">has_fix</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="s">&quot;3D&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s">&quot;no_fix&quot;</span><span class="p">,</span>
+<span class="w">                </span><span class="k">sizeof</span><span class="p">(</span><span class="n">frame</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">fix_type</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="w">        </span><span class="n">frame</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gps</span><span class="o">-&gt;</span><span class="n">timestamp_us</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// ---- 2. Set up the output stream ----</span>
+<span class="w">    </span><span class="c1">// pb_ostream_from_buffer: wraps out_frame+HEADER in a stream.</span>
+<span class="w">    </span><span class="c1">// Writing starts at byte FRAME_HEADER_SIZE (offset 4) to leave room for header.</span>
+<span class="w">    </span><span class="c1">// The stream tracks bytes_written.</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">proto_start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">out_frame</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">FRAME_HEADER_SIZE</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pb_ostream_t</span><span class="w"> </span><span class="n">stream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_ostream_from_buffer</span><span class="p">(</span><span class="n">proto_start</span><span class="p">,</span><span class="w"> </span><span class="n">PROTO_BUF_MAX</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// ---- 3. Encode ----</span>
+<span class="w">    </span><span class="c1">// pb_encode writes TLV bytes into stream.</span>
+<span class="w">    </span><span class="c1">// Returns false if: buffer too small, required field missing, callback error.</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">ok</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_encode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stream</span><span class="p">,</span><span class="w"> </span><span class="n">SensorFrame_fields</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">frame</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">ok</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// PB_GET_ERROR reads the error string stored in the stream.</span>
+<span class="w">        </span><span class="c1">// Without this, you only know &quot;encode failed&quot; but not why.</span>
+<span class="w">        </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;pb_encode failed: %s&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">PB_GET_ERROR</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stream</span><span class="p">));</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// ---- 4. Write the frame header ----</span>
+<span class="w">    </span><span class="c1">// Magic bytes let the receiver detect frame boundary alignment.</span>
+<span class="w">    </span><span class="n">out_frame</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0xAB</span><span class="p">;</span>
+<span class="w">    </span><span class="n">out_frame</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0xCD</span><span class="p">;</span>
+<span class="w">    </span><span class="c1">// payload length (big-endian): only the valid protobuf bytes</span>
+<span class="w">    </span><span class="c1">// stream.bytes_written is the ACTUAL bytes written, not sizeof(buffer)</span>
+<span class="w">    </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">payload_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint16_t</span><span class="p">)</span><span class="n">stream</span><span class="p">.</span><span class="n">bytes_written</span><span class="p">;</span>
+<span class="w">    </span><span class="n">out_frame</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint8_t</span><span class="p">)(</span><span class="n">payload_len</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">8</span><span class="p">);</span>
+<span class="w">    </span><span class="n">out_frame</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint8_t</span><span class="p">)(</span><span class="n">payload_len</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// ---- 5. Zero-pad the rest of the frame ----</span>
+<span class="w">    </span><span class="c1">// Prevents stale bytes from a previous (larger) frame from leaking.</span>
+<span class="w">    </span><span class="n">memset</span><span class="p">(</span><span class="n">proto_start</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">payload_len</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">PROTO_BUF_MAX</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">payload_len</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">FRAME_HEADER_SIZE</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">payload_len</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h3 id="27-pb_decode-round-trip-test-on-host-linux">2.7 pb_decode() round-trip test on host Linux</h3>
+<p>Before porting to STM32, verify your encode/decode is correct on a Linux PC where you can print everything:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// test/round_trip.c — compile and run on Linux, not Zephyr</span>
+<span class="c1">// gcc test/round_trip.c sensor_frame.pb.c -lprotobuf-nanopb -Inanopb -o round_trip</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;stdio.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;assert.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;pb_encode.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;pb_decode.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;sensor_frame.pb.h&quot;</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">buf</span><span class="p">[</span><span class="mi">256</span><span class="p">];</span>
+
+<span class="w">    </span><span class="c1">// ---- ENCODE ----</span>
+<span class="w">    </span><span class="n">SensorFrame</span><span class="w"> </span><span class="n">tx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SensorFrame_init_zero</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx</span><span class="p">.</span><span class="n">seq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">42</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx</span><span class="p">.</span><span class="n">has_imu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">accel_x</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mf">1.23f</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">accel_y</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mf">-0.45f</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">accel_z</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mf">9.81f</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100000ULL</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx</span><span class="p">.</span><span class="n">has_gps</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">has_fix</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">latitude</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mf">35.6762</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">longitude</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mf">139.6503</span><span class="p">;</span>
+<span class="w">    </span><span class="n">strncpy</span><span class="p">(</span><span class="n">tx</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">fix_type</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;3D&quot;</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">tx</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">fix_type</span><span class="p">));</span>
+
+<span class="w">    </span><span class="n">pb_ostream_t</span><span class="w"> </span><span class="n">ostream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_ostream_from_buffer</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">));</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">ok</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_encode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ostream</span><span class="p">,</span><span class="w"> </span><span class="n">SensorFrame_fields</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx</span><span class="p">);</span>
+<span class="w">    </span><span class="n">assert</span><span class="p">(</span><span class="n">ok</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="s">&quot;encode failed&quot;</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">printf</span><span class="p">(</span><span class="s">&quot;Encoded %zu bytes</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">ostream</span><span class="p">.</span><span class="n">bytes_written</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Print hex dump — compare against what you expect</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">ostream</span><span class="p">.</span><span class="n">bytes_written</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">printf</span><span class="p">(</span><span class="s">&quot;%02X &quot;</span><span class="p">,</span><span class="w"> </span><span class="n">buf</span><span class="p">[</span><span class="n">i</span><span class="p">]);</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">((</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="mi">16</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="n">printf</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="n">printf</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// ---- DECODE ----</span>
+<span class="w">    </span><span class="n">SensorFrame</span><span class="w"> </span><span class="n">rx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SensorFrame_init_zero</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// pb_istream_from_buffer: wraps buf for decoding.</span>
+<span class="w">    </span><span class="c1">// CRITICAL: pass ostream.bytes_written, NOT sizeof(buf).</span>
+<span class="w">    </span><span class="c1">// Passing sizeof(buf) makes the decoder read past the valid payload</span>
+<span class="w">    </span><span class="c1">// and interpret zero-padding as fields — exactly the SPI bug.</span>
+<span class="w">    </span><span class="n">pb_istream_t</span><span class="w"> </span><span class="n">istream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_istream_from_buffer</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="n">ostream</span><span class="p">.</span><span class="n">bytes_written</span><span class="p">);</span>
+<span class="w">    </span><span class="n">ok</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_decode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">istream</span><span class="p">,</span><span class="w"> </span><span class="n">SensorFrame_fields</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rx</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">ok</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// PB_GET_ERROR gives the reason — much better than a raw bool</span>
+<span class="w">        </span><span class="n">fprintf</span><span class="p">(</span><span class="n">stderr</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;decode failed: %s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">PB_GET_ERROR</span><span class="p">(</span><span class="o">&amp;</span><span class="n">istream</span><span class="p">));</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// ---- VERIFY round-trip ----</span>
+<span class="w">    </span><span class="n">assert</span><span class="p">(</span><span class="n">rx</span><span class="p">.</span><span class="n">seq</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">42</span><span class="p">);</span>
+<span class="w">    </span><span class="n">assert</span><span class="p">(</span><span class="n">rx</span><span class="p">.</span><span class="n">has_imu</span><span class="p">);</span>
+<span class="w">    </span><span class="c1">// Float comparison with small epsilon (floating point isn&#39;t exact)</span>
+<span class="w">    </span><span class="n">assert</span><span class="p">(</span><span class="n">fabsf</span><span class="p">(</span><span class="n">rx</span><span class="p">.</span><span class="n">imu</span><span class="p">.</span><span class="n">accel_x</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mf">1.23f</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mf">0.001f</span><span class="p">);</span>
+<span class="w">    </span><span class="n">assert</span><span class="p">(</span><span class="n">rx</span><span class="p">.</span><span class="n">has_gps</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">rx</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">has_fix</span><span class="p">);</span>
+<span class="w">    </span><span class="n">assert</span><span class="p">(</span><span class="n">strcmp</span><span class="p">(</span><span class="n">rx</span><span class="p">.</span><span class="n">gps</span><span class="p">.</span><span class="n">fix_type</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;3D&quot;</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">printf</span><span class="p">(</span><span class="s">&quot;Round-trip test PASSED</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Build and run this on your development machine BEFORE bringing nanopb onto the STM32. If it fails here, the .proto/.options/CMakeLists.txt have a bug. If it passes here but fails on STM32, the problem is firmware-specific (stack, buffer size, DMA alignment).</p>
+<hr />
+<h3 id="28-the-packer-thread-complete-annotated-example">2.8 The packer thread — complete annotated example</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// ============================================================</span>
+<span class="c1">// packer/packer_thread.c — integrates ZBus + nanopb + double-buffer</span>
+<span class="c1">// ============================================================</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/kernel.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/zbus/zbus.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/logging/log.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;string.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;channels.h&quot;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;encoder.h&quot;</span><span class="c1">        // encode_sensor_frame()</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;spi_slave.h&quot;</span><span class="c1">      // spi_swap_buffer()</span>
+
+<span class="n">LOG_MODULE_REGISTER</span><span class="p">(</span><span class="n">packer</span><span class="p">,</span><span class="w"> </span><span class="n">LOG_LEVEL_INF</span><span class="p">);</span>
+
+<span class="c1">// Double-buffer: while the SPI DMA is transmitting buffer A,</span>
+<span class="c1">// the packer thread encodes into buffer B.</span>
+<span class="c1">// On the next swap, A becomes the write target and B starts transmitting.</span>
+<span class="c1">// This ensures the SPI DMA never reads from a buffer we&#39;re writing to.</span>
+<span class="cp">#define FRAME_SIZE  164   </span><span class="c1">// 4 header + 160 max protobuf</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">frame_buf</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="n">FRAME_SIZE</span><span class="p">];</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">active_buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">   </span><span class="c1">// which buffer SPI DMA is currently sending</span>
+
+<span class="k">extern</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">zbus_observer</span><span class="w"> </span><span class="n">packer_sub</span><span class="p">;</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">packer_thread_fn</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">zbus_channel</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">;</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w">  </span><span class="n">imu</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="mi">0</span><span class="p">};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">gps_data</span><span class="w">  </span><span class="n">gps</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="mi">0</span><span class="p">};</span>
+
+<span class="w">    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">imu_seq_last</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">   </span><span class="c1">// detect ZBus drops via IMU seq</span>
+<span class="w">    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">encode_count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;Packer thread started&quot;</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Block until imu_chan or gps_chan publishes</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">zbus_sub_wait</span><span class="p">(</span><span class="o">&amp;</span><span class="n">packer_sub</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">chan</span><span class="p">,</span><span class="w"> </span><span class="n">K_FOREVER</span><span class="p">);</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">rc</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">LOG_WRN</span><span class="p">(</span><span class="s">&quot;sub_wait error: %d&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">rc</span><span class="p">);</span>
+<span class="w">            </span><span class="k">continue</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">chan</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">struct</span><span class="w"> </span><span class="nc">imu_data</span><span class="w"> </span><span class="n">new_imu</span><span class="p">;</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">new_imu</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="c1">// Check for ZBus drops: if we see a seq jump &gt; 1 here,</span>
+<span class="w">                </span><span class="c1">// it means the packer ran slower than the IMU published.</span>
+<span class="w">                </span><span class="c1">// (requires imu_data to include a seq field)</span>
+<span class="w">                </span><span class="n">imu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">new_imu</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">chan</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">&amp;</span><span class="n">gps_chan</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// GPS at 1Hz — just cache it, don&#39;t encode mid-SPI-frame</span>
+<span class="w">            </span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">gps_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">gps</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+<span class="w">            </span><span class="k">continue</span><span class="p">;</span><span class="w">   </span><span class="c1">// don&#39;t trigger an encode for GPS-only updates</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="c1">// Select the INACTIVE buffer to write into</span>
+<span class="w">        </span><span class="c1">// (active_buf is currently being sent by SPI DMA — don&#39;t touch it)</span>
+<span class="w">        </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">write_buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">active_buf</span><span class="p">;</span>
+
+<span class="w">        </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">frame_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">encode_sensor_frame</span><span class="p">(</span>
+<span class="w">            </span><span class="o">&amp;</span><span class="n">imu</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">gps</span><span class="p">,</span>
+<span class="w">            </span><span class="n">frame_buf</span><span class="p">[</span><span class="n">write_buf</span><span class="p">],</span>
+<span class="w">            </span><span class="k">sizeof</span><span class="p">(</span><span class="n">frame_buf</span><span class="p">[</span><span class="n">write_buf</span><span class="p">])</span>
+<span class="w">        </span><span class="p">);</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">frame_len</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;encode_sensor_frame failed — skipping swap&quot;</span><span class="p">);</span>
+<span class="w">            </span><span class="k">continue</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="c1">// Atomic buffer swap: tell SPI slave to start using write_buf for next transfer.</span>
+<span class="w">        </span><span class="c1">// spi_swap_buffer() waits for the current DMA transfer to complete,</span>
+<span class="w">        </span><span class="c1">// then switches the DMA source pointer to the new buffer.</span>
+<span class="w">        </span><span class="n">spi_swap_buffer</span><span class="p">(</span><span class="n">frame_buf</span><span class="p">[</span><span class="n">write_buf</span><span class="p">],</span><span class="w"> </span><span class="n">FRAME_SIZE</span><span class="p">);</span>
+<span class="w">        </span><span class="n">active_buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">write_buf</span><span class="p">;</span>
+
+<span class="w">        </span><span class="n">encode_count</span><span class="o">++</span><span class="p">;</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">encode_count</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="mi">1000</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;Packer: %u frames encoded&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">encode_count</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="n">K_THREAD_DEFINE</span><span class="p">(</span>
+<span class="w">    </span><span class="n">packer_tid</span><span class="p">,</span>
+<span class="w">    </span><span class="mi">2048</span><span class="p">,</span><span class="w">               </span><span class="c1">// 2048: pb_encode stack + LOG overhead + safety margin</span>
+<span class="w">    </span><span class="n">packer_thread_fn</span><span class="p">,</span>
+<span class="w">    </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span>
+<span class="w">    </span><span class="mi">5</span><span class="p">,</span><span class="w">                  </span><span class="c1">// priority 5: below IMU thread (typically at 3), above idle</span>
+<span class="w">    </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="mi">0</span>
+<span class="p">);</span>
+</code></pre></div>
+
+<hr />
+<h2 id="part-3-gotcha-table">PART 3 — Gotcha Table</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely Cause</th>
+<th>How to Diagnose</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Jetson sees identical sensor values for 3–4 consecutive 10ms frames</td>
+<td>ZBus subscriber queue full — packer thread is too slow; notification dropped; channel holds same stale value until packer finally wakes</td>
+<td>Check <code>zbus_obs_get_chan_drop_cnt(&amp;packer_sub)</code> in Zephyr shell. On Jetson, check <code>delta_seq</code> — a jump from N to N+4 confirms 3 drops</td>
+<td>Increase subscriber queue depth: <code>ZBUS_SUBSCRIBER_DEFINE(packer_sub, 10)</code>. Reduce packer thread work, or increase its priority</td>
+</tr>
+<tr>
+<td><code>pb_encode()</code> returns <code>false</code> with no visible error message</td>
+<td>Missing <code>max_size</code> annotation in <code>.options</code> file for a string field</td>
+<td>The PB_GET_ERROR string will say &ldquo;Field allocation failed&rdquo; or &ldquo;bytes_written exceeded&rdquo;</td>
+<td>Add <code>FieldName.field_name  max_size:N</code> to <code>sensor_frame.options</code>. Regenerate .pb.h/.pb.c</td>
+</tr>
+<tr>
+<td>Jetson successfully decodes some frames but gets garbage floats when GPS loses fix</td>
+<td>Variable-length protobuf output + fixed-size SPI DMA: when GPS fields go to zero they&rsquo;re omitted, producing fewer bytes; Jetson reads stale bytes from unflushed DMA buffer</td>
+<td>On Jetson: print <code>len(raw_bytes)</code> before decode — it will be fixed (128) but payload valid only for first N bytes</td>
+<td>Add explicit <code>payload_length</code> 2-byte header. Zero-pad the remainder in <code>encode_sensor_frame()</code>. On Jetson, decode only <code>payload_length</code> bytes</td>
+</tr>
+<tr>
+<td><code>pb_encode()</code> returns <code>true</code> but decoded fields are zero on the Jetson</td>
+<td><code>pb_istream_from_buffer()</code> called with <code>sizeof(buf)</code> instead of <code>stream.bytes_written</code> — decoder reads zero-padded region and interprets zeros as &ldquo;field not present&rdquo;</td>
+<td>In Jetson Python: <code>print(frame.HasField('imu'))</code> prints False even though IMU was encoded</td>
+<td>Pass <code>ostream.bytes_written</code> (C) or <code>payload_length</code> from header (Python) to the decode call, not the buffer size</td>
+</tr>
+<tr>
+<td>Hard fault or stack overflow in packer thread</td>
+<td>pb_encode nested sub-messages use ~500–750 bytes of stack; combined with LOG_ERR (~400 bytes) exceeds 1024-byte default stack</td>
+<td><code>CONFIG_STACK_SENTINEL=y</code> catches it with &ldquo;Stack sentinel violation&rdquo;. Without it: random corruption with no error</td>
+<td>Set packer thread stack to 2048 minimum. Check high-water mark: <code>k_thread_stack_space_get(&amp;packer_tid, &amp;unused)</code> — target &lt;80% used</td>
+</tr>
+<tr>
+<td><code>zbus_chan_pub()</code> returns <code>-EAGAIN</code> consistently</td>
+<td>A listener callback is blocking — it holds the channel mutex while doing slow I/O</td>
+<td>Add timing: <code>uint32_t t0 = k_uptime_get_32(); pub(); LOG_DBG("pub took %u ms", k_uptime_get_32()-t0)</code> — if &gt;1ms, a listener is the culprit</td>
+<td>Move slow work out of listeners into subscribers. Listeners must complete in &lt;50µs</td>
+</tr>
+<tr>
+<td>Wrong priority on packer thread — ZBus drops still high even with depth=10</td>
+<td>Packer runs at lower priority than other threads which starve it; it processes its queue faster than it reads ZBus</td>
+<td>Use <code>west build -t menuconfig</code> → Task-Aware Debugger, or enable <code>CONFIG_THREAD_MONITOR=y</code> and check via shell <code>kernel threads</code></td>
+<td>Set packer priority numerically close to (but below) the IMU reading thread. If IMU is priority 3, make packer priority 4</td>
+</tr>
+<tr>
+<td>First 1–4 bytes of EVERY SPI frame are 0x00 on Jetson</td>
+<td>SPI slave DMA pre-arming race: DMA armed in CS interrupt callback, but CS goes low and clock starts before DMA is ready</td>
+<td>Logic analyzer: trigger on CS falling edge, observe first byte(s) on MISO line — they will be 0x00 while subsequent bytes are correct</td>
+<td>Arm SPI slave DMA in the <em>previous transfer complete</em> callback, not on CS assert. See docs/runbooks/spi-slave-race.md</td>
+</tr>
+<tr>
+<td><code>ZBUS_CHAN_DECLARE</code> in .h file causes linker error &ldquo;multiple definition of imu_chan&rdquo;</td>
+<td>ZBUS_CHAN_DEFINE used in a header file instead of a .c file — it allocates memory, so it appears in every translation unit that includes the header</td>
+<td><code>grep -r ZBUS_CHAN_DEFINE</code> — should appear only in .c files</td>
+<td>Move <code>ZBUS_CHAN_DEFINE</code> to a .c file. Use <code>ZBUS_CHAN_DECLARE</code> in the shared header</td>
+</tr>
+<tr>
+<td>ZBus compile error: <code>CONFIG_ZBUS_RUNTIME_OBSERVERS not set</code></td>
+<td><code>zbus_chan_add_obs()</code> used without enabling runtime observers</td>
+<td>Build error mentions <code>CONFIG_ZBUS_RUNTIME_OBSERVERS</code></td>
+<td>Add <code>CONFIG_ZBUS_RUNTIME_OBSERVERS=y</code> to prj.conf; or register observers compile-time with <code>ZBUS_OBSERVERS(sub_name)</code> in <code>ZBUS_CHAN_DEFINE</code></td>
+</tr>
+<tr>
+<td>nanopb decode produces struct with zeroed sub-message fields even though sender set them</td>
+<td><code>has_imu</code> flag not set before encoding — proto3 sub-messages are only included if <code>has_*</code> is <code>true</code></td>
+<td>Hex-dump the encoded bytes on STM32: a SensorFrame without ImuData will not contain field-2 (tag 0x12)</td>
+<td>Set <code>frame.has_imu = true</code> before filling <code>frame.imu.*</code> fields</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="quick-reference-card">Quick Reference Card</h2>
+<div class="highlight"><pre><span></span><code>ZBus prj.conf:
+  CONFIG_ZBUS=y
+  CONFIG_ZBUS_RUNTIME_OBSERVERS=y   (for ZBUS_CHAN_ADD_OBS at runtime)
+  CONFIG_ZBUS_CHANNEL_NAME=y        (debug: channel names in output)
+
+nanopb prj.conf:
+  CONFIG_NANOPB=y
+
+ZBus API summary:
+  ZBUS_CHAN_DEFINE(name, type, validator, user_data, observers, init)  ← in .c
+  ZBUS_CHAN_DECLARE(name)                                               ← in .h
+  ZBUS_SUBSCRIBER_DEFINE(name, queue_depth)                            ← in .c
+  ZBUS_LISTENER_DEFINE(name, callback_fn)                              ← in .c
+  zbus_chan_pub(&amp;chan, &amp;msg, timeout)    ← write new value
+  zbus_chan_read(&amp;chan, &amp;msg, timeout)   ← read latest value
+  zbus_sub_wait(&amp;sub, &amp;chan_ptr, timeout) ← block until notification
+  zbus_chan_add_obs(&amp;chan, &amp;obs, timeout) ← runtime subscription
+
+nanopb API summary:
+  SensorFrame frame = SensorFrame_init_zero;  ← ALWAYS start with this
+  pb_ostream_t out = pb_ostream_from_buffer(buf, size);
+  bool ok = pb_encode(&amp;out, SensorFrame_fields, &amp;frame);
+  uint16_t written = (uint16_t)out.bytes_written;  ← NOT sizeof(buf)!
+  if (!ok) { LOG_ERR(&quot;%s&quot;, PB_GET_ERROR(&amp;out)); }
+
+  pb_istream_t in = pb_istream_from_buffer(buf, written);  ← pass written, not sizeof
+  bool ok = pb_decode(&amp;in, SensorFrame_fields, &amp;frame);
+  if (!ok) { LOG_ERR(&quot;%s&quot;, PB_GET_ERROR(&amp;in)); }
+
+SPI frame layout:
+  [0]     = 0xAB  (magic)
+  [1]     = 0xCD  (magic)
+  [2]     = payload_len &gt;&gt; 8
+  [3]     = payload_len &amp; 0xFF
+  [4..N]  = protobuf bytes (exactly payload_len bytes)
+  [N+1..] = zero padding
+
+Stack rules:
+  Packer thread calling pb_encode (nested 2 sub-messages): min 2048 bytes
+  ZBus subscriber thread without LOG: min 1024 bytes
+  Listener callback: must complete in &lt;50µs, no sleeping
+
+ZBus drop detection:
+  On STM32: zbus_obs_get_chan_drop_cnt(&amp;observer)
+  On Jetson: delta_seq = frame.seq - prev_seq; if delta_seq &gt; 1 → drop
+  Symptom:   identical sensor values across 3–4 consecutive 10ms windows
+
+Proto3 zero-omission rule:
+  Fields equal to their default value (0, false, &quot;&quot;) are NOT encoded.
+  Always use payload_length header — never decode sizeof(buffer) bytes.
+  Always test GPS-loses-fix edge case before deploying.
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

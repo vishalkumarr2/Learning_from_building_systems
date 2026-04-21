@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SPI Slave + DMA + Double Buffering - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="spi-slave-dma-double-buffering">SPI Slave + DMA + Double Buffering</h1>
+<h2 id="why-spi-slave-is-hard">Why SPI Slave Is Hard</h2>
+<p>As a <strong>master</strong> (Jetson) you initiate transfers when you want.
+As a <strong>slave</strong> (STM32) the master can start clocking <strong>at any moment</strong>.</p>
+<div class="highlight"><pre><span></span><code>Jetson (master)          STM32 (slave)
+─────────────────────────────────────────────────────
+CS  goes LOW  ──────►  [DMA must already have TX buffer loaded!]
+CLK starts    ──────►  Hardware shifts bits out of SPI_DR register
+Data flows    ◄──────  If DMA not ready → sends 0xFF or stale data
+CS  goes HIGH ──────►  Transfer done, Jetson has whatever was in SPI_DR
+</code></pre></div>
+
+<p><strong>The core constraint</strong>: from the moment CS goes low to the first CLK edge, you may have only <strong>~100ns to 1µs</strong> depending on Jetson configuration. The CPU cannot react that fast to load a buffer — <strong>DMA must already be armed</strong>.</p>
+<hr />
+<h2 id="double-buffering-the-solution">Double Buffering — The Solution</h2>
+<div class="highlight"><pre><span></span><code>Two buffers in memory:
+
+Buffer A (DMA active):  ████████████████  ← DMA is sending this RIGHT NOW
+Buffer B (CPU idle):    ░░░░░░░░░░░░░░░░  ← CPU/packer is writing next frame here
+
+10ms tick:
+  t=1ms:  packer finishes writing Buffer B
+  t=1ms:  SWAP: B becomes active, A becomes idle (atomic pointer swap)
+  t=5ms:  Jetson asserts CS
+  t=5ms:  CS ISR: DMA already points to Buffer B → starts sending
+  t=5.05ms: Transfer complete
+  t=5ms-10ms: packer writes next frame into Buffer A (now idle)
+  t=10ms: SWAP again
+</code></pre></div>
+
+<p>No race condition — packer always writes to the buffer DMA is NOT reading.</p>
+<hr />
+<h2 id="complete-implementation">Complete Implementation</h2>
+<h3 id="buffer-definitions">Buffer definitions</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// comms/spi_slave.c</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/kernel.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/spi.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/gpio.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;crc16.h&quot;</span>
+
+<span class="cp">#define FRAME_MAX_BYTES  300</span>
+
+<span class="c1">// DMA-accessible region — annotate for linker to place in correct SRAM bank</span>
+<span class="c1">// On STM32H7: DMA1/2 can only access D2 SRAM, not D1 SRAM — check your chip!</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="nf">__aligned</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="n">FRAME_MAX_BYTES</span><span class="p">];</span>
+<span class="k">static</span><span class="w"> </span><span class="k">volatile</span><span class="w"> </span><span class="kt">int</span><span class="w">     </span><span class="n">tx_active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">   </span><span class="c1">// which buffer DMA is currently sending</span>
+<span class="k">static</span><span class="w"> </span><span class="k">volatile</span><span class="w"> </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">tx_len</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">   </span><span class="c1">// valid bytes in active buffer</span>
+
+<span class="k">static</span><span class="w"> </span><span class="n">K_SEM_DEFINE</span><span class="p">(</span><span class="n">frame_ready</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w">  </span><span class="c1">// signals SPI task new frame available</span>
+</code></pre></div>
+
+<h3 id="frame-packing-called-by-packer-thread">Frame packing — called by packer thread</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// Builds a framed packet in the IDLE buffer, then atomically swaps</span>
+<span class="c1">// Frame format: [0xAA][len_hi][len_lo][...payload...][crc_hi][crc_lo]</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">spi_slave_push_frame</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">len</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">5</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">FRAME_MAX_BYTES</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="p">;</span><span class="w">  </span><span class="c1">// payload too large</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">write</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">tx_active</span><span class="p">;</span><span class="w">   </span><span class="c1">// write to the buffer DMA is NOT using</span>
+
+<span class="w">    </span><span class="c1">// Build frame in idle buffer</span>
+<span class="w">    </span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0xAA</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">len</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">len</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">    </span><span class="n">memcpy</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write</span><span class="p">][</span><span class="mi">3</span><span class="p">],</span><span class="w"> </span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="n">len</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// CRC over payload only (not header)</span>
+<span class="w">    </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">crc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">crc16_ccitt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write</span><span class="p">][</span><span class="mi">3</span><span class="p">],</span><span class="w"> </span><span class="n">len</span><span class="p">);</span>
+<span class="w">    </span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write</span><span class="p">][</span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">len</span><span class="p">]</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">crc</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write</span><span class="p">][</span><span class="mi">3</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">crc</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Cache flush: ensure CPU cache is written to SRAM before DMA reads</span>
+<span class="w">    </span><span class="c1">// Required on Cortex-M7 (STM32H7/F7) — omit for M0/M3/M4 (no D-cache)</span>
+<span class="w">    </span><span class="n">SCB_CleanDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="o">*</span><span class="p">)</span><span class="n">tx_buf</span><span class="p">[</span><span class="n">write</span><span class="p">],</span><span class="w"> </span><span class="n">len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">5</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Atomic swap — next CS edge will send this buffer</span>
+<span class="w">    </span><span class="n">tx_len</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span>
+<span class="w">    </span><span class="n">tx_active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">write</span><span class="p">;</span><span class="w">           </span><span class="c1">// single word write = atomic on ARM</span>
+
+<span class="w">    </span><span class="n">k_sem_give</span><span class="p">(</span><span class="o">&amp;</span><span class="n">frame_ready</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="cs-falling-edge-interrupt-reload-dma">CS falling-edge interrupt — reload DMA</h3>
+<div class="highlight"><pre><span></span><code><span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_dt_spec</span><span class="w"> </span><span class="n">cs_gpio</span><span class="w"> </span><span class="o">=</span>
+<span class="w">    </span><span class="n">GPIO_DT_SPEC_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">spi1_cs</span><span class="p">),</span><span class="w"> </span><span class="n">gpios</span><span class="p">);</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_callback</span><span class="w"> </span><span class="n">cs_cb_data</span><span class="p">;</span>
+
+<span class="c1">// Called when Jetson asserts CS low</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">cs_falling_isr</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span>
+<span class="w">                            </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_callback</span><span class="w"> </span><span class="o">*</span><span class="n">cb</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="c1">// Reconfigure SPI DMA TX to point at current active buffer</span>
+<span class="w">    </span><span class="c1">// This is the time-critical path — must complete &lt;&lt; 1µs</span>
+<span class="w">    </span><span class="n">spi_dma_reload</span><span class="p">(</span><span class="n">tx_buf</span><span class="p">[</span><span class="n">tx_active</span><span class="p">],</span><span class="w"> </span><span class="n">tx_len</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">spi_slave_init</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">gpio_pin_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cs_gpio</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_INPUT</span><span class="p">);</span>
+<span class="w">    </span><span class="n">gpio_init_callback</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cs_cb_data</span><span class="p">,</span><span class="w"> </span><span class="n">cs_falling_isr</span><span class="p">,</span><span class="w"> </span><span class="n">BIT</span><span class="p">(</span><span class="n">cs_gpio</span><span class="p">.</span><span class="n">pin</span><span class="p">));</span>
+<span class="w">    </span><span class="n">gpio_add_callback</span><span class="p">(</span><span class="n">cs_gpio</span><span class="p">.</span><span class="n">port</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">cs_cb_data</span><span class="p">);</span>
+<span class="w">    </span><span class="n">gpio_pin_interrupt_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cs_gpio</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_INT_EDGE_FALLING</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="devicetree-overlay-appoverlay">Devicetree overlay (app.overlay)</h3>
+<div class="highlight"><pre><span></span><code><span class="o">&amp;</span><span class="na">spi1</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kr">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;okay&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">spi1_slave_default</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/* SPI slave mode — no cs-gpios here (master controls CS) */</span>
+<span class="w">    </span><span class="cm">/* DMA channels assigned in board&#39;s DTS or here */</span>
+<span class="w">    </span><span class="n">dmas</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">dma1</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="mh">0x10</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">dma1</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="mh">0x10</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">dma-names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;tx&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;rx&quot;</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="nf">/</span><span class="cm"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Expose CS pin as GPIO so we can interrupt on it */</span>
+<span class="w">    </span><span class="nl">spi1_cs</span><span class="p">:</span><span class="w"> </span><span class="nf">spi1-cs</span><span class="cm"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kr">compatible</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;gpio-keys&quot;</span><span class="p">;</span>
+<span class="w">        </span><span class="n">gpios</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">gpioa</span><span class="w"> </span><span class="mi">4</span><span class="w"> </span><span class="na">GPIO_ACTIVE_LOW</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="p">};</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<hr />
+<h2 id="spi-framing-protocol">SPI Framing Protocol</h2>
+<div class="highlight"><pre><span></span><code>Offset  Size    Content
+──────────────────────────────────────────────
+0       1       Sync byte: 0xAA
+1-2     2       Payload length (big-endian uint16)
+3..N    N       nanopb-encoded SensorFrame
+N+1..N+2  2     CRC16-CCITT over payload bytes only
+</code></pre></div>
+
+<p><strong>Why the sync byte?</strong>
+If Jetson misses a byte (glitch, reboot), the byte positions shift. The sync byte lets Jetson re-lock:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Jetson sync recovery — keep reading until 0xAA seen</span>
+<span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">spi</span><span class="o">.</span><span class="n">readbytes</span><span class="p">(</span><span class="mi">1</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">b</span> <span class="o">==</span> <span class="mh">0xAA</span><span class="p">:</span>
+        <span class="k">break</span>
+<span class="c1"># read length, then payload</span>
+</code></pre></div>
+
+<p><strong>Why CRC?</strong>
+SPI has no built-in error detection. Electrical noise on a long cable, crosstalk with other signals, or a voltage glitch can flip bits silently. CRC catches this and lets you discard the frame rather than process garbage sensor data.</p>
+<hr />
+<h2 id="dma-register-details-stm32-hal-style-for-reference">DMA Register Details (STM32 HAL style, for reference)</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// What spi_dma_reload() does internally:</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">spi_dma_reload</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">len</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="c1">// Disable DMA stream</span>
+<span class="w">    </span><span class="n">DMA1_Stream3</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w"> </span><span class="o">&amp;=</span><span class="w"> </span><span class="o">~</span><span class="n">DMA_SxCR_EN</span><span class="p">;</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">DMA1_Stream3</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">DMA_SxCR_EN</span><span class="p">)</span><span class="w"> </span><span class="p">{}</span><span class="w">  </span><span class="c1">// wait for disable</span>
+
+<span class="w">    </span><span class="c1">// Set new source address and count</span>
+<span class="w">    </span><span class="n">DMA1_Stream3</span><span class="o">-&gt;</span><span class="n">M0AR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="n">buf</span><span class="p">;</span>
+<span class="w">    </span><span class="n">DMA1_Stream3</span><span class="o">-&gt;</span><span class="n">NDTR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">len</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Re-enable</span>
+<span class="w">    </span><span class="n">DMA1_Stream3</span><span class="o">-&gt;</span><span class="n">CR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">DMA_SxCR_EN</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Enable SPI</span>
+<span class="w">    </span><span class="n">SPI1</span><span class="o">-&gt;</span><span class="n">CR1</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">SPI_CR1_SPE</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>On a higher-level RTOS like Zephyr this is hidden inside <code>spi_transceive()</code>, but the principle is the same.</p>
+<hr />
+<h2 id="timing-constraints-summary">Timing Constraints Summary</h2>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Time budget</th>
+<th>What happens if violated</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CS ISR → DMA armed</td>
+<td>&lt; 1µs</td>
+<td>First bytes sent as 0xFF (corrupt frame)</td>
+</tr>
+<tr>
+<td>Packer → buffer swap</td>
+<td>&lt; 9ms (before next CS)</td>
+<td>Old frame sent again (stale, but valid)</td>
+</tr>
+<tr>
+<td>Cache flush before swap</td>
+<td>Before DMA starts</td>
+<td>DMA reads old cached data (silent corruption)</td>
+</tr>
+<tr>
+<td>CRC generation</td>
+<td>Part of packer time</td>
+<td>Skip it and you can&rsquo;t detect noise corruption</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="debugging-tips">Debugging Tips</h2>
+<ul>
+<li><strong>Scope CS + CLK + MOSI</strong> — verify timing matches your spi_slave config (CPOL/CPHA)</li>
+<li><strong>Scope CS + DMA TC interrupt</strong> — DMA completion should happen before CS goes high</li>
+<li><strong>Add sequence number in frame</strong> (<code>SensorFrame.seq</code>) — Jetson can detect dropped frames</li>
+<li><strong>Log <code>is_corrupt</code></strong> on Jetson — how often does CRC fail? &gt;0.1% = check wiring</li>
+<li><strong>Cache bug symptom</strong>: first ~32 bytes correct, rest is old/garbage → flush cache</li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

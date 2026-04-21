@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>02 — Semiconductors: Diodes, BJTs, MOSFETs - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-amber-600 hover:text-amber-800 mb-4 inline-block">&larr; Back to Electronics</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="02-semiconductors-diodes-bjts-mosfets">02 — Semiconductors: Diodes, BJTs, MOSFETs</h1>
+<h3 id="the-active-components-that-switch-amplify-and-protect">The active components that switch, amplify, and protect</h3>
+<p><strong>Prerequisites:</strong> Chapter 01 (Ohm&rsquo;s law, voltage dividers, RC time constants)
+<strong>Unlocks:</strong> Level shifting (for SPI/I2C between 3.3V and 5V), open-drain buses (I2C), motor/relay drivers, ESD protection, power switching</p>
+<hr />
+<h2 id="why-should-i-care-stm32jetson-project-context">Why Should I Care? (STM32/Jetson Project Context)</h2>
+<ul>
+<li><strong>Diodes:</strong> TVS diodes protect your SPI lines from ESD. Schottky diodes are in every power supply on both boards. Flyback diodes protect FET drivers on your robot.</li>
+<li><strong>MOSFETs:</strong> The BSS138 level-shifter circuit converts 3.3V I2C to 5V I2C for legacy sensors. MOSFETs switch power to motor drivers and sensor modules. The I2C bus itself relies on MOSFET-based open-drain outputs.</li>
+<li><strong>BJTs:</strong> Still used in some relay driver circuits and as current sources in precision analog circuits.</li>
+</ul>
+<p>If you can&rsquo;t read a MOSFET datasheet or calculate a base resistor, you can&rsquo;t design or debug the power management around your sensing systems.</p>
+<hr />
+<h1 id="part-1-diodes">PART 1 — DIODES</h1>
+<hr />
+<h2 id="11-the-pn-junction-what-a-diode-physically-is">1.1 The PN Junction — What a Diode Physically IS</h2>
+<p>Silicon is a <em>semiconductor</em> — it conducts slightly, but not well. By adding impurities (doping), we change its behavior:</p>
+<ul>
+<li><strong>N-type:</strong> Add phosphorus (5 valence electrons) → extra free electrons → conducts via negative charges</li>
+<li><strong>P-type:</strong> Add boron (3 valence electrons) → missing electrons (&ldquo;holes&rdquo;) → conducts via positive charge carriers</li>
+</ul>
+<p>When you join P-type and N-type silicon together, something magical happens at the boundary:</p>
+<div class="highlight"><pre><span></span><code>    P-type          │         N-type
+    ○ ○ ○ ○ ○      │      ● ● ● ● ●
+    ○ ○ ○ ○ ○      │      ● ● ● ● ●     ○ = hole (positive carrier)
+    ○ ○ ○ ○ ○      │      ● ● ● ● ●     ● = electron (negative carrier)
+                    │
+              DEPLETION REGION
+              (no mobile carriers)
+</code></pre></div>
+
+<p>Electrons from the N-side diffuse into the P-side and fill holes. This creates a thin region with no mobile carriers (the depletion region), and builds up a voltage barrier (~0.7V for silicon).</p>
+<p><strong>The one-way valve analogy:</strong></p>
+<p>Think of the depletion region as a hill. Current (water) can easily flow downhill (forward bias), but needs to be pumped uphill (reverse bias → no flow, unless you push REALLY hard → breakdown).</p>
+<ul>
+<li><strong>Forward bias (+ to P, - to N):</strong> Applied voltage overcomes the 0.7V barrier → current flows freely</li>
+<li><strong>Reverse bias (+ to N, - to P):</strong> Applied voltage reinforces the barrier → no current flows (until breakdown)</li>
+</ul>
+<div class="highlight"><pre><span></span><code>    Diode symbol:
+
+    Anode ──▶|── Cathode
+    (P)              (N)
+
+    Current flows from Anode to Cathode (in the direction of the arrow)
+    The line (|) is the cathode — the &quot;wall&quot; that blocks reverse current
+</code></pre></div>
+
+<p><strong>Where the analogy breaks down:</strong> A real diode isn&rsquo;t a perfect one-way valve:
+- Forward: there&rsquo;s a ~0.7V voltage drop (you lose 0.7V across the diode, always)
+- Reverse: a tiny leakage current flows (nanoamps — usually ignorable)
+- If reverse voltage exceeds the breakdown voltage, current floods through (destructive for regular diodes, intentional for Zener diodes)</p>
+<hr />
+<h2 id="12-forward-voltage-drop-by-diode-type">1.2 Forward Voltage Drop by Diode Type</h2>
+<table>
+<thead>
+<tr>
+<th>Diode Type</th>
+<th>Forward Voltage (Vf)</th>
+<th>Speed</th>
+<th>Typical Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Silicon rectifier (1N4007)</td>
+<td>0.7V</td>
+<td>Slow (µs)</td>
+<td>Power rectification, flyback</td>
+</tr>
+<tr>
+<td>Schottky (BAT54, 1N5819)</td>
+<td>0.2–0.4V</td>
+<td>Fast (ns)</td>
+<td>Power supply, OR-ing, high-freq rectification</td>
+</tr>
+<tr>
+<td>Red LED</td>
+<td>1.8–2.2V</td>
+<td>N/A</td>
+<td>Indication</td>
+</tr>
+<tr>
+<td>Green LED</td>
+<td>2.0–3.5V</td>
+<td>N/A</td>
+<td>Indication</td>
+</tr>
+<tr>
+<td>Blue/White LED</td>
+<td>2.8–3.5V</td>
+<td>N/A</td>
+<td>Indication, illumination</td>
+</tr>
+<tr>
+<td>Zener (various)</td>
+<td>Vf forward, Vz reverse</td>
+<td>Medium</td>
+<td>Voltage regulation/reference</td>
+</tr>
+<tr>
+<td>TVS (SMBJ3.3A)</td>
+<td>0.7V forward</td>
+<td>Very fast (ps)</td>
+<td>ESD/transient protection</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key insight:</strong> The forward voltage drop is NOT proportional to current — it&rsquo;s nearly constant. A silicon diode drops ~0.7V whether 1mA or 1A flows through it (it varies slightly, but treat it as constant for circuit design).</p>
+<hr />
+<h2 id="13-zener-diodes-voltage-regulation">1.3 Zener Diodes — Voltage Regulation</h2>
+<p>A Zener diode is designed to safely conduct in reverse when the reverse voltage reaches a specific value (the Zener voltage, Vz).</p>
+<div class="highlight"><pre><span></span><code>    Use case: 12V input → stable 5.1V output for a reference
+
+    12V ──┤ R ├──┬── 5.1V output
+                 │
+                ─┤─    ← Zener diode (5.1V)
+                 │       Conducts in reverse at Vz
+                 │
+    GND ─────────┘
+
+    R limits the current through the Zener.
+    R = (Vin - Vz) / Iz = (12 - 5.1) / 0.020 = 345Ω → use 330Ω
+</code></pre></div>
+
+<p>Not efficient for high current loads (the excess power is wasted as heat in R and the Zener), but excellent for voltage references.</p>
+<hr />
+<h2 id="14-flyback-freewheeling-diode">1.4 Flyback / Freewheeling Diode</h2>
+<p>Covered in chapter 01 (inductors section), but reinforced here because it&rsquo;s critical:</p>
+<div class="highlight"><pre><span></span><code>    12V ──┬─── Motor/Relay ───┬── MOSFET to GND
+          │                    │
+          │    ╱|  flyback     │
+          └── ╱ | diode ──────┘
+              ╱──┘
+</code></pre></div>
+
+<p>When the MOSFET turns off, the motor/relay coil generates back-EMF (see chapter 01, section 3.3). The flyback diode gives the decaying current a path to flow, clamping the voltage spike to ~0.7V above the supply rail.</p>
+<p><strong>Use Schottky for flyback if speed matters</strong> — Schottky diodes have no reverse recovery time (they turn on instantly), while silicon diodes have ~1µs of &ldquo;confused&rdquo; time where they briefly conduct backwards.</p>
+<hr />
+<h2 id="15-tvs-diodes-esd-protection">1.5 TVS Diodes — ESD Protection</h2>
+<p><strong>Why should I care?</strong> ESD (Electrostatic Discharge) from your finger can deliver 15kV in nanoseconds. Your signal lines (SPI, I2C, UART) are connected to IC pins rated for perhaps 5V max. A TVS diode clamps the spike before it reaches the IC.</p>
+<div class="highlight"><pre><span></span><code>    Signal ──┬── to IC pin
+             │
+            ─┤─  ← TVS diode (e.g., SMBJ3.3A for 3.3V rails)
+             │     Clamps voltage to ~5.5V (safe for 3.3V IC)
+             │
+    GND ─────┘
+</code></pre></div>
+
+<p><strong>How it works:</strong> Normal operation: TVS is reverse-biased, essentially invisible. When a transient spike exceeds the breakdown voltage (e.g., 5.5V), the TVS instantly conducts to ground, clamping the voltage. After the spike, it returns to high impedance.</p>
+<p>Used on: USB data lines, CAN bus, Ethernet, SPI/I2C lines in harsh environments (robots!).</p>
+<hr />
+<h2 id="16-led-as-a-diode">1.6 LED as a Diode</h2>
+<p>An LED (Light-Emitting Diode) IS a diode — it has a PN junction, a forward voltage drop, and conducts only in one direction. The energy released when electrons cross the junction produces photons (light) instead of just heat.</p>
+<div class="highlight"><pre><span></span><code>    Forward voltage sets the COLOR (it&#39;s the bandgap energy):
+    - Red:    ~2.0V
+    - Yellow: ~2.1V
+    - Green:  ~2.2V (or 3.0V for blue-green)
+    - Blue:   ~3.0V
+    - White:  ~3.2V (blue LED + phosphor coating)
+
+    Current sets the BRIGHTNESS:
+    - 1mA:  dim indicator
+    - 10mA: standard brightness
+    - 20mA: maximum for most indicator LEDs
+    - 350mA+: power LEDs (with heatsink!)
+</code></pre></div>
+
+<p><strong>ALWAYS use a current-limiting resistor.</strong> Without one, the LED&rsquo;s forward voltage is essentially fixed, so the current is limited only by the power supply&rsquo;s internal resistance → too much current → LED dies.</p>
+<hr />
+<h1 id="part-2-bjt-bipolar-junction-transistor">PART 2 — BJT (BIPOLAR JUNCTION TRANSISTOR)</h1>
+<hr />
+<h2 id="21-what-a-bjt-is-current-controlled-current-source">2.1 What a BJT IS — Current-Controlled Current Source</h2>
+<p>A BJT has three terminals: Base (B), Collector (C), Emitter (E).</p>
+<div class="highlight"><pre><span></span><code>    NPN BJT:                    PNP BJT:
+
+         C                          C
+         │                          │
+     B──┤│ (arrow out)          B──┤│ (arrow in)
+         │↓                         │↑
+         E                          E
+
+    NPN: Current flows C→E when base current flows B→E
+    PNP: Current flows E→C when base current flows E→B
+</code></pre></div>
+
+<p><strong>The water faucet analogy:</strong></p>
+<div class="highlight"><pre><span></span><code>    WATER FAUCET                    NPN BJT
+    ────────────                    ────────
+    Water supply (high pressure) → VCC (through load) to Collector
+    Faucet handle (small twist)  → Base current (small, from GPIO)
+    Water output (large flow)    → Emitter to GND (large current)
+
+    A tiny twist of the handle (small base current)
+    controls a large flow of water (large collector current).
+    The ratio is β (current gain, typically 100-300):
+
+    I_collector = β × I_base
+</code></pre></div>
+
+<p><strong>Where the analogy breaks down:</strong> A water faucet is proportional — more twist = more water. A BJT used as a switch is either fully OFF (base current = 0, cutoff) or fully ON (base current large enough to saturate it, Vce ≈ 0.2V). We rarely use it in the proportional middle ground (that&rsquo;s the amplifier region, used in analog circuits).</p>
+<hr />
+<h2 id="22-bjt-regions-of-operation">2.2 BJT Regions of Operation</h2>
+<table>
+<thead>
+<tr>
+<th>Region</th>
+<th>Base Current</th>
+<th>Collector-Emitter</th>
+<th>Behavior</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cutoff</td>
+<td>0</td>
+<td>Open (high V)</td>
+<td>Switch OFF</td>
+<td>Digital</td>
+</tr>
+<tr>
+<td>Active</td>
+<td>Moderate</td>
+<td>Proportional to Ib</td>
+<td>Amplifier</td>
+<td>Analog</td>
+</tr>
+<tr>
+<td>Saturation</td>
+<td>Large</td>
+<td>~0.2V (shorted)</td>
+<td>Switch ON</td>
+<td>Digital</td>
+</tr>
+</tbody>
+</table>
+<p>For digital switching (driving relays, LEDs, motors from GPIOs), we only care about <strong>cutoff</strong> and <strong>saturation</strong>.</p>
+<hr />
+<h2 id="23-worked-example-bjt-relay-driver-from-33v-gpio">2.3 Worked Example: BJT Relay Driver from 3.3V GPIO</h2>
+<p><strong>Problem:</strong> Drive a 12V relay coil (50mA, 240Ω) from a 3.3V GPIO that can only source 4mA.</p>
+<div class="highlight"><pre><span></span><code>    12V ──┬── Relay Coil ──┐
+          │                 │
+         ─┤─ flyback diode  │    ← ALWAYS add flyback diode!
+          │                 │
+          └────────────────┤ C
+                      B ──┤│    ← NPN BJT (2N2222 or BC547)
+               GPIO ──┤R├─┤│
+                            │ E
+                            │
+    GND ────────────────────┘
+</code></pre></div>
+
+<p><strong>Design steps:</strong></p>
+<ol>
+<li><strong>Collector current needed:</strong> Ic = 50mA (the relay needs this)</li>
+<li><strong>BJT β (current gain):</strong> datasheet says β_min = 100 for 2N2222</li>
+<li><strong>Base current needed:</strong> Ib = Ic / β = 50mA / 100 = 0.5mA minimum</li>
+<li><strong>Overdrive for reliable saturation:</strong> Use 2-3× → Ib = 1.5mA</li>
+<li><strong>Base resistor:</strong> Rb = (Vgpio - Vbe) / Ib = (3.3V - 0.7V) / 1.5mA = 1.73kΩ → <strong>use 1.8kΩ</strong></li>
+<li><strong>Check GPIO current:</strong> 1.5mA &lt; 4mA GPIO max ✓</li>
+<li><strong>Check power:</strong> Relay sees 12V - Vce_sat = 12V - 0.2V = 11.8V → 49mA → works fine ✓</li>
+</ol>
+<p><strong>Why not use the GPIO directly?</strong>
+- GPIO can only source 4mA; relay needs 50mA
+- GPIO is 3.3V; relay is 12V
+- The BJT provides both current amplification AND voltage level translation</p>
+<hr />
+<h2 id="24-darlington-pair-when-one-bjt-isnt-enough">2.4 Darlington Pair — When One BJT Isn&rsquo;t Enough</h2>
+<p>Two BJTs cascaded: the emitter of the first drives the base of the second. Total gain = β₁ × β₂ (e.g., 100 × 100 = 10,000). But Vce_sat increases to ~1.2V (two Vbe drops). The TIP120 is a common Darlington in one package.</p>
+<div class="highlight"><pre><span></span><code>         C
+         │
+    B ──┤│     First BJT
+         │↓
+         ├──┤│  Second BJT
+         │   │↓
+              E
+</code></pre></div>
+
+<p>Used when: the base current available is VERY small (e.g., driving a 1A motor from a logic gate that can only source 100µA).</p>
+<hr />
+<h1 id="part-3-mosfet-metal-oxide-semiconductor-field-effect-transistor">PART 3 — MOSFET (METAL-OXIDE-SEMICONDUCTOR FIELD-EFFECT TRANSISTOR)</h1>
+<hr />
+<h2 id="31-how-a-mosfet-works-voltage-controlled-switch">3.1 How a MOSFET Works — Voltage-Controlled Switch</h2>
+<p>Unlike a BJT (current-controlled), a MOSFET is controlled by <strong>voltage</strong> at the gate. The gate is insulated from the channel by a thin oxide layer — <strong>no DC current flows into the gate</strong> (negligible, femtoamps).</p>
+<div class="highlight"><pre><span></span><code>    N-Channel MOSFET:               P-Channel MOSFET:
+
+         D (Drain)                       D (Drain)
+         │                               │
+    G ──┤│  (no arrow = N-ch)       G ──┤│→ (arrow in = P-ch)
+         │                               │
+         S (Source)                       S (Source)
+</code></pre></div>
+
+<p><strong>How it switches (N-channel enhancement mode):</strong></p>
+<div class="highlight"><pre><span></span><code>    Gate Voltage (Vgs) vs Channel:
+
+    Vgs &lt; Vth:    Channel is OFF (no current flows D→S)
+                  MOS = open circuit between D and S
+
+    Vgs &gt; Vth:    Channel is ON (current flows D→S)
+                  MOS = low resistance between D and S (Rds_on)
+
+    Vth = threshold voltage, typically 1-4V
+</code></pre></div>
+
+<p><strong>ELI15:</strong> Imagine a drawbridge:
+- Gate voltage = the crank that raises/lowers the bridge
+- Drain-Source = the road across the moat
+- When Vgs &lt; Vth: bridge is UP, no traffic crosses (OFF)
+- When Vgs &gt; Vth: bridge is DOWN, traffic flows freely (ON)
+- No one crosses the drawbridge mechanism itself (no gate current)</p>
+<p>This is fundamentally different from a BJT, where base current continuously flows. A MOSFET gate is capacitive — you just need to charge/discharge it to switch states (important for gate drivers at high frequencies).</p>
+<hr />
+<h2 id="32-key-mosfet-parameters">3.2 Key MOSFET Parameters</h2>
+<h3 id="vgsth-threshold-voltage">Vgs(th) — Threshold Voltage</h3>
+<p>The minimum gate-to-source voltage to start turning the MOSFET on.</p>
+<p><strong>Critical for 3.3V MCUs:</strong> If Vgs(th) is 4V and your GPIO outputs 3.3V, the MOSFET <strong>never fully turns on</strong>. It stays in the partially-on region, getting very hot.</p>
+<table>
+<thead>
+<tr>
+<th>MOSFET Type</th>
+<th>Vgs(th)</th>
+<th>Works with 3.3V GPIO?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Standard (IRF540N)</td>
+<td>2-4V</td>
+<td><strong>NO</strong> — partially on, high Rds_on, overheating</td>
+</tr>
+<tr>
+<td>Logic-level (IRLZ44N)</td>
+<td>1-2V</td>
+<td><strong>YES</strong> — fully on with 3.3V gate drive</td>
+</tr>
+<tr>
+<td>Sub-logic (Si2302)</td>
+<td>0.4-1V</td>
+<td><strong>YES</strong> — even works with 1.8V logic</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule:</strong> For direct GPIO drive, always use &ldquo;logic-level&rdquo; MOSFETs (check that Rds_on is specified at Vgs = 2.5V or 3.3V in the datasheet, not just at Vgs = 10V).</p>
+<h3 id="rdson-on-resistance">Rds(on) — On-Resistance</h3>
+<p>When fully on, the MOSFET behaves like a small resistor between Drain and Source. This is Rds(on).</p>
+<div class="highlight"><pre><span></span><code>    Power dissipated = I² × Rds_on
+
+    Example: IRLZ44N, Rds_on = 22mΩ at Vgs=5V, switching 5A:
+    P = 5² × 0.022 = 0.55W → needs small heatsink
+
+    Example: IRF540N, Rds_on = 77mΩ at Vgs=10V, but 500mΩ at Vgs=3.3V:
+    P = 5² × 0.5 = 12.5W → THIS WILL CATCH FIRE without a massive heatsink
+    (and it&#39;s not even fully on! Hence the &quot;standard vs logic-level&quot; distinction)
+</code></pre></div>
+
+<h3 id="gate-capacitance-qg">Gate Capacitance (Qg)</h3>
+<p>The gate acts like a small capacitor (a few nanofarads). To switch the MOSFET quickly, you must charge/discharge this capacitor quickly. This requires a gate driver for high-frequency switching (&gt;100kHz).</p>
+<p>For your 100Hz SPI bridge, switching a MOSFET at 100Hz from a GPIO is trivially easy — not a concern. But for the DC-DC converters on your boards, this is why they need dedicated driver ICs.</p>
+<hr />
+<h2 id="33-n-channel-vs-p-channel-where-they-go">3.3 N-Channel vs P-Channel — Where They Go</h2>
+<div class="highlight"><pre><span></span><code>    LOW-SIDE SWITCH (N-channel):        HIGH-SIDE SWITCH (P-channel):
+
+    VCC ── Load ──┐                     VCC ──┤ P-ch ├──┬── Load ── GND
+                   │                      │    S    D    │
+                  ┌┤ N-ch                G ──┤│←         │
+             G ──┤│                           │          │
+                  │                           │          │
+    GND ──────────┘                     GPIO (inverted logic)
+
+    GPIO HIGH → N-ch ON → Load powered   GPIO LOW → P-ch ON → Load powered
+    GPIO LOW  → N-ch OFF → Load off      GPIO HIGH → P-ch OFF → Load off
+</code></pre></div>
+
+<p><strong>N-channel (low-side):</strong> Easy to drive — Gate referenced to GND (same as MCU). Put the load between VCC and Drain. Current flows from Drain to Source when ON.</p>
+<p><strong>P-channel (high-side):</strong> Harder to drive — Gate must be pulled LOW relative to Source (which is at VCC). Used when you want to switch the positive supply rail to a load. Logic is inverted.</p>
+<p><strong>Rule of thumb:</strong>
+- N-channel MOSFETs are cheaper, lower Rds_on, more variety → prefer whenever possible
+- P-channel only when you MUST switch the high side (or use an N-channel + gate driver)</p>
+<hr />
+<h2 id="34-mosfet-as-a-switch-practical-examples">3.4 MOSFET as a Switch — Practical Examples</h2>
+<h3 id="example-1-switching-a-12v-led-strip-from-a-33v-gpio">Example 1: Switching a 12V LED Strip from a 3.3V GPIO</h3>
+<div class="highlight"><pre><span></span><code>    12V ── LED strip ── (+) ──┐
+                               │ D
+                          G ──┤│  IRLZ44N (logic-level N-ch)
+                               │ S
+    GND ───────────────────────┘
+
+    GPIO (3.3V) ──┤ 100Ω ├── G    ← gate resistor (optional, limits inrush)
+    GND ─────────────────── S
+</code></pre></div>
+
+<p>When GPIO = HIGH (3.3V): Vgs = 3.3V &gt; Vth (~1.5V) → MOSFET ON → LED strip lights up
+When GPIO = LOW (0V): Vgs = 0V &lt; Vth → MOSFET OFF → LED strip off</p>
+<p><strong>Why 100Ω gate resistor?</strong> The gate is a capacitor. Without a resistor, the GPIO charges it with a current spike limited only by the GPIO output resistance (~25Ω). The 100Ω limits the current spike to 3.3V/125Ω ≈ 26mA, which is within GPIO specs. For 100Hz switching, this is optional but good practice.</p>
+<h3 id="example-2-high-side-power-switch-with-p-channel">Example 2: High-Side Power Switch with P-Channel</h3>
+<div class="highlight"><pre><span></span><code>    3.3V_SENSOR_RAIL ── S ──┤│← ── D ── Sensor VCC
+                        │  P-ch  │
+                   GPIO ┤R├ G     │
+                        │        │
+                       GND    Sensor GND ── GND
+
+    R = 10kΩ (when GPIO is low → Vgs = -3.3V → ON → sensor powered)
+    Also add 10kΩ from G to S (pull-up to keep sensor OFF during boot)
+</code></pre></div>
+
+<p>This is how you power-cycle a sensor from your MCU — useful for resetting a stuck I2C device.</p>
+<hr />
+<h2 id="35-level-shifting-with-mosfets-the-bss138-circuit">3.5 Level Shifting with MOSFETs — The BSS138 Circuit</h2>
+<p><strong>Why should I care?</strong> Your STM32 runs at 3.3V. Some sensors (legacy IMUs, certain EEPROMs) use 5V I2C. You need to safely connect them.</p>
+<p>The BSS138 bidirectional level shifter is the standard circuit for I2C level conversion:</p>
+<div class="highlight"><pre><span></span><code>    3.3V side                            5V side
+
+    3.3V ──┤ R1 ├──┬─── SDA_3V3        5V ──┤ R2 ├──┬─── SDA_5V
+           (10kΩ)  │                         (10kΩ)  │
+                   │   ┌────┐                        │
+                   └───┤ G  │  BSS138 (N-ch)         │
+                       │    ├────────────────────────┘
+                       │ S  │  D
+                       └────┘
+                     Source tied to 3.3V side
+</code></pre></div>
+
+<p><strong>How it works (this is clever!):</strong></p>
+<p><strong>Case 1: 3.3V device drives LOW</strong>
+- SDA_3V3 goes to 0V
+- Vgs = 3.3V - 0V = 3.3V &gt; Vth → MOSFET ON
+- Drain (5V side) pulled LOW through MOSFET
+- SDA_5V goes LOW ✓</p>
+<p><strong>Case 2: 3.3V device releases (open-drain high)</strong>
+- R1 pulls SDA_3V3 to 3.3V
+- Vgs = 3.3V - 3.3V = 0V → MOSFET OFF
+- R2 pulls SDA_5V to 5V
+- Both sides HIGH at their respective levels ✓</p>
+<p><strong>Case 3: 5V device drives LOW</strong>
+- SDA_5V goes to 0V
+- MOSFET body diode conducts (Source is now higher than Drain)
+- SDA_3V3 drops to ~0.7V, then&hellip;
+- Vgs = 3.3V - 0.7V = 2.6V &gt; Vth → MOSFET turns ON
+- SDA_3V3 pulled fully to 0V through MOSFET
+- SDA_3V3 goes LOW ✓</p>
+<p><strong>Case 4: 5V device releases (open-drain high)</strong>
+- R2 pulls SDA_5V to 5V
+- R1 pulls SDA_3V3 to 3.3V
+- Vgs = 3.3V - 3.3V = 0V → MOSFET OFF
+- Both sides HIGH ✓</p>
+<p><strong>This is one of the most elegant circuits in electronics.</strong> It&rsquo;s bidirectional, works with open-drain buses, and needs only one MOSFET and two resistors per signal line.</p>
+<p><strong>You need TWO of these</strong> for I2C (one for SDA, one for SCL). Modules like the SparkFun BOB-12009 put it all on one tiny board.</p>
+<hr />
+<h2 id="36-body-diode-the-parasitic-diode">3.6 Body Diode — The Parasitic Diode</h2>
+<p>Every MOSFET has a parasitic diode between Source and Drain (formed by the body-to-drain PN junction):</p>
+<div class="highlight"><pre><span></span><code>    N-channel:          P-channel:
+
+      D                   D
+      │                   │
+     ┌┤ ←body diode      ┌┤ body diode→
+    ─┤│                  ─┤│
+     │                    │
+      S                   S
+
+    N-ch: body diode conducts from S to D (Source more positive)
+    P-ch: body diode conducts from D to S (Drain more positive)
+</code></pre></div>
+
+<p><strong>When it matters:</strong>
+- In H-bridges (motor drivers): the body diode provides a freewheeling path during dead-time
+- In reverse polarity protection: an N-ch MOSFET in the positive supply line uses the body diode to bootstrap itself ON
+- The body diode is SLOW compared to a Schottky — in fast-switching applications, add an external Schottky in parallel</p>
+<hr />
+<h2 id="37-h-bridge-four-mosfets-for-bidirectional-motor-control">3.7 H-Bridge — Four MOSFETs for Bidirectional Motor Control</h2>
+<div class="highlight"><pre><span></span><code>    VCC ──┬──────────────────────┬
+          │                      │
+         ┌┤ Q1 (P-ch)    Q3 (P-ch) ├┐
+         │                            │
+         ├──── MOTOR ─────────────────┤
+         │                            │
+         ┌┤ Q2 (N-ch)    Q4 (N-ch) ├┐
+          │                      │
+    GND ──┴──────────────────────┴
+
+    Q1+Q4 ON, Q2+Q3 OFF → Current flows LEFT to RIGHT → Motor forward
+    Q3+Q2 ON, Q1+Q4 OFF → Current flows RIGHT to LEFT → Motor reverse
+    All OFF → Motor coasts (free-spinning)
+    Q2+Q4 ON → Motor brakes (shorted through low-side MOSFETs)
+
+    NEVER turn on Q1+Q2 or Q3+Q4 simultaneously!
+    That shorts VCC to GND through two MOSFETs → &quot;shoot-through&quot; → magic smoke.
+</code></pre></div>
+
+<p>In practice, you use an H-bridge IC (L298N, DRV8871, TB6612) that handles the dead-time and shoot-through protection for you.</p>
+<hr />
+<h1 id="part-4-bjt-vs-mosfet-comparison">PART 4 — BJT vs MOSFET COMPARISON</h1>
+<hr />
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>BJT (NPN/PNP)</th>
+<th>MOSFET (N-ch/P-ch)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Control signal</strong></td>
+<td>Current (Ib controls Ic)</td>
+<td>Voltage (Vgs controls Id)</td>
+</tr>
+<tr>
+<td><strong>Gate/Base current</strong></td>
+<td>Continuous (Ib flows always)</td>
+<td>Zero DC (gate is capacitive)</td>
+</tr>
+<tr>
+<td><strong>Input impedance</strong></td>
+<td>Low (~kΩ)</td>
+<td>Extremely high (~TΩ)</td>
+</tr>
+<tr>
+<td><strong>ON voltage drop</strong></td>
+<td>Vce_sat ≈ 0.2V (good for low V)</td>
+<td>Rds_on × Id (can be &lt;0.01V for large FETs)</td>
+</tr>
+<tr>
+<td><strong>Switching speed</strong></td>
+<td>Moderate (µs for power BJTs)</td>
+<td>Fast (ns for small FETs)</td>
+</tr>
+<tr>
+<td><strong>Thermal behavior</strong></td>
+<td>Positive temp coefficient of β → thermal runaway possible</td>
+<td>Negative temp coefficient of Rds_on → naturally self-limiting</td>
+</tr>
+<tr>
+<td><strong>Typical use (modern)</strong></td>
+<td>Analog circuits, current sources, voltage references</td>
+<td>Digital switching, power management, motor drivers</td>
+</tr>
+<tr>
+<td><strong>Cost</strong></td>
+<td>Very cheap</td>
+<td>Slightly more expensive</td>
+</tr>
+<tr>
+<td><strong>Why still used?</strong></td>
+<td>Better for linear/analog, simpler voltage reference circuits</td>
+<td>Dominates digital and power switching</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule of thumb:</strong> For switching loads (motors, LEDs, relays, heaters), use a MOSFET. For analog amplification or current sources, consider a BJT.</p>
+<hr />
+<h1 id="gotcha-table">GOTCHA TABLE</h1>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely Cause</th>
+<th>How to Diagnose</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MOSFET doesn&rsquo;t turn on from 3.3V GPIO</td>
+<td>Vgs(th) too high (standard, not logic-level)</td>
+<td>Check datasheet: Rds_on specified at Vgs=10V only, not 3.3V</td>
+<td>Use logic-level MOSFET (IRLZ44N, Si2302)</td>
+</tr>
+<tr>
+<td>MOSFET gets very hot</td>
+<td>Not fully on (high Rds_on) or excessive current</td>
+<td>Measure Vds when ON — should be &lt;0.5V. Calculate I²×Rds_on</td>
+<td>Ensure gate is driven above Vgs_max specified for low Rds_on</td>
+</tr>
+<tr>
+<td>BJT driver doesn&rsquo;t switch relay</td>
+<td>Base resistor too high → insufficient Ib</td>
+<td>Calculate Ib = Ic/β, use 2-3× for saturation margin</td>
+<td>Lower base resistor value</td>
+</tr>
+<tr>
+<td>MOSFET driver FET destroyed</td>
+<td>Missing flyback diode on inductive load → back-EMF exceeds Vds_max</td>
+<td>Check for diode across load. Measure with scope during turn-off</td>
+<td>Add flyback Schottky diode</td>
+</tr>
+<tr>
+<td>Level shifter doesn&rsquo;t work</td>
+<td>Wrong MOSFET type (P-ch instead of N-ch), or pull-ups missing</td>
+<td>Verify BSS138 (N-ch, Vth~1.5V). Check R1, R2 present</td>
+<td>Use N-ch with Vth &lt; 2V, add pull-ups to both voltage rails</td>
+</tr>
+<tr>
+<td>5V signal on 3.3V-only input → IC damage</td>
+<td>No level shifting or clamping</td>
+<td>Dead IC. Measure input voltage with scope</td>
+<td>Add voltage divider, BSS138 shifter, or TVS clamp</td>
+</tr>
+<tr>
+<td>LED flickers or burns out</td>
+<td>No current-limiting resistor, or value too low</td>
+<td>Measure current with multimeter in series</td>
+<td>Calculate R = (Vcc - Vf) / I_desired</td>
+</tr>
+<tr>
+<td>Open-drain output always low</td>
+<td>Pull-up resistor missing</td>
+<td>Measure voltage — stuck at 0V or floating</td>
+<td>Add pull-up resistor to appropriate VCC rail</td>
+</tr>
+<tr>
+<td>Diode in reverse → circuit doesn&rsquo;t work</td>
+<td>Anode and cathode swapped</td>
+<td>Check marking: stripe on component = cathode</td>
+<td>Flip diode. Cathode = stripe = the &ldquo;bar&rdquo; in the symbol</td>
+</tr>
+<tr>
+<td>GPIO damaged after driving large load</td>
+<td>Sink/source current exceeded (&gt;20mA)</td>
+<td>GPIO pin doesn&rsquo;t go to full 0V or 3.3V</td>
+<td>Use BJT or MOSFET transistor as a driver</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="quick-reference-card">QUICK REFERENCE CARD</h1>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────── SEMICONDUCTORS CHEAT SHEET ──────────────────────────────────┐
+│                                                                                              │
+│  DIODE:    Forward voltage: Silicon=0.7V, Schottky=0.3V, LED=2-3V (color dependent)        │
+│            Cathode = stripe on package = bar in schematic symbol                             │
+│            Flyback diode: ALWAYS across inductive loads (reverse-biased)                     │
+│                                                                                              │
+│  BJT:      Ib = Ic / β            (base current = collector current / gain)                 │
+│            Vbe ≈ 0.7V              (base-emitter drop, always)                              │
+│            Rb = (Vgpio - 0.7V) / (2×Ic/β)   (2× for saturation margin)                    │
+│            NPN: C→E current, arrow OUT of emitter                                           │
+│            PNP: E→C current, arrow IN to emitter                                            │
+│                                                                                              │
+│  MOSFET:   Logic-level: check Rds_on at Vgs=2.5V or 3.3V in datasheet                     │
+│            Power dissipation: P = Id² × Rds_on                                              │
+│            N-ch: low-side switch, gate HIGH = ON                                             │
+│            P-ch: high-side switch, gate LOW (relative to source) = ON                        │
+│            Gate is capacitive — no DC current into gate                                      │
+│                                                                                              │
+│  BSS138 LEVEL SHIFTER (per line):                                                           │
+│            Vlow ──┤Rpull├──Source   Gate=Source   Drain──┤Rpull├── Vhigh                    │
+│            Rpull = 4.7kΩ–10kΩ each side. Bidirectional. Open-drain only.                    │
+│                                                                                              │
+│  COMMON PARTS:                                                                               │
+│    Diode:  1N4148 (signal), 1N4007 (1A power), BAT54 (Schottky)                            │
+│    BJT:    2N2222/BC547 (NPN), 2N2907/BC557 (PNP)                                          │
+│    MOSFET: BSS138 (level shift), IRLZ44N (logic N-ch power), Si2302 (small N-ch SOT-23)    │
+│    TVS:    SMBJ3.3A (3.3V lines), SMBJ5.0A (5V lines)                                     │
+│                                                                                              │
+│  PACKAGES:  SOT-23 (3-pin tiny), SOT-223 (3-pin medium), TO-220 (3-pin, heatsinkable)     │
+│             SO-8 (8-pin SMD), DPAK (power SMD), D2PAK (big power SMD)                      │
+│                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

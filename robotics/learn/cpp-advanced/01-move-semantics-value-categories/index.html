@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Week 1: Move Semantics, Value Categories &amp; Compile-Time C++ - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-indigo-600 hover:text-indigo-800 mb-4 inline-block">&larr; Back to C++ Advanced</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="week-1-move-semantics-value-categories-compile-time-c">Week 1: Move Semantics, Value Categories &amp; Compile-Time C++</h1>
+<blockquote>
+<p><strong>Goal</strong>: Write zero-copy, compile-time-evaluated code.<br />
+<strong>Prerequisite</strong>: You know basic C++ templates, smart pointers, and have used <code>std::move</code> at least once without fully understanding it.</p>
+</blockquote>
+<hr />
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#1-value-categories">Value Categories — The 5-Fold Taxonomy</a></li>
+<li><a href="#2-move-semantics">Move Semantics — What Actually Happens</a></li>
+<li><a href="#3-perfect-forwarding">Perfect Forwarding — Reference Collapsing &amp; std::forward</a></li>
+<li><a href="#4-compile-time-evaluation">constexpr / consteval / constinit Evolution</a></li>
+<li><a href="#5-concepts">C++20 Concepts — Replacing SFINAE</a></li>
+<li><a href="#6-ros-tie-ins">ROS Tie-ins — Why This Matters for Robots</a></li>
+</ol>
+<hr />
+<h2 id="1-value-categories">1. Value Categories</h2>
+<h3 id="the-problem-these-solve">The Problem These Solve</h3>
+<p>Every expression in C++ has two independent properties:
+- <strong>A type</strong> (int, std::string, const Widget&amp;, etc.)
+- <strong>A value category</strong> (lvalue, rvalue, etc.)</p>
+<p>The compiler needs value categories to decide:
+1. Which overload to pick (<code>f(T&amp;)</code> vs <code>f(T&amp;&amp;)</code>)
+2. Whether to move or copy
+3. Whether you can take the address of an expression
+4. Whether lifetime extension applies</p>
+<h3 id="the-taxonomy">The Taxonomy</h3>
+<p>Before C++11, we had just <strong>lvalues</strong> and <strong>rvalues</strong>. C++11 added three more.
+Here&rsquo;s the tree:</p>
+<div class="highlight"><pre><span></span><code>                    expression
+                   /          \
+               glvalue       rvalue
+              /       \     /      \
+           lvalue    xvalue      prvalue
+</code></pre></div>
+
+<p>Two independent axes:
+- <strong>Has identity</strong> (glvalue) vs <strong>no identity</strong> (prvalue) — Can you take its address?
+- <strong>Movable</strong> (rvalue) vs <strong>not movable from</strong> (lvalue) — Can you steal its guts?</p>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th style="text-align: center;">Has Identity?</th>
+<th style="text-align: center;">Movable?</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>lvalue</strong></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td><code>x</code>, <code>*p</code>, <code>a[3]</code>, <code>++i</code>, string literal <code>"hello"</code></td>
+</tr>
+<tr>
+<td><strong>xvalue</strong></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td><code>std::move(x)</code>, <code>static_cast&lt;T&amp;&amp;&gt;(x)</code>, member of rvalue</td>
+</tr>
+<tr>
+<td><strong>prvalue</strong></td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+<td><code>42</code>, <code>3.14</code>, <code>x + y</code>, <code>f()</code> returning by value, lambda</td>
+</tr>
+<tr>
+<td><strong>glvalue</strong></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td>lvalue ∪ xvalue (anything with identity)</td>
+</tr>
+<tr>
+<td><strong>rvalue</strong></td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✅</td>
+<td>xvalue ∪ prvalue (anything movable)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="mental-model-the-identity-movability-grid">Mental Model: The Identity-Movability Grid</h3>
+<div class="highlight"><pre><span></span><code>                    Has Identity
+                   YES        NO
+              ┌──────────┬──────────┐
+  Can Move  N │  lvalue  │ (empty)  │
+  From      O │  int x;  │  N/A     │
+              ├──────────┼──────────┤
+  Can Move  Y │  xvalue  │ prvalue  │
+  From      E │ move(x)  │  42      │
+  (rvalue)  S │          │  x + y   │
+              └──────────┴──────────┘
+</code></pre></div>
+
+<p>The &ldquo;NO identity, NO move&rdquo; cell is empty — it would mean an expression that you can&rsquo;t refer to AND can&rsquo;t move from. That doesn&rsquo;t exist in C++.</p>
+<h3 id="why-named-rvalue-references-are-lvalues-the-1-gotcha">Why Named Rvalue References Are Lvalues (The #1 Gotcha)</h3>
+<p>This is the most counter-intuitive rule in C++11:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="kt">int</span><span class="o">&amp;</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;lvalue</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="kt">int</span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;rvalue</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">g</span><span class="p">(</span><span class="kt">int</span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// x is declared as int&amp;&amp;, but...</span>
+<span class="w">    </span><span class="n">f</span><span class="p">(</span><span class="n">x</span><span class="p">);</span><span class="w">   </span><span class="c1">// calls f(int&amp;) — x is an LVALUE here!</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Why?</strong> Because <code>x</code> has a <strong>name</strong>. You can take its address (<code>&amp;x</code>). It persists.
+The rule: <strong>if it has a name, it&rsquo;s an lvalue</strong>. Full stop.</p>
+<p>This is not a quirk — it&rsquo;s a safety feature. If <code>x</code> were treated as an rvalue inside <code>g()</code>, you could accidentally move from it twice:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">g</span><span class="p">(</span><span class="kt">int</span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">use</span><span class="p">(</span><span class="n">x</span><span class="p">);</span><span class="w">           </span><span class="c1">// first use — if this moved from x, then...</span>
+<span class="w">    </span><span class="n">use_again</span><span class="p">(</span><span class="n">x</span><span class="p">);</span><span class="w">     </span><span class="c1">// ...this would use a moved-from value. BAD.</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>By making named rvalue references lvalues, the language forces you to be explicit:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">g</span><span class="p">(</span><span class="kt">int</span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">use</span><span class="p">(</span><span class="n">x</span><span class="p">);</span><span class="w">                 </span><span class="c1">// uses as lvalue (safe, just reads)</span>
+<span class="w">    </span><span class="n">use_again</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">x</span><span class="p">));</span><span class="w"> </span><span class="c1">// explicit: &quot;I&#39;m done with x, take it&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="how-to-test-value-categories">How To Test Value Categories</h3>
+<p>The compiler knows value categories. You can query them:</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;type_traits&gt;</span>
+
+<span class="c1">// decltype(expr) for expressions:</span>
+<span class="c1">// - lvalue  → decltype gives T&amp;</span>
+<span class="c1">// - xvalue  → decltype gives T&amp;&amp;  </span>
+<span class="c1">// - prvalue → decltype gives T</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">42</span><span class="p">;</span>
+<span class="k">static_assert</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">is_lvalue_reference_v</span><span class="o">&lt;</span><span class="k">decltype</span><span class="p">((</span><span class="n">x</span><span class="p">))</span><span class="o">&gt;</span><span class="p">);</span><span class="w">      </span><span class="c1">// (x) is lvalue</span>
+<span class="k">static_assert</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">is_rvalue_reference_v</span><span class="o">&lt;</span><span class="k">decltype</span><span class="p">((</span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">x</span><span class="p">)))</span><span class="o">&gt;</span><span class="p">);</span><span class="w"> </span><span class="c1">// xvalue</span>
+<span class="k">static_assert</span><span class="p">(</span><span class="o">!</span><span class="n">std</span><span class="o">::</span><span class="n">is_reference_v</span><span class="o">&lt;</span><span class="k">decltype</span><span class="p">((</span><span class="mi">42</span><span class="p">))</span><span class="o">&gt;</span><span class="p">);</span><span class="w">            </span><span class="c1">// prvalue</span>
+</code></pre></div>
+
+<p><strong>Note the double parentheses</strong>: <code>decltype(x)</code> gives the declared type of <code>x</code> (int).
+<code>decltype((x))</code> gives the value category of the expression <code>(x)</code> (int&amp; — lvalue).</p>
+<hr />
+<h2 id="2-move-semantics">2. Move Semantics</h2>
+<h3 id="what-move-actually-means">What &ldquo;Move&rdquo; Actually Means</h3>
+<p>Move is <strong>not</strong> a memory operation. It&rsquo;s a <strong>permission</strong>.</p>
+<p>A move constructor/assignment says: &ldquo;I&rsquo;m allowed to steal the resources of the source object, because the caller promised it&rsquo;s going away (or they explicitly consented via <code>std::move</code>).&rdquo;</p>
+<p>For a <code>std::string</code>:</p>
+<div class="highlight"><pre><span></span><code>Before move:
+  src: [ptr=0x1000, size=100, cap=128]    heap: &quot;Hello world......&quot;
+  dst: [ptr=nullptr, size=0, cap=0]
+
+After move:
+  src: [ptr=nullptr, size=0, cap=0]        heap: &quot;Hello world......&quot;
+  dst: [ptr=0x1000, size=100, cap=128]    ↑ same address, no copy!
+</code></pre></div>
+
+<p>At the assembly level, a move of a string is typically 3-4 <code>mov</code> instructions (swap pointers and sizes). A copy is <code>malloc</code> + <code>memcpy</code>.</p>
+<h3 id="the-moved-from-state">The Moved-From State</h3>
+<p>The standard says a moved-from object is in a <strong>valid but unspecified state</strong>.</p>
+<p>&ldquo;Valid&rdquo; means:
+- You can destroy it (dtor must work)
+- You can assign to it (reset it)</p>
+<p>&ldquo;Unspecified&rdquo; means:
+- You can&rsquo;t assume it&rsquo;s empty
+- You can&rsquo;t assume it still has the old value
+- You can&rsquo;t assume anything about <code>size()</code>, <code>capacity()</code>, etc.</p>
+<p>In practice, most STL implementations leave moved-from containers empty, but <strong>you must not rely on this</strong>.</p>
+<p>The only safe operations on a moved-from object:
+1. Destroy it
+2. Assign a new value to it
+3. Call functions with no preconditions (like <code>empty()</code>, <code>size()</code>)</p>
+<h3 id="rule-of-five">Rule of Five</h3>
+<p>If your class manages a resource (file descriptor, raw memory, GPU handle, mutex lock), you need ALL five special members:</p>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────────┐
+│  The Rule of Five                           │
+│                                             │
+│  1. Destructor         ~T()                 │
+│  2. Copy constructor   T(const T&amp;)          │
+│  3. Copy assignment    T&amp; operator=(const T&amp;│)
+│  4. Move constructor   T(T&amp;&amp;) noexcept      │
+│  5. Move assignment    T&amp; operator=(T&amp;&amp;) noexcept
+│                                             │
+│  If you write ANY of these, write ALL of them│
+│  Or explicitly = delete the ones you don&#39;t  │
+│  want.                                      │
+└─────────────────────────────────────────────┘
+</code></pre></div>
+
+<p><strong>Why noexcept on moves?</strong> <code>std::vector</code> uses move only if it&rsquo;s <code>noexcept</code>. If your move might throw, <code>vector::push_back</code> falls back to <strong>copying</strong> during reallocation. This is because if a move fails halfway through reallocating N elements, you&rsquo;ve corrupted both the old and new storage. With copies, the old storage is untouched if one copy fails.</p>
+<h3 id="return-value-optimization-rvonrvo">Return Value Optimization (RVO/NRVO)</h3>
+<p>The compiler can <strong>elide</strong> copies and moves entirely:</p>
+<div class="highlight"><pre><span></span><code><span class="n">Widget</span><span class="w"> </span><span class="nf">make_widget</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">Widget</span><span class="w"> </span><span class="n">w</span><span class="p">;</span><span class="w">           </span><span class="c1">// constructed directly in caller&#39;s memory</span>
+<span class="w">    </span><span class="n">w</span><span class="p">.</span><span class="n">configure</span><span class="p">(</span><span class="mi">42</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">w</span><span class="p">;</span><span class="w">           </span><span class="c1">// NO copy, NO move — NRVO</span>
+<span class="p">}</span>
+
+<span class="n">Widget</span><span class="w"> </span><span class="n">w</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">make_widget</span><span class="p">();</span><span class="w">  </span><span class="c1">// just one construction</span>
+</code></pre></div>
+
+<p>RVO (unnamed) is <strong>mandatory</strong> since C++17.<br />
+NRVO (named) is still optional but virtually all compilers do it.</p>
+<p>When NRVO <strong>can&rsquo;t</strong> apply:
+- Returning different local variables on different paths
+- Returning a function parameter
+- Returning a global or member variable</p>
+<hr />
+<h2 id="3-perfect-forwarding">3. Perfect Forwarding</h2>
+<h3 id="the-problem">The Problem</h3>
+<p>You want to write a wrapper function that passes arguments through <strong>exactly</strong> as they were passed in — preserving lvalue/rvalue-ness, const-ness, everything.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// You want: make&lt;Widget&gt;(1, &quot;hello&quot;, std::move(resource))</span>
+<span class="c1">// To call:  new Widget(1, &quot;hello&quot;, std::move(resource))</span>
+<span class="c1">// With ZERO extra copies or moves.</span>
+</code></pre></div>
+
+<h3 id="reference-collapsing-rules">Reference Collapsing Rules</h3>
+<p>When you combine references (through templates or typedef), C++ collapses them:</p>
+<div class="highlight"><pre><span></span><code>T&amp; &amp;   → T&amp;     (lvalue ref to lvalue ref → lvalue ref)
+T&amp; &amp;&amp;  → T&amp;     (rvalue ref to lvalue ref → lvalue ref)
+T&amp;&amp; &amp;  → T&amp;     (lvalue ref to rvalue ref → lvalue ref)
+T&amp;&amp; &amp;&amp; → T&amp;&amp;    (rvalue ref to rvalue ref → rvalue ref)
+</code></pre></div>
+
+<p><strong>Simple rule</strong>: If EITHER reference is an lvalue reference, the result is an lvalue reference.<br />
+Rvalue reference only survives if BOTH are rvalue references.</p>
+<div class="highlight"><pre><span></span><code>       &amp;    &amp;&amp;
+     ┌─────┬──────┐
+  &amp;  │  &amp;  │  &amp;   │  ← lvalue always wins
+     ├─────┼──────┤
+  &amp;&amp; │  &amp;  │  &amp;&amp;  │  ← rvalue only if both &amp;&amp;
+     └─────┴──────┘
+</code></pre></div>
+
+<h3 id="how-t-in-templates-works-forwarding-references">How T&amp;&amp; in Templates Works (Forwarding References)</h3>
+<p>When <code>T</code> is a template parameter and you write <code>T&amp;&amp;</code>, it&rsquo;s NOT an rvalue reference — it&rsquo;s a <strong>forwarding reference</strong> (formerly &ldquo;universal reference&rdquo;):</p>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="kt">void</span><span class="w"> </span><span class="n">f</span><span class="p">(</span><span class="n">T</span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">x</span><span class="p">);</span><span class="w">     </span><span class="c1">// forwarding reference — binds to ANYTHING</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="kt">int</span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">x</span><span class="p">);</span><span class="w">   </span><span class="c1">// plain rvalue reference — binds to rvalues only</span>
+</code></pre></div>
+
+<p>Deduction rules for <code>f(T&amp;&amp; x)</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>T deduced as</th>
+<th>x type (after collapsing)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>int a; f(a)</code></td>
+<td><code>int&amp;</code></td>
+<td><code>int&amp; &amp;&amp; → int&amp;</code></td>
+</tr>
+<tr>
+<td><code>const int b; f(b)</code></td>
+<td><code>const int&amp;</code></td>
+<td><code>const int&amp; &amp;&amp; → const int&amp;</code></td>
+</tr>
+<tr>
+<td><code>f(42)</code></td>
+<td><code>int</code></td>
+<td><code>int&amp;&amp;</code></td>
+</tr>
+<tr>
+<td><code>f(std::move(a))</code></td>
+<td><code>int</code></td>
+<td><code>int&amp;&amp;</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="stdforward-the-cast-that-preserves-categories">std::forward — The Cast That Preserves Categories</h3>
+<p><code>std::forward&lt;T&gt;(x)</code> is a conditional cast:
+- If T is an lvalue reference (like <code>int&amp;</code>): returns x as lvalue (no cast)
+- If T is not a reference (like <code>int</code>): returns x as rvalue (casts to <code>T&amp;&amp;</code>)</p>
+<p>Implementation (simplified):</p>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="n">T</span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">forward</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">remove_reference_t</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;&amp;</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&amp;&amp;&gt;</span><span class="p">(</span><span class="n">t</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Walk through the cases:</p>
+<div class="highlight"><pre><span></span><code>T = int&amp;:   static_cast&lt;int&amp; &amp;&amp;&gt;(t) → static_cast&lt;int&amp;&gt;(t)   → lvalue ✓
+T = int:    static_cast&lt;int&amp;&amp;&gt;(t)                              → rvalue ✓
+</code></pre></div>
+
+<h3 id="auto-in-range-for">auto&amp;&amp; in Range-For</h3>
+<p><code>auto&amp;&amp;</code> in a range-for loop is a forwarding reference that binds to anything:</p>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">&gt;</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="s">&quot;a&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;b&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;c&quot;</span><span class="p">};</span>
+
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">auto</span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">elem</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">v</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// elem is std::string&amp; (lvalue ref, because v yields lvalues)</span>
+<span class="p">}</span>
+
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">auto</span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">elem</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">get_temporary_vector</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// elem is std::string&amp;&amp; (rvalue ref, because temporaries yield rvalues)</span>
+<span class="w">    </span><span class="c1">// Lifetime of the temporary vector is extended to the loop</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>This is why <code>auto&amp;&amp;</code> is the &ldquo;safest&rdquo; range-for binding — it works for everything without extra copies.</p>
+<hr />
+<h2 id="4-constexpr-consteval-constinit-evolution">4. constexpr / consteval / constinit Evolution</h2>
+<h3 id="the-timeline">The Timeline</h3>
+<div class="highlight"><pre><span></span><code>C++11: constexpr introduced
+       - Single return statement only
+       - No loops, no local variables
+       - constexpr functions can run at compile-time OR runtime
+
+C++14: constexpr relaxed
+       - Loops, local variables, multiple returns
+       - Still no: try/catch, new/delete, reinterpret_cast
+
+C++17: constexpr if, constexpr lambdas
+       - if constexpr for compile-time branching
+       - Lambdas can be constexpr
+
+C++20: consteval, constinit, constexpr new/delete, virtual, try/catch
+       - consteval = MUST be compile-time (immediate function)
+       - constinit = variable initialized at compile-time (but mutable at runtime)
+       - constexpr containers (std::string, std::vector in constexpr context)
+
+C++23: constexpr &lt;cmath&gt;, static constexpr in constexpr functions
+       - More standard library constexpr
+       - constexpr-compatible static variables
+</code></pre></div>
+
+<h3 id="constexpr-vs-consteval-vs-constinit">constexpr vs consteval vs constinit</h3>
+<div class="highlight"><pre><span></span><code>┌───────────────────────────────────────────────────────────────┐
+│ Keyword      │ When             │ What                        │
+├──────────────┼──────────────────┼─────────────────────────────┤
+│ constexpr    │ Compile OR run   │ Function CAN be evaluated   │
+│              │                  │ at compile time             │
+├──────────────┼──────────────────┼─────────────────────────────┤
+│ consteval    │ Compile ONLY     │ Function MUST be evaluated  │
+│  (C++20)     │                  │ at compile time             │
+├──────────────┼──────────────────┼─────────────────────────────┤
+│ constinit    │ Compile init,    │ Variable initialized at     │
+│  (C++20)     │ runtime mutate   │ compile time, mutable later │
+└──────────────┴──────────────────┴─────────────────────────────┘
+</code></pre></div>
+
+<h3 id="why-constinit-matters-the-static-init-order-fiasco">Why constinit Matters (The Static Init Order Fiasco)</h3>
+<p>In C++, the order of initialization of static variables in different translation units is <strong>undefined</strong>.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// file_a.cpp</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">global_path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;/etc/config&quot;</span><span class="p">;</span><span class="w">  </span><span class="c1">// when does this init?</span>
+
+<span class="c1">// file_b.cpp</span>
+<span class="k">extern</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">global_path</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">config_file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">global_path</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot;/app.conf&quot;</span><span class="p">;</span><span class="w">  </span><span class="c1">// might be EMPTY!</span>
+</code></pre></div>
+
+<p><code>constinit</code> prevents this:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Must be initialized at compile time — so it&#39;s ready before main()</span>
+<span class="k">constinit</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">global_path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;/etc/config&quot;</span><span class="p">;</span>
+</code></pre></div>
+
+<p>If the initializer can&rsquo;t be computed at compile time, you get a compile error — catching the problem at build time, not as a mystery crash at runtime.</p>
+<h3 id="compile-time-computation-patterns">Compile-Time Computation Patterns</h3>
+<p><strong>CRC32 table</strong>: 256-entry lookup table, computed at compile time. Zero runtime cost.</p>
+<div class="highlight"><pre><span></span><code><span class="k">constexpr</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">crc_table</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[]</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="kt">uint32_t</span><span class="p">,</span><span class="w"> </span><span class="mi">256</span><span class="o">&gt;</span><span class="w"> </span><span class="n">table</span><span class="p">{};</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">256</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">crc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i</span><span class="p">;</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">j</span><span class="p">)</span>
+<span class="w">            </span><span class="n">crc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">crc</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">^</span><span class="w"> </span><span class="p">(</span><span class="mh">0xEDB88320u</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="p">(</span><span class="o">-</span><span class="p">(</span><span class="n">crc</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mi">1</span><span class="p">)));</span>
+<span class="w">        </span><span class="n">table</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">crc</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">table</span><span class="p">;</span>
+<span class="p">}();</span>
+<span class="c1">// This entire table is in .rodata — computed by the compiler</span>
+</code></pre></div>
+
+<p><strong>String hashing for switch</strong>: C++ can&rsquo;t switch on strings, but you can switch on compile-time hashes:</p>
+<div class="highlight"><pre><span></span><code><span class="k">constexpr</span><span class="w"> </span><span class="kt">uint64_t</span><span class="w"> </span><span class="nf">fnv1a</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">sv</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">hash</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0xcbf29ce484222325ULL</span><span class="p">;</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">char</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">sv</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">hash</span><span class="w"> </span><span class="o">^=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">uint64_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+<span class="w">        </span><span class="n">hash</span><span class="w"> </span><span class="o">*=</span><span class="w"> </span><span class="mh">0x100000001b3ULL</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">hash</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// Usage:</span>
+<span class="k">switch</span><span class="w"> </span><span class="p">(</span><span class="n">fnv1a</span><span class="p">(</span><span class="n">command</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="no">fnv1a</span><span class="p">(</span><span class="s">&quot;start&quot;</span><span class="p">):</span><span class="w">  </span><span class="n">start_robot</span><span class="p">();</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="no">fnv1a</span><span class="p">(</span><span class="s">&quot;stop&quot;</span><span class="p">):</span><span class="w">   </span><span class="n">stop_robot</span><span class="p">();</span><span class="w">  </span><span class="k">break</span><span class="p">;</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="no">fnv1a</span><span class="p">(</span><span class="s">&quot;pause&quot;</span><span class="p">):</span><span class="w">  </span><span class="n">pause_robot</span><span class="p">();</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<span class="p">}</span>
+<span class="c1">// The case labels are compile-time constants!</span>
+</code></pre></div>
+
+<hr />
+<h2 id="5-c20-concepts">5. C++20 Concepts</h2>
+<h3 id="what-concepts-replace">What Concepts Replace</h3>
+<p>Before C++20, constraining templates was painful:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// SFINAE horror (C++11/14/17):</span>
+<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="p">,</span><span class="w"> </span><span class="k">typename</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">enable_if_t</span><span class="o">&lt;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">is_arithmetic_v</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="n">std</span><span class="o">::</span><span class="n">is_same_v</span><span class="o">&lt;</span><span class="n">T</span><span class="p">,</span><span class="w"> </span><span class="kt">bool</span><span class="o">&gt;&gt;&gt;</span>
+<span class="n">T</span><span class="w"> </span><span class="n">clamp_to_range</span><span class="p">(</span><span class="n">T</span><span class="w"> </span><span class="n">val</span><span class="p">,</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="n">lo</span><span class="p">,</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="n">hi</span><span class="p">);</span>
+
+<span class="c1">// Error message when you pass a string:</span>
+<span class="c1">//   &quot;no matching function for call to &#39;clamp_to_range&#39;&quot;</span>
+<span class="c1">//   &quot;candidate template ignored: requirement </span>
+<span class="c1">//    &#39;std::is_arithmetic_v&lt;std::string&gt;&#39; was not satisfied&quot;</span>
+<span class="c1">//   (deep in the template instantiation stack)</span>
+</code></pre></div>
+
+<p>With concepts:</p>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="k">concept</span><span class="w"> </span><span class="nc">Arithmetic</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">is_arithmetic_v</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="n">std</span><span class="o">::</span><span class="n">is_same_v</span><span class="o">&lt;</span><span class="n">T</span><span class="p">,</span><span class="w"> </span><span class="kt">bool</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="n">Arithmetic</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">clamp_to_range</span><span class="p">(</span><span class="n">Arithmetic</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">val</span><span class="p">,</span><span class="w"> </span>
+<span class="w">                                </span><span class="n">Arithmetic</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">lo</span><span class="p">,</span><span class="w"> </span>
+<span class="w">                                </span><span class="n">Arithmetic</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">hi</span><span class="p">);</span>
+
+<span class="c1">// Error when you pass a string:</span>
+<span class="c1">//   &quot;constraints not satisfied for &#39;Arithmetic&#39;&quot;</span>
+<span class="c1">//   Much clearer!</span>
+</code></pre></div>
+
+<h3 id="concept-syntax-4-ways">Concept Syntax (4 Ways)</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// 1. Requires clause after template</span>
+<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span><span class="w"> </span><span class="k">requires</span><span class="w"> </span><span class="n">Sortable</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span>
+<span class="kt">void</span><span class="w"> </span><span class="n">sort</span><span class="p">(</span><span class="n">T</span><span class="o">&amp;</span><span class="w"> </span><span class="n">container</span><span class="p">);</span>
+
+<span class="c1">// 2. Trailing requires</span>
+<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="kt">void</span><span class="w"> </span><span class="n">sort</span><span class="p">(</span><span class="n">T</span><span class="o">&amp;</span><span class="w"> </span><span class="n">container</span><span class="p">)</span><span class="w"> </span><span class="k">requires</span><span class="w"> </span><span class="n">Sortable</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="c1">// 3. Constrained template parameter</span>
+<span class="k">template</span><span class="o">&lt;</span><span class="n">Sortable</span><span class="w"> </span><span class="n">T</span><span class="o">&gt;</span>
+<span class="kt">void</span><span class="w"> </span><span class="n">sort</span><span class="p">(</span><span class="n">T</span><span class="o">&amp;</span><span class="w"> </span><span class="n">container</span><span class="p">);</span>
+
+<span class="c1">// 4. Abbreviated function template (terse)</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">sort</span><span class="p">(</span><span class="n">Sortable</span><span class="w"> </span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">container</span><span class="p">);</span>
+</code></pre></div>
+
+<p>All four are equivalent. Use #4 for simple cases, #1 or #2 for complex constraints.</p>
+<h3 id="writing-concepts-with-requires-expressions">Writing Concepts with <code>requires</code> Expressions</h3>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="k">concept</span><span class="w"> </span><span class="nc">Sensor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">requires</span><span class="p">(</span><span class="n">T</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Simple requirement: expression must be valid</span>
+<span class="w">    </span><span class="n">t</span><span class="p">.</span><span class="n">read</span><span class="p">();</span>
+
+<span class="w">    </span><span class="c1">// Compound requirement: valid + return type constraint</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">read</span><span class="p">()</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">convertible_to</span><span class="o">&lt;</span><span class="kt">double</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">is_valid</span><span class="p">()</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">same_as</span><span class="o">&lt;</span><span class="kt">bool</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Nested requirement: a static_assert-like check</span>
+<span class="w">    </span><span class="k">requires</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">T</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mi">128</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Type requirement: associated type must exist</span>
+<span class="w">    </span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">::</span><span class="n">sample_type</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Compound with noexcept</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">is_valid</span><span class="p">()</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="k">noexcept</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">same_as</span><span class="o">&lt;</span><span class="kt">bool</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<h3 id="concept-subsumption-overload-resolution">Concept Subsumption (Overload Resolution)</h3>
+<p>When two concepts constrain an overload set, the <strong>more constrained</strong> concept wins:</p>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span><span class="w"> </span><span class="k">concept</span><span class="w"> </span><span class="nc">Integral</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">is_integral_v</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span><span class="w"> </span><span class="k">concept</span><span class="w"> </span><span class="nc">SignedIntegral</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Integral</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">is_signed_v</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="n">Integral</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w">       </span><span class="p">{</span><span class="w"> </span><span class="cm">/* generic integer */</span><span class="w"> </span><span class="p">}</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="n">SignedIntegral</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="cm">/* signed-specific */</span><span class="w"> </span><span class="p">}</span>
+
+<span class="n">process</span><span class="p">(</span><span class="mi">42</span><span class="p">);</span><span class="w">    </span><span class="c1">// calls SignedIntegral version (more specific)</span>
+<span class="n">process</span><span class="p">(</span><span class="mi">42u</span><span class="p">);</span><span class="w">   </span><span class="c1">// calls Integral version (unsigned doesn&#39;t match Signed)</span>
+</code></pre></div>
+
+<p><strong>How subsumption works</strong>: The compiler decomposes concepts into atomic constraints.
+<code>SignedIntegral</code> = <code>Integral&lt;T&gt; &amp;&amp; is_signed_v&lt;T&gt;</code>. It <strong>subsumes</strong> <code>Integral</code> because it includes everything <code>Integral</code> requires, plus more. The compiler can prove that if <code>SignedIntegral</code> is satisfied, <code>Integral</code> is too.</p>
+<p>This ONLY works with named concepts. Raw <code>requires</code> clauses don&rsquo;t participate in subsumption:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// These are AMBIGUOUS — no subsumption possible</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="k">auto</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="k">requires</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">is_integral_v</span><span class="o">&lt;</span><span class="k">decltype</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="k">auto</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="k">requires</span><span class="w"> </span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">is_integral_v</span><span class="o">&lt;</span><span class="k">decltype</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">&gt;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">is_signed_v</span><span class="o">&lt;</span><span class="k">decltype</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">&gt;</span><span class="p">);</span>
+<span class="c1">// Compiler error: ambiguous overload</span>
+</code></pre></div>
+
+<hr />
+<h2 id="6-ros-tie-ins-why-this-matters-for-robots">6. ROS Tie-ins — Why This Matters for Robots</h2>
+<h3 id="move-semantics-in-sensor-pipelines">Move Semantics in Sensor Pipelines</h3>
+<p>A typical robot sensor pipeline:</p>
+<div class="highlight"><pre><span></span><code>IMU → filter → estimator → controller → actuator
+       ↑
+   PointCloud → downsample → obstacle map → planner
+</code></pre></div>
+
+<p>Every <code>→</code> is a potential copy. With 30Hz IMU data at 48 bytes, that&rsquo;s fine. But a 640×480 depth image at 30Hz is <strong>18 MB/sec</strong>. Unnecessary copies destroy your cycle time.</p>
+<p><strong>ROS1 Problem</strong>: <code>ros::Publisher::publish()</code> takes a <code>const T&amp;</code> — it always copies to the internal queue. Even if you&rsquo;re done with the message, you can&rsquo;t move it in.</p>
+<p><strong>ROS2 Solution</strong>: <code>rclcpp::Publisher::publish(std::unique_ptr&lt;T&gt;)</code> — zero-copy transport. The message is moved into shared memory, and subscribers get a loan. No copy at all.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// ROS2 zero-copy publishing</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">msg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">sensor_msgs</span><span class="o">::</span><span class="n">msg</span><span class="o">::</span><span class="n">PointCloud2</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="n">fill_pointcloud</span><span class="p">(</span><span class="o">*</span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="n">lidar_data</span><span class="p">);</span>
+<span class="n">publisher</span><span class="o">-&gt;</span><span class="n">publish</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">msg</span><span class="p">));</span><span class="w">  </span><span class="c1">// zero copy!</span>
+</code></pre></div>
+
+<h3 id="compile-time-message-validation">Compile-Time Message Validation</h3>
+<p>In safety-critical robot code, you want to catch message format errors at <strong>compile time</strong>, not at runtime when the robot is moving:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// CRC of message layout — computed at compile time</span>
+<span class="k">static_assert</span><span class="p">(</span><span class="n">message_crc</span><span class="o">&lt;</span><span class="n">ImuMessage</span><span class="o">&gt;</span><span class="p">()</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mh">0xA3B7C921</span><span class="p">,</span>
+<span class="w">    </span><span class="s">&quot;ImuMessage layout changed — update serialization code!&quot;</span><span class="p">);</span>
+
+<span class="c1">// Message size validation</span>
+<span class="k">static_assert</span><span class="p">(</span><span class="k">sizeof</span><span class="p">(</span><span class="n">ImuMessage</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">MAX_DMA_BUFFER</span><span class="p">,</span>
+<span class="w">    </span><span class="s">&quot;ImuMessage too large for DMA transfer&quot;</span><span class="p">);</span>
+</code></pre></div>
+
+<h3 id="concepts-for-hardware-abstraction">Concepts for Hardware Abstraction</h3>
+<p>Real robots have many sensor types. Concepts enforce the interface at compile time:</p>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="k">concept</span><span class="w"> </span><span class="nc">Sensor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">requires</span><span class="p">(</span><span class="n">T</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">read</span><span class="p">()</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">convertible_to</span><span class="o">&lt;</span><span class="kt">double</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">is_valid</span><span class="p">()</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">same_as</span><span class="o">&lt;</span><span class="kt">bool</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="n">T</span><span class="o">::</span><span class="n">sample_rate_hz</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">convertible_to</span><span class="o">&lt;</span><span class="kt">unsigned</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="c1">// This function works with ANY sensor — IMU, encoder, lidar, etc.</span>
+<span class="c1">// If someone adds a new sensor that doesn&#39;t have read(), they get a </span>
+<span class="c1">// compile error pointing at this concept, not a 200-line template error.</span>
+<span class="k">template</span><span class="o">&lt;</span><span class="n">Sensor</span><span class="w"> </span><span class="n">S</span><span class="o">&gt;</span>
+<span class="kt">void</span><span class="w"> </span><span class="n">log_sensor</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">S</span><span class="o">&amp;</span><span class="w"> </span><span class="n">sensor</span><span class="p">,</span><span class="w"> </span><span class="n">Logger</span><span class="o">&amp;</span><span class="w"> </span><span class="n">log</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">sensor</span><span class="p">.</span><span class="n">is_valid</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">log</span><span class="p">.</span><span class="n">write</span><span class="p">(</span><span class="n">sensor</span><span class="p">.</span><span class="n">read</span><span class="p">(),</span><span class="w"> </span><span class="n">S</span><span class="o">::</span><span class="n">sample_rate_hz</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="constinit-for-static-robot-configuration">constinit for Static Robot Configuration</h3>
+<p>Robot parameters that are known at compile time but might be adjusted:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Initialized at compile time — no static init order issues</span>
+<span class="k">constinit</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">wheel_radius_m</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.075</span><span class="p">;</span>
+<span class="k">constinit</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">wheel_base_m</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.40</span><span class="p">;</span>
+<span class="k">constinit</span><span class="w"> </span><span class="kt">unsigned</span><span class="w"> </span><span class="n">control_freq_hz</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">200</span><span class="p">;</span>
+</code></pre></div>
+
+<p>This is safer than <code>const</code> globals because <code>constinit</code> guarantees they&rsquo;re ready before <code>main()</code> — critical when ROS nodes initialize in unpredictable order.</p>
+<hr />
+<h2 id="summary-week-1-key-takeaways">Summary — Week 1 Key Takeaways</h2>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────────────────────────────┐
+│  1. EVERY expression has a value category (lvalue/xvalue/prvalue│)
+│  2. Named rvalue references are LVALUES (most common mistake)   │
+│  3. Move is a PERMISSION to steal, not a memory operation       │
+│  4. std::forward preserves value category through templates     │
+│  5. Reference collapsing: lvalue ref wins unless both are &amp;&amp;    │
+│  6. constexpr = maybe compile-time; consteval = forced          │
+│  7. Concepts replace SFINAE with readable constraints           │
+│  8. Concept subsumption: more constrained wins in overloads     │
+│  9. Mark moves noexcept or vector will copy instead             │
+│ 10. ROS2 uses move semantics for zero-copy message transport    │
+└─────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

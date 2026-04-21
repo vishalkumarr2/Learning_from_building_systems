@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zephyr Interrupts and GPIO - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="zephyr-interrupts-and-gpio">Zephyr Interrupts and GPIO</h1>
+<h2 id="what-is-an-interrupt">What Is an Interrupt?</h2>
+<p>An interrupt (IRQ) is a <strong>hardware signal</strong> that tells the CPU &ldquo;stop what you&rsquo;re doing and handle this now.&rdquo;</p>
+<p>When an interrupt fires:
+1. CPU finishes current instruction
+2. Saves registers to stack<br />
+3. Jumps to <strong>ISR</strong> (Interrupt Service Routine) — your handler function
+4. Returns to where it was</p>
+<p>Without interrupts, you&rsquo;d have to constantly poll every peripheral: &ldquo;any new data from UART? GPIO? Timer?&rdquo; — wasteful and slow.</p>
+<p>With interrupts, peripherals notify you when they need attention.</p>
+<hr />
+<h2 id="isr-rules-the-golden-rules">ISR Rules — The Golden Rules</h2>
+<p><strong>ISRs have strict constraints.</strong> They run at the highest priority, interrupting everything else.</p>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────┐
+│       ISR Constraints               │
+├─────────────────────────────────────┤
+│ ✅ Read/write registers quickly      │
+│ ✅ Set a flag / give a semaphore     │
+│ ✅ Put a byte in a ring buffer       │
+│ ✅ Call k_sem_give(), k_fifo_put()   │
+├─────────────────────────────────────┤
+│ ❌ Call k_msleep() — NEVER            │
+│ ❌ Call k_mutex_lock() — blocks      │
+│ ❌ Call printk() / LOG_INF()         │
+│ ❌ Allocate memory (malloc)          │
+│ ❌ Do heavy computation              │
+└─────────────────────────────────────┘
+</code></pre></div>
+
+<p><strong>The pattern</strong>: ISR does minimum work (set flag, copy byte), then wakes a thread that does the real work.</p>
+<div class="highlight"><pre><span></span><code><span class="cm">/* ISR: tiny */</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">button_isr</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span>
+<span class="w">                </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_callback</span><span class="w"> </span><span class="o">*</span><span class="n">cb</span><span class="p">,</span>
+<span class="w">                </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">k_sem_give</span><span class="p">(</span><span class="o">&amp;</span><span class="n">button_sem</span><span class="p">);</span><span class="w">   </span><span class="cm">/* wake the handler thread */</span>
+<span class="p">}</span>
+
+<span class="cm">/* Thread: does real work */</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">button_handler_thread</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">k_sem_take</span><span class="p">(</span><span class="o">&amp;</span><span class="n">button_sem</span><span class="p">,</span><span class="w"> </span><span class="n">K_FOREVER</span><span class="p">);</span>
+<span class="w">        </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;Button pressed!&quot;</span><span class="p">);</span><span class="w">       </span><span class="cm">/* safe here */</span>
+<span class="w">        </span><span class="n">process_button_event</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="gpio-general-purpose-inputoutput">GPIO — General Purpose Input/Output</h2>
+<p>GPIO pins can be:
+- <strong>Output</strong>: drive HIGH (VCC) or LOW (GND) — control LEDs, enable/disable sensors, etc.
+- <strong>Input</strong>: read HIGH or LOW — button press, sensor indicate pin, etc.
+- <strong>Interrupt-capable input</strong>: hardware fires ISR when pin changes</p>
+<h3 id="devicetree-declaration">Devicetree declaration</h3>
+<div class="highlight"><pre><span></span><code><span class="cm">/* app.overlay */</span>
+<span class="nf">/</span><span class="cm"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nf">aliases</span><span class="cm"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">led0</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">green_led</span><span class="p">;</span>
+<span class="w">        </span><span class="n">sw0</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">user_button</span><span class="p">;</span>
+<span class="w">    </span><span class="p">};</span>
+
+<span class="w">    </span><span class="nf">leds</span><span class="cm"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nl">green_led</span><span class="p">:</span><span class="w"> </span><span class="nf">led_0</span><span class="cm"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">gpios</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">gpioc</span><span class="w"> </span><span class="mi">7</span><span class="w"> </span><span class="na">GPIO_ACTIVE_HIGH</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">        </span><span class="p">};</span>
+<span class="w">    </span><span class="p">};</span>
+
+<span class="w">    </span><span class="nf">buttons</span><span class="cm"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nl">user_button</span><span class="p">:</span><span class="w"> </span><span class="nf">button_0</span><span class="cm"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">gpios</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">gpioa</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">(</span><span class="na">GPIO_ACTIVE_LOW</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="na">GPIO_PULL_UP</span><span class="p">)</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">            </span><span class="cm">/* LOW = pressed (typical for buttons), internal pull-up enabled */</span>
+<span class="w">        </span><span class="p">};</span>
+<span class="w">    </span><span class="p">};</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<h3 id="output-gpio-led-example">Output GPIO — LED example</h3>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/gpio.h&gt;</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_dt_spec</span><span class="w"> </span><span class="n">led</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GPIO_DT_SPEC_GET</span><span class="p">(</span><span class="n">DT_ALIAS</span><span class="p">(</span><span class="n">led0</span><span class="p">),</span><span class="w"> </span><span class="n">gpios</span><span class="p">);</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">setup_led</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">gpio_is_ready_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">led</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;LED GPIO not ready&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">gpio_pin_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">led</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_OUTPUT_INACTIVE</span><span class="p">);</span>
+<span class="w">    </span><span class="cm">/* GPIO_OUTPUT_INACTIVE: output mode, starts in &quot;off&quot; state */</span>
+<span class="w">    </span><span class="cm">/* GPIO_OUTPUT_ACTIVE: output mode, starts in &quot;on&quot; state */</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">led_on</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">gpio_pin_set_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">led</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w"> </span><span class="p">}</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">led_off</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">gpio_pin_set_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">led</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"> </span><span class="p">}</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">led_toggle</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">gpio_pin_toggle_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">led</span><span class="p">);</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+
+<p>Note: <code>GPIO_ACTIVE_HIGH</code> in DTS means &ldquo;logical 1 = physical HIGH&rdquo;. <code>gpio_pin_set_dt(&amp;led, 1)</code> sets logical 1, which maps to physical HIGH. If the LED is connected active-low (cathode to GPIO), use <code>GPIO_ACTIVE_LOW</code> in DTS — then <code>gpio_pin_set_dt(&amp;led, 1)</code> sets pin LOW, which turns the LED on. Your code never needs to think about polarity.</p>
+<h3 id="input-gpio-button-polling">Input GPIO — Button polling</h3>
+<div class="highlight"><pre><span></span><code><span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_dt_spec</span><span class="w"> </span><span class="n">btn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GPIO_DT_SPEC_GET</span><span class="p">(</span><span class="n">DT_ALIAS</span><span class="p">(</span><span class="n">sw0</span><span class="p">),</span><span class="w"> </span><span class="n">gpios</span><span class="p">);</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">setup_button</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">gpio_pin_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">btn</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_INPUT</span><span class="p">);</span>
+<span class="w">    </span><span class="cm">/* The DTS already includes GPIO_PULL_UP in flags */</span>
+<span class="p">}</span>
+
+<span class="kt">bool</span><span class="w"> </span><span class="nf">is_button_pressed</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">gpio_pin_get_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">btn</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">    </span><span class="cm">/* Returns logical 1 when button IS pressed */</span>
+<span class="w">    </span><span class="cm">/* DTS GPIO_ACTIVE_LOW handles the inversion: physical LOW → logical 1 */</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="input-gpio-interrupt-on-button-press">Input GPIO — Interrupt on button press</h3>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/gpio.h&gt;</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_dt_spec</span><span class="w"> </span><span class="n">btn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GPIO_DT_SPEC_GET</span><span class="p">(</span><span class="n">DT_ALIAS</span><span class="p">(</span><span class="n">sw0</span><span class="p">),</span><span class="w"> </span><span class="n">gpios</span><span class="p">);</span>
+<span class="k">static</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_callback</span><span class="w"> </span><span class="n">btn_cb_data</span><span class="p">;</span>
+<span class="k">static</span><span class="w"> </span><span class="n">K_SEM_DEFINE</span><span class="p">(</span><span class="n">btn_pressed_sem</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">btn_isr</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span>
+<span class="w">                    </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_callback</span><span class="w"> </span><span class="o">*</span><span class="n">cb</span><span class="p">,</span>
+<span class="w">                    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">k_sem_give</span><span class="p">(</span><span class="o">&amp;</span><span class="n">btn_pressed_sem</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">button_interrupt_init</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">gpio_is_ready_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">btn</span><span class="p">))</span><span class="w"> </span><span class="k">return</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">gpio_pin_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">btn</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_INPUT</span><span class="p">);</span>
+
+<span class="w">    </span><span class="cm">/* Register callback and enable interrupt */</span>
+<span class="w">    </span><span class="n">gpio_init_callback</span><span class="p">(</span><span class="o">&amp;</span><span class="n">btn_cb_data</span><span class="p">,</span><span class="w"> </span><span class="n">btn_isr</span><span class="p">,</span><span class="w"> </span><span class="n">BIT</span><span class="p">(</span><span class="n">btn</span><span class="p">.</span><span class="n">pin</span><span class="p">));</span>
+<span class="w">    </span><span class="n">gpio_add_callback</span><span class="p">(</span><span class="n">btn</span><span class="p">.</span><span class="n">port</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">btn_cb_data</span><span class="p">);</span>
+<span class="w">    </span><span class="n">gpio_pin_interrupt_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">btn</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_INT_EDGE_TO_ACTIVE</span><span class="p">);</span>
+<span class="w">    </span><span class="cm">/* GPIO_INT_EDGE_TO_ACTIVE = interrupt on edge going to &quot;active&quot; = button pressed */</span>
+<span class="w">    </span><span class="cm">/* Other options: GPIO_INT_EDGE_RISING, GPIO_INT_EDGE_FALLING, GPIO_INT_LEVEL_HIGH */</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">button_thread</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">button_interrupt_init</span><span class="p">();</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">k_sem_take</span><span class="p">(</span><span class="o">&amp;</span><span class="n">btn_pressed_sem</span><span class="p">,</span><span class="w"> </span><span class="n">K_FOREVER</span><span class="p">);</span>
+<span class="w">        </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;Button pressed!&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="interrupt-priorities-on-zephyr-arm">Interrupt Priorities on Zephyr ARM</h2>
+<p>ARM Cortex-M has multiple interrupt priority levels. Lower number = higher priority, runs first.</p>
+<div class="highlight"><pre><span></span><code>Priority 0  ─── NMI (non-maskable, hardware only)
+Priority 1  ─── HardFault
+...
+Priority 2  ─── IRQ configured by you
+Priority 3  ─── IRQ configured by you
+...
+Priority 15 ─── Lowest priority
+</code></pre></div>
+
+<p>In Zephyr devicetree:</p>
+<div class="highlight"><pre><span></span><code><span class="o">&amp;</span><span class="na">spi1</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">interrupts</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">35</span><span class="w"> </span><span class="mi">0</span><span class="o">&gt;</span><span class="p">;</span><span class="w">   </span><span class="cm">/* IRQ number 35, priority 0 */</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p>For GPIO interrupts configured via the GPIO API, Zephyr uses a mid-level priority automatically.</p>
+<p><strong>Critical</strong>: if your ISR calls <code>k_sem_give()</code>, that internally calls the scheduler. The ISR priority must be high enough to preempt any thread, but low enough to allow kernel operations. Zephyr handles this via <code>CONFIG_ZERO_LATENCY_IRQS</code> and <code>IRQ_PRIO_LOWEST</code> when you use the standard GPIO API.</p>
+<hr />
+<h2 id="real-example-imu-data-ready-interrupt-at-100hz">Real Example: IMU Data-Ready Interrupt at 100Hz</h2>
+<p>This is the recommended pattern for our pipeline — ISR signals a thread which reads and publishes at exactly 100Hz:</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/gpio.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/i2c.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/kernel.h&gt;</span>
+
+<span class="cm">/* DTS defines imu node with int-gpios */</span>
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_dt_spec</span><span class="w"> </span><span class="n">imu_drdy</span><span class="w"> </span><span class="o">=</span>
+<span class="w">    </span><span class="n">GPIO_DT_SPEC_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">imu</span><span class="p">),</span><span class="w"> </span><span class="n">int_gpios</span><span class="p">);</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_callback</span><span class="w"> </span><span class="n">imu_drdy_cb</span><span class="p">;</span>
+<span class="k">static</span><span class="w"> </span><span class="n">K_SEM_DEFINE</span><span class="p">(</span><span class="n">imu_drdy_sem</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">imu_drdy_isr</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span>
+<span class="w">                          </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_callback</span><span class="w"> </span><span class="o">*</span><span class="n">cb</span><span class="p">,</span>
+<span class="w">                          </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">k_sem_give</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_drdy_sem</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">imu_thread</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">i2c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">i2c1</span><span class="p">));</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">12</span><span class="p">];</span>
+
+<span class="w">    </span><span class="cm">/* Wake IMU from sleep */</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">pwr_buf</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="mh">0x4E</span><span class="p">,</span><span class="w"> </span><span class="mh">0x0F</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="n">i2c_write</span><span class="p">(</span><span class="n">i2c</span><span class="p">,</span><span class="w"> </span><span class="n">pwr_buf</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mh">0x68</span><span class="p">);</span>
+<span class="w">    </span><span class="n">k_msleep</span><span class="p">(</span><span class="mi">10</span><span class="p">);</span>
+
+<span class="w">    </span><span class="cm">/* Configure IMU INT1 = data-ready pulse */</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">int_buf</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="mh">0x14</span><span class="p">,</span><span class="w"> </span><span class="mh">0x02</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="n">i2c_write</span><span class="p">(</span><span class="n">i2c</span><span class="p">,</span><span class="w"> </span><span class="n">int_buf</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mh">0x68</span><span class="p">);</span>
+
+<span class="w">    </span><span class="cm">/* Setup GPIO interrupt */</span>
+<span class="w">    </span><span class="n">gpio_pin_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_drdy</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_INPUT</span><span class="p">);</span>
+<span class="w">    </span><span class="n">gpio_init_callback</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_drdy_cb</span><span class="p">,</span><span class="w"> </span><span class="n">imu_drdy_isr</span><span class="p">,</span><span class="w"> </span><span class="n">BIT</span><span class="p">(</span><span class="n">imu_drdy</span><span class="p">.</span><span class="n">pin</span><span class="p">));</span>
+<span class="w">    </span><span class="n">gpio_add_callback</span><span class="p">(</span><span class="n">imu_drdy</span><span class="p">.</span><span class="n">port</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">imu_drdy_cb</span><span class="p">);</span>
+<span class="w">    </span><span class="n">gpio_pin_interrupt_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_drdy</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_INT_EDGE_RISING</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">k_sem_take</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_drdy_sem</span><span class="p">,</span><span class="w"> </span><span class="n">K_FOREVER</span><span class="p">);</span>
+<span class="w">        </span><span class="cm">/* Data guaranteed ready — IMU pulsed the pin */</span>
+<span class="w">        </span><span class="n">i2c_write_read</span><span class="p">(</span><span class="n">i2c</span><span class="p">,</span><span class="w"> </span><span class="mh">0x68</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">uint8_t</span><span class="p">[]){</span><span class="mh">0x1F</span><span class="p">},</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">raw</span><span class="p">,</span><span class="w"> </span><span class="mi">12</span><span class="p">);</span>
+<span class="w">        </span><span class="cm">/* Parse and publish to ZBus */</span>
+<span class="w">        </span><span class="n">publish_imu</span><span class="p">(</span><span class="n">raw</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="n">K_THREAD_DEFINE</span><span class="p">(</span><span class="n">imu_tid</span><span class="p">,</span><span class="w"> </span><span class="n">imu_thread</span><span class="p">,</span><span class="w"> </span><span class="mi">1024</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+</code></pre></div>
+
+<hr />
+<h2 id="gpio-vs-spi-vs-i2c-interrupts">GPIO vs SPI vs I2C interrupts</h2>
+<p>Not all interrupts come from GPIOs. Every peripheral has its own interrupt line:</p>
+<table>
+<thead>
+<tr>
+<th>Interrupt source</th>
+<th>How you configure</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GPIO pin change</td>
+<td><code>gpio_pin_interrupt_configure_dt()</code></td>
+</tr>
+<tr>
+<td>UART RX data</td>
+<td><code>uart_irq_rx_enable()</code></td>
+</tr>
+<tr>
+<td>SPI transfer complete</td>
+<td>Handled by Zephyr driver internally</td>
+</tr>
+<tr>
+<td>I2C transfer complete</td>
+<td>Handled by Zephyr driver internally</td>
+</tr>
+<tr>
+<td>Timer overflow</td>
+<td><code>k_timer_start()</code> registers callback</td>
+</tr>
+<tr>
+<td>DMA transfer complete</td>
+<td><code>dma_config()</code> with callback</td>
+</tr>
+<tr>
+<td>CAN frame received</td>
+<td><code>can_add_rx_filter()</code> with callback</td>
+</tr>
+</tbody>
+</table>
+<p>For SPI, I2C, UART, CAN — Zephyr&rsquo;s driver handles the hardware interrupts for you. You call high-level <code>i2c_write_read()</code> and the driver manages the ISR internally.</p>
+<hr />
+<h2 id="common-mistakes">Common Mistakes</h2>
+<table>
+<thead>
+<tr>
+<th>Mistake</th>
+<th>Symptom</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Calling <code>LOG_INF</code> in ISR</td>
+<td>System crash or dropped logs</td>
+<td>Never log in ISR, use <code>k_sem_give</code> instead</td>
+</tr>
+<tr>
+<td>Forgetting <code>gpio_add_callback</code></td>
+<td>ISR never fires</td>
+<td>Both <code>gpio_init_callback</code> AND <code>gpio_add_callback</code> required</td>
+</tr>
+<tr>
+<td>Wrong interrupt edge</td>
+<td>ISR fires at wrong time</td>
+<td>Check datasheet: DRDY high→low or low→high? Use matching <code>GPIO_INT_EDGE_*</code></td>
+</tr>
+<tr>
+<td>Missing <code>gpio_pin_configure_dt</code></td>
+<td>ISR never fires</td>
+<td>Must configure pin as input before enabling interrupt</td>
+</tr>
+<tr>
+<td>GPIO spec references wrong DTS node</td>
+<td>Builds but wrong pin</td>
+<td>Double-check phandle in DTS</td>
+</tr>
+<tr>
+<td>Debounce missing for button</td>
+<td>Multiple fires per press</td>
+<td>Use <code>k_msleep(50)</code> after event or apply hardware capacitor</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

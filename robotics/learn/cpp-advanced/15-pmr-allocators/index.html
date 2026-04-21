@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Module 15: PMR (Polymorphic Memory Resource) Allocators - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-indigo-600 hover:text-indigo-800 mb-4 inline-block">&larr; Back to C++ Advanced</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="module-15-pmr-polymorphic-memory-resource-allocators">Module 15: PMR (Polymorphic Memory Resource) Allocators</h1>
+<h2 id="the-allocation-problem-in-real-time-systems">The Allocation Problem in Real-Time Systems</h2>
+<p>In real-time robotics and embedded systems, <strong>deterministic timing</strong> is non-negotiable.
+Standard <code>new</code>/<code>malloc</code> is the enemy of determinism:</p>
+<table>
+<thead>
+<tr>
+<th>Problem</th>
+<th>Why It Kills RT</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Mutex locks</strong></td>
+<td><code>malloc</code> uses internal locks → priority inversion, unbounded wait</td>
+</tr>
+<tr>
+<td><strong>Page faults</strong></td>
+<td>OS may need to map new pages → 1-100μs stall</td>
+</tr>
+<tr>
+<td><strong>Fragmentation</strong></td>
+<td>After hours of alloc/dealloc, no contiguous block available → OOM</td>
+</tr>
+<tr>
+<td><strong>System calls</strong></td>
+<td><code>brk()</code>/<code>mmap()</code> for new heap pages → kernel entry</td>
+</tr>
+<tr>
+<td><strong>Unpredictable latency</strong></td>
+<td>Best case: 50ns. Worst case: 100μs+ (1000x variance)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule for RT</strong>: All memory for hot paths must be pre-allocated at startup.</p>
+<hr />
+<h2 id="the-traditional-c-allocator-model-pre-c17">The Traditional C++ Allocator Model (Pre-C++17)</h2>
+<p>The STL allocator model (<code>std::allocator&lt;T&gt;</code>) has fundamental problems:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// 1. Type-parameterized → viral template propagation</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">int</span><span class="p">,</span><span class="w"> </span><span class="n">MyAlloc</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">v</span><span class="p">;</span><span class="w">          </span><span class="c1">// Allocator is part of the TYPE</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">int</span><span class="p">,</span><span class="w"> </span><span class="n">MyAlloc</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">v2</span><span class="p">;</span><span class="w">         </span><span class="c1">// Same type → can swap</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">int</span><span class="p">,</span><span class="w"> </span><span class="n">OtherAlloc</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">v3</span><span class="p">;</span><span class="w">      </span><span class="c1">// Different type! Can&#39;t swap with v.</span>
+
+<span class="c1">// 2. Stateless by convention → can&#39;t point to a specific arena</span>
+<span class="c1">// std::allocator&lt;T&gt; instances are interchangeable (no state)</span>
+
+<span class="c1">// 3. Propagation nightmare → every nested container needs explicit allocator</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">basic_string</span><span class="o">&lt;</span><span class="kt">char</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">char_traits</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="n">MyAlloc</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">&gt;&gt;</span><span class="p">,</span>
+<span class="w">            </span><span class="n">MyAlloc</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">basic_string</span><span class="o">&lt;</span><span class="kt">char</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">char_traits</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="n">MyAlloc</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">&gt;&gt;&gt;&gt;</span>
+<span class="c1">// ^^^ This is insane. Nobody does this.</span>
+</code></pre></div>
+
+<p><strong>Result</strong>: Real-world code almost never uses custom STL allocators.</p>
+<hr />
+<h2 id="the-pmr-solution-c17">The PMR Solution (C++17)</h2>
+<p><code>&lt;memory_resource&gt;</code> introduces <strong>polymorphic, stateful, runtime-switchable</strong> allocators.</p>
+<h3 id="core-design">Core Design</h3>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────────────┐
+│  std::pmr::polymorphic_allocator&lt;T&gt;             │
+│  (Thin wrapper, always same type regardless     │
+│   of underlying resource)                        │
+│                                                  │
+│  Points to → std::pmr::memory_resource*         │
+│              (Abstract base class)               │
+└──────────────────────┬──────────────────────────┘
+                       │ virtual dispatch
+          ┌────────────┼────────────────────┐
+          ▼            ▼                    ▼
+   monotonic_     unsynchronized_     synchronized_
+   buffer_        pool_              pool_
+   resource       resource           resource
+</code></pre></div>
+
+<p><strong>Key insight</strong>: <code>pmr::vector&lt;int&gt;</code> is always the same type, regardless of which
+memory resource backs it. No more viral template propagation!</p>
+<h3 id="stdpmrmemory_resource-the-base-class"><code>std::pmr::memory_resource</code> — The Base Class</h3>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">memory_resource</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">allocate</span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">bytes</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">alignment</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">alignof</span><span class="p">(</span><span class="n">max_align_t</span><span class="p">));</span>
+<span class="w">    </span><span class="kt">void</span><span class="w">  </span><span class="nf">deallocate</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">p</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">bytes</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">alignment</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">alignof</span><span class="p">(</span><span class="n">max_align_t</span><span class="p">));</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w">  </span><span class="nf">is_equal</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">memory_resource</span><span class="o">&amp;</span><span class="w"> </span><span class="n">other</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+
+<span class="k">protected</span><span class="o">:</span>
+<span class="w">    </span><span class="c1">// Override these three:</span>
+<span class="w">    </span><span class="k">virtual</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">do_allocate</span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">bytes</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">alignment</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">virtual</span><span class="w"> </span><span class="kt">void</span><span class="w">  </span><span class="nf">do_deallocate</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">p</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">bytes</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">alignment</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">virtual</span><span class="w"> </span><span class="kt">bool</span><span class="w">  </span><span class="nf">do_is_equal</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">memory_resource</span><span class="o">&amp;</span><span class="w"> </span><span class="n">other</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<hr />
+<h2 id="the-3-standard-memory-resources">The 3 Standard Memory Resources</h2>
+<h3 id="1-monotonic_buffer_resource-bump-allocator-fastest">1. <code>monotonic_buffer_resource</code> — Bump Allocator (Fastest)</h3>
+<div class="highlight"><pre><span></span><code><span class="kt">char</span><span class="w"> </span><span class="n">buffer</span><span class="p">[</span><span class="mi">1024</span><span class="p">];</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">monotonic_buffer_resource</span><span class="w"> </span><span class="nf">mr</span><span class="p">(</span><span class="n">buffer</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">buffer</span><span class="p">));</span>
+
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">v</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mr</span><span class="p">);</span>
+<span class="n">v</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span><span class="mi">42</span><span class="p">);</span><span class="w">  </span><span class="c1">// Allocated from buffer, pointer just bumps forward</span>
+</code></pre></div>
+
+<p><strong>Properties</strong>:
+- Allocation = pointer increment (O(1), ~2 instructions)
+- <strong>Deallocation is a no-op</strong> — memory is never returned to the resource
+- <code>release()</code> frees ALL memory at once (resets to initial buffer)
+- Falls back to upstream resource when buffer exhausted
+- <strong>Perfect for</strong>: per-frame/per-cycle temporary allocations</p>
+<p><strong>When to use</strong>: You know the total allocation size upfront, or you&rsquo;ll release everything at once.</p>
+<h3 id="2-unsynchronized_pool_resource-pool-allocator-single-threaded">2. <code>unsynchronized_pool_resource</code> — Pool Allocator (Single-threaded)</h3>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">pool_options</span><span class="w"> </span><span class="n">opts</span><span class="p">;</span>
+<span class="n">opts</span><span class="p">.</span><span class="n">max_blocks_per_chunk</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1024</span><span class="p">;</span>
+<span class="n">opts</span><span class="p">.</span><span class="n">largest_required_pool_block</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span><span class="p">;</span>
+
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">unsynchronized_pool_resource</span><span class="w"> </span><span class="nf">pool</span><span class="p">(</span><span class="n">opts</span><span class="p">,</span><span class="w"> </span><span class="n">upstream</span><span class="p">);</span>
+</code></pre></div>
+
+<p><strong>Properties</strong>:
+- Maintains pools of different block sizes (like <code>tcmalloc</code>)
+- Allocation from matching pool = O(1) (pop from free list)
+- Deallocation returns to pool for reuse (unlike monotonic)
+- <strong>Not thread-safe</strong> — fastest pool option
+- <strong>Perfect for</strong>: single-threaded hot paths with mixed alloc/dealloc</p>
+<h3 id="3-synchronized_pool_resource-pool-allocator-thread-safe">3. <code>synchronized_pool_resource</code> — Pool Allocator (Thread-safe)</h3>
+<p>Same as unsynchronized but with internal synchronization.
+Use when multiple threads share the resource. Slower than unsynchronized.</p>
+<hr />
+<h2 id="global-resources-utilities">Global Resources &amp; Utilities</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// Default resource (wraps ::operator new)</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">memory_resource</span><span class="o">*</span><span class="w"> </span><span class="n">def</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">new_delete_resource</span><span class="p">();</span>
+
+<span class="c1">// Throws std::bad_alloc on ANY allocation (for testing)</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">memory_resource</span><span class="o">*</span><span class="w"> </span><span class="n">null</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">null_memory_resource</span><span class="p">();</span>
+
+<span class="c1">// Set/get global default</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">memory_resource</span><span class="o">*</span><span class="w"> </span><span class="n">old</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">set_default_resource</span><span class="p">(</span><span class="o">&amp;</span><span class="n">my_resource</span><span class="p">);</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">memory_resource</span><span class="o">*</span><span class="w"> </span><span class="n">cur</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">get_default_resource</span><span class="p">();</span>
+</code></pre></div>
+
+<hr />
+<h2 id="pmr-containers">PMR Containers</h2>
+<p>All standard containers have PMR aliases:</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;memory_resource&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;vector&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;string&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;map&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;unordered_map&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;deque&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;list&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;set&gt;</span>
+
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w">                 </span><span class="n">v</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mr</span><span class="p">);</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">string</span><span class="w">                      </span><span class="nf">s</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mr</span><span class="p">);</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">map</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">string</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="o">&gt;</span><span class="w">  </span><span class="n">m</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mr</span><span class="p">);</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">unordered_map</span><span class="o">&lt;</span><span class="kt">int</span><span class="p">,</span><span class="w"> </span><span class="kt">double</span><span class="o">&gt;</span><span class="w">  </span><span class="n">um</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mr</span><span class="p">);</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">deque</span><span class="o">&lt;</span><span class="kt">float</span><span class="o">&gt;</span><span class="w">                </span><span class="n">d</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mr</span><span class="p">);</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">list</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w">                   </span><span class="n">l</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mr</span><span class="p">);</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">set</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w">                    </span><span class="n">st</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mr</span><span class="p">);</span>
+</code></pre></div>
+
+<h3 id="critical-nested-container-propagation">Critical: Nested Container Propagation</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// CORRECT: Inner strings use the SAME memory resource as the vector</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">string</span><span class="o">&gt;</span><span class="w"> </span><span class="n">good</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mr</span><span class="p">);</span>
+<span class="n">good</span><span class="p">.</span><span class="n">emplace_back</span><span class="p">(</span><span class="s">&quot;hello&quot;</span><span class="p">);</span><span class="w">  </span><span class="c1">// &quot;hello&quot; allocated from mr!</span>
+
+<span class="c1">// BUG: Inner strings use the DEFAULT allocator (heap)</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">&gt;</span><span class="w"> </span><span class="n">bad</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mr</span><span class="p">);</span>
+<span class="n">bad</span><span class="p">.</span><span class="n">emplace_back</span><span class="p">(</span><span class="s">&quot;hello&quot;</span><span class="p">);</span><span class="w">  </span><span class="c1">// &quot;hello&quot; allocated from ::operator new!</span>
+</code></pre></div>
+
+<p>The inner container must also be a PMR type for propagation to work.</p>
+<hr />
+<h2 id="upstream-resources-chaining-allocators">Upstream Resources: Chaining Allocators</h2>
+<p>Resources can be chained. The upstream is the fallback when the primary is exhausted:</p>
+<div class="highlight"><pre><span></span><code>Stack buffer (fast, limited)
+    └──▶ monotonic_buffer_resource
+              └──▶ unsynchronized_pool_resource (upstream)
+                        └──▶ new_delete_resource (upstream)
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="kt">char</span><span class="w"> </span><span class="n">stack_buf</span><span class="p">[</span><span class="mi">4096</span><span class="p">];</span>
+
+<span class="c1">// Level 1: monotonic over stack buffer, falls back to pool</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">monotonic_buffer_resource</span><span class="w"> </span><span class="nf">mono</span><span class="p">(</span><span class="n">stack_buf</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">stack_buf</span><span class="p">),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">pool</span><span class="p">);</span>
+
+<span class="c1">// Level 2: pool falls back to new_delete</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">unsynchronized_pool_resource</span><span class="w"> </span><span class="nf">pool</span><span class="p">(</span><span class="n">opts</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">new_delete_resource</span><span class="p">());</span>
+</code></pre></div>
+
+<hr />
+<h2 id="writing-a-custom-memory_resource">Writing a Custom <code>memory_resource</code></h2>
+<p>Override three virtual functions:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">TrackingResource</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">memory_resource</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">memory_resource</span><span class="o">*</span><span class="w"> </span><span class="n">upstream_</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">size_t</span><span class="w"> </span><span class="n">total_allocated_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">size_t</span><span class="w"> </span><span class="n">total_deallocated_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w">    </span><span class="n">alloc_count_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="k">protected</span><span class="o">:</span>
+<span class="w">    </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">do_allocate</span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">bytes</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">alignment</span><span class="p">)</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">upstream_</span><span class="o">-&gt;</span><span class="n">allocate</span><span class="p">(</span><span class="n">bytes</span><span class="p">,</span><span class="w"> </span><span class="n">alignment</span><span class="p">);</span>
+<span class="w">        </span><span class="n">total_allocated_</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">bytes</span><span class="p">;</span>
+<span class="w">        </span><span class="o">++</span><span class="n">alloc_count_</span><span class="p">;</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">p</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kt">void</span><span class="w"> </span><span class="n">do_deallocate</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">p</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">bytes</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">alignment</span><span class="p">)</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">upstream_</span><span class="o">-&gt;</span><span class="n">deallocate</span><span class="p">(</span><span class="n">p</span><span class="p">,</span><span class="w"> </span><span class="n">bytes</span><span class="p">,</span><span class="w"> </span><span class="n">alignment</span><span class="p">);</span>
+<span class="w">        </span><span class="n">total_deallocated_</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">bytes</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">do_is_equal</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">memory_resource</span><span class="o">&amp;</span><span class="w"> </span><span class="n">other</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="k">this</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">&amp;</span><span class="n">other</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<hr />
+<h2 id="real-time-patterns">Real-Time Patterns</h2>
+<h3 id="pattern-1-pre-allocated-arena-for-hot-loop">Pattern 1: Pre-allocated Arena for Hot Loop</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// STARTUP (non-RT)</span>
+<span class="k">constexpr</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">ARENA_SIZE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1024</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1024</span><span class="p">;</span><span class="w">  </span><span class="c1">// 1 MB</span>
+<span class="k">alignas</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">max_align_t</span><span class="p">)</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="n">arena_buf</span><span class="p">[</span><span class="n">ARENA_SIZE</span><span class="p">];</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">monotonic_buffer_resource</span><span class="w"> </span><span class="nf">arena</span><span class="p">(</span><span class="n">arena_buf</span><span class="p">,</span><span class="w"> </span><span class="n">ARENA_SIZE</span><span class="p">,</span>
+<span class="w">                                           </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">null_memory_resource</span><span class="p">());</span>
+<span class="c1">// null upstream → crash immediately if we overflow (better than silent heap use)</span>
+
+<span class="c1">// HOT LOOP (RT, 1 kHz)</span>
+<span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">running</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// All allocations from pre-allocated buffer</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">SensorReading</span><span class="o">&gt;</span><span class="w"> </span><span class="n">readings</span><span class="p">(</span><span class="o">&amp;</span><span class="n">arena</span><span class="p">);</span>
+<span class="w">    </span><span class="n">readings</span><span class="p">.</span><span class="n">reserve</span><span class="p">(</span><span class="n">MAX_SENSORS</span><span class="p">);</span>
+<span class="w">    </span><span class="n">process</span><span class="p">(</span><span class="n">readings</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Reset for next cycle — O(1), no deallocation</span>
+<span class="w">    </span><span class="n">arena</span><span class="p">.</span><span class="n">release</span><span class="p">();</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="pattern-2-per-frame-allocator-game-engine-style">Pattern 2: Per-Frame Allocator (Game Engine Style)</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// Double-buffered arenas</span>
+<span class="kt">char</span><span class="w"> </span><span class="n">buf_a</span><span class="p">[</span><span class="n">FRAME_SIZE</span><span class="p">],</span><span class="w"> </span><span class="n">buf_b</span><span class="p">[</span><span class="n">FRAME_SIZE</span><span class="p">];</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">monotonic_buffer_resource</span><span class="o">*</span><span class="w"> </span><span class="n">current</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">new_arena</span><span class="p">(</span><span class="n">buf_a</span><span class="p">);</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">monotonic_buffer_resource</span><span class="o">*</span><span class="w"> </span><span class="n">previous</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">new_arena</span><span class="p">(</span><span class="n">buf_b</span><span class="p">);</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">on_frame</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">swap</span><span class="p">(</span><span class="n">current</span><span class="p">,</span><span class="w"> </span><span class="n">previous</span><span class="p">);</span>
+<span class="w">    </span><span class="n">current</span><span class="o">-&gt;</span><span class="n">release</span><span class="p">();</span>
+<span class="w">    </span><span class="c1">// current is now fresh, previous still valid for GPU reads</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="performance-pmr-vs-default-allocator">Performance: PMR vs Default Allocator</h2>
+<p>Typical benchmarks (10K small allocations):</p>
+<table>
+<thead>
+<tr>
+<th>Allocator</th>
+<th>Time</th>
+<th>Relative</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>new</code>/<code>delete</code></td>
+<td>500 μs</td>
+<td>1.0x (baseline)</td>
+</tr>
+<tr>
+<td><code>monotonic_buffer_resource</code></td>
+<td>5 μs</td>
+<td><strong>100x faster</strong></td>
+</tr>
+<tr>
+<td><code>unsynchronized_pool_resource</code></td>
+<td>15 μs</td>
+<td><strong>33x faster</strong></td>
+</tr>
+<tr>
+<td><code>synchronized_pool_resource</code></td>
+<td>25 μs</td>
+<td><strong>20x faster</strong></td>
+</tr>
+<tr>
+<td><code>monotonic</code> (stack buffer, no upstream)</td>
+<td>3 μs</td>
+<td><strong>167x faster</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The monotonic allocator is essentially free — it&rsquo;s a pointer bump.</p>
+<hr />
+<h2 id="ros-2-tie-in">ROS 2 Tie-In</h2>
+<p>ROS 2 (<code>rclcpp</code>) supports custom allocators for real-time nodes:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// rclcpp uses allocator interfaces for:</span>
+<span class="c1">// - Message allocation in callbacks</span>
+<span class="c1">// - Subscription/publisher internal buffers</span>
+<span class="c1">// - Executor message handling</span>
+
+<span class="c1">// The pattern: pre-allocate a PMR arena, pass to the executor</span>
+<span class="c1">// This avoids heap allocation in the callback hot path</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">alloc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">make_shared</span><span class="o">&lt;</span><span class="n">rclcpp</span><span class="o">::</span><span class="n">memory_strategies</span><span class="o">::</span>
+<span class="w">    </span><span class="n">allocator_memory_strategy</span><span class="o">::</span><span class="n">AllocatorMemoryStrategy</span><span class="o">&lt;</span><span class="n">MyPMRAllocator</span><span class="o">&gt;&gt;</span><span class="p">();</span>
+</code></pre></div>
+
+<p>Key ROS 2 RT rules:
+1. No allocation in timer/subscription callbacks
+2. Pre-allocate message buffers
+3. Use <code>realtime_tools::RealtimeBuffer</code> for inter-thread data
+4. PMR arenas for any temporary containers in callbacks</p>
+<hr />
+<h2 id="common-pitfalls">Common Pitfalls</h2>
+<h3 id="1-dangling-references-after-resource-destruction">1. Dangling References After Resource Destruction</h3>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;*</span><span class="w"> </span><span class="n">v</span><span class="p">;</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">monotonic_buffer_resource</span><span class="w"> </span><span class="n">mr</span><span class="p">;</span>
+<span class="w">    </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mr</span><span class="p">);</span>
+<span class="w">    </span><span class="n">v</span><span class="o">-&gt;</span><span class="n">push_back</span><span class="p">(</span><span class="mi">42</span><span class="p">);</span>
+<span class="p">}</span><span class="w">  </span><span class="c1">// mr destroyed! v&#39;s memory is now invalid!</span>
+<span class="n">v</span><span class="o">-&gt;</span><span class="n">at</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span><span class="w">  </span><span class="c1">// UNDEFINED BEHAVIOR — silent corruption</span>
+</code></pre></div>
+
+<h3 id="2-forgetting-upstream-silent-heap-allocation">2. Forgetting Upstream → Silent Heap Allocation</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// Default upstream is new_delete_resource() — silently falls back to heap</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">monotonic_buffer_resource</span><span class="w"> </span><span class="nf">mr</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="mi">64</span><span class="p">);</span><span class="w">  </span><span class="c1">// tiny buffer</span>
+<span class="c1">// If you exceed 64 bytes, it heap-allocates. Use null_resource to catch this:</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">monotonic_buffer_resource</span><span class="w"> </span><span class="nf">mr</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="mi">64</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">null_memory_resource</span><span class="p">());</span>
+</code></pre></div>
+
+<h3 id="3-thread-safety">3. Thread Safety</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// WRONG: sharing unsynchronized_pool across threads</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">unsynchronized_pool_resource</span><span class="w"> </span><span class="n">pool</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="w"> </span><span class="nf">t1</span><span class="p">([</span><span class="o">&amp;</span><span class="p">]{</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">v</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pool</span><span class="p">);</span><span class="w"> </span><span class="cm">/* ... */</span><span class="w"> </span><span class="p">});</span>
+<span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="w"> </span><span class="nf">t2</span><span class="p">([</span><span class="o">&amp;</span><span class="p">]{</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">v</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pool</span><span class="p">);</span><span class="w"> </span><span class="cm">/* ... */</span><span class="w"> </span><span class="p">});</span>
+<span class="c1">// Data race! Use synchronized_pool_resource instead.</span>
+</code></pre></div>
+
+<h3 id="4-non-pmr-inner-containers">4. Non-PMR Inner Containers</h3>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">&gt;</span><span class="w"> </span><span class="n">v</span><span class="p">(</span><span class="o">&amp;</span><span class="n">arena</span><span class="p">);</span><span class="w">  </span><span class="c1">// std::string uses default new!</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">string</span><span class="o">&gt;</span><span class="w"> </span><span class="n">v</span><span class="p">(</span><span class="o">&amp;</span><span class="n">arena</span><span class="p">);</span><span class="w">  </span><span class="c1">// CORRECT</span>
+</code></pre></div>
+
+<hr />
+<h2 id="comparison-with-other-allocators">Comparison with Other Allocators</h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>PMR</th>
+<th>tcmalloc</th>
+<th>jemalloc</th>
+<th>mimalloc</th>
+<th>Custom Pool</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Standard C++</td>
+<td>✅</td>
+<td>❌ (replace malloc)</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>Per-container control</td>
+<td>✅</td>
+<td>❌ (global)</td>
+<td>❌</td>
+<td>❌</td>
+<td>Depends</td>
+</tr>
+<tr>
+<td>Deterministic timing</td>
+<td>✅ (monotonic)</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Zero-overhead dealloc</td>
+<td>✅ (monotonic)</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>Depends</td>
+</tr>
+<tr>
+<td>Works with STL</td>
+<td>✅</td>
+<td>✅ (transparent)</td>
+<td>✅</td>
+<td>✅</td>
+<td>Complex</td>
+</tr>
+<tr>
+<td>Composable/chainable</td>
+<td>✅</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>Manual</td>
+</tr>
+<tr>
+<td>Thread-safe option</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>Manual</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Bottom line</strong>: PMR is the right tool when you need per-container, deterministic,
+composable allocation within standard C++. Use <code>tcmalloc</code>/<code>jemalloc</code>/<code>mimalloc</code>
+as global replacements when you want better average performance without per-container control.</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>PMR solves the allocator propagation problem</strong> — one type for all allocators</li>
+<li><strong>monotonic_buffer_resource is your RT workhorse</strong> — bump allocator, release-all-at-once</li>
+<li><strong>Chain resources</strong> — stack → monotonic → pool → new_delete</li>
+<li><strong>Use null_memory_resource as upstream</strong> to catch unexpected overflow</li>
+<li><strong>Inner containers must also be PMR</strong> for propagation to work</li>
+<li><strong>Pre-allocate everything at startup</strong>, use arenas in hot paths</li>
+<li><strong>PMR + null upstream = zero-allocation guarantee</strong> at compile-test time</li>
+</ol>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

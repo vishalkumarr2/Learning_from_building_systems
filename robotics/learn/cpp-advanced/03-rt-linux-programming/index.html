@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Week 3 — Real-Time Linux Programming - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-indigo-600 hover:text-indigo-800 mb-4 inline-block">&larr; Back to C++ Advanced</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="week-3-real-time-linux-programming">Week 3 — Real-Time Linux Programming</h1>
+<h2 id="what-real-time-actually-means">What &ldquo;Real-Time&rdquo; Actually Means</h2>
+<p>Real-time does <strong>not</strong> mean fast. It means <strong>deterministic</strong> — the system guarantees a
+response within a known time bound. A response that arrives 1μs late can be as
+catastrophic as one that never arrives.</p>
+<h3 id="hard-real-time">Hard Real-Time</h3>
+<p><strong>Definition:</strong> Missing a deadline is a system failure.</p>
+<p><strong>Examples:</strong>
+- <strong>Airbag controller</strong> — must fire within 15ms of sensor trigger. 16ms = passenger dies.
+- <strong>Anti-lock braking (ABS)</strong> — must modulate brakes every 5ms. Miss one = wheel locks.
+- <strong>Pacemaker</strong> — electrical pulse must fire within the cardiac cycle. Late = fibrillation.
+- <strong>Industrial robot arm</strong> — position update must arrive every 1ms. Late = arm overshoots into worker.</p>
+<p><strong>Guarantee:</strong> Worst-Case Execution Time (WCET) is analyzed and proven at design time.</p>
+<h3 id="soft-real-time">Soft Real-Time</h3>
+<p><strong>Definition:</strong> Occasional deadline misses are tolerable; quality degrades gracefully.</p>
+<p><strong>Examples:</strong>
+- <strong>Video playback</strong> — drop a frame, you see a flicker. Nobody dies.
+- <strong>VoIP call</strong> — lose a packet, you hear a click. Conversation continues.
+- <strong>Web server</strong> — 99th percentile latency of 200ms is fine; 500ms occasionally is ugly but OK.</p>
+<p><strong>Guarantee:</strong> Statistical — p99/p99.9 within bounds.</p>
+<h3 id="firm-real-time">Firm Real-Time</h3>
+<p><strong>Definition:</strong> A late result has zero value but doesn&rsquo;t cause catastrophe.</p>
+<p><strong>Examples:</strong>
+- <strong>High-frequency trading</strong> — a stale quote is worthless. Late order = missed profit, not death.
+- <strong>Radar tracking</strong> — a late return is discarded. The target has moved.
+- <strong>OKS AMR control loop</strong> — a late cmd_vel is useless; the robot is now 10mm further along.</p>
+<p><strong>Key insight for our work:</strong> The OKS robot estimator + controller runs at ~100Hz (10ms).
+That makes it firm-RT. The sensorbar must deliver fresh data every 10ms. When it delivers
+duplicated data (stale), the estimator diverges — exactly the failure mode we&rsquo;ve been
+investigating in tickets #98301, #99185, #98838.</p>
+<hr />
+<h2 id="the-rt-forbidden-operations">The RT-Forbidden Operations</h2>
+<p>In a real-time code path (the &ldquo;hot loop&rdquo;), these operations are <strong>forbidden</strong>.
+Not &ldquo;discouraged&rdquo; — <strong>forbidden</strong>. Each one can cause unbounded latency spikes.</p>
+<h3 id="1-malloc-operator-new">1. <code>malloc</code> / <code>operator new</code></h3>
+<p><strong>Why forbidden:</strong> <code>malloc</code> uses a freelist with locks. It can:
+- Acquire a global mutex (blocks on contention)
+- Call <code>mmap</code>/<code>brk</code> (system call → context switch → page fault)
+- Trigger the OOM killer (process gets killed)</p>
+<p><strong>How bad:</strong> Typical: 0.5-5μs. Worst case: 10-500μs. With OOM pressure: milliseconds.</p>
+<div class="highlight"><pre><span></span><code>Typical malloc timeline:
+╭─────────────────────────────────────────────────────╮
+│ Check freelist → found → return ptr         ~50ns   │
+│ Check freelist → empty → call mmap()        ~5μs    │
+│ Check freelist → empty → mmap → page fault  ~50μs   │
+│ Check freelist → lock contention → spin     ~100μs  │
+╰─────────────────────────────────────────────────────╯
+</code></pre></div>
+
+<p><strong>Fix:</strong> Pre-allocate everything before entering the RT loop. Use pool allocators (see ex04).</p>
+<h3 id="2-printf-stdcout-any-io-to-file-or-console">2. <code>printf</code> / <code>std::cout</code> / any I/O to file or console</h3>
+<p><strong>Why forbidden:</strong> These call <code>write()</code>, which:
+- Acquires a stdio lock (contention with other threads)
+- May flush the buffer (triggering a <code>write</code> syscall)
+- <code>write</code> to a terminal can block if the terminal buffer is full
+- <code>write</code> to a file can trigger filesystem journaling (ext4 journal commit = 5ms)</p>
+<p><strong>How bad:</strong> Typical: 1-10μs. Worst case: 100μs-5ms (filesystem flush).</p>
+<p><strong>Fix:</strong> Write to a pre-allocated ring buffer. A separate low-priority thread drains
+the buffer to disk/console. This is the telemetry pattern in ex05.</p>
+<h3 id="3-mutex-without-priority-inheritance">3. Mutex (without Priority Inheritance)</h3>
+<p><strong>Why forbidden:</strong> Causes <strong>priority inversion</strong> — the Mars Pathfinder bug:</p>
+<div class="highlight"><pre><span></span><code>Priority Inversion Timeline:
+─────────────────────────────────────────────────────
+Time →
+LOW  ████████████████░░░░░░░████████  (holds mutex, runs)
+MED  ░░░░░░░░░░░░░░░██████████░░░░░░  (ready, preempts LOW)
+HIGH ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  (BLOCKED on mutex)
+                    ↑ HIGH blocked here because MED
+                      preempts LOW, which holds lock
+
+With Priority Inheritance:
+LOW  ████████████████░░░████░░░░░░░░  (boosted to HIGH prio)
+MED  ░░░░░░░░░░░░░░░░░░░░░░███████░  (can&#39;t preempt boosted LOW)
+HIGH ░░░░░░░░░░░░░░░░░░░███░░░░░░░░  (gets mutex quickly)
+─────────────────────────────────────────────────────
+</code></pre></div>
+
+<p><strong>Fix:</strong> Use <code>PTHREAD_PRIO_INHERIT</code> mutexes. Or better: use lock-free data structures
+(SPSC queues from Week 2).</p>
+<h3 id="4-disk-io-readwriteopenfsync">4. Disk I/O (read/write/open/fsync)</h3>
+<p><strong>Why forbidden:</strong> Filesystem operations can:
+- Wait for disk seek (HDD: 5-10ms)
+- Wait for journal commit (ext4: every 5s, or at fsync)
+- Trigger page cache eviction (kernel does I/O under your allocation)
+- Wait for NFS/CIFS network timeout (seconds)</p>
+<p><strong>Fix:</strong> All logging goes through a lock-free queue to a non-RT thread.</p>
+<h3 id="5-system-calls-that-can-page-fault">5. System calls that can page fault</h3>
+<p><strong>Why forbidden:</strong> <code>mmap</code>, <code>brk</code>, and even <code>read</code> can trigger page faults.
+A <strong>major page fault</strong> requires reading from disk — 100μs to 10ms.</p>
+<p><strong>Fix:</strong> Call <code>mlockall(MCL_CURRENT | MCL_FUTURE)</code> at startup.
+Touch all stack pages (&ldquo;prefault the stack&rdquo;) before entering the RT loop.</p>
+<h3 id="summary-table">Summary Table</h3>
+<div class="highlight"><pre><span></span><code>╔════════════════════╦═════════╦═══════════╦═══════════════════════╗
+║ Operation          ║ Typical ║ Worst     ║ Fix                   ║
+╠════════════════════╬═════════╬═══════════╬═══════════════════════╣
+║ malloc/new         ║ 0.5μs   ║ 500μs     ║ Pool allocator / PMR  ║
+║ printf/cout        ║ 5μs     ║ 5ms       ║ Lock-free log queue   ║
+║ mutex (no PI)      ║ 0.1μs   ║ unbounded ║ PI mutex / lock-free  ║
+║ disk I/O           ║ 50μs    ║ 10ms      ║ Separate I/O thread   ║
+║ page fault         ║ 1μs     ║ 10ms      ║ mlockall + prefault   ║
+╚════════════════════╩═════════╩═══════════╩═══════════════════════╝
+</code></pre></div>
+
+<hr />
+<h2 id="preempt_rt-patch">PREEMPT_RT Patch</h2>
+<p>Standard Linux is a <strong>general-purpose OS</strong>, not a real-time OS. The PREEMPT_RT patch
+(mainlined into Linux 6.12+) converts it to a deterministic system. Here&rsquo;s what it changes:</p>
+<h3 id="what-preempt_rt-does">What PREEMPT_RT Does</h3>
+<ol>
+<li>
+<p><strong>Makes spinlocks preemptible</strong> — In vanilla Linux, <code>spin_lock()</code> disables preemption.
+   Under PREEMPT_RT, most spinlocks become sleeping mutexes with priority inheritance.
+   This means a high-priority RT thread can preempt kernel code that holds a &ldquo;spinlock&rdquo;.</p>
+</li>
+<li>
+<p><strong>Threaded interrupt handlers</strong> — In vanilla Linux, hardware interrupts run in a
+   special context that can&rsquo;t be preempted. PREEMPT_RT moves interrupt handlers into
+   kernel threads with configurable priorities. Your RT thread can have higher priority
+   than a network interrupt.</p>
+</li>
+<li>
+<p><strong>High-resolution timers</strong> — <code>clock_nanosleep</code> becomes accurate to ~1μs instead of
+   the default timer tick (typically 1ms or 4ms on vanilla kernels).</p>
+</li>
+<li>
+<p><strong>Sleeping spinlocks become PI-aware</strong> — Since spinlocks become mutexes, they inherit
+   priority inheritance automatically, preventing priority inversion in kernel code.</p>
+</li>
+</ol>
+<h3 id="how-to-check-if-you-have-rt">How to check if you have RT</h3>
+<div class="highlight"><pre><span></span><code>uname<span class="w"> </span>-a<span class="w">    </span><span class="c1"># look for &quot;PREEMPT_RT&quot; in the output</span>
+cat<span class="w"> </span>/sys/kernel/realtime<span class="w">   </span><span class="c1"># &quot;1&quot; if RT kernel (if file exists)</span>
+</code></pre></div>
+
+<h3 id="typical-worst-case-latencies">Typical worst-case latencies</h3>
+<div class="highlight"><pre><span></span><code>╔═══════════════════╦═══════════════╦═══════════════╗
+║                   ║ Vanilla Linux ║ PREEMPT_RT    ║
+╠═══════════════════╬═══════════════╬═══════════════╣
+║ Timer jitter      ║ 50-500μs      ║ 1-15μs        ║
+║ IRQ latency       ║ 5-100μs       ║ 3-10μs        ║
+║ Scheduling jitter ║ 10-1000μs     ║ 2-20μs        ║
+╚═══════════════════╩═══════════════╩═══════════════╝
+</code></pre></div>
+
+<hr />
+<h2 id="thread-affinity-and-cpu-isolation">Thread Affinity and CPU Isolation</h2>
+<h3 id="why-core-0-is-never-for-rt">Why Core 0 is Never for RT</h3>
+<p>Core 0 handles:
+- Timer interrupts (the scheduler)
+- RCU callbacks (kernel memory reclamation)
+- Workqueues (deferred kernel work)
+- Most IRQs by default</p>
+<p>Pinning an RT thread to core 0 means it fights the kernel for CPU time.</p>
+<h3 id="cpu-isolation-isolcpus">CPU Isolation: <code>isolcpus</code></h3>
+<p>Boot parameter that tells the scheduler &ldquo;don&rsquo;t put anything on these cores&rdquo;:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># In /etc/default/grub:</span>
+<span class="nv">GRUB_CMDLINE_LINUX</span><span class="o">=</span><span class="s2">&quot;isolcpus=2,3 nohz_full=2,3 rcu_nocbs=2,3&quot;</span>
+</code></pre></div>
+
+<ul>
+<li><code>isolcpus=2,3</code> — scheduler won&rsquo;t place tasks on cores 2,3</li>
+<li><code>nohz_full=2,3</code> — disable timer tick on these cores when possible</li>
+<li><code>rcu_nocbs=2,3</code> — move RCU callbacks off these cores</li>
+</ul>
+<div class="highlight"><pre><span></span><code>CPU Core Layout for RT System:
+╔════════╦════════════════════════════════════════════╗
+║ Core 0 ║ OS kernel, IRQs, housekeeping             ║
+║ Core 1 ║ Non-RT threads (telemetry, logging)        ║
+║ Core 2 ║ ★ RT control loop (isolated)               ║
+║ Core 3 ║ ★ RT sensor processing (isolated)          ║
+╚════════╩════════════════════════════════════════════╝
+</code></pre></div>
+
+<h3 id="setting-thread-affinity-programmatically">Setting Thread Affinity Programmatically</h3>
+<div class="highlight"><pre><span></span><code><span class="kt">cpu_set_t</span><span class="w"> </span><span class="n">cpuset</span><span class="p">;</span>
+<span class="n">CPU_ZERO</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cpuset</span><span class="p">);</span>
+<span class="n">CPU_SET</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">cpuset</span><span class="p">);</span><span class="w">  </span><span class="c1">// pin to core 2</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sched_setaffinity</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">cpuset</span><span class="p">),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">cpuset</span><span class="p">);</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">rc</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;sched_setaffinity failed&quot;</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="setting-rt-scheduling-policy">Setting RT Scheduling Policy</h3>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">sched_param</span><span class="w"> </span><span class="n">param</span><span class="p">;</span>
+<span class="n">param</span><span class="p">.</span><span class="n">sched_priority</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">80</span><span class="p">;</span><span class="w">  </span><span class="c1">// 1-99, higher = more urgent</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">rc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sched_setscheduler</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">SCHED_FIFO</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">param</span><span class="p">);</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">rc</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Requires CAP_SYS_NICE or root</span>
+<span class="w">    </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;sched_setscheduler failed (need root or CAP_SYS_NICE)&quot;</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>SCHED_FIFO vs SCHED_RR:</strong>
+- <code>SCHED_FIFO</code> — runs until it voluntarily yields or a higher-priority thread arrives.
+  No timeslicing. Best for RT — predictable.
+- <code>SCHED_RR</code> — like FIFO but with timeslicing among same-priority threads.
+  Adds scheduling jitter. Avoid for hard RT.</p>
+<hr />
+<h2 id="the-cyclic-executive-pattern">The Cyclic Executive Pattern</h2>
+<p>The fundamental RT control loop pattern. Every robot controller, flight controller,
+and industrial PLC uses a variation of this:</p>
+<div class="highlight"><pre><span></span><code>Cyclic Executive Timing (1kHz = 1ms period):
+
+│◄──────── 1ms ─────────►│◄──────── 1ms ─────────►│
+│                         │                         │
+│  Sensor  │ Compute │Act│  Sensor  │ Compute │Act│
+│  200μs   │  400μs  │50│  200μs   │  400μs  │50│
+│          │         │μs│          │         │μs│
+├──────────┴─────────┴───┤──────────┴─────────┴───┤
+│     slack: 350μs       │     slack: 350μs       │
+│◄ sleep ──────────────► │◄ sleep ──────────────► │
+
+Overrun Detection:
+│◄──────── 1ms ─────────►│
+│                         │
+│  Sensor  │ Compute (overrun!) │
+│  200μs   │  900μs              │
+│                                │← missed deadline!
+│  LOG OVERRUN, skip to next     │
+</code></pre></div>
+
+<h3 id="key-implementation-details">Key Implementation Details</h3>
+<p><strong>Absolute time, not relative:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// WRONG — drifts by processing time each cycle:</span>
+<span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">running</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">do_work</span><span class="p">();</span>
+<span class="w">    </span><span class="n">clock_nanosleep</span><span class="p">(</span><span class="n">CLOCK_MONOTONIC</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">period</span><span class="p">,</span><span class="w"> </span><span class="k">nullptr</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="c1">// CORRECT — always wakes at exact multiples of period:</span>
+<span class="n">clock_gettime</span><span class="p">(</span><span class="n">CLOCK_MONOTONIC</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">next_wake</span><span class="p">);</span>
+<span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">running</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">do_work</span><span class="p">();</span>
+<span class="w">    </span><span class="n">next_wake</span><span class="p">.</span><span class="n">tv_nsec</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">period_ns</span><span class="p">;</span>
+<span class="w">    </span><span class="n">normalize_timespec</span><span class="p">(</span><span class="n">next_wake</span><span class="p">);</span><span class="w">  </span><span class="c1">// handle nsec overflow</span>
+<span class="w">    </span><span class="n">clock_nanosleep</span><span class="p">(</span><span class="n">CLOCK_MONOTONIC</span><span class="p">,</span><span class="w"> </span><span class="n">TIMER_ABSTIME</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">next_wake</span><span class="p">,</span><span class="w"> </span><span class="k">nullptr</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Overrun detection:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">timespec</span><span class="w"> </span><span class="n">now</span><span class="p">;</span>
+<span class="n">clock_gettime</span><span class="p">(</span><span class="n">CLOCK_MONOTONIC</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">now</span><span class="p">);</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">timespec_diff_us</span><span class="p">(</span><span class="n">now</span><span class="p">,</span><span class="w"> </span><span class="n">next_wake</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">overrun_count</span><span class="o">++</span><span class="p">;</span>
+<span class="w">    </span><span class="c1">// Skip to the next aligned period</span>
+<span class="w">    </span><span class="n">next_wake</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">now</span><span class="p">;</span>
+<span class="w">    </span><span class="n">align_to_period</span><span class="p">(</span><span class="n">next_wake</span><span class="p">,</span><span class="w"> </span><span class="n">period_ns</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="pool-allocators-and-pmr">Pool Allocators and PMR</h2>
+<h3 id="the-problem">The Problem</h3>
+<p><code>std::vector::push_back</code> can call <code>malloc</code>. In a 1kHz loop, even one malloc
+per cycle means 1000 mallocs/second, any of which can stall.</p>
+<h3 id="solution-1-fixed-pool-allocator">Solution 1: Fixed Pool Allocator</h3>
+<p>Pre-allocate a fixed number of objects. Alloc and free are O(1):</p>
+<div class="highlight"><pre><span></span><code>FixedPool&lt;Sensor, 128&gt; Layout:
+╔══════════════════════════════════════════════════╗
+║ storage[0] │ storage[1] │ ... │ storage[127]     ║
+║  (Sensor)  │  (Sensor)  │     │  (Sensor)        ║
+╠══════════════════════════════════════════════════╣
+║ free_list → [4] → [7] → [12] → ... → [null]     ║
+║ (singly-linked list through unused slots)        ║
+╚══════════════════════════════════════════════════╝
+
+alloc():  pop head of free_list     O(1)
+free(p):  push p onto free_list     O(1)
+</code></pre></div>
+
+<h3 id="solution-2-pmr-polymorphic-memory-resource">Solution 2: PMR (Polymorphic Memory Resource)</h3>
+<p>C++17 added <code>&lt;memory_resource&gt;</code>. The idea: containers take an allocator
+parameter that can be swapped without changing the container type.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Stack buffer — no heap allocation ever</span>
+<span class="k">alignas</span><span class="p">(</span><span class="mi">16</span><span class="p">)</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">byte</span><span class="w"> </span><span class="n">buf</span><span class="p">[</span><span class="mi">4096</span><span class="p">];</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">monotonic_buffer_resource</span><span class="w"> </span><span class="n">pool</span><span class="p">{</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">)};</span>
+
+<span class="c1">// Vector that allocates from our stack buffer</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pmr</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">data</span><span class="p">{</span><span class="o">&amp;</span><span class="n">pool</span><span class="p">};</span>
+<span class="n">data</span><span class="p">.</span><span class="n">reserve</span><span class="p">(</span><span class="mi">100</span><span class="p">);</span><span class="w">  </span><span class="c1">// allocates from buf, not from heap</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>PMR monotonic_buffer_resource Layout:
+╔════════════════════════════════════════════════╗
+║ Stack buffer (4096 bytes)                      ║
+║ ┌──────┬──────┬──────┬─────────────────────┐  ║
+║ │ used │ used │ used │  free space          │  ║
+║ │ (vec)│(str1)│(str2)│← next allocation here│  ║
+║ └──────┴──────┴──────┴─────────────────────┘  ║
+║                       ↑ current pointer        ║
+╚════════════════════════════════════════════════╝
+Note: monotonic = never frees individual chunks.
+      Reset deallocates everything at once.
+</code></pre></div>
+
+<p><strong>Key PMR types:</strong>
+- <code>monotonic_buffer_resource</code> — bumps a pointer, never frees. Fastest. Reset all at once.
+- <code>unsynchronized_pool_resource</code> — pool of fixed-size blocks. Good for mixed sizes.
+- <code>synchronized_pool_resource</code> — thread-safe version (adds locking — avoid in RT).</p>
+<hr />
+<h2 id="the-prefault-stack-trick">The Prefault Stack Trick</h2>
+<p>When a function is called, the stack grows. If the stack page hasn&rsquo;t been
+accessed before, the first write triggers a <strong>page fault</strong> — the kernel must
+allocate a physical page. That&rsquo;s 5-50μs of latency in your RT loop.</p>
+<h3 id="the-fix">The Fix</h3>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">prefault_stack</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Lock all current and future pages in RAM</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">mlockall</span><span class="p">(</span><span class="n">MCL_CURRENT</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">MCL_FUTURE</span><span class="p">)</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;mlockall failed (need CAP_IPC_LOCK or root)&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Touch every page of a large stack allocation</span>
+<span class="w">    </span><span class="k">volatile</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="n">stack_touch</span><span class="p">[</span><span class="mi">1024</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1024</span><span class="p">];</span><span class="w">  </span><span class="c1">// 1MB</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">stack_touch</span><span class="p">);</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">4096</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">stack_touch</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">  </span><span class="c1">// write touches the page</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Why <code>volatile</code>?</strong> Without it, the compiler optimizes away the dead writes.</p>
+<p><strong>Why every 4096 bytes?</strong> That&rsquo;s one page. We need to touch at least one byte
+per page to force the kernel to map a physical frame.</p>
+<p><strong>Why <code>mlockall</code>?</strong> Without it, the kernel can swap out pages we&rsquo;ve faulted in.
+<code>mlockall(MCL_FUTURE)</code> prevents future pages from being swappable too.</p>
+<div class="highlight"><pre><span></span><code>Stack Prefault Sequence:
+
+Before:   [mapped] [mapped] [guard] [unmapped] [unmapped] ...
+                              ↑ stack grows down
+
+After mlockall + touch:
+          [locked] [locked] [locked] [locked] [locked] ...
+          All pages physically present and pinned in RAM
+</code></pre></div>
+
+<hr />
+<h2 id="putting-it-all-together-rt-initialization-checklist">Putting It All Together: RT Initialization Checklist</h2>
+<p>Before entering the RT loop, every real-time Linux application must:</p>
+<div class="highlight"><pre><span></span><code>RT Application Startup Sequence:
+╔═══╦══════════════════════════════════════════════════╗
+║ 1 ║ mlockall(MCL_CURRENT | MCL_FUTURE)               ║
+║ 2 ║ Prefault stack (volatile touch 1MB)               ║
+║ 3 ║ Pre-allocate all buffers (pool/PMR)               ║
+║ 4 ║ Set thread affinity (pin to isolated core)        ║
+║ 5 ║ Set SCHED_FIFO with appropriate priority          ║
+║ 6 ║ Start non-RT threads (logging, telemetry)         ║
+║ 7 ║ ═══ ENTER RT LOOP ═══                            ║
+║   ║ No malloc, no printf, no mutex, no I/O            ║
+╚═══╩══════════════════════════════════════════════════╝
+</code></pre></div>
+
+<hr />
+<h2 id="connection-to-our-work">Connection to Our Work</h2>
+<p>The OKS robot runs ROS1 on Linux. The navigation estimator and controller
+run as ROS nodes at ~100Hz. They are <strong>not</strong> configured for hard RT:
+- No <code>SCHED_FIFO</code>
+- No <code>mlockall</code>
+- No isolated CPUs
+- <code>rospy</code> and <code>roscpp</code> both call <code>malloc</code> freely</p>
+<p>This explains why the system is vulnerable to latency spikes: when the kernel
+is busy (disk flush, network burst, RCU grace period), the estimator loop
+gets delayed, stale sensorbar data accumulates, and the robot diverges.</p>
+<p>Understanding RT programming helps us:
+1. <strong>Diagnose</strong> why certain failures only happen under load
+2. <strong>Design</strong> better firmware (STM32 Zephyr runs actual RTOS)
+3. <strong>Build</strong> deterministic test tools (like <code>nav_tile_test.py</code> with timing)
+4. <strong>Read</strong> controller code critically — spot non-RT-safe patterns</p>
+<hr />
+<h2 id="exercises-this-week">Exercises This Week</h2>
+<table>
+<thead>
+<tr>
+<th>Exercise</th>
+<th>What You Build</th>
+<th>Key Concept</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ex01</td>
+<td>RT-forbidden demo</td>
+<td>Measure malloc/printf latency tails</td>
+</tr>
+<tr>
+<td>ex02</td>
+<td>Thread affinity</td>
+<td><code>sched_setaffinity</code>, SCHED_FIFO, cache effects</td>
+</tr>
+<tr>
+<td>ex03</td>
+<td>Cyclic executive</td>
+<td>1kHz loop, jitter measurement, overrun detection</td>
+</tr>
+<tr>
+<td>ex04</td>
+<td>Pool allocator</td>
+<td><code>FixedPool&lt;T,N&gt;</code>, PMR, heap detection</td>
+</tr>
+<tr>
+<td>ex05</td>
+<td>RT + telemetry</td>
+<td>Full mini-project: RT loop + SPSC + CSV telemetry</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Puzzle</th>
+<th>What You Explore</th>
+<th>Key Insight</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>puzzle01</td>
+<td>Relative vs absolute sleep</td>
+<td>Drift accumulation</td>
+</tr>
+<tr>
+<td>puzzle02</td>
+<td>Priority inversion</td>
+<td>Mars Pathfinder, <code>PTHREAD_PRIO_INHERIT</code></td>
+</tr>
+<tr>
+<td>puzzle03</td>
+<td>Page fault latency</td>
+<td><code>mlockall</code> + prefault eliminates spikes</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>&ldquo;The Design of the PREEMPT_RT Patch&rdquo; — LWN.net series</li>
+<li>&ldquo;Real-Time Linux Wiki&rdquo; — rt.wiki.kernel.org</li>
+<li>&ldquo;Is Parallel Programming Hard?&rdquo; — Paul McKenney, Ch. 7-8 on RT</li>
+<li>&ldquo;Linux Device Drivers, 3rd Ed.&rdquo; — Ch. 7 (Time, Delays, Deferred Work)</li>
+<li>cyclictest tool — the standard RT latency benchmark</li>
+<li>OKS firmware: <code>oks_navigation_estimator</code> runs a cyclic pattern at 100Hz</li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

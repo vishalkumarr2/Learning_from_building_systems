@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 — I2C Deep Dive - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-amber-600 hover:text-amber-800 mb-4 inline-block">&larr; Back to Electronics</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="06-i2c-deep-dive">06 — I2C Deep Dive</h1>
+<h3 id="from-open-drain-physics-to-complete-protocol-transactions">From open-drain physics to complete protocol transactions</h3>
+<p><strong>Prerequisites:</strong> Chapter 01 (RC time constants, pull-ups), Chapter 02 (MOSFETs, open-drain)
+<strong>Unlocks:</strong> EEPROM access, sensor configuration (IMU, temp, pressure), IO expanders, multi-sensor buses</p>
+<hr />
+<h2 id="why-should-i-care-stm32jetson-project-context">Why Should I Care? (STM32/Jetson Project Context)</h2>
+<ul>
+<li>The ICM-42688 IMU supports I2C (in addition to SPI) — many breakout boards default to I2C</li>
+<li>I2C EEPROMs store calibration data and serial numbers on production boards</li>
+<li>Temperature sensors (TMP102), IO expanders (PCA9555), and other peripherals sit on I2C</li>
+<li>When I2C misbehaves (&ldquo;bus stuck&rdquo;), you need to understand the physics to recover</li>
+<li>Understanding I2C&rsquo;s open-drain nature is essential for designing multi-sensor harnesses on robots</li>
+</ul>
+<hr />
+<h1 id="part-1-the-physics-open-drain-and-pull-ups">PART 1 — THE PHYSICS: OPEN-DRAIN AND PULL-UPS</h1>
+<hr />
+<h2 id="11-what-open-drain-means-the-fundamental-insight">1.1 What &ldquo;Open-Drain&rdquo; Means — The Fundamental Insight</h2>
+<p>Every I2C output stage is an N-channel MOSFET (or BJT) that can only PULL the line LOW. It CANNOT drive the line HIGH. This is called &ldquo;open-drain&rdquo; because the MOSFET drain is left &ldquo;open&rdquo; (not connected to VCC).</p>
+<div class="highlight"><pre><span></span><code>    Inside every I2C device&#39;s output pin:
+
+    SDA or SCL bus wire
+         │
+         │ ← this point is either:
+         │    - PULLED LOW by the MOSFET (device writes &quot;0&quot;)
+         │    - LEFT FLOATING (device writes &quot;1&quot; → pull-up makes it HIGH)
+         │
+        ┌┤ N-channel MOSFET
+   G ──┤│
+        │
+       GND
+
+    When Gate = HIGH: MOSFET ON → wire pulled to GND (logic 0)
+    When Gate = LOW:  MOSFET OFF → wire released → pull-up resistor pulls to VCC (logic 1)
+</code></pre></div>
+
+<p><strong>Why not just drive HIGH?</strong></p>
+<p>If two devices tried to drive the same wire — one HIGH (VCC) and one LOW (GND) — you&rsquo;d get a short circuit (VCC directly shorted to GND through the two output stages). Smoke. Dead chips.</p>
+<p>With open-drain, this can&rsquo;t happen:
+- Device A pulls LOW (MOSFET on) + Device B releases (MOSFET off) → wire is LOW ✓
+- Device A releases + Device B pulls LOW → wire is LOW ✓
+- Device A pulls LOW + Device B pulls LOW → wire is LOW ✓ (both MOSFETs to GND, no conflict)
+- Device A releases + Device B releases → pull-up pulls HIGH ✓</p>
+<p><strong>This is called &ldquo;wired-AND&rdquo;</strong>: the line is HIGH only if ALL devices release it. Any single device can pull it LOW. This is safe for multi-device buses.</p>
+<div class="highlight"><pre><span></span><code>    WIRED-AND truth table:
+
+    Device A  Device B  Bus Level   Logic
+    Release   Release   HIGH (1)    1 AND 1 = 1
+    Release   Pull LOW  LOW (0)     1 AND 0 = 0
+    Pull LOW  Release   LOW (0)     0 AND 1 = 0
+    Pull LOW  Pull LOW  LOW (0)     0 AND 0 = 0
+
+    → ANY device pulling LOW makes the bus LOW
+    → Bus is HIGH only when ALL devices release
+</code></pre></div>
+
+<hr />
+<h2 id="12-the-pull-up-resistor-why-its-value-matters">1.2 The Pull-Up Resistor — Why Its Value Matters</h2>
+<p>The pull-up is what makes the wire go HIGH. It&rsquo;s an external resistor between the bus wire and VCC.</p>
+<div class="highlight"><pre><span></span><code>    VCC (3.3V)
+      │
+     ┌┴┐
+     │Rp│  ← Pull-up resistor
+     └┬┘
+      │
+      ├── SDA bus wire ── Device 1 ── Device 2 ── Device 3
+      │
+     ┌┴┐
+     │Rp│  ← Pull-up (separate for SCL, same value)
+     └┬┘
+      │
+      ├── SCL bus wire ── Device 1 ── Device 2 ── Device 3
+</code></pre></div>
+
+<p><strong>The RC time constant problem:</strong></p>
+<p>The bus wire has capacitance: each device adds ~10pF for its input pin, plus ~50pF per 10cm of wire. The pull-up must charge this capacitance to VCC quickly enough for the bus speed.</p>
+<div class="highlight"><pre><span></span><code>    Rising edge is a capacitor charging through a resistor:
+
+    V(t) = VCC × (1 - e^(-t/(Rp × Cbus)))
+
+    The I2C spec requires:
+    - Standard mode (100kHz): rise time &lt; 1000ns
+    - Fast mode (400kHz): rise time &lt; 300ns
+    - Fast mode+ (1MHz): rise time &lt; 120ns
+
+    Rise time ≈ 0.8473 × Rp × Cbus  (time to reach 0.7×VCC from 0.3×VCC)
+</code></pre></div>
+
+<h3 id="worked-example-pull-up-for-400khz-i2c">Worked Example: Pull-Up for 400kHz I2C</h3>
+<p><strong>Given:</strong>
+- 3 devices on the bus, each with 10pF input capacitance = 30pF
+- 15cm of wire at ~50pF/10cm = 75pF
+- Total Cbus = 30pF + 75pF = 105pF ≈ say 200pF with safety margin
+- Required rise time &lt; 300ns (Fast mode)</p>
+<p><strong>Calculate maximum Rp:</strong></p>
+<div class="highlight"><pre><span></span><code>    300ns &gt; 0.8473 × Rp × 200pF
+    Rp &lt; 300ns / (0.8473 × 200×10⁻¹²)
+    Rp &lt; 300×10⁻⁹ / 169.5×10⁻¹²
+    Rp &lt; 1770Ω
+</code></pre></div>
+
+<p><strong>Calculate minimum Rp (limited by sink current):</strong></p>
+<p>The I2C spec says devices must sink at least 3mA (standard) or 20mA (fast-mode plus). When a device pulls the line LOW to near 0V, the pull-up supplies:</p>
+<div class="highlight"><pre><span></span><code>    I_sink = VCC / Rp = 3.3V / Rp
+
+    For 3mA max sink: Rp &gt; 3.3V / 3mA = 1100Ω
+    For 20mA max sink (Fm+): Rp &gt; 3.3V / 20mA = 165Ω
+</code></pre></div>
+
+<p><strong>Result for 400kHz, 200pF bus, 3.3V, 3mA sink:</strong></p>
+<div class="highlight"><pre><span></span><code>    1100Ω &lt; Rp &lt; 1770Ω
+
+    Common values in this range: 1.5kΩ or 1.8kΩ
+
+    The classic &quot;4.7kΩ I2C pull-up&quot; is for 100kHz mode with low bus capacitance.
+    For 400kHz, you likely need 1.5kΩ–2.2kΩ!
+</code></pre></div>
+
+<p><strong>Rule of thumb:</strong>
+| I2C Speed | Typical Pull-Up (3.3V, &lt;200pF) |
+|----------|-------------------------------|
+| 100kHz (Standard) | 4.7kΩ – 10kΩ |
+| 400kHz (Fast) | 1.5kΩ – 4.7kΩ |
+| 1MHz (Fast+) | 1kΩ – 2.2kΩ |</p>
+<hr />
+<h1 id="part-2-i2c-bit-level-protocol">PART 2 — I2C BIT-LEVEL PROTOCOL</h1>
+<hr />
+<h2 id="21-start-and-stop-conditions">2.1 START and STOP Conditions</h2>
+<p>I2C defines special conditions using the relationship between SDA and SCL:</p>
+<div class="highlight"><pre><span></span><code>    START condition: SDA goes LOW while SCL is HIGH
+    STOP condition:  SDA goes HIGH while SCL is HIGH
+
+    During normal data: SDA only changes while SCL is LOW
+
+    START:                              STOP:
+
+    SDA: ‾‾‾‾‾\________                SDA: _________/‾‾‾‾‾
+
+    SCL: ‾‾‾‾‾‾‾‾‾‾‾‾‾‾                SCL: ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+              ↑                                    ↑
+         SDA falls while SCL HIGH            SDA rises while SCL HIGH
+         = START                             = STOP
+</code></pre></div>
+
+<p><strong>Why these are special:</strong> During normal data transfer, SDA only changes when SCL is LOW (setup time). SDA changing while SCL is HIGH is FORBIDDEN during data — and this is exactly what makes START/STOP unambiguous markers.</p>
+<hr />
+<h2 id="22-data-transfer-one-bit-at-a-time">2.2 Data Transfer — One Bit at a Time</h2>
+<div class="highlight"><pre><span></span><code>    Rules:
+    1. SDA must be STABLE while SCL is HIGH (this is when the receiver samples)
+    2. SDA can CHANGE while SCL is LOW (this is when the transmitter sets up the next bit)
+    3. MSB is transmitted first (opposite of UART!)
+
+    One bit:
+
+    SCL: ___|‾‾‾‾‾|___
+              ↑
+         Data sampled here
+         (SDA must be stable)
+
+    SDA: ===|XXXXX|===
+         ↑           ↑
+    Changes OK    Changes OK
+    (SCL is LOW)  (SCL is LOW)
+</code></pre></div>
+
+<hr />
+<h2 id="23-byte-transfer-8-data-1-ack-9-clock-cycles">2.3 Byte Transfer — 8 Data + 1 ACK = 9 Clock Cycles</h2>
+<p>After every 8 data bits, the receiver sends an ACK (acknowledge) or NACK (not-acknowledge):</p>
+<div class="highlight"><pre><span></span><code>    Transmitter sends 8 bits (MSB first), then RELEASES SDA:
+
+    SCL: _|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_
+          D7  D6  D5  D4  D3  D2  D1  D0  ACK
+          ←────── 8 data bits ──────→    ←───→
+
+    ACK = 0 (receiver pulls SDA LOW): &quot;Got it, send more&quot;
+    NACK = 1 (receiver releases SDA, stays HIGH): &quot;Stop&quot; or &quot;error&quot;
+</code></pre></div>
+
+<hr />
+<h2 id="24-the-address-byte-7-bit-address-rw-bit">2.4 The Address Byte — 7-bit Address + R/W Bit</h2>
+<p>Every I2C transaction starts with a START condition followed by the address byte:</p>
+<div class="highlight"><pre><span></span><code>    Byte structure: [A6][A5][A4][A3][A2][A1][A0][R/W̄]
+
+    A6:A0 = 7-bit slave address
+    R/W̄ = 0 for WRITE, 1 for READ
+</code></pre></div>
+
+<p><strong>Example: ICM-42688 at address 0x68</strong></p>
+<div class="highlight"><pre><span></span><code>    Write to 0x68:
+    Binary: [1][1][0][1][0][0][0][0] = 0xD0        (0x68 &lt;&lt; 1 | 0)
+
+    Read from 0x68:
+    Binary: [1][1][0][1][0][0][0][1] = 0xD1        (0x68 &lt;&lt; 1 | 1)
+</code></pre></div>
+
+<p><strong>Confusion alert:</strong> Datasheets sometimes specify the I2C address as:
+- <strong>7-bit format:</strong> 0x68 (you shift left and add R/W in your code)
+- <strong>8-bit format (write):</strong> 0xD0 (already shifted, 0 for write)
+- <strong>8-bit format (read):</strong> 0xD1 (already shifted, 1 for read)</p>
+<p>Check which format the datasheet uses. Getting this wrong means you&rsquo;re addressing the wrong device.</p>
+<hr />
+<h2 id="25-complete-transaction-walkthrough-reading-who_am_i-from-icm-42688">2.5 Complete Transaction Walkthrough — Reading WHO_AM_I from ICM-42688</h2>
+<p><strong>Goal:</strong> Read register 0x75 (WHO_AM_I) from device at address 0x68. Expected return value: 0x47.</p>
+<p><strong>Two-phase transaction:</strong>
+1. WRITE phase: tell the device which register you want
+2. READ phase: read the register value back</p>
+<div class="highlight"><pre><span></span><code>    Phase 1 — WRITE register address:
+
+    [START] [0xD0] [ACK] [0x75] [ACK]
+     ↑       ↑      ↑     ↑      ↑
+     |    Address    |  Register  |
+     |    0x68+W     |   0x75     |
+     |    = 0xD0     | (WHO_AM_I) |
+     |               |            |
+     SDA LOW while   Slave sends  Slave sends
+     SCL HIGH        ACK (SDA=0)  ACK (SDA=0)
+
+    Phase 2 — Repeated START + READ:
+
+    [Sr] [0xD1] [ACK] [0x47] [NACK] [STOP]
+     ↑     ↑      ↑     ↑      ↑      ↑
+     |  Address    |  Data from  |    SDA HIGH
+     |  0x68+R     |   slave     |    while SCL
+     |  = 0xD1     |  (0x47!)    |    HIGH
+     |             |             |
+    Repeated      Slave ACKs   Master sends
+    START         its addr     NACK → &quot;I don&#39;t
+    (no STOP                   want more bytes&quot;
+     in between!)              then STOP
+</code></pre></div>
+
+<p><strong>Detailed bit-by-bit waveform for Phase 1 (writing 0xD0 then 0x75):</strong></p>
+<div class="highlight"><pre><span></span><code>    SDA: ‾‾\_1_/‾1‾\_0_/‾1‾\_0_/‾0‾\_0_/‾0‾\_A_/‾0‾\_1_/‾1‾\_1_/‾0‾\_1_/‾0‾\_1_/‾A‾/
+              D7      D6      D5      D4      D3      D2      D1      D0     ACK
+              ←──────────── 0xD0 (address + write) ────────────→  ← slave pulls LOW
+
+    SCL: ___/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/‾‾\_/...
+           ↑START
+
+    Then 0x75 = 0111_0101:
+    SDA: \_0_/‾1‾/‾1‾/‾1‾\_0_/‾1‾\_0_/‾1‾\_A_/
+          D7   D6   D5   D4   D3   D2   D1   D0  ACK
+          ←──────────── 0x75 ───────────────→ ← slave ACK
+</code></pre></div>
+
+<p><strong>Why Repeated START (Sr) instead of STOP + START?</strong></p>
+<p>Between Phase 1 (write register address) and Phase 2 (read data), we use a Repeated START instead of STOP + START. This is because:
+1. STOP would release the bus, allowing another master to grab it (in multi-master systems)
+2. Some slaves reset their internal register pointer on STOP, so we&rsquo;d lose the address we just set
+3. Repeated START is faster (no idle time between)</p>
+<hr />
+<h1 id="part-3-advanced-i2c-features">PART 3 — ADVANCED I2C FEATURES</h1>
+<hr />
+<h2 id="31-clock-stretching">3.1 Clock Stretching</h2>
+<p>The slave can hold SCL LOW to slow down the master. This is &ldquo;clock stretching.&rdquo;</p>
+<div class="highlight"><pre><span></span><code>    Normal:
+    SCL (by master): ___|‾‾|___|‾‾|___|‾‾|___
+
+    With clock stretching:
+    SCL (master releases): ___|‾‾|___|‾‾|____________|‾‾|___
+                                                 ↑
+                           Slave holds SCL LOW here
+                           while it prepares data
+                           Master must wait!
+</code></pre></div>
+
+<p><strong>Why it exists:</strong> Some slow devices (EEPROMs, ADCs) need time to prepare data after receiving a command. Instead of making the master poll, the slave simply stretches the clock until ready.</p>
+<p><strong>Why it causes problems:</strong>
+- The master must monitor SCL after releasing it to check if the slave is stretching
+- A buggy slave can hold SCL forever → bus hangs
+- Some masters (bit-banged I2C on Raspberry Pi) don&rsquo;t support clock stretching → data corruption
+- Linux kernel I2C drivers generally handle it, but you may need to configure timeouts</p>
+<hr />
+<h2 id="32-bus-arbitration-multi-master-i2c">3.2 Bus Arbitration — Multi-Master I2C</h2>
+<p>When two masters try to transmit simultaneously, arbitration decides who wins:</p>
+<ol>
+<li>Both masters send their START conditions</li>
+<li>Both put their data bits on SDA simultaneously</li>
+<li>After each bit, each master reads SDA back</li>
+<li>If a master sent a 1 (released SDA) but reads back 0 (someone else pulled LOW):
+   → That master loses arbitration and backs off
+   → The other master doesn&rsquo;t even know there was competition</li>
+</ol>
+<p><strong>This works because of wired-AND</strong>: a 0 on the bus means SOMEONE pulled LOW. If you sent 1 but see 0, another device has higher priority (lower address/data value).</p>
+<div class="highlight"><pre><span></span><code>    Master A sends: 1  1  0  1  0  ...
+    Master B sends: 1  1  0  0  ← B sends 0 while A sends 1
+    Bus sees:       1  1  0  0  ← A reads back 0 (it sent 1 → lost!)
+
+    Master A detects: &quot;I sent 1 but bus is 0 → I lost arbitration&quot;
+    → Master A stops transmitting and tries again later
+    → Master B continues unaware of the conflict
+</code></pre></div>
+
+<hr />
+<h2 id="33-10-bit-addressing">3.3 10-Bit Addressing</h2>
+<p>Standard I2C uses 7-bit addresses (128 possible addresses, but several are reserved → 112 usable). For rare cases needing more than 112 devices on one bus:</p>
+<div class="highlight"><pre><span></span><code>    10-bit address uses TWO address bytes:
+    [1][1][1][1][0][A9][A8][R/W̄]  [A7][A6][A5][A4][A3][A2][A1][A0]
+    ←────── first byte ─────────→  ←────── second byte ────────────→
+
+    The 11110 prefix is the &quot;10-bit addressing&quot; flag
+</code></pre></div>
+
+<p>In practice, 10-bit addressing is almost never used. If you&rsquo;re running out of addresses, use an I2C multiplexer (TCA9548A — 8-channel I2C mux with 3 address pins = 8 sub-buses).</p>
+<hr />
+<h2 id="34-bus-stuck-recovery-the-9-clock-method">3.4 Bus Stuck Recovery — The 9-Clock Method</h2>
+<p><strong>The problem:</strong> A slave device is stuck mid-byte, holding SDA LOW. It&rsquo;s waiting for more clock pulses to finish shifting out its data byte. But the master has stopped clocking (maybe it was reset, or got confused).</p>
+<p>Both the master and slave are now stuck:
+- Slave holds SDA LOW → master can&rsquo;t generate START (START requires SDA HIGH → LOW)
+- Master stopped clocking → slave can&rsquo;t finish its byte and release SDA</p>
+<div class="highlight"><pre><span></span><code>    Normal:          SDA: ‾‾\_data_/‾ACK‾\_data_/‾‾‾
+                     SCL: _|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_
+
+    Stuck mid-byte:  SDA: ‾‾\_data_______________________ (stuck LOW!)
+                     SCL: _|‾|_|‾|________________________ (master stopped)
+                                     ↑
+                              Slave waiting for more clocks
+                              to finish its byte
+</code></pre></div>
+
+<p><strong>The fix — bit-bang 9 clocks:</strong></p>
+<ol>
+<li>Master bit-bangs (toggle GPIO manually) SCL 9 times while leaving SDA released (input mode)</li>
+<li>The stuck slave receives these clock pulses and shifts out its remaining bits</li>
+<li>After at most 8 bits, the slave has finished its byte and releases SDA for the ACK</li>
+<li>On the 9th clock, the slave&rsquo;s ACK phase completes → SDA is released</li>
+<li>Master now sees SDA HIGH → can generate a proper STOP condition</li>
+<li>Send STOP → bus is recovered</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="cm">/* I2C bus recovery — bit-bang on STM32 */</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">i2c_bus_recovery</span><span class="p">(</span><span class="n">GPIO_TypeDef</span><span class="w"> </span><span class="o">*</span><span class="n">scl_port</span><span class="p">,</span><span class="w"> </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">scl_pin</span><span class="p">,</span>
+<span class="w">                      </span><span class="n">GPIO_TypeDef</span><span class="w"> </span><span class="o">*</span><span class="n">sda_port</span><span class="p">,</span><span class="w"> </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">sda_pin</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Configure SCL as GPIO output, SDA as GPIO input */</span>
+<span class="w">    </span><span class="cm">/* Bit-bang 9 clock pulses */</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">9</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">HAL_GPIO_WritePin</span><span class="p">(</span><span class="n">scl_port</span><span class="p">,</span><span class="w"> </span><span class="n">scl_pin</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_PIN_SET</span><span class="p">);</span>
+<span class="w">        </span><span class="n">delay_us</span><span class="p">(</span><span class="mi">5</span><span class="p">);</span>
+<span class="w">        </span><span class="n">HAL_GPIO_WritePin</span><span class="p">(</span><span class="n">scl_port</span><span class="p">,</span><span class="w"> </span><span class="n">scl_pin</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_PIN_RESET</span><span class="p">);</span>
+<span class="w">        </span><span class="n">delay_us</span><span class="p">(</span><span class="mi">5</span><span class="p">);</span>
+
+<span class="w">        </span><span class="cm">/* Check if SDA is released */</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">HAL_GPIO_ReadPin</span><span class="p">(</span><span class="n">sda_port</span><span class="p">,</span><span class="w"> </span><span class="n">sda_pin</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">GPIO_PIN_SET</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">break</span><span class="p">;</span><span class="w">  </span><span class="cm">/* Slave released SDA — we&#39;re done */</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="cm">/* Generate STOP condition */</span>
+<span class="w">    </span><span class="n">HAL_GPIO_WritePin</span><span class="p">(</span><span class="n">sda_port</span><span class="p">,</span><span class="w"> </span><span class="n">sda_pin</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_PIN_RESET</span><span class="p">);</span><span class="w">  </span><span class="cm">/* SDA LOW */</span>
+<span class="w">    </span><span class="n">delay_us</span><span class="p">(</span><span class="mi">5</span><span class="p">);</span>
+<span class="w">    </span><span class="n">HAL_GPIO_WritePin</span><span class="p">(</span><span class="n">scl_port</span><span class="p">,</span><span class="w"> </span><span class="n">scl_pin</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_PIN_SET</span><span class="p">);</span><span class="w">    </span><span class="cm">/* SCL HIGH */</span>
+<span class="w">    </span><span class="n">delay_us</span><span class="p">(</span><span class="mi">5</span><span class="p">);</span>
+<span class="w">    </span><span class="n">HAL_GPIO_WritePin</span><span class="p">(</span><span class="n">sda_port</span><span class="p">,</span><span class="w"> </span><span class="n">sda_pin</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_PIN_SET</span><span class="p">);</span><span class="w">    </span><span class="cm">/* SDA HIGH while SCL HIGH = STOP */</span>
+
+<span class="w">    </span><span class="cm">/* Re-configure pins for I2C peripheral */</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Zephyr handles this:</strong> The <code>i2c_recover_bus()</code> API does exactly this. Some STM32 I2C peripherals also have hardware bus recovery.</p>
+<hr />
+<h1 id="part-4-i2c-speed-modes">PART 4 — I2C SPEED MODES</h1>
+<hr />
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Speed</th>
+<th>Pull-Up Range</th>
+<th>Max Bus Capacitance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Standard</td>
+<td>100 kHz</td>
+<td>4.7kΩ – 10kΩ</td>
+<td>400pF</td>
+</tr>
+<tr>
+<td>Fast</td>
+<td>400 kHz</td>
+<td>1.5kΩ – 4.7kΩ</td>
+<td>400pF</td>
+</tr>
+<tr>
+<td>Fast-mode Plus (Fm+)</td>
+<td>1 MHz</td>
+<td>1kΩ – 2.2kΩ</td>
+<td>550pF</td>
+</tr>
+<tr>
+<td>High-speed (HS)</td>
+<td>3.4 MHz</td>
+<td>Special</td>
+<td>400pF</td>
+</tr>
+</tbody>
+</table>
+<p>Most embedded projects use Standard (100kHz) or Fast (400kHz). If you need higher speed, use SPI instead.</p>
+<hr />
+<h1 id="part-5-common-i2c-devices">PART 5 — COMMON I2C DEVICES</h1>
+<hr />
+<table>
+<thead>
+<tr>
+<th>Device</th>
+<th>Address</th>
+<th>Purpose</th>
+<th>Speed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ICM-42688 / MPU-6050</td>
+<td>0x68/0x69</td>
+<td>6-axis IMU</td>
+<td>400kHz</td>
+</tr>
+<tr>
+<td>TMP102</td>
+<td>0x48-0x4B</td>
+<td>Temperature sensor</td>
+<td>400kHz</td>
+</tr>
+<tr>
+<td>ADS1115</td>
+<td>0x48-0x4B</td>
+<td>16-bit ADC</td>
+<td>400kHz</td>
+</tr>
+<tr>
+<td>24C02 / AT24C256</td>
+<td>0x50-0x57</td>
+<td>EEPROM</td>
+<td>400kHz</td>
+</tr>
+<tr>
+<td>PCA9555</td>
+<td>0x20-0x27</td>
+<td>16-bit IO expander</td>
+<td>400kHz</td>
+</tr>
+<tr>
+<td>TCA9548A</td>
+<td>0x70-0x77</td>
+<td>8-channel I2C mux</td>
+<td>400kHz</td>
+</tr>
+<tr>
+<td>SSD1306</td>
+<td>0x3C/0x3D</td>
+<td>OLED display</td>
+<td>400kHz</td>
+</tr>
+<tr>
+<td>BMP280</td>
+<td>0x76/0x77</td>
+<td>Pressure/temp sensor</td>
+<td>3.4MHz</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Address conflicts:</strong> Notice that TMP102 and ADS1115 share the same address range! If you need both, use a TCA9548A mux, or choose devices with different addresses.</p>
+<hr />
+<h1 id="part-6-i2c-vs-smbus">PART 6 — I2C vs SMBus</h1>
+<hr />
+<p>SMBus (System Management Bus) is a stricter subset of I2C used in PC motherboards for battery management, fan control, etc.</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>I2C</th>
+<th>SMBus</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bus timeout</td>
+<td>None (can hang forever)</td>
+<td>35ms max → auto-release</td>
+</tr>
+<tr>
+<td>Voltage</td>
+<td>Up to 5.5V</td>
+<td>2.5V–5.5V only</td>
+</tr>
+<tr>
+<td>Clock stretching</td>
+<td>Unlimited</td>
+<td>Limited to 25ms</td>
+</tr>
+<tr>
+<td>PEC (error checking)</td>
+<td>Optional</td>
+<td>Supported (CRC-8)</td>
+</tr>
+<tr>
+<td>Alert# (interrupt line)</td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Frequency range</td>
+<td>0–400kHz+</td>
+<td>10kHz–100kHz</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Why it matters:</strong> If you use an SMBus device on an I2C bus without timeouts, clock stretching bugs can hang the bus forever. Adding a timeout to your I2C driver prevents permanent lockups.</p>
+<hr />
+<h1 id="part-7-level-shifting-for-i2c">PART 7 — LEVEL SHIFTING FOR I2C</h1>
+<hr />
+<p>I2C level shifting between 3.3V and 5V uses the BSS138 circuit described in chapter 02 (section 3.5). Brief refresher:</p>
+<div class="highlight"><pre><span></span><code>    3.3V ──┤4.7kΩ├──┬── SDA_3V3    5V ──┤4.7kΩ├──┬── SDA_5V
+                     │                              │
+                     └──── S ──── G ──── D ─────────┘
+                             BSS138
+                          (per line)
+
+    Need 2 BSS138 circuits: one for SDA, one for SCL
+    The SparkFun BOB-12009 and Adafruit 757 put this on a breakout board
+</code></pre></div>
+
+<p><strong>Why I2C level shifting is easy (compared to SPI):</strong> I2C is open-drain, so all drivers only pull LOW or release. The BSS138 circuit works perfectly with this. SPI is push-pull (drives HIGH and LOW), so BSS138 doesn&rsquo;t work — use a dedicated level-shifting IC like TXB0104 for SPI.</p>
+<hr />
+<h1 id="gotcha-table">GOTCHA TABLE</h1>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely Cause</th>
+<th>How to Diagnose</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NACK on every address</td>
+<td>Missing pull-ups</td>
+<td>Scope SCL/SDA: line never goes HIGH (stays ~0.5V)</td>
+<td>Add 4.7kΩ pull-ups to VCC on both SDA and SCL</td>
+</tr>
+<tr>
+<td>Correct device address, still NACK</td>
+<td>Wrong address format (7-bit vs 8-bit notation)</td>
+<td>Try address both as-is and shifted right by 1</td>
+<td>Match datasheet format. In Zephyr, use 7-bit address.</td>
+</tr>
+<tr>
+<td>Bus hangs (SCL or SDA stuck LOW)</td>
+<td>Slave stuck mid-byte, or slave crashed</td>
+<td>Scope: one line permanently LOW</td>
+<td>9-clock recovery. Power-cycle slave. Check for code bugs.</td>
+</tr>
+<tr>
+<td>Random data corruption</td>
+<td>Wrong I2C speed for pull-up value → slow rise times</td>
+<td>Scope rise time on SDA/SCL. Should be &lt; 300ns at 400kHz.</td>
+<td>Lower pull-up value (e.g., 2.2kΩ instead of 10kΩ)</td>
+</tr>
+<tr>
+<td>Works with one device but not two</td>
+<td>Address conflict</td>
+<td><code>i2cdetect</code> scan — two devices at same address</td>
+<td>Use different address pin config, or I2C mux</td>
+</tr>
+<tr>
+<td>Data OK at 100kHz, corrupt at 400kHz</td>
+<td>Rise time too slow for Fast mode</td>
+<td>Measure rise time with scope. Calculate RC.</td>
+<td>Lower pull-up resistors. Reduce bus capacitance (shorter wires).</td>
+</tr>
+<tr>
+<td>Slave works but doesn&rsquo;t ACK consistently</td>
+<td>Clock stretching not handled by master</td>
+<td>Scope: SCL LOW periods vary wildly in duration</td>
+<td>Enable clock stretching support in master config</td>
+</tr>
+<tr>
+<td>3.3V device damaged after connecting to 5V bus</td>
+<td>No level shifter</td>
+<td>Dead pin. Measure VCC of all devices.</td>
+<td>Add BSS138 level shifter between voltage domains</td>
+</tr>
+<tr>
+<td>Repeated START doesn&rsquo;t work</td>
+<td>Master sends STOP+START instead of Sr</td>
+<td>Scope: SDA goes HIGH→LOW between write and read phases</td>
+<td>Check HAL/driver settings for repeated start support</td>
+</tr>
+<tr>
+<td>i2cdetect shows device at wrong address</td>
+<td>Address bits set by external pins not as expected</td>
+<td>Check A0/A1/A2 pin connections on device</td>
+<td>Pull address pins to correct level (GND or VCC)</td>
+</tr>
+<tr>
+<td>Communication stops after a while</td>
+<td>SMBus timeout on slave side</td>
+<td>Add logging for NACK/timeout errors. Check slave specs.</td>
+<td>Ensure bus transactions complete within 35ms</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="quick-reference-card">QUICK REFERENCE CARD</h1>
+<div class="highlight"><pre><span></span><code>┌──────────────────────────────── I2C CHEAT SHEET ────────────────────────────────────────────┐
+│                                                                                              │
+│  CORE:  2 wires (SDA, SCL), open-drain with pull-ups, multi-master, half-duplex            │
+│                                                                                              │
+│  PULL-UPS (3.3V):                                                                           │
+│    100kHz: 4.7kΩ–10kΩ     400kHz: 1.5kΩ–4.7kΩ     1MHz: 1kΩ–2.2kΩ                        │
+│    Rise time &lt; 1000ns (Std) / 300ns (Fast) / 120ns (Fm+)                                   │
+│    Rise time ≈ 0.8473 × Rp × Cbus                                                          │
+│                                                                                              │
+│  CONDITIONS:                                                                                 │
+│    START:  SDA ↓ while SCL HIGH          STOP: SDA ↑ while SCL HIGH                        │
+│    DATA:   SDA stable while SCL HIGH, changes while SCL LOW                                 │
+│                                                                                              │
+│  ADDRESS BYTE:  [A6..A0][R/W̄]   R/W̄=0 for write, R/W̄=1 for read                          │
+│    7-bit addr 0x68 → Write byte = 0xD0 (0x68&lt;&lt;1|0), Read byte = 0xD1 (0x68&lt;&lt;1|1)          │
+│                                                                                              │
+│  ACK/NACK:  After every 8 data bits (9th clock cycle)                                       │
+│    ACK = SDA LOW (receiver)    NACK = SDA HIGH (receiver)                                   │
+│                                                                                              │
+│  READ REGISTER:  [START][addr+W][ACK][reg][ACK][Sr][addr+R][ACK][data][NACK][STOP]         │
+│                                                                                              │
+│  BUS RECOVERY:  Bit-bang 9 SCL clocks with SDA released, then STOP                         │
+│                                                                                              │
+│  LEVEL SHIFT:  BSS138 + pull-ups on both sides (per line). Use for 3.3V↔5V I2C.            │
+│                                                                                              │
+│  RESERVED ADDRESSES:    0x00 (general call), 0x01-0x07 (reserved),                          │
+│    0x78-0x7F (10-bit header, reserved)                                                       │
+│                                                                                              │
+│  SCAN: i2cdetect -y 1 (Linux), or Zephyr i2c_scan shell command                            │
+│                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Module 14: Exception Safety Guarantees - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-indigo-600 hover:text-indigo-800 mb-4 inline-block">&larr; Back to C++ Advanced</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="module-14-exception-safety-guarantees">Module 14: Exception Safety Guarantees</h1>
+<h2 id="overview">Overview</h2>
+<p>Exception safety is about what guarantees your code provides when an exception
+is thrown. It&rsquo;s not about <em>preventing</em> exceptions — it&rsquo;s about maintaining
+program correctness <em>despite</em> exceptions. This is one of the most important
+and most misunderstood topics in C++.</p>
+<p>The concept was formalized by <strong>Dave Abrahams</strong> in the late 1990s during the
+standardization of the STL. His work defined the vocabulary we still use today.</p>
+<hr />
+<h2 id="the-four-exception-safety-guarantee-levels">The Four Exception Safety Guarantee Levels</h2>
+<h3 id="level-0-no-guarantee-never-acceptable">Level 0: No Guarantee (NEVER acceptable)</h3>
+<p>The function may leak resources, violate invariants, or corrupt data if an
+exception is thrown. This is a <strong>bug</strong>, not a design choice.</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">bad_transfer</span><span class="p">(</span><span class="n">Account</span><span class="o">&amp;</span><span class="w"> </span><span class="n">from</span><span class="p">,</span><span class="w"> </span><span class="n">Account</span><span class="o">&amp;</span><span class="w"> </span><span class="n">to</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">from</span><span class="p">.</span><span class="n">balance</span><span class="w"> </span><span class="o">-=</span><span class="w"> </span><span class="n">amount</span><span class="p">;</span><span class="w">   </span><span class="c1">// Step 1: debit</span>
+<span class="w">    </span><span class="c1">// If this throws, &#39;from&#39; is debited but &#39;to&#39; never credited!</span>
+<span class="w">    </span><span class="n">to</span><span class="p">.</span><span class="n">balance</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">amount</span><span class="p">;</span><span class="w">     </span><span class="c1">// Step 2: credit — may throw</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="level-1-basic-guarantee">Level 1: Basic Guarantee</h3>
+<p>If an exception is thrown:
+- All invariants are preserved
+- No resources are leaked
+- Objects are in a <strong>valid but unspecified</strong> state</p>
+<p>This is the <strong>minimum acceptable</strong> level for production code.</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">basic_transfer</span><span class="p">(</span><span class="n">Account</span><span class="o">&amp;</span><span class="w"> </span><span class="n">from</span><span class="p">,</span><span class="w"> </span><span class="n">Account</span><span class="o">&amp;</span><span class="w"> </span><span class="n">to</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">lock_guard</span><span class="w"> </span><span class="n">lock</span><span class="p">(</span><span class="n">mutex_</span><span class="p">);</span>
+<span class="w">    </span><span class="n">from</span><span class="p">.</span><span class="n">withdraw</span><span class="p">(</span><span class="n">amount</span><span class="p">);</span><span class="w">   </span><span class="c1">// may throw, but Account stays valid</span>
+<span class="w">    </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">to</span><span class="p">.</span><span class="n">deposit</span><span class="p">(</span><span class="n">amount</span><span class="p">);</span><span class="w">  </span><span class="c1">// may throw</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(...)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">from</span><span class="p">.</span><span class="n">deposit</span><span class="p">(</span><span class="n">amount</span><span class="p">);</span><span class="w"> </span><span class="c1">// rollback — basic guarantee</span>
+<span class="w">        </span><span class="k">throw</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="level-2-strong-guarantee-commit-or-rollback">Level 2: Strong Guarantee (commit-or-rollback)</h3>
+<p>If an exception is thrown, the program state is <strong>exactly as it was before</strong>
+the function was called. Either the operation fully succeeds, or it&rsquo;s as if
+it never happened.</p>
+<p>This is the <strong>copy-and-swap</strong> level.</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">strong_transfer</span><span class="p">(</span><span class="n">Account</span><span class="o">&amp;</span><span class="w"> </span><span class="n">from</span><span class="p">,</span><span class="w"> </span><span class="n">Account</span><span class="o">&amp;</span><span class="w"> </span><span class="n">to</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">Account</span><span class="w"> </span><span class="n">from_copy</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">from</span><span class="p">;</span><span class="w">  </span><span class="c1">// work on copies</span>
+<span class="w">    </span><span class="n">Account</span><span class="w"> </span><span class="n">to_copy</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">to</span><span class="p">;</span>
+<span class="w">    </span><span class="n">from_copy</span><span class="p">.</span><span class="n">withdraw</span><span class="p">(</span><span class="n">amount</span><span class="p">);</span>
+<span class="w">    </span><span class="n">to_copy</span><span class="p">.</span><span class="n">deposit</span><span class="p">(</span><span class="n">amount</span><span class="p">);</span>
+<span class="w">    </span><span class="c1">// Only now commit — swap is noexcept</span>
+<span class="w">    </span><span class="n">swap</span><span class="p">(</span><span class="n">from</span><span class="p">,</span><span class="w"> </span><span class="n">from_copy</span><span class="p">);</span><span class="w">     </span><span class="c1">// noexcept</span>
+<span class="w">    </span><span class="n">swap</span><span class="p">(</span><span class="n">to</span><span class="p">,</span><span class="w"> </span><span class="n">to_copy</span><span class="p">);</span><span class="w">         </span><span class="c1">// noexcept</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="level-3-no-throw-guarantee-noexcept">Level 3: No-Throw Guarantee (<code>noexcept</code>)</h3>
+<p>The operation <strong>never</strong> throws an exception. Period. If something goes wrong
+internally, it handles it without propagating an exception.</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">nothrow_swap</span><span class="p">(</span><span class="n">Account</span><span class="o">&amp;</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">Account</span><span class="o">&amp;</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">swap</span><span class="p">(</span><span class="n">a</span><span class="p">.</span><span class="n">balance_</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="p">.</span><span class="n">balance_</span><span class="p">);</span><span class="w">  </span><span class="c1">// primitive swap, can&#39;t throw</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Functions that <strong>must</strong> be noexcept:
+- Destructors (implicitly noexcept since C++11)
+- Move constructors and move assignment (for container efficiency)
+- <code>swap()</code> functions
+- Deallocation functions (<code>operator delete</code>)</p>
+<hr />
+<h2 id="the-noexcept-specifier">The <code>noexcept</code> Specifier</h2>
+<h3 id="when-to-use-it">When to Use It</h3>
+<p>Mark a function <code>noexcept</code> when:
+1. It genuinely cannot throw (e.g., swapping integers)
+2. You <em>want</em> the compiler to assume it won&rsquo;t throw (move operations!)
+3. Failure should terminate rather than propagate</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Unconditional noexcept</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">swap</span><span class="p">(</span><span class="n">MyClass</span><span class="o">&amp;</span><span class="w"> </span><span class="n">other</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+
+<span class="c1">// Conditional noexcept — noexcept if T&#39;s move ctor is noexcept</span>
+<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="kt">void</span><span class="w"> </span><span class="n">Container</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;::</span><span class="n">swap</span><span class="p">(</span><span class="n">Container</span><span class="o">&amp;</span><span class="w"> </span><span class="n">other</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">(</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">is_nothrow_move_constructible_v</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span>
+<span class="p">);</span>
+</code></pre></div>
+
+<h3 id="impact-on-optimization">Impact on Optimization</h3>
+<p>The compiler can optimize <code>noexcept</code> functions more aggressively:
+- No need to maintain stack unwinding information
+- Move operations used instead of copies in containers
+- <code>std::vector::push_back</code> will COPY instead of MOVE if the move ctor isn&rsquo;t <code>noexcept</code></p>
+<h3 id="the-noexcept-operator">The <code>noexcept</code> Operator</h3>
+<p>The <code>noexcept()</code> operator is a compile-time check:</p>
+<div class="highlight"><pre><span></span><code><span class="k">static_assert</span><span class="p">(</span><span class="k">noexcept</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">declval</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&amp;&gt;</span><span class="p">()</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">));</span><span class="w">  </span><span class="c1">// int assignment is noexcept</span>
+
+<span class="c1">// Conditional noexcept using the operator</span>
+<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="kt">void</span><span class="w"> </span><span class="n">wrapper</span><span class="p">(</span><span class="n">T</span><span class="o">&amp;</span><span class="w"> </span><span class="n">obj</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">(</span><span class="k">noexcept</span><span class="p">(</span><span class="n">obj</span><span class="p">.</span><span class="n">do_thing</span><span class="p">()))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">obj</span><span class="p">.</span><span class="n">do_thing</span><span class="p">();</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="copy-and-swap-idiom">Copy-and-Swap Idiom</h2>
+<p>The classic technique for providing the <strong>strong guarantee</strong> on assignment:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">Widget</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">data_</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">size_t</span><span class="w"> </span><span class="n">size_</span><span class="p">;</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="c1">// Copy constructor — may throw (allocates)</span>
+<span class="w">    </span><span class="n">Widget</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">Widget</span><span class="o">&amp;</span><span class="w"> </span><span class="n">other</span><span class="p">)</span>
+<span class="w">        </span><span class="o">:</span><span class="w"> </span><span class="n">data_</span><span class="p">(</span><span class="k">new</span><span class="w"> </span><span class="kt">int</span><span class="p">[</span><span class="n">other</span><span class="p">.</span><span class="n">size_</span><span class="p">])</span>
+<span class="w">        </span><span class="p">,</span><span class="w"> </span><span class="n">size_</span><span class="p">(</span><span class="n">other</span><span class="p">.</span><span class="n">size_</span><span class="p">)</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">copy</span><span class="p">(</span><span class="n">other</span><span class="p">.</span><span class="n">data_</span><span class="p">,</span><span class="w"> </span><span class="n">other</span><span class="p">.</span><span class="n">data_</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">size_</span><span class="p">,</span><span class="w"> </span><span class="n">data_</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Swap — must be noexcept</span>
+<span class="w">    </span><span class="k">friend</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">swap</span><span class="p">(</span><span class="n">Widget</span><span class="o">&amp;</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">Widget</span><span class="o">&amp;</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">using</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">swap</span><span class="p">;</span>
+<span class="w">        </span><span class="n">swap</span><span class="p">(</span><span class="n">a</span><span class="p">.</span><span class="n">data_</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="p">.</span><span class="n">data_</span><span class="p">);</span>
+<span class="w">        </span><span class="n">swap</span><span class="p">(</span><span class="n">a</span><span class="p">.</span><span class="n">size_</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="p">.</span><span class="n">size_</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Assignment via copy-and-swap — strong guarantee</span>
+<span class="w">    </span><span class="n">Widget</span><span class="o">&amp;</span><span class="w"> </span><span class="k">operator</span><span class="o">=</span><span class="p">(</span><span class="n">Widget</span><span class="w"> </span><span class="n">other</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">  </span><span class="c1">// note: pass by VALUE (copy happens here)</span>
+<span class="w">        </span><span class="n">swap</span><span class="p">(</span><span class="o">*</span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">other</span><span class="p">);</span><span class="w">            </span><span class="c1">// noexcept swap</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="o">*</span><span class="k">this</span><span class="p">;</span><span class="w">                  </span><span class="c1">// old data destroyed when &#39;other&#39; dies</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p>Why the naive approach fails:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// WRONG — not exception safe!</span>
+<span class="n">Widget</span><span class="o">&amp;</span><span class="w"> </span><span class="k">operator</span><span class="o">=</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">Widget</span><span class="o">&amp;</span><span class="w"> </span><span class="n">other</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">delete</span><span class="p">[]</span><span class="w"> </span><span class="n">data_</span><span class="p">;</span><span class="w">                    </span><span class="c1">// point of no return!</span>
+<span class="w">    </span><span class="n">data_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="kt">int</span><span class="p">[</span><span class="n">other</span><span class="p">.</span><span class="n">size_</span><span class="p">];</span><span class="w">     </span><span class="c1">// THROWS? data_ is dangling!</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">copy</span><span class="p">(...);</span>
+<span class="w">    </span><span class="n">size_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">other</span><span class="p">.</span><span class="n">size_</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="o">*</span><span class="k">this</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="raii-the-foundation-of-exception-safety">RAII: The Foundation of Exception Safety</h2>
+<p><strong>Resource Acquisition Is Initialization</strong> — every resource is owned by an
+object whose destructor releases it. This is THE mechanism that makes C++
+exception safety work.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// BAD: manual resource management</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">unsafe</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">FILE</span><span class="o">*</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fopen</span><span class="p">(</span><span class="s">&quot;data.txt&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;r&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">int</span><span class="o">*</span><span class="w"> </span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="kt">int</span><span class="p">[</span><span class="mi">1024</span><span class="p">];</span>
+<span class="w">    </span><span class="n">process</span><span class="p">(</span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="n">buf</span><span class="p">);</span><span class="w">    </span><span class="c1">// if this throws, f and buf leak!</span>
+<span class="w">    </span><span class="k">delete</span><span class="p">[]</span><span class="w"> </span><span class="n">buf</span><span class="p">;</span>
+<span class="w">    </span><span class="n">fclose</span><span class="p">(</span><span class="n">f</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="c1">// GOOD: RAII wrappers</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">safe</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="kt">FILE</span><span class="p">,</span><span class="w"> </span><span class="k">decltype</span><span class="p">(</span><span class="o">&amp;</span><span class="n">fclose</span><span class="p">)</span><span class="o">&gt;</span><span class="p">(</span>
+<span class="w">        </span><span class="n">fopen</span><span class="p">(</span><span class="s">&quot;data.txt&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;r&quot;</span><span class="p">),</span><span class="w"> </span><span class="o">&amp;</span><span class="n">fclose</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="kt">int</span><span class="p">[]</span><span class="o">&gt;</span><span class="p">(</span><span class="mi">1024</span><span class="p">);</span>
+<span class="w">    </span><span class="n">process</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">get</span><span class="p">(),</span><span class="w"> </span><span class="n">buf</span><span class="p">.</span><span class="n">get</span><span class="p">());</span><span class="w">  </span><span class="c1">// if this throws, destructors clean up</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="stduncaught_exceptions-and-scope-guards"><code>std::uncaught_exceptions()</code> and Scope Guards</h2>
+<p>C++17 added <code>std::uncaught_exceptions()</code> (note: plural!) which returns the
+<em>number</em> of uncaught exceptions currently in flight. This enables scope guards
+that behave differently on success vs failure.</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">ScopeFailure</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">exceptions_on_entry_</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">function</span><span class="o">&lt;</span><span class="kt">void</span><span class="p">()</span><span class="o">&gt;</span><span class="w"> </span><span class="n">rollback_</span><span class="p">;</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="n">ScopeFailure</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">function</span><span class="o">&lt;</span><span class="kt">void</span><span class="p">()</span><span class="o">&gt;</span><span class="w"> </span><span class="n">fn</span><span class="p">)</span>
+<span class="w">        </span><span class="o">:</span><span class="w"> </span><span class="n">exceptions_on_entry_</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">uncaught_exceptions</span><span class="p">())</span>
+<span class="w">        </span><span class="p">,</span><span class="w"> </span><span class="n">rollback_</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">fn</span><span class="p">))</span><span class="w"> </span><span class="p">{}</span>
+
+<span class="w">    </span><span class="o">~</span><span class="n">ScopeFailure</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Only call rollback if we&#39;re unwinding due to a NEW exception</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">uncaught_exceptions</span><span class="p">()</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">exceptions_on_entry_</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">rollback_</span><span class="p">();</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<hr />
+<h2 id="exception-safety-in-constructors">Exception Safety in Constructors</h2>
+<p><strong>The fully-constructed-subobject rule</strong>: If a constructor throws, destructors
+are called for all fully constructed base classes and members (in reverse order
+of construction), but NOT for the object being constructed (its destructor
+won&rsquo;t run).</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">Composite</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">ResourceA</span><span class="w"> </span><span class="n">a_</span><span class="p">;</span><span class="w">   </span><span class="c1">// constructed first</span>
+<span class="w">    </span><span class="n">ResourceB</span><span class="w"> </span><span class="n">b_</span><span class="p">;</span><span class="w">   </span><span class="c1">// constructed second</span>
+<span class="w">    </span><span class="n">ResourceC</span><span class="w"> </span><span class="n">c_</span><span class="p">;</span><span class="w">   </span><span class="c1">// constructed third — THROWS!</span>
+
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="n">Composite</span><span class="p">()</span>
+<span class="w">        </span><span class="o">:</span><span class="w"> </span><span class="n">a_</span><span class="p">()</span><span class="w">    </span><span class="c1">// constructed, will be destroyed</span>
+<span class="w">        </span><span class="p">,</span><span class="w"> </span><span class="n">b_</span><span class="p">()</span><span class="w">    </span><span class="c1">// constructed, will be destroyed</span>
+<span class="w">        </span><span class="p">,</span><span class="w"> </span><span class="n">c_</span><span class="p">()</span><span class="w">    </span><span class="c1">// THROWS — b_ then a_ destructors called</span>
+<span class="w">    </span><span class="p">{}</span><span class="w">            </span><span class="c1">// ~Composite() is NOT called</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p>This is why RAII members are essential — raw pointers in members won&rsquo;t be
+cleaned up if a later member&rsquo;s construction throws.</p>
+<hr />
+<h2 id="exception-safety-in-containers">Exception Safety in Containers</h2>
+<h3 id="why-push_back-provides-the-strong-guarantee">Why <code>push_back</code> Provides the Strong Guarantee</h3>
+<p><code>std::vector::push_back</code> either succeeds or leaves the vector unchanged:</p>
+<ol>
+<li>If reallocation needed and copy/move of existing elements throws → old
+   buffer is still intact, new buffer is discarded</li>
+<li>If constructing the new element throws → size is not incremented</li>
+</ol>
+<p><strong>Critical</strong>: This only works efficiently if the move constructor is <code>noexcept</code>.
+Otherwise, <code>vector</code> must COPY elements during reallocation (because if a move
+throws halfway through, the old buffer is already partially moved-from).</p>
+<h3 id="stdmove_if_noexcept"><code>std::move_if_noexcept</code></h3>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">move_if_noexcept</span><span class="p">(</span><span class="n">T</span><span class="o">&amp;</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Returns T&amp;&amp; if T&#39;s move ctor is noexcept, otherwise const T&amp;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">is_nothrow_move_constructible_v</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">x</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">x</span><span class="p">;</span><span class="w">  </span><span class="c1">// returns lvalue — will copy</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>This is what <code>std::vector</code> uses internally during reallocation. If your move
+constructor isn&rsquo;t <code>noexcept</code>, your &ldquo;fast moves&rdquo; silently become &ldquo;slow copies&rdquo;.</p>
+<hr />
+<h2 id="designing-exception-safe-interfaces">Designing Exception-Safe Interfaces</h2>
+<h3 id="the-commit-or-rollback-pattern">The Commit-or-Rollback Pattern</h3>
+<div class="highlight"><pre><span></span><code>1. Do all the work that might throw (on temporaries/copies)
+2. Commit the results using only noexcept operations (swap, pointer assignment)
+</code></pre></div>
+
+<p>This is the generalized form of copy-and-swap.</p>
+<h3 id="multi-step-operations">Multi-Step Operations</h3>
+<p>When multiple objects must be updated atomically:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">atomic_update</span><span class="p">(</span><span class="n">A</span><span class="o">&amp;</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">B</span><span class="o">&amp;</span><span class="w"> </span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="n">C</span><span class="o">&amp;</span><span class="w"> </span><span class="n">c</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">A</span><span class="w"> </span><span class="n">a_new</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">compute_new_a</span><span class="p">(</span><span class="n">a</span><span class="p">);</span><span class="w">  </span><span class="c1">// may throw — a unchanged</span>
+<span class="w">    </span><span class="n">B</span><span class="w"> </span><span class="n">b_new</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">compute_new_b</span><span class="p">(</span><span class="n">b</span><span class="p">);</span><span class="w">  </span><span class="c1">// may throw — a,b unchanged</span>
+<span class="w">    </span><span class="n">C</span><span class="w"> </span><span class="n">c_new</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">compute_new_c</span><span class="p">(</span><span class="n">c</span><span class="p">);</span><span class="w">  </span><span class="c1">// may throw — a,b,c unchanged</span>
+<span class="w">    </span><span class="c1">// COMMIT PHASE — all noexcept</span>
+<span class="w">    </span><span class="n">swap</span><span class="p">(</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">a_new</span><span class="p">);</span>
+<span class="w">    </span><span class="n">swap</span><span class="p">(</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="n">b_new</span><span class="p">);</span>
+<span class="w">    </span><span class="n">swap</span><span class="p">(</span><span class="n">c</span><span class="p">,</span><span class="w"> </span><span class="n">c_new</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="exception-safety-in-multi-threaded-code">Exception Safety in Multi-Threaded Code</h2>
+<p>Exceptions and threads interact dangerously:</p>
+<ol>
+<li>An exception thrown in a <code>std::thread</code> that isn&rsquo;t caught calls <code>std::terminate</code></li>
+<li>Use <code>std::promise</code>/<code>std::future</code> to transport exceptions across threads</li>
+<li>Lock guards (RAII) ensure mutexes are released even if exceptions occur</li>
+<li><code>std::shared_mutex</code> with RAII locks provides exception-safe concurrent access</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">thread_work</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">promise</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;&amp;</span><span class="w"> </span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">p</span><span class="p">.</span><span class="n">set_value</span><span class="p">(</span><span class="n">compute</span><span class="p">());</span><span class="w">  </span><span class="c1">// success</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(...)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">p</span><span class="p">.</span><span class="n">set_exception</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">current_exception</span><span class="p">());</span><span class="w">  </span><span class="c1">// propagate to caller</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="real-world-oks-robot-firmware-and-fno-exceptions">Real-World: OKS Robot Firmware and <code>-fno-exceptions</code></h2>
+<p>The OKS robot firmware (running on Zephyr RTOS) compiles with <code>-fno-exceptions</code>
+because:</p>
+<ol>
+<li>
+<p><strong>Deterministic timing</strong>: Exception handling adds unpredictable latency.
+   A motor controller ISR must complete in microseconds — stack unwinding
+   is not acceptable.</p>
+</li>
+<li>
+<p><strong>Code size</strong>: Exception tables and unwind info add significant binary size
+   on embedded ARM Cortex-M targets.</p>
+</li>
+<li>
+<p><strong>No heap</strong>: Many firmware modules run without dynamic allocation.
+   <code>std::bad_alloc</code> doesn&rsquo;t make sense.</p>
+</li>
+</ol>
+<p><strong>What replaces exceptions in firmware?</strong>
+- Return codes (often wrapped in <code>Result&lt;T, Error&gt;</code> types)
+- Error callback / handler registration
+- <code>assert()</code> / <code>__builtin_trap()</code> for unrecoverable errors
+- <code>std::expected&lt;T, E&gt;</code> (C++23, or backported)
+- Guardian watchdog: if a subsystem fails, the watchdog reboots it</p>
+<p>This is a valid engineering tradeoff — not a rejection of exception safety
+principles. The same guarantee levels apply, just enforced through different
+mechanisms.</p>
+<hr />
+<h2 id="common-mistakes">Common Mistakes</h2>
+<h3 id="1-catching-by-value-slicing">1. Catching by Value (Slicing)</h3>
+<div class="highlight"><pre><span></span><code><span class="k">try</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">throw</span><span class="w"> </span><span class="n">DerivedError</span><span class="p">(</span><span class="s">&quot;oops&quot;</span><span class="p">);</span><span class="w"> </span><span class="p">}</span>
+<span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">BaseError</span><span class="w"> </span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">     </span><span class="c1">// SLICED! DerivedError info lost</span>
+<span class="w">    </span><span class="c1">// e is a BaseError, not DerivedError</span>
+<span class="p">}</span>
+
+<span class="c1">// CORRECT: catch by const reference</span>
+<span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">BaseError</span><span class="o">&amp;</span><span class="w"> </span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+
+<h3 id="2-throwing-in-destructors">2. Throwing in Destructors</h3>
+<p>If a destructor throws during stack unwinding (another exception is already
+in flight), <code>std::terminate()</code> is called. Since C++11, destructors are
+implicitly <code>noexcept</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="o">~</span><span class="n">Resource</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">try</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">cleanup</span><span class="p">();</span><span class="w"> </span><span class="p">}</span><span class="w">    </span><span class="c1">// cleanup might fail</span>
+<span class="w">    </span><span class="k">catch</span><span class="w"> </span><span class="p">(...)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">log_error</span><span class="p">();</span><span class="w">      </span><span class="c1">// swallow — NEVER let destructors throw</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="3-exception-unsafe-swap">3. Exception-Unsafe Swap</h3>
+<p>If <code>swap()</code> can throw, copy-and-swap gives NO guarantee at all:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// WRONG: swap that allocates (may throw)</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">swap</span><span class="p">(</span><span class="n">BigObject</span><span class="o">&amp;</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">BigObject</span><span class="o">&amp;</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">BigObject</span><span class="w"> </span><span class="n">temp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">a</span><span class="p">;</span><span class="w">  </span><span class="c1">// COPIES! May throw!</span>
+<span class="w">    </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">b</span><span class="p">;</span>
+<span class="w">    </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">temp</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// CORRECT: swap by exchanging internals</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">swap</span><span class="p">(</span><span class="n">BigObject</span><span class="o">&amp;</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">BigObject</span><span class="o">&amp;</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">using</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">swap</span><span class="p">;</span>
+<span class="w">    </span><span class="n">swap</span><span class="p">(</span><span class="n">a</span><span class="p">.</span><span class="n">ptr_</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="p">.</span><span class="n">ptr_</span><span class="p">);</span><span class="w">    </span><span class="c1">// pointer swap — noexcept</span>
+<span class="w">    </span><span class="n">swap</span><span class="p">(</span><span class="n">a</span><span class="p">.</span><span class="n">size_</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="p">.</span><span class="n">size_</span><span class="p">);</span><span class="w">  </span><span class="c1">// int swap — noexcept</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="4-forgetting-noexcept-on-move-operations">4. Forgetting <code>noexcept</code> on Move Operations</h3>
+<p>This silently degrades <code>std::vector</code> performance from O(1) amortized moves
+to O(N) copies during reallocation. See exercise 04.</p>
+<h3 id="5-resource-acquisition-before-raii">5. Resource Acquisition Before RAII</h3>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">leak</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">Resource</span><span class="o">*</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">acquire</span><span class="p">();</span><span class="w">     </span><span class="c1">// raw pointer!</span>
+<span class="w">    </span><span class="n">do_work</span><span class="p">();</span><span class="w">                   </span><span class="c1">// THROWS — r leaks!</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">Resource</span><span class="o">&gt;</span><span class="w"> </span><span class="n">p</span><span class="p">(</span><span class="n">r</span><span class="p">);</span><span class="w">  </span><span class="c1">// too late</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">safe</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">Resource</span><span class="o">&gt;</span><span class="p">(</span><span class="n">acquire</span><span class="p">());</span><span class="w">  </span><span class="c1">// RAII immediately</span>
+<span class="w">    </span><span class="n">do_work</span><span class="p">();</span><span class="w">   </span><span class="c1">// if throws, p&#39;s destructor cleans up</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="summary-table">Summary Table</h2>
+<table>
+<thead>
+<tr>
+<th>Guarantee</th>
+<th>State After Exception</th>
+<th>Resource Leaks?</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No-throw</td>
+<td>N/A (never throws)</td>
+<td>No</td>
+<td><code>swap()</code>, destructors</td>
+</tr>
+<tr>
+<td>Strong</td>
+<td>Rolled back</td>
+<td>No</td>
+<td><code>vector::push_back</code></td>
+</tr>
+<tr>
+<td>Basic</td>
+<td>Valid but changed</td>
+<td>No</td>
+<td><code>vector::insert</code> (sometimes)</td>
+</tr>
+<tr>
+<td>None</td>
+<td>Anything</td>
+<td>Maybe</td>
+<td><strong>BUG</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li>Every function should provide at least the <strong>basic guarantee</strong></li>
+<li>Use <strong>RAII</strong> for all resource management — it&rsquo;s the foundation</li>
+<li>Mark move ctors/assignment and swap as <strong><code>noexcept</code></strong> — containers depend on it</li>
+<li>Use <strong>copy-and-swap</strong> when you need the strong guarantee on assignment</li>
+<li>For multi-step operations, do all throwing work first, then commit with noexcept ops</li>
+<li>Never throw in destructors</li>
+<li>Catch by <code>const&amp;</code>, never by value</li>
+<li><code>noexcept</code> is not just documentation — it changes runtime behavior</li>
+</ol>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>
