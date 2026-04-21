@@ -22,26 +22,78 @@ Every week: One mini-project that ships a working artifact
 ```
 learn/cpp-advanced/
 ├── STUDY-PLAN.md                          ← YOU ARE HERE
+├── README.md                              ← Navigation & content summary
+├── build_all.sh                           ← Build all modules
 ├── 01-move-semantics-value-categories/
 │   ├── notes.md
 │   ├── exercises/
 │   └── puzzles/
-├── 02-compile-time-computation/
-├── 03-error-handling-without-exceptions/
-├── 04-memory-model-atomics/
-├── 05-lock-free-data-structures/
-├── 06-rt-linux-programming/
-├── 07-allocators-and-memory/
-├── 08-safety-critical-patterns/
-├── 09-static-analysis-and-tooling/
-├── 10-build-systems-and-ci/
-├── 11-ipc-serialization/
-├── 12-testing-and-fuzzing/
-└── projects/
-    ├── week2-spsc-queue/
-    ├── week4-rt-cyclic-executive/
-    ├── week6-telemetry-pipeline/
-    └── week8-mini-flight-software/
+├── 02-error-handling-memory-model/
+│   ├── notes.md
+│   ├── exercises/
+│   └── puzzles/
+├── 03-rt-linux-programming/
+│   ├── notes.md
+│   ├── exercises/
+│   └── puzzles/
+├── 04-safety-critical-patterns/
+│   ├── notes.md
+│   ├── exercises/
+│   └── puzzles/
+├── 05-build-test-tooling/
+│   ├── notes.md
+│   ├── exercises/
+│   └── puzzles/
+├── 06-ipc-serialization/
+│   ├── notes.md
+│   ├── exercises/
+│   └── puzzles/
+├── 07-ub-advanced-patterns/
+│   ├── notes.md
+│   ├── exercises/
+│   └── puzzles/
+├── 08-capstone-flight-software/
+│   ├── include/flight_sw/   (8 headers)
+│   ├── src/main.cpp
+│   └── tests/test_main.cpp
+├── 09-hardware-lessons/
+│   └── exercises/  (hw01–hw05)
+├── 10-safety-lessons/
+│   └── exercises/  (sf01–sf05)
+├── 11-cpp20-coroutines/           ← NEW: requires GCC 10+
+│   ├── notes.md
+│   ├── exercises/ (ex01–ex04)
+│   └── puzzles/
+├── 12-cpp20-ranges/               ← NEW: requires GCC 10+
+│   ├── notes.md
+│   ├── exercises/ (ex01–ex05)
+│   └── puzzles/
+├── 13-cpp20-format/               ← NEW: requires GCC 13+
+│   ├── notes.md
+│   ├── exercises/ (ex01–ex04)
+│   └── puzzles/
+├── 14-exception-safety/           ← NEW: GCC 9+ compatible
+│   ├── notes.md
+│   ├── exercises/ (ex01–ex05)
+│   └── puzzles/
+├── 15-pmr-allocators/             ← NEW: GCC 9+ compatible
+│   ├── notes.md
+│   ├── exercises/ (ex01–ex05)
+│   └── puzzles/
+├── 16-sanitizer-workshop/         ← NEW: GCC 9+ compatible
+│   ├── notes.md
+│   ├── exercises/ (ex01–ex05, multi-sanitizer builds)
+│   └── puzzles/
+└── 17-sdv-mission-critical/       ← NEW: C++20, optional pthread
+    ├── notes.md
+    ├── exercises/ (ex01–ex08: E2E, degradation, cyclic exec,
+    │   triple buffer, DTC, OTA, SecOC, watchdog)
+    └── puzzles/
+├── 18-coding-standards-tracing/   ← NEW: profiling, LTTng-style tracing
+│   ├── notes.md
+│   ├── exercises/ (ex01–ex08: standards, static analysis, cache,
+│   │   callgraph, syscall, tracepoints, watchpoints, flamegraph)
+│   └── puzzles/ (false sharing, invisible alloc, lying benchmark)
 ```
 
 ---
@@ -4440,6 +4492,188 @@ Every safety incident in history falls into one or more of these:
 
 ---
 
+## 🔄 Module 11: C++20 Coroutines
+*Standalone — requires GCC 10+ or Clang 14+*
+*Goal: Understand stackless coroutines for lazy pipelines and async patterns*
+
+### Topics Covered
+- Coroutine machinery: `co_await`, `co_yield`, `co_return`
+- Promise type and `coroutine_handle`
+- Awaitable/Awaiter concepts (`await_ready`, `await_suspend`, `await_resume`)
+- Generator pattern — lazy sequences with iterator interface
+- Async Task pattern — single-value futures with continuation
+- Cooperative scheduler (round-robin, priority)
+- Symmetric transfer for O(1) stack usage
+- Coroutine lifetime pitfalls (dangling references across suspension points)
+
+### Exercises
+| File | What |
+|------|------|
+| `ex01_generator.cpp` | Build a `Generator<T>` from scratch — fibonacci, file lines, transforms |
+| `ex02_async_task.cpp` | Build a `Task<T>` with continuation chaining |
+| `ex03_coroutine_scheduler.cpp` | Cooperative round-robin + priority scheduler |
+| `ex04_symmetric_transfer.cpp` | Demonstrate and benchmark symmetric transfer |
+
+### Puzzles
+| File | What |
+|------|------|
+| `puzzle01_lifetime_trap.cpp` | 💀 Dangling reference across `co_await` — find and fix |
+| `puzzle02_generator_leak.cpp` | 💀 Resource leak on early `break` from generator loop |
+
+---
+
+## 📐 Module 12: C++20 Ranges
+*Standalone — requires GCC 10+ (partial) or GCC 12+ (full)*
+*Goal: Replace iterator-pair algorithms with composable, lazy view pipelines*
+
+### Topics Covered
+- Range concepts: `range`, `view`, `input_range`, `sized_range`, `contiguous_range`
+- Views vs containers (lazy vs eager, O(1) construction)
+- Pipe syntax `|` for composition
+- Range adaptors: `filter`, `transform`, `take`, `drop`, `reverse`, `split`, `join`
+- Range algorithms with projections — the killer feature
+- Writing custom views with `view_interface`
+- Sentinel vs end iterator
+- Dangling views and borrowed ranges
+
+### Exercises
+| File | What |
+|------|------|
+| `ex01_range_basics.cpp` | Filter/transform/take pipeline, laziness proof |
+| `ex02_projections.cpp` | Sort, find, max with projections — replaces verbose lambdas |
+| `ex03_custom_view.cpp` | Build a `stride_view` with iterator + pipe adaptor |
+| `ex04_range_algorithms.cpp` | `ranges::sort` vs `std::sort`, partition, rotate, unique |
+| `ex05_lazy_pipeline.cpp` | Infinite sensor stream, lazy vs eager benchmark |
+
+### Puzzles
+| File | What |
+|------|------|
+| `puzzle01_dangling_view.cpp` | 💀 View over temporary — predict `ranges::dangling` |
+| `puzzle02_single_pass_trap.cpp` | 💀 `istream_view` consumed once — explain and fix |
+
+---
+
+## 📝 Module 13: C++20 `std::format`
+*Standalone — requires GCC 13+ or Clang 17+ (use `{fmt}` as polyfill for older)*
+*Goal: Type-safe, fast, compile-time-checked string formatting*
+
+### Topics Covered
+- Format specification mini-language: fill, align, sign, width, precision, type
+- `std::format` vs `std::format_to` vs `std::format_to_n` vs `std::formatted_size`
+- Custom formatters via `std::formatter<T>` specialization
+- Compile-time format string validation
+- Performance vs printf vs iostream
+- `{fmt}` library as polyfill
+
+### Exercises
+| File | What |
+|------|------|
+| `ex01_format_basics.cpp` | Format integers, floats, hex, binary, alignment |
+| `ex02_custom_formatter.cpp` | Formatters for `Vector3d`, `Timestamp`, `HexDump` |
+| `ex03_format_benchmark.cpp` | printf vs ostringstream vs std::format — 100K iterations |
+| `ex04_safe_logging.cpp` | Thread-safe logger with compile-time validation |
+
+### Puzzles
+| File | What |
+|------|------|
+| `puzzle01_format_spec_quiz.cpp` | 💀 Predict the output of tricky format specs |
+| `puzzle02_formatter_sfinae.cpp` | 💀 `Formattable` concept — better error messages |
+
+---
+
+## 🛟 Module 14: Exception Safety Guarantees
+*Standalone — GCC 9+ compatible*
+*Goal: Design APIs that never leak, never corrupt, always roll back on failure*
+
+### Topics Covered
+- The 4 guarantee levels: no-throw, strong, basic, no guarantee
+- `noexcept` specifier and operator — impact on move operations
+- Copy-and-swap idiom for strong guarantee
+- RAII as the foundation of exception safety
+- Scope guards using `std::uncaught_exceptions()`
+- `std::move_if_noexcept` — why `noexcept` on moves matters for containers
+- Exception safety in constructors and multi-step operations
+- Commit-or-rollback pattern
+
+### Exercises
+| File | What |
+|------|------|
+| `ex01_guarantee_levels.cpp` | `BankAccount::transfer()` — all 4 levels demonstrated |
+| `ex02_copy_and_swap.cpp` | `DynamicArray<T>` — naive (broken) vs copy-and-swap |
+| `ex03_scope_guard.cpp` | `ScopeGuard`, `ScopeSuccess`, `ScopeFailure` with rollback |
+| `ex04_noexcept_impact.cpp` | Benchmark: 100K push_backs with/without noexcept move |
+| `ex05_exception_safe_container.cpp` | `SmallVector<T,N>` with SBO and strong guarantee |
+
+### Puzzles
+| File | What |
+|------|------|
+| `puzzle01_destructor_throw.cpp` | 💀 Throwing in destructor during unwinding → `std::terminate` |
+| `puzzle02_move_or_copy.cpp` | 💀 Predict: does vector move or copy for each Widget variant? |
+
+---
+
+## 🧱 Module 15: PMR (Polymorphic Memory Resource) Allocators
+*Standalone — GCC 9+ compatible*
+*Goal: Eliminate heap allocation from real-time hot paths*
+
+### Topics Covered
+- Why `new`/`malloc` break real-time guarantees (locks, page faults, fragmentation)
+- `std::pmr::memory_resource` — polymorphic, stateful, runtime-switchable
+- 3 standard resources: `monotonic_buffer_resource`, `unsynchronized_pool_resource`, `synchronized_pool_resource`
+- Null resource (testing), new-delete resource (default), upstream chaining
+- PMR containers: `pmr::vector`, `pmr::string` — allocator propagation
+- Writing custom `memory_resource` (TrackingResource, StackResource, BumpAllocator)
+- Real-time arena pattern: pre-allocate at startup, use bump allocator in 1kHz loop
+- The `pmr::vector<std::string>` vs `pmr::vector<pmr::string>` propagation trap
+
+### Exercises
+| File | What |
+|------|------|
+| `ex01_monotonic_buffer.cpp` | Stack-backed bump allocator, benchmark vs heap |
+| `ex02_pool_resource.cpp` | Pool with size binning, memory reuse, multi-threaded |
+| `ex03_custom_memory_resource.cpp` | TrackingResource + StackResource + BumpAllocator |
+| `ex04_realtime_arena.cpp` | 1kHz control loop with zero-allocation hot path |
+| `ex05_pmr_containers.cpp` | Propagation verification, the non-pmr inner container bug |
+
+### Puzzles
+| File | What |
+|------|------|
+| `puzzle01_arena_lifetime.cpp` | 💀 Dangling pointers after arena destruction |
+| `puzzle02_propagation_trap.cpp` | 💀 Compile-time detection of non-pmr inner containers |
+
+---
+
+## 🔬 Module 16: Sanitizer Workshop
+*Standalone — GCC 9+ compatible*
+*Goal: Master ASan, UBSan, TSan for hunting real bugs*
+
+### Topics Covered
+- AddressSanitizer: buffer overflow, use-after-free, double-free, leak detection
+- UndefinedBehaviorSanitizer: signed overflow, null deref, alignment, shift
+- ThreadSanitizer: data races, lock-order-inversion, signal-unsafe code
+- Compiler flags and runtime options (`ASAN_OPTIONS`, `TSAN_OPTIONS`)
+- Cannot combine ASan + TSan — run separately
+- Performance overhead: ASan ~2x, TSan ~5-15x, UBSan ~minimal
+- CI integration: separate sanitizer jobs
+- Sanitizer blind spots: logic errors, ABA, uninitialized reads
+
+### Exercises
+| File | What |
+|------|------|
+| `ex01_asan_bugs.cpp` | 8 ASan bugs — heap/stack overflow, UAF, double-free, leak |
+| `ex02_ubsan_bugs.cpp` | 8 UBSan bugs — overflow, shift, null, alignment, float-cast |
+| `ex03_tsan_bugs.cpp` | 5 TSan bugs — races, bitfield race, ABBA deadlock |
+| `ex04_sanitizer_ci.cpp` | Realistic `MessageQueue<T>` with 3 hidden bugs + fixed version |
+| `ex05_sanitizer_detective.cpp` | `RobotController` with 3 subtle bugs — pick the right sanitizer |
+
+### Puzzles
+| File | What |
+|------|------|
+| `puzzle01_false_positive.cpp` | 💀 SeqLock false positive — write a suppression |
+| `puzzle02_sanitizer_blind_spots.cpp` | 💀 What sanitizers CAN'T catch — alternative strategies |
+
+---
+
 ## Progression Summary
 
 | Week | You Can Now... |
@@ -4455,6 +4689,12 @@ Every safety incident in history falls into one or more of these:
 | 🧓 | Think like a 20-year veteran — know the tradeoffs, not just the syntax |
 | ⚡ | Understand what the hardware is doing under your abstractions |
 | 🛡️ | Design for failure — because hardware WILL fail, code WILL have bugs |
+| 🔄 | Write lazy async pipelines with C++20 coroutines |
+| 📐 | Compose data transformations with zero-overhead ranges |
+| 📝 | Format output safely without printf or iostream pain |
+| 🛟 | Design exception-safe APIs with strong guarantee |
+| 🧱 | Eliminate heap allocation from hot paths with PMR arenas |
+| 🔬 | Hunt memory, UB, and race bugs with sanitizer instrumentation |
 
 ---
 
