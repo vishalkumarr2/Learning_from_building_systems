@@ -12,27 +12,20 @@ the daily RCA work actually happens.
 ```
 EXISTING                            MISSING
 ────────────────────────────────    ────────────────────────────────────────
-electronics/    (hardware theory)   navigation-estimator/  ← HIGHEST PRIORITY
-zephyr/         (firmware)          ros2-handson/           ← HIGH
-cpp-advanced/   (C++ depth)         python-oks/             ← MEDIUM
-                                    zephyr/deep-dive/       ← MEDIUM (stub only)
-                                    linux-rt/               ← LOW (cpp-advanced/03 partial)
+electronics/    (hardware theory)   navigation-estimator/  ← COMPLETED ✅
+zephyr/         (firmware)          ros2-handson/           ← COMPLETED ✅
+cpp-advanced/   (C++ depth)         python-oks/             ← COMPLETED ✅
+navigation-estimator/ (EKF/odom)    control-systems/        ← COMPLETED ✅
+ros2-handson/   (ROS2 practice)     zephyr/deep-dive/       ← MEDIUM (stub only)
+python-oks/     (scripting)         linux-rt/               ← LOW (cpp-advanced/03 partial)
+control-systems/ (PID→advanced)
 ```
 
 ---
 
 ## Track 1: Navigation & State Estimation
 **Priority: HIGHEST**
-**Why now:** You investigate `NAV_ESTIMATED_STATE_NOT_FINITE`, slip detection, sensorbar covariance
-blow-up, and EKF divergence tickets daily. You know the OKS code deeply (repo memory) but
-lack the mathematical theory to immediately see *why* a covariance grows / explodes / converges.
-
-**Goal:** Be able to look at any estimator log and reason from first principles about whether
-the observed covariance trajectory is expected or anomalous.
-
-**Timeline:** 5 weeks · 3–4 hrs/week · no hardware needed
-
-**Status:** 🔴 Not started
+**Status:** ✅ **COMPLETED**
 **Folder:** `learn/navigation-estimator/`
 
 | Week | Topic | OKS Relevance |
@@ -132,7 +125,19 @@ python-oks/
 
 ---
 
-## Track 4: Zephyr Deep-Dive
+## Track 4: Control Systems
+**Priority: HIGH**
+**Status:** ✅ **COMPLETED**
+**Folder:** `learn/control-systems/`
+
+10 core lessons (PID fundamentals → advanced control), 3 debugging sessions (motor oscillation,
+integral windup, cmd_vel gap), 8 exercise sets, and 30 senior interview questions across
+control theory, embedded control, and system integration. Covers MCU inner loop (STM32, 10 kHz,
+fixed-point) through Jetson outer loop (50 Hz, floating-point, ROS2 Nav2).
+
+---
+
+## Track 5: Zephyr Deep-Dive
 **Priority: MEDIUM (blocked by hardware)**
 **Why:** `zephyr/deep-dive/` exists but is empty. Meant for hardware-stage deep dives once
 the STM32 + logic analyzer are in hand.
@@ -154,7 +159,7 @@ zephyr/deep-dive/
 
 ---
 
-## Track 5: Linux RT Internals
+## Track 6: Linux RT Internals
 **Priority: LOW**
 **Why:** `cpp-advanced/03-rt-linux-programming` partially covers this (SCHED_FIFO, mutex, priority inversion).
 Not a separate track — extend cpp-advanced/03 instead.

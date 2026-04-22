@@ -52,6 +52,36 @@
   - [02 — Testing & CLI Scripts](python-oks/02-testing-cli-scripts.md)
   - [03 — Time-Series Analysis](python-oks/03-timeseries-analysis.md)
 
+- **Control Systems**
+  - [Learning Plan](control-systems/00-learning-plan.md)
+  - [01 — What Is Control?](control-systems/01-what-is-control.md)
+  - [02 — Modeling Physical Systems](control-systems/02-modeling-physical-systems.md)
+  - [03 — PID Control](control-systems/03-pid-control.md)
+  - [04 — Tuning PID](control-systems/04-tuning-pid.md)
+  - [05 — Digital Implementation](control-systems/05-digital-implementation.md)
+  - [06 — Cascade Control](control-systems/06-cascade-control.md)
+  - [07 — Feedforward & Disturbance](control-systems/07-feedforward-disturbance.md)
+  - [08 — Gain Scheduling](control-systems/08-gain-scheduling.md)
+  - [09 — MCU vs Jetson](control-systems/09-mcu-vs-jetson.md)
+  - [10 — Advanced Control](control-systems/10-advanced-control.md)
+  - *Debugging*
+  - [Debug 01 — Motor Oscillation](control-systems/debugging/01-motor-oscillation.md)
+  - [Debug 02 — Integral Windup](control-systems/debugging/02-integral-windup.md)
+  - [Debug 03 — cmd_vel Gap](control-systems/debugging/03-cmd-vel-gap.md)
+  - *Exercises*
+  - [Ex 01 — Block Diagrams](control-systems/exercises/01-block-diagrams.md)
+  - [Ex 02 — First-Order Systems](control-systems/exercises/02-first-order-systems.md)
+  - [Ex 03 — PID Implementation](control-systems/exercises/03-pid-implementation.md)
+  - [Ex 04 — Tuning Challenge](control-systems/exercises/04-tuning-challenge.md)
+  - [Ex 05 — Digital PID in C](control-systems/exercises/05-digital-pid-c.md)
+  - [Ex 06 — Cascade Design](control-systems/exercises/06-cascade-design.md)
+  - [Ex 07 — Feedforward Design](control-systems/exercises/07-feedforward-design.md)
+  - [Ex 08 — Full Pipeline](control-systems/exercises/08-full-pipeline.md)
+  - *Senior Questions*
+  - [SQ 01 — Control Theory Deep](control-systems/senior-questions/01-control-theory-deep.md)
+  - [SQ 02 — Embedded Control](control-systems/senior-questions/02-embedded-control.md)
+  - [SQ 03 — System Integration](control-systems/senior-questions/03-system-integration.md)
+
 - **C++ Advanced**
   - [Study Plan](cpp-advanced/STUDY-PLAN.md)
   - [01 — Move Semantics](cpp-advanced/01-move-semantics-value-categories/notes.md)
