@@ -579,6 +579,14 @@ def build_robotics_index():
                            "Unified Study Plan",
                            "120–130 hour roadmap: Electronics → Protocols → Embedded Systems",
                            "blue"))
+    cards.append(card_html("learn/resources.html",
+                           "External Resources",
+                           "Curated courses, papers, repos, and videos for each learning track",
+                           "cyan"))
+    cards.append(card_html("learn/gaps-roadmap.html",
+                           "Gaps & Roadmap",
+                           "Learning gap analysis and prioritised improvement roadmap",
+                           "orange"))
     cards.append(card_html("learn/cpp-advanced/index.html",
                            "Advanced C++ for Robotics",
                            "Real-time, safety-critical & production systems — 18 modules",
