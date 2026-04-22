@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Navigation &amp; State Estimation — Learning Plan - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Navigation Estimator</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="navigation-state-estimation-learning-plan">Navigation &amp; State Estimation — Learning Plan</h1>
+<h3 id="for-software-engineer-investigating-oks-amr-navigation-failures-daily">For: Software engineer investigating OKS AMR navigation failures daily</h3>
+<h3 id="goal-read-estimator-covariance-trajectories-from-first-principles-diagnose-ekf-failures-from-logsbags">Goal: Read estimator covariance trajectories from first principles, diagnose EKF failures from logs/bags</h3>
+<hr />
+<h2 id="why-this-track-exists">Why This Track Exists</h2>
+<p>You already know the the navigation estimator code deeply:
+- <code>predict()</code> grows covariance from a fixed noise model (delta_trans, delta_theta, delta_t)
+- <code>update()</code> shrinks covariance using sensorbar line measurements with Mahalanobis gating
+- Slip detection sets covariance to INF via velocity window comparison
+- <code>isFinite()</code> check in <code>executePoseGoal()</code> triggers <code>ESTIMATED_STATE_NOT_FINITE</code></p>
+<p><strong>What you&rsquo;re missing:</strong> The mathematical theory that lets you look at a covariance trace in a bag
+and immediately say &ldquo;this blow-up is a slip, not a delocalization&rdquo; or &ldquo;this sensorbar update
+was rejected because innovation exceeded 2-sigma.&rdquo; This track fills that gap.</p>
+<hr />
+<h2 id="dependency-graph">Dependency Graph</h2>
+<div class="highlight"><pre><span></span><code>                              ┌────────────────────────┐
+                              │ 05-failure-modes.md    │
+                              │ (OKS diagnosis)        │
+                              └────────────┬───────────┘
+                                           │ requires all below
+              ┌────────────────────────────┼────────────────────────────┐
+              │                            │                            │
+   ┌──────────▼──────────┐   ┌────────────▼────────────┐  ┌────────────▼──────────┐
+   │ 03-measurement-     │   │ 04-imu-fusion.md        │  │ 02-kalman-filter.md   │
+   │ models.md           │   │ (gyro, bias, sensorbar  │  │ (EKF predict/update)  │
+   │ (line constraints,  │   │  theta update)          │  │                       │
+   │  Mahalanobis)       │   └────────────┬────────────┘  └────────────┬──────────┘
+   └──────────┬──────────┘                │                             │
+              │                           └──────────┬──────────────────┘
+              └──────────────────────────────────────┤
+                                                     ▼
+                                        ┌────────────────────────┐
+                                        │ 01-dead-reckoning.md   │
+                                        │ (odometry, unicycle,   │
+                                        │  arc integration)      │
+                                        └────────────────────────┘
+</code></pre></div>
+
+<p><strong>Reading order:</strong> 01 → 02 → 03 → 04 → 05 (strictly sequential — each builds on the previous)</p>
+<hr />
+<h2 id="topic-breakdown">Topic Breakdown</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>File</th>
+<th>Est. Time</th>
+<th>What It Gives You</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><code>01-dead-reckoning.md</code></td>
+<td>3 hrs</td>
+<td>Derive <code>(x', y', θ')</code> from encoder counts; understand OKS <code>predict()</code> noise terms</td>
+</tr>
+<tr>
+<td>02</td>
+<td><code>02-kalman-filter.md</code></td>
+<td>4 hrs</td>
+<td>KF → EKF equations; understand why covariance grows during motion and shrinks on measurement</td>
+</tr>
+<tr>
+<td>03</td>
+<td><code>03-measurement-models.md</code></td>
+<td>3 hrs</td>
+<td>Line sensor as a constraint; Mahalanobis distance; when OKS rejects a sensorbar update</td>
+</tr>
+<tr>
+<td>04</td>
+<td><code>04-imu-fusion.md</code></td>
+<td>3 hrs</td>
+<td>Gyro integration; bias estimation; how OKS theta update differs from XY update</td>
+</tr>
+<tr>
+<td>05</td>
+<td><code>05-failure-modes.md</code></td>
+<td>3 hrs</td>
+<td>Recognise slip vs delocalize vs collision from covariance patterns in bags</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Total: ~16 hours</strong></p>
+<hr />
+<h2 id="checkpoint-questions-youre-done-when-you-can-answer">Checkpoint Questions — &ldquo;You&rsquo;re Done When You Can Answer&hellip;&rdquo;</h2>
+<p>After each file, you must answer these without opening any notes:</p>
+<h3 id="after-01-dead-reckoningmd">After <code>01-dead-reckoning.md</code></h3>
+<ul>
+<li>[ ] A robot moves 0.1m forward. Left wheel encoder reads 100 ticks, right reads 98. Wheel radius 0.05m, ticks/rev = 1000, base.3m. Compute Δx, Δy, Δθ.</li>
+<li>[ ] Why does arc integration accumulate heading error faster than position error?</li>
+<li>[ ] In <code>predict()</code>, which noise term (<code>k_trans_noise</code> vs <code>k_rot_pos_noise</code>) dominates during a tight turn?</li>
+</ul>
+<h3 id="after-02-kalman-filtermd">After <code>02-kalman-filter.md</code></h3>
+<ul>
+<li>[ ] Write the EKF prediction equations. What are <code>F</code>, <code>Q</code>, <code>P</code>?</li>
+<li>[ ] After 10 steps with no measurement, the covariance is large. One sensorbar update arrives. What happens to <code>P</code>?</li>
+<li>[ ] OKS <code>predict()</code> does NOT use the odom message&rsquo;s covariance fields. Why is this OK?</li>
+</ul>
+<h3 id="after-03-measurement-modelsmd">After <code>03-measurement-models.md</code></h3>
+<ul>
+<li>[ ] Sensorbar reads a line at 5cm left of expected. The covariance is large. Is the update accepted or rejected?</li>
+<li>[ ] What is Mahalanobis distance and why is it used instead of raw innovation?</li>
+<li>[ ] OKS uses <code>clamp(state, meas.min, meas.max)</code> instead of a standard Kalman gain. What does this mean geometrically?</li>
+</ul>
+<h3 id="after-04-imu-fusionmd">After <code>04-imu-fusion.md</code></h3>
+<ul>
+<li>[ ] What is gyro bias and why does it matter for heading estimation?</li>
+<li>[ ] OKS only uses IMU for theta, not XY. Why?</li>
+<li>[ ] If the IMU is missing, what happens to the OKS theta update? (hint: check sensorbar code path)</li>
+</ul>
+<h3 id="after-05-failure-modesmd">After <code>05-failure-modes.md</code></h3>
+<ul>
+<li>[ ] Given a bag where covariance(X,X) = INF appears at T+2s after a velocity spike, what is the most likely cause?</li>
+<li>[ ] The robot delocalized but the slip detection never fired. What else can cause <code>ERROR_INVALID_STATE</code>?</li>
+<li>[ ] How would you use <code>scripts/analysis/</code> to plot covariance over time and identify the divergence point?</li>
+</ul>
+<hr />
+<h2 id="weekly-schedule">Weekly Schedule</h2>
+<h3 id="week-1-dead-reckoning-odometry-math-3-hrs">Week 1: Dead-Reckoning + Odometry Math (3 hrs)</h3>
+<p><strong>Read:</strong> <code>01-dead-reckoning.md</code>
+<strong>Do:</strong> <code>exercises/01-odometry-math.md</code>
+<strong>Connect:</strong> Open <code>`</code>predict()` and label each noise term against the math you learned.</p>
+<hr />
+<h3 id="week-2-ekf-theory-prediction-step-4-hrs">Week 2: EKF Theory — Prediction Step (4 hrs)</h3>
+<p><strong>Read:</strong> <code>02-kalman-filter.md</code> — KF derivation, then EKF linearisation
+<strong>Do:</strong> <code>exercises/02-kalman-1d.md</code> — build a 1D KF by hand (position + velocity)
+<strong>Connect:</strong> The OKS prediction step is a simplified EKF (no Jacobian for covariance — uses fixed
+noise model instead). Understand why this is an approximation and when it breaks.</p>
+<hr />
+<h3 id="week-3-measurement-update-mahalanobis-3-hrs">Week 3: Measurement Update + Mahalanobis (3 hrs)</h3>
+<p><strong>Read:</strong> <code>03-measurement-models.md</code>
+<strong>Do:</strong> <code>exercises/03-ekf-unicycle.md</code> — implement EKF for a 2D unicycle in Python (30 lines)
+<strong>Connect:</strong> Read <code>`</code>update()` . You can now read every line.</p>
+<hr />
+<h3 id="week-4-imu-fusion-theta-3-hrs">Week 4: IMU Fusion + Theta (3 hrs)</h3>
+<p><strong>Read:</strong> <code>04-imu-fusion.md</code>
+<strong>Do:</strong> <code>exercises/04-log-diagnosis.md</code> — given a synthetic covariance trace, identify the failure
+<strong>Connect:</strong> Look at <code>imuCallback()</code> callback. The gyro integration + bias correction will now make sense.</p>
+<hr />
+<h3 id="week-5-oks-failure-modes-bag-diagnosis-3-hrs">Week 5: OKS Failure Modes + Bag Diagnosis (3 hrs)</h3>
+<p><strong>Read:</strong> <code>05-failure-modes.md</code>
+<strong>Do:</strong> <code>exercises/05-oks-specific.md</code> — use a real OKS bag (from <code>attachments/</code>) to find the
+first moment covariance blows up, and name the cause.
+<strong>Goal:</strong> At the end of this week, every <code>ERROR_INVALID_STATE</code> ticket you open should
+have a 3-sentence hypothesis within 2 minutes of looking at the bag.</p>
+<hr />
+<h2 id="oks-specific-reference">OKS-Specific Reference</h2>
+<p>These code locations are your ground truth — the math in these notes should map 1:1:</p>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>OKS Code Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Odometry noise model</td>
+<td><code>`</code>predict()` lines 396+</td>
+</tr>
+<tr>
+<td>Covariance set to INF (slip)</td>
+<td><code>`</code>odometryCallback()`</td>
+</tr>
+<tr>
+<td>Covariance set to INF (collision)</td>
+<td><code>`</code>imuCallback()` lines ~200–250</td>
+</tr>
+<tr>
+<td>Measurement update (sensorbar)</td>
+<td><code>`</code>update()`</td>
+</tr>
+<tr>
+<td>Mahalanobis gate (2-sigma)</td>
+<td><code>`</code>update()` — innovation check</td>
+</tr>
+<tr>
+<td>isFinite check</td>
+<td><code>`</code>executePoseGoal()`</td>
+</tr>
+<tr>
+<td>Theta KF update</td>
+<td>`` — Kalman gain for IMU theta</td>
+</tr>
+<tr>
+<td>VelocityWindowTracker</td>
+<td>``</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="how-this-connects-to-other-tracks">How This Connects to Other Tracks</h2>
+<div class="highlight"><pre><span></span><code>electronics/05-spi-deep-dive.md     ─→  sensorbar data arrives over SPI (v3.1+)
+zephyr/study-notes/02-sensors.md    ─→  how IMU data is read from ICM-42688
+navigation-estimator/ (this track)  ─→  what the estimator does with that data
+ros2-handson/ (next track)          ─→  how nav2 uses the estimated state for planning
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

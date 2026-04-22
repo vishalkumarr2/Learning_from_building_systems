@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exercise01 — Publisher, Subscriber, Timer - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-sky-600 hover:text-sky-800 mb-4 inline-block">&larr; Back to ROS 2 Hands-on</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="exercise01-publisher-subscriber-timer">Exercise01 — Publisher, Subscriber, Timer</h1>
+<h3 id="companion-exercises-for-01-nodes-topics-actionsmd">Companion exercises for <code>01-nodes-topics-actions.md</code></h3>
+<p><strong>Estimated time:</strong> 60 minutes<br />
+<strong>Prerequisite:</strong> <a href="../01-nodes-topics-actions.md">01-nodes-topics-actions.md</a></p>
+<p><strong>Self-assessment guide:</strong> Write your answer on paper before expanding each details block.
+If you can answer Section A without peeking, you understand the executor model well enough
+to diagnose silent subscriber failures in field logs.</p>
+<hr />
+<h2 id="overview">Overview</h2>
+<p>A large share of &ldquo;node running but not publishing&rdquo; incidents come from exactly three root
+causes: the executor is blocked by a long callback, a QoS incompatibility prevents
+message delivery, or the publisher/subscriber was created but never has <code>spin()</code> called.
+These exercises drill each scenario from first principles, then ask you to build complete
+nodes from scratch.</p>
+<hr />
+<h2 id="section-a-conceptual-questions">Section A — Conceptual Questions</h2>
+<p><strong>A1.</strong> What does <code>rclpy.spin(node)</code> block on?<br />
+Describe exactly what the thread is doing while it waits for the next event, and what
+happens to the spin call when your callback takes 5 seconds to execute.</p>
+<details><summary>Answer</summary>
+
+`rclpy.spin(node)` calls into the `SingleThreadedExecutor.spin()` loop, which repeatedly
+calls `executor.spin_once()`. Inside `spin_once()`, the thread blocks on
+`rcl_wait()` — a system call that sleeps until at least one waitable handle (subscription,
+timer, service, action) fires or the timeout expires.
+
+**While it waits:** The thread is parked in `epoll_wait` (on Linux). CPU usage is
+effectively zero. No callbacks run.
+
+**What happens when your callback takes 5 seconds:**
+The executor is single-threaded. It cannot call any other callback until your 5-second
+callback returns. This means:
+- All timers that fire during those 5 seconds queue up but are NOT missed — they are
+  delivered as a burst when your callback finally returns.
+- All incoming subscription messages that arrive during the 5 seconds accumulate in the
+  DDS receive queue (up to `depth` messages if using `KEEP_LAST`).
+- The calling code does not see any output for 5 seconds.
+
+In practice, if a timer at 10Hz fires while a 5-second callback is running, you get:
+50 pending timer events → burst of 50 callbacks delivered back-to-back as fast as the
+executor can run them. This is the "callback pile-up" failure mode that causes apparent
+jitter even when the underlying signal is smooth.
+
+**Fix:** Keep all callbacks short (< 1 ms for high-rate topics). Move slow work to a
+separate thread or use `MultiThreadedExecutor`.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<p><strong>A2.</strong> A publisher uses <code>KEEP_LAST(1)</code> on a 100 Hz topic. Describe three distinct
+scenarios where this QoS choice is correct and one where it would be the wrong choice.</p>
+<details><summary>Answer</summary>
+
+**Correct choices for `KEEP_LAST(1)`:**
+
+1. **Current pose / odometry:** You always want the most recent position estimate.
+   The consumer (controller) only cares where the robot is *right now*. Replaying stale
+   positions would corrupt the control loop. `KEEP_LAST(1)` ensures the subscriber always
+   gets the freshest sample.
+
+2. **Sensor status / heartbeat:** A watchdog subscriber only wants to know the last
+   reported health state. Queuing 100 stale "all-good" messages wastes memory and delays
+   detection of a newly-arrived "fault" message.
+
+3. **Display / visualization topics:** An RViz subscriber rendering at 10Hz on a 100Hz
+   topic. No value in rendering 90 intermediate frames — only the latest matters.
+
+**Wrong choice:**
+- **Commanded velocity log / audit trail:** If a safety monitor must receive and record
+  *every* velocity command ever issued (e.g., for post-incident replay), `KEEP_LAST(1)` would
+  silently drop messages when the executor is busy. Use `KEEP_ALL` or a large
+  `KEEP_LAST(N)` with a reliable transport.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<p><strong>A3.</strong> What happens if a subscriber callback takes longer than the publish rate of its
+topic? Walk through what happens to message delivery over 3 publish periods.</p>
+<details><summary>Answer</summary>
+
+Assume publish rate = 100 Hz (period = 10 ms) and callback takes 25 ms.
+
+**Period 1 (t=0 ms):** Message M1 arrives. Executor picks it up and calls the callback.
+The callback runs for 25 ms.
+
+**Period 2 (t=10 ms):** Publisher emits M2 while the callback from M1 is still running.
+M2 enters the DDS receive queue. The executor cannot call the callback for M2 because the
+single thread is occupied with M1.
+
+**Period 3 (t=20 ms):** Publisher emits M3. With `KEEP_LAST(1)`, M3 *overwrites* M2 in
+the queue. M2 is silently dropped.
+
+**At t=25 ms:** M1 callback returns. Executor calls the callback for M3 (M2 was dropped).
+
+**Result:** Effective callback rate = 1/25ms = 40 Hz (not 100 Hz). 60% of messages are
+dropped. This is not an error — it is by design when using `KEEP_LAST(1)`. The callback
+always gets the latest message, never a stale one.
+
+With `KEEP_LAST(10)`, messages queue up until memory is exhausted or the executor catches
+up. If the callback is always slower than the rate, the queue fills up, and when the queue
+is full, the oldest message is dropped (oldest-first eviction).
+
+**Key insight:** A callback that is slower than the publish rate will never process all
+messages in real-time with a single-threaded executor. This is normal for display/logging
+callbacks but a bug for control-loop callbacks.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<p><strong>A4.</strong> What is the difference between <code>rclpy.Node</code> and <code>rclpy_lifecycle.LifecycleNode</code>?
+Name at least three states of a lifecycle node and explain what operation is typically
+performed in each.</p>
+<details><summary>Answer</summary>
+
+**`rclpy.Node`:** A standard ROS2 node. Publishers, subscribers, and timers become active
+immediately when created in `__init__`. There is no concept of "not ready yet" — as soon
+as `__init__` returns, all communication primitives are live.
+
+**`rclpy_lifecycle.LifecycleNode`:** A node that implements the Managed Node interface
+(REP-2001). Communication primitives are created but remain inactive until the node
+transitions through its state machine.
+
+**Three key states and their operations:**
+
+| State | Description | Typical operation |
+|---|---|---|
+| `UNCONFIGURED` | Node created, `__init__` done | Nothing active. No publishers, no timers. |
+| `INACTIVE` (after `on_configure`) | Resources allocated | Create publishers/subscribers/timers, load params, connect to hardware — but do NOT start sending/receiving data. |
+| `ACTIVE` (after `on_activate`) | Node is fully operational | Activate publishers (allow `publish()` to transmit), start timers, begin reading from hardware. |
+| `FINALIZED` (after `on_cleanup` / `on_shutdown`) | Resources released | Destroy publishers, disconnect from hardware, write logs. |
+
+**Why lifecycle nodes matter for navigation stacks:** Nav2 uses lifecycle nodes so the
+entire stack can be configured (parameters loaded, TF initialized) and then activated in a
+coordinated sequence. Without this, a node might start publishing data before the TF tree
+is ready, causing a burst of lookup failures on startup.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<p><strong>A5.</strong> Name the three things <code>create_publisher</code> requires. Then describe what happens at
+the DDS layer when two nodes publish to the same topic but with incompatible QoS.</p>
+<details><summary>Answer</summary>
+
+**`create_publisher` requires:**
+1. **Message type** — the Python/C++ class for the message (e.g., `std_msgs.msg.Float64`)
+2. **Topic name** — a string (e.g., `'/robot/speed'`)
+3. **QoS profile** — a `rclpy.qos.QoSProfile` object or integer depth (default: `KEEP_LAST(10)`)
+
+**What happens at the DDS layer with incompatible QoS:**
+
+DDS negotiates QoS via *offered vs requested* incompatibility. The rule is:
+- The publisher *offers* a QoS profile.
+- The subscriber *requests* a QoS profile.
+- The subscription is only established if the publisher's offer is *at least as good* as the
+  subscriber's request.
+
+Example: publisher offers `BEST_EFFORT`, subscriber requests `RELIABLE`.
+`BEST_EFFORT < RELIABLE` → the offered QoS is weaker than requested → **incompatible**.
+
+**Concrete outcome:**
+- No message is ever delivered. The subscriber's callback is never called.
+- Both nodes log an `IncompatibleQosEvent` warning (though it is often missed).
+- `ros2 topic info /topic_name --verbose` shows the QoS mismatch.
+
+**This is completely silent** — the subscriber node is ACTIVE, the topic appears to have
+data (`ros2 topic hz`), but the callback receives nothing. This is one of the most common
+"why isn't my node getting data" bugs.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<h2 id="section-b-spot-the-bug">Section B — Spot the Bug</h2>
+<p>Each snippet below has exactly one bug. Read the code, identify the bug, and write the fix
+before expanding the answer.</p>
+<hr />
+<p><strong>B1.</strong> This node is supposed to publish <code>/status</code> at 1Hz. It never publishes anything.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">std_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">String</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">StatusNode</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;status_node&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">String</span><span class="p">,</span> <span class="s1">&#39;/status&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">timer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_timer</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">timer_cb</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">timer_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">msg</span> <span class="o">=</span> <span class="n">String</span><span class="p">()</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="s1">&#39;ok&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">()</span>
+    <span class="n">node</span> <span class="o">=</span> <span class="n">StatusNode</span><span class="p">()</span>
+    <span class="c1"># nothing else</span>
+</code></pre></div>
+
+<details><summary>Answer</summary>
+
+**Bug:** `main()` creates the node but never calls `rclpy.spin(node)`. The executor never
+runs, so the timer callback is never invoked.
+
+**Fix:**
+
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">()</span>
+    <span class="n">node</span> <span class="o">=</span> <span class="n">StatusNode</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">spin</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>          <span class="c1"># &lt;-- this line is missing</span>
+    <span class="n">node</span><span class="o">.</span><span class="n">destroy_node</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</code></pre></div>
+
+
+
+Without `spin()`, the process creates all ROS2 primitives (publisher, timer) and then
+immediately returns from `main()`. The timer is registered but never fired because the
+executor never has a chance to poll the timer handle.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<p><strong>B2.</strong> This subscriber is intended to cache the latest message. Under concurrent access
+the cached value is sometimes corrupted.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sensor_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Imu</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.executors</span><span class="w"> </span><span class="kn">import</span> <span class="n">MultiThreadedExecutor</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">ImuCache</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;imu_cache&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">latest_imu</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_subscription</span><span class="p">(</span><span class="n">Imu</span><span class="p">,</span> <span class="s1">&#39;/imu&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">cb</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">cb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">latest_imu</span> <span class="o">=</span> <span class="n">msg</span>   <span class="c1"># shared write, no lock</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_latest</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">latest_imu</span>  <span class="c1"># shared read, no lock</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">()</span>
+    <span class="n">node</span> <span class="o">=</span> <span class="n">ImuCache</span><span class="p">()</span>
+    <span class="n">executor</span> <span class="o">=</span> <span class="n">MultiThreadedExecutor</span><span class="p">(</span><span class="n">num_threads</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+    <span class="n">executor</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+    <span class="n">executor</span><span class="o">.</span><span class="n">spin</span><span class="p">()</span>
+</code></pre></div>
+
+<details><summary>Answer</summary>
+
+**Bug:** `self.latest_imu` is written in `cb()` (called by executor threads) and read in
+`get_latest()` (potentially called from any thread). With a `MultiThreadedExecutor`, multiple
+callbacks can run in parallel. The read/write is not atomic in CPython for complex objects
+(the GIL protects simple attribute assignments, but the read-modify idiom `if node.get_latest()
+is not None` can still race). On non-CPython runtimes (PyPy, future no-GIL Python) this is a
+data race.
+
+**Fix:** Protect the shared variable with a lock.
+
+
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">ImuCache</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;imu_cache&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">latest_imu</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>          <span class="c1"># &lt;-- add lock</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_subscription</span><span class="p">(</span><span class="n">Imu</span><span class="p">,</span> <span class="s1">&#39;/imu&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">cb</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">cb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lock</span><span class="p">:</span>                        <span class="c1"># &lt;-- acquire before write</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">latest_imu</span> <span class="o">=</span> <span class="n">msg</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_latest</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_lock</span><span class="p">:</span>                        <span class="c1"># &lt;-- acquire before read</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">latest_imu</span>
+</code></pre></div>
+
+
+
+**Note:** With `SingleThreadedExecutor`, the lock is not strictly required because
+callbacks are serialised. The bug only manifests with `MultiThreadedExecutor`. This is a
+common source of hard-to-reproduce races in sensor fusion nodes.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<p><strong>B3.</strong> This QoS config is intended to receive <code>/map</code> from <code>map_server</code>, which publishes
+with <code>TRANSIENT_LOCAL</code> durability. The subscriber never receives the map on startup.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.qos</span><span class="w"> </span><span class="kn">import</span> <span class="n">QoSProfile</span><span class="p">,</span> <span class="n">ReliabilityPolicy</span><span class="p">,</span> <span class="n">DurabilityPolicy</span>
+
+<span class="n">map_qos</span> <span class="o">=</span> <span class="n">QoSProfile</span><span class="p">(</span>
+    <span class="n">reliability</span><span class="o">=</span><span class="n">ReliabilityPolicy</span><span class="o">.</span><span class="n">RELIABLE</span><span class="p">,</span>
+    <span class="n">durability</span><span class="o">=</span><span class="n">DurabilityPolicy</span><span class="o">.</span><span class="n">VOLATILE</span><span class="p">,</span>   <span class="c1"># &lt;-- look here</span>
+    <span class="n">depth</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="bp">self</span><span class="o">.</span><span class="n">map_sub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_subscription</span><span class="p">(</span>
+    <span class="n">OccupancyGrid</span><span class="p">,</span> <span class="s1">&#39;/map&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">map_cb</span><span class="p">,</span> <span class="n">map_qos</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<details><summary>Answer</summary>
+
+**Bug:** The subscriber uses `VOLATILE` durability. `map_server` publishes `/map` with
+`TRANSIENT_LOCAL`, meaning it *stores* the last published map and delivers it to any new
+subscriber that connects after publication.
+
+The `VOLATILE` subscriber says "I do not want stored messages — only live ones." Since the
+map was published before this node started, the subscriber misses it entirely and waits
+forever.
+
+**Fix:** Match the publisher's durability.
+
+
+<div class="highlight"><pre><span></span><code><span class="n">map_qos</span> <span class="o">=</span> <span class="n">QoSProfile</span><span class="p">(</span>
+    <span class="n">reliability</span><span class="o">=</span><span class="n">ReliabilityPolicy</span><span class="o">.</span><span class="n">RELIABLE</span><span class="p">,</span>
+    <span class="n">durability</span><span class="o">=</span><span class="n">DurabilityPolicy</span><span class="o">.</span><span class="n">TRANSIENT_LOCAL</span><span class="p">,</span>   <span class="c1"># &lt;-- must match publisher</span>
+    <span class="n">depth</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+
+
+**Rule:** For `TRANSIENT_LOCAL` to work, *both* publisher and subscriber must use
+`TRANSIENT_LOCAL`. If either uses `VOLATILE`, the late-join delivery is disabled and
+new subscribers miss any data published before they connected.
+
+This is the most common cause of "costmap never loads" or "static obstacles not visible"
+on nav stack startup — the costmap's static layer subscribes to `/map` with the wrong
+durability.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<h2 id="section-c-build-exercises">Section C — Build Exercises</h2>
+<h3 id="c1-minimal-publisher">C1. Minimal Publisher</h3>
+<p>Write a <strong>complete</strong>, runnable Python ROS2 node that publishes a <code>Float64</code> to <code>/robot/speed</code>
+at 10 Hz. Include all imports, the <code>Node</code> subclass, <code>main()</code>, and the <code>spin()</code> call.</p>
+<p>The published value should be <code>1.0</code> (a constant placeholder).</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># TODO: fill in here</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="c1"># TODO: remaining imports</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">SpeedPublisher</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;speed_publisher&#39;</span><span class="p">)</span>
+        <span class="c1"># TODO: create publisher on /robot/speed, Float64, depth 10</span>
+        <span class="c1"># TODO: create timer at 10Hz calling self.timer_cb</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">timer_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># TODO: create Float64 message, set data=1.0, publish it</span>
+        <span class="k">pass</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="c1"># TODO: init, create node, spin, destroy, shutdown</span>
+    <span class="k">pass</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</code></pre></div>
+
+<details><summary>Answer</summary>
+
+
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">std_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Float64</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">SpeedPublisher</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;speed_publisher&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">Float64</span><span class="p">,</span> <span class="s1">&#39;/robot/speed&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">timer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_timer</span><span class="p">(</span><span class="mf">0.1</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">timer_cb</span><span class="p">)</span>   <span class="c1"># 1/10Hz = 0.1s</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">timer_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">msg</span> <span class="o">=</span> <span class="n">Float64</span><span class="p">()</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="mf">1.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="n">args</span><span class="p">)</span>
+    <span class="n">node</span> <span class="o">=</span> <span class="n">SpeedPublisher</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">spin</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+    <span class="n">node</span><span class="o">.</span><span class="n">destroy_node</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</code></pre></div>
+
+
+
+**Key points:**
+- `create_timer(0.1, ...)` → period in seconds; 0.1s = 10 Hz.
+- `depth=10` is the QoS history depth (KEEP_LAST(10)).
+- `destroy_node()` and `shutdown()` ensure clean teardown when Ctrl-C interrupts spin.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<h3 id="c2-subscriber-with-state-and-fusion-timer">C2. Subscriber with State and Fusion Timer</h3>
+<p>Write a node that:
+1. Subscribes to <code>/odom</code> (<code>nav_msgs/Odometry</code>) and stores the latest linear x-speed.
+2. Subscribes to <code>/imu</code> (<code>sensor_msgs/Imu</code>) and stores the latest linear x-acceleration.
+3. On a <strong>1 Hz</strong> timer, publishes a <code>Float64</code> to <code>/fusion/speed_comparison</code> equal to the
+   absolute difference between the latest odom speed and the latest IMU linear x-acceleration.
+4. If no message has been received yet on either topic, skip the publish and log a warning.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="c1"># TODO: remaining imports</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">FusionNode</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;fusion_node&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_latest_odom_speed</span> <span class="o">=</span> <span class="kc">None</span>   <span class="c1"># float or None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_latest_imu_accel</span>  <span class="o">=</span> <span class="kc">None</span>   <span class="c1"># float or None</span>
+
+        <span class="c1"># TODO: subscriber to /odom</span>
+        <span class="c1"># TODO: subscriber to /imu</span>
+        <span class="c1"># TODO: publisher on /fusion/speed_comparison</span>
+        <span class="c1"># TODO: 1Hz timer</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">odom_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">):</span>
+        <span class="c1"># TODO: store msg.twist.twist.linear.x</span>
+        <span class="k">pass</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">imu_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">):</span>
+        <span class="c1"># TODO: store msg.linear_acceleration.x</span>
+        <span class="k">pass</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">timer_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># TODO: guard against None, compute abs diff, publish</span>
+        <span class="k">pass</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="n">args</span><span class="p">)</span>
+    <span class="n">node</span> <span class="o">=</span> <span class="n">FusionNode</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">spin</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+    <span class="n">node</span><span class="o">.</span><span class="n">destroy_node</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</code></pre></div>
+
+<details><summary>Answer</summary>
+
+
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">nav_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Odometry</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sensor_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Imu</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">std_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Float64</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">FusionNode</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;fusion_node&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_latest_odom_speed</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_latest_imu_accel</span>  <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">sub_odom</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_subscription</span><span class="p">(</span>
+            <span class="n">Odometry</span><span class="p">,</span> <span class="s1">&#39;/odom&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">odom_cb</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sub_imu</span>  <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_subscription</span><span class="p">(</span>
+            <span class="n">Imu</span><span class="p">,</span> <span class="s1">&#39;/imu&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">imu_cb</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">Float64</span><span class="p">,</span> <span class="s1">&#39;/fusion/speed_comparison&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">timer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_timer</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">timer_cb</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">odom_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">:</span> <span class="n">Odometry</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_latest_odom_speed</span> <span class="o">=</span> <span class="n">msg</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">linear</span><span class="o">.</span><span class="n">x</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">imu_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">:</span> <span class="n">Imu</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_latest_imu_accel</span> <span class="o">=</span> <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">x</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">timer_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_latest_odom_speed</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_latest_imu_accel</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="s1">&#39;Waiting for sensor data: &#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;odom=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_latest_odom_speed</span><span class="w"> </span><span class="ow">is</span><span class="w"> </span><span class="ow">not</span><span class="w"> </span><span class="kc">None</span><span class="si">}</span><span class="s1">, &#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;imu=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_latest_imu_accel</span><span class="w"> </span><span class="ow">is</span><span class="w"> </span><span class="ow">not</span><span class="w"> </span><span class="kc">None</span><span class="si">}</span><span class="s1">&#39;</span>
+            <span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="n">diff</span> <span class="o">=</span> <span class="n">Float64</span><span class="p">()</span>
+        <span class="n">diff</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_latest_odom_speed</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">_latest_imu_accel</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">diff</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="n">args</span><span class="p">)</span>
+    <span class="n">node</span> <span class="o">=</span> <span class="n">FusionNode</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">spin</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+    <span class="n">node</span><span class="o">.</span><span class="n">destroy_node</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</code></pre></div>
+
+
+
+**Design notes:**
+- Storing `None` as sentinel allows distinguishing "never received" from "received zero".
+- `get_logger().warn(...)` uses the node's logger so the message includes the node name,
+  timestamp, and severity — better than `print()` for diagnosing startup hangs.
+- `msg.twist.twist.linear.x` — note the double `twist`; `Odometry.twist` is a
+  `TwistWithCovariance`, and its inner `twist` field is the actual `Twist`.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<h3 id="c3-lifecycle-node-publisher">C3. Lifecycle Node Publisher</h3>
+<p>Convert the publisher from C1 into a <strong>Lifecycle Node</strong>. The publisher should only
+be created in <code>on_configure()</code> and should only be actively used in the <code>ACTIVE</code> state.
+Show <code>on_activate()</code> and <code>on_deactivate()</code> callbacks.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.lifecycle</span><span class="w"> </span><span class="kn">import</span> <span class="n">LifecycleNode</span><span class="p">,</span> <span class="n">TransitionCallbackReturn</span><span class="p">,</span> <span class="n">State</span>
+<span class="c1"># TODO: remaining imports</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">LifecycleSpeedPublisher</span><span class="p">(</span><span class="n">LifecycleNode</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;lifecycle_speed_publisher&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pub</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">on_configure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">State</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TransitionCallbackReturn</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Called when transitioning UNCONFIGURED → INACTIVE.&quot;&quot;&quot;</span>
+        <span class="c1"># TODO: create publisher (but do NOT start timer yet)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Configured.&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">TransitionCallbackReturn</span><span class="o">.</span><span class="n">SUCCESS</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">on_activate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">State</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TransitionCallbackReturn</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Called when transitioning INACTIVE → ACTIVE.&quot;&quot;&quot;</span>
+        <span class="c1"># TODO: create the 10Hz timer</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Activated.&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">TransitionCallbackReturn</span><span class="o">.</span><span class="n">SUCCESS</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">on_deactivate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">State</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TransitionCallbackReturn</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Called when transitioning ACTIVE → INACTIVE.&quot;&quot;&quot;</span>
+        <span class="c1"># TODO: destroy/cancel the timer (publisher stays allocated)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Deactivated.&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">TransitionCallbackReturn</span><span class="o">.</span><span class="n">SUCCESS</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">on_cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">State</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TransitionCallbackReturn</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Called when transitioning INACTIVE → UNCONFIGURED.&quot;&quot;&quot;</span>
+        <span class="c1"># TODO: destroy publisher</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Cleaned up.&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">TransitionCallbackReturn</span><span class="o">.</span><span class="n">SUCCESS</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">timer_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># TODO: publish Float64(data=1.0) to /robot/speed</span>
+        <span class="k">pass</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="n">args</span><span class="p">)</span>
+    <span class="n">node</span> <span class="o">=</span> <span class="n">LifecycleSpeedPublisher</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">spin</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+    <span class="n">node</span><span class="o">.</span><span class="n">destroy_node</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</code></pre></div>
+
+<details><summary>Answer</summary>
+
+
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.lifecycle</span><span class="w"> </span><span class="kn">import</span> <span class="n">LifecycleNode</span><span class="p">,</span> <span class="n">TransitionCallbackReturn</span><span class="p">,</span> <span class="n">State</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">std_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Float64</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">LifecycleSpeedPublisher</span><span class="p">(</span><span class="n">LifecycleNode</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;lifecycle_speed_publisher&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pub</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">on_configure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">State</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TransitionCallbackReturn</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_lifecycle_publisher</span><span class="p">(</span><span class="n">Float64</span><span class="p">,</span> <span class="s1">&#39;/robot/speed&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Configured: publisher created (inactive).&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">TransitionCallbackReturn</span><span class="o">.</span><span class="n">SUCCESS</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">on_activate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">State</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TransitionCallbackReturn</span><span class="p">:</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">on_activate</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>              <span class="c1"># activates the managed publisher</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_timer</span><span class="p">(</span><span class="mf">0.1</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">timer_cb</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Activated: timer started.&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">TransitionCallbackReturn</span><span class="o">.</span><span class="n">SUCCESS</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">on_deactivate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">State</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TransitionCallbackReturn</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">destroy_timer</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_timer</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">on_deactivate</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>            <span class="c1"># deactivates the managed publisher</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Deactivated: timer stopped.&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">TransitionCallbackReturn</span><span class="o">.</span><span class="n">SUCCESS</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">on_cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">State</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TransitionCallbackReturn</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pub</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">destroy_publisher</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_pub</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pub</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Cleaned up: publisher destroyed.&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">TransitionCallbackReturn</span><span class="o">.</span><span class="n">SUCCESS</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">timer_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pub</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pub</span><span class="o">.</span><span class="n">is_activated</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="n">Float64</span><span class="p">()</span>
+            <span class="n">msg</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="mf">1.0</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="n">args</span><span class="p">)</span>
+    <span class="n">node</span> <span class="o">=</span> <span class="n">LifecycleSpeedPublisher</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">spin</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+    <span class="n">node</span><span class="o">.</span><span class="n">destroy_node</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</code></pre></div>
+
+
+
+**Key points:**
+- `create_lifecycle_publisher()` (not `create_publisher()`) returns a managed publisher
+  that knows about the node's lifecycle state. Its `is_activated` property returns `False`
+  in `INACTIVE` state even if `publish()` is called.
+- `super().on_activate(state)` must be called to trigger the base class mechanism that
+  sets `is_activated = True` on all managed publishers. Missing this is a common bug.
+- The timer is created in `on_activate` (not `on_configure`) so it only fires when the
+  node is in the `ACTIVE` state.
+- Destroying the timer in `on_deactivate` is important — if you only `cancel()` without
+  `destroy_timer()`, the timer handle remains registered with the executor and will be
+  checked on every `spin_once()`, wasting a small amount of time.
+
+**To trigger transitions manually:**
+
+<div class="highlight"><pre><span></span><code>ros2<span class="w"> </span>lifecycle<span class="w"> </span><span class="nb">set</span><span class="w"> </span>/lifecycle_speed_publisher<span class="w"> </span>configure
+ros2<span class="w"> </span>lifecycle<span class="w"> </span><span class="nb">set</span><span class="w"> </span>/lifecycle_speed_publisher<span class="w"> </span>activate
+ros2<span class="w"> </span>lifecycle<span class="w"> </span><span class="nb">set</span><span class="w"> </span>/lifecycle_speed_publisher<span class="w"> </span>deactivate
+</code></pre></div>
+
+
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

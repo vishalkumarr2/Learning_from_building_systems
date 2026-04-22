@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>03 — Measurement Models &amp; Mahalanobis Gating - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Navigation Estimator</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="03-measurement-models-mahalanobis-gating">03 — Measurement Models &amp; Mahalanobis Gating</h1>
+<h3 id="why-oks-sometimes-rejects-sensorbar-updates">Why OKS sometimes rejects sensorbar updates</h3>
+<p><strong>Prerequisite:</strong> <code>02-kalman-filter.md</code> (EKF predict/update equations, covariance growth)
+<strong>Unlocks:</strong> <code>04-imu-fusion.md</code> (theta update, gyro bias), <code>05-failure-modes.md</code> (diagnosing silent rejections)</p>
+<hr />
+<h2 id="why-should-i-care-oks-project-context">Why Should I Care? (OKS Project Context)</h2>
+<p>You are staring at a bag where the robot drifts 0.3m off a lane line over 8 seconds, yet the
+sensorbar is firing. The estimator logs show nothing — no explicit rejection messages, no errors.
+The sensorbar is silently ignored. This happens every day on the SCL floor.</p>
+<p>Understanding measurement models tells you exactly why:
+- <strong>Mahalanobis gating</strong> can reject a perfectly good sensorbar reading if the state covariance
+  is too tight (P too small) — the measurement looks like an outlier even when the robot is
+  close to the line.
+- <strong>OKS does not use a standard Kalman gain</strong> for XY updates. It clamps the state to a range
+  and sets covariance to the variance of a uniform distribution. Knowing this lets you compute
+  the exact threshold at which a sensorbar range &ldquo;wins&rdquo; over the current covariance.
+- <strong><code>is_reliable=True</code> does not mean the reading is accurate.</strong> Sensorbar duplicates (11–30%
+  of frames in SCL bags) pass the reliability gate but carry identical stale offsets. They look
+  like valid measurements to the estimator.</p>
+<p>By the end of this chapter you will be able to:
+1. Compute whether a given sensorbar reading will be accepted or rejected without running code.
+2. Explain why the clamp update is mathematically equivalent to a uniform-likelihood measurement.
+3. Identify in a bag trace the difference between &ldquo;measurement rejected by Mahalanobis gate&rdquo;
+   and &ldquo;measurement accepted but wrong (duplicate)&rdquo;.</p>
+<hr />
+<h1 id="part-1-what-is-a-measurement-model">PART 1 — WHAT IS A MEASUREMENT MODEL</h1>
+<hr />
+<h2 id="11-the-sensor-to-state-relationship">1.1 The Sensor-to-State Relationship</h2>
+<p>The <strong>state vector</strong> x holds what we believe about the robot:</p>
+<div class="highlight"><pre><span></span><code>        ┌ x  ┐    ← world-frame X position (metres)
+    x = │ y  │    ← world-frame Y position (metres)
+        └ θ  ┘    ← heading angle (radians, CCW from +X)
+</code></pre></div>
+
+<p>The <strong>measurement</strong> z is what a sensor actually reports. A measurement model is the function
+that predicts what the sensor <em>should</em> report if the state were exactly x:</p>
+<div class="highlight"><pre><span></span><code>    z = h(x) + noise
+</code></pre></div>
+
+<p>For a <strong>linear</strong> relationship we write <code>h(x) = H x</code> where H is the measurement matrix.</p>
+<p><strong>Example — GPS measuring position directly:</strong></p>
+<div class="highlight"><pre><span></span><code>         ┌ 1  0  0 ┐   ┌ x ┐   ┌ x ┐
+    z = H x =       │   │ y │ = │ y │
+         └ 0  1  0 ┘   └ θ ┘   └ y ┘
+
+    H = [1 0 0]   (measuring x only)
+    H = [0 1 0]   (measuring y only)
+</code></pre></div>
+
+<p>GPS gives us two independent scalar measurements, each with its own H row.</p>
+<p><strong>Key insight:</strong> H tells the filter which component of the state the sensor is observing. A row
+of H like <code>[0, 1, 0]</code> means &ldquo;the sensor only sees y; x and θ are invisible to it.&rdquo;</p>
+<hr />
+<h2 id="12-the-sensorbar-as-a-line-constraint">1.2 The Sensorbar as a Line Constraint</h2>
+<p>The OKS sensorbar is an array of IR emitter-detector pairs mounted under the robot chassis.
+When the robot passes over a floor line, the detectors that cross the line return a different
+reflectance signal. By finding the centroid of activated sensors, the firmware computes the
+<strong>lateral offset</strong> of the robot from the line.</p>
+<div class="highlight"><pre><span></span><code>    Floor view (top-down):
+
+         Robot chassis
+         ┌─────────────────────┐
+         │                     │
+         │  ○ ○ ○ ● ● ○ ○ ○   │  ← IR array (● = detecting line)
+         │                     │
+         └─────────────────────┘
+                  │
+                  │  centroid of ● sensors
+                  ▼
+         ├────────┼────────────┤
+                  └── offset from line centreline
+
+    Floor:
+    ══════════════════════════════  ← lane line (e.g. painted stripe)
+</code></pre></div>
+
+<p>The offset is a <strong>1D measurement</strong> — it tells the robot how far it is perpendicularly from
+the line. It does NOT tell us how far along the line the robot is. This distinction creates
+the two measurement types.</p>
+<hr />
+<h2 id="13-orthogonal-vs-parallel-measurements">1.3 Orthogonal vs Parallel Measurements</h2>
+<div class="highlight"><pre><span></span><code>    ORTHOGONAL MEASUREMENT                PARALLEL MEASUREMENT
+    (robot crosses line ~perpendicularly)  (robot travels along a line)
+
+          ↑ direction of travel                  → direction of travel
+          │
+          │         Floor line                   ════════════════════
+    ══════╪════════════════════                        │
+          │ ←── sensorbar fires here              sensorbar fires
+          │      measures LATERAL                 measures AHEAD/BEHIND
+          │      offset from line                 offset from line
+
+    Updates: X or Y (one axis only,          Updates: the OTHER lateral axis
+             perpendicular to line)          (perpendicular to travel direction)
+
+    H = [1 0 0]  (if line is N-S,            H = [0 1 0]  (if line is E-W,
+                  robot goes E-W,                          robot goes N-S,
+                  measures X)                              measures Y)
+</code></pre></div>
+
+<p><strong>Why 1D?</strong> One line crossing gives ONE perpendicular offset measurement. The parallel component
+(how far along the line the robot is) is unobservable from a single crossing — you would need
+two intersecting lines or a landmark for that.</p>
+<p><strong>ELI15 — the train on tracks:</strong> A train on a straight track knows exactly how far it is from
+the track (0m — it&rsquo;s constrained). But the track itself tells nothing about how far along the
+route the train has travelled. The sensorbar is the track: it constrains lateral position perfectly
+but reveals nothing about longitudinal progress.</p>
+<hr />
+<h1 id="part-2-the-sensorbar-as-a-line-constraint">PART 2 — THE SENSORBAR AS A LINE CONSTRAINT</h1>
+<hr />
+<h2 id="21-the-oks-floor-map">2.1 The OKS Floor Map</h2>
+<p>The SCL warehouse floor has a grid of guidance lines:</p>
+<div class="highlight"><pre><span></span><code>    Y
+    │
+    │  ─────────────────────────────────────────  Y = 6.0m
+    │
+    │  ─────────────────────────────────────────  Y = 4.5m
+    │
+    │  ─────────────────────────────────────────  Y = 3.0m
+    │
+    │  ─────────────────────────────────────────  Y = 1.5m
+    │
+    └──────────────────────────────────────────── X
+
+    Vertical lines (N-S) constrain X:
+    │        │        │        │
+    X=1.0  X=2.5  X=4.0  X=5.5
+</code></pre></div>
+
+<p>When the robot crosses a horizontal line (E-W), the sensorbar fires a measurement that
+constrains <strong>Y</strong>. When it crosses a vertical line (N-S), the measurement constrains <strong>X</strong>.
+This is why in ``, the line type (horizontal/vertical) determines which state
+component gets updated.</p>
+<hr />
+<h2 id="22-the-measurement-range-not-a-point">2.2 The Measurement Range (Not a Point!)</h2>
+<p>Unlike a GPS fix that gives a precise coordinate, the sensorbar gives a <strong>range</strong>:</p>
+<div class="highlight"><pre><span></span><code>    Sensorbar has N sensors, each 6mm apart.
+    If 3 sensors are activated:
+
+    ─── Sensor 1 (6mm spacing) ─── Sensor 2 ─── Sensor 3 ───
+
+    The line is somewhere within the activated span.
+    Centroid computation gives ±3mm resolution.
+
+    Typical reported range:    [meas.min, meas.max]
+                                e.g. [1.985m, 2.015m]
+                                    ↑ 3cm total width ↑
+</code></pre></div>
+
+<p>This is why OKS uses a <strong>clamping update</strong> rather than a Kalman gain — the measurement is
+honestly a range, not a point. The uniform distribution is the right model for &ldquo;the robot is
+somewhere in this 3cm band, with equal probability anywhere in the band.&rdquo;</p>
+<hr />
+<h1 id="part-3-innovation-and-mahalanobis-distance">PART 3 — INNOVATION AND MAHALANOBIS DISTANCE</h1>
+<hr />
+<h2 id="31-what-is-innovation">3.1 What Is Innovation?</h2>
+<p>Before the filter accepts a measurement, it checks consistency. The <strong>innovation</strong> is:</p>
+<div class="highlight"><pre><span></span><code>    ν = z - h(x̂⁻)
+
+    where:
+      z      = actual measurement from sensor
+      x̂⁻    = prior state estimate (before this measurement)
+      h(x̂⁻) = predicted measurement (what sensor SHOULD read if x̂⁻ is correct)
+</code></pre></div>
+
+<p>For the linear case: <code>ν = z - H x̂⁻</code></p>
+<ul>
+<li>Small ν → measurement consistent with prediction → probably accept</li>
+<li>Large ν → measurement far from prediction → possibly an outlier or sensor fault</li>
+</ul>
+<p><strong>But what is &ldquo;large&rdquo;?</strong> 0.1m is large if the state uncertainty is 0.001m, but tiny if
+uncertainty is 1.0m. The filter needs to normalize by uncertainty.</p>
+<hr />
+<h2 id="32-mahalanobis-distance">3.2 Mahalanobis Distance</h2>
+<p>The <strong>Mahalanobis distance</strong> is the innovation normalized by the total uncertainty in the
+measurement space:</p>
+<div class="highlight"><pre><span></span><code>                                              ⁻¹
+    d² = νᵀ  (H P⁻ Hᵀ + R)   ν
+
+    where:
+      P⁻  = prior state covariance (uncertainty before this measurement)
+      R   = measurement noise covariance (sensor uncertainty)
+      H   = measurement matrix
+
+    S = H P⁻ Hᵀ + R    ← &quot;innovation covariance&quot;
+                           (total uncertainty in measurement space)
+
+    d² = νᵀ S⁻¹ ν
+</code></pre></div>
+
+<p><strong>Scalar case</strong> (one measurement, one uncertain state dimension):</p>
+<div class="highlight"><pre><span></span><code>    d = |z - predicted| / sqrt(P_component + R)
+</code></pre></div>
+
+<p><code>P_component + R</code> is the sum of &ldquo;how uncertain we are about the state&rdquo; plus &ldquo;how uncertain
+the sensor is.&rdquo; Together they define the expected spread of the innovation.</p>
+<hr />
+<h2 id="33-the-2-sigma-gate-oks">3.3 The 2-Sigma Gate (OKS)</h2>
+<div class="highlight"><pre><span></span><code>    Innovation space (2D example):
+
+    ┌────────────────────────────────────────┐
+    │                                        │
+    │        REJECT         •                │   ← outlier
+    │                                        │
+    │              ┌─────────┐               │
+    │         •   /           \    •         │
+    │            │  ACCEPT     │             │
+    │            │   (d &lt; 2)   │             │
+    │         •   \           /    •         │
+    │              └─────────┘               │
+    │                                        │
+    │    The ellipse shape comes from S⁻¹:   │
+    │    correlated axes → tilted ellipse    │
+    │    uncorrelated → axis-aligned ellipse │
+    └────────────────────────────────────────┘
+
+    The boundary is at d = 2 (2 sigma).
+    Area inside ellipse ≈ 95% of expected innovations.
+    Only 5% of valid measurements fall outside — if d &gt; 2, reject.
+</code></pre></div>
+
+<p><strong>Implementation:</strong> In <code>update()</code>, the rejection check is:</p>
+<div class="highlight"><pre><span></span><code><span class="w">    </span><span class="c1">// Pseudocode from update() ~</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="n">mahal_dist</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">innovation</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">sqrt</span><span class="p">(</span><span class="n">P_xx</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">R</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">mahal_dist</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mf">2.0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// reject this measurement</span>
+<span class="w">        </span><span class="k">continue</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="34-worked-example-mahalanobis-distance">3.4 Worked Example — Mahalanobis Distance</h2>
+<p><strong>Scenario:</strong> Robot moving east, approaches a N-S line at X = 2.00m.</p>
+<p><strong>Given:</strong></p>
+<div class="highlight"><pre><span></span><code>    State estimate:      x̂⁻(x) = 2.05m   (dead-reckoning puts us 5cm east of line)
+    State covariance:    P⁻(x,x) = 0.010 m²
+    Measurement:         z = 2.00m         (sensorbar reports line at exactly this X)
+    Measurement noise:   R = 0.005 m²      (sensorbar has ~7cm std dev)
+</code></pre></div>
+
+<p><strong>Step 1: Compute innovation</strong></p>
+<div class="highlight"><pre><span></span><code>    ν = z - H x̂⁻ = 2.00 - 2.05 = -0.05m
+</code></pre></div>
+
+<p><strong>Step 2: Compute innovation standard deviation</strong></p>
+<div class="highlight"><pre><span></span><code>    S = H P⁻ Hᵀ + R
+      = P⁻(x,x) + R          (H = [1,0,0] so H P⁻ Hᵀ = P⁻(x,x))
+      = 0.010 + 0.005
+      = 0.015 m²
+
+    sqrt(S) = 0.122m
+</code></pre></div>
+
+<p><strong>Step 3: Mahalanobis distance</strong></p>
+<div class="highlight"><pre><span></span><code>    d = |ν| / sqrt(S) = 0.05 / 0.122 = 0.41
+</code></pre></div>
+
+<p><strong>Decision: ACCEPTED</strong> (d = 0.41 &lt; 2.0) ✓</p>
+<hr />
+<p><strong>Now try with very tight covariance:</strong></p>
+<div class="highlight"><pre><span></span><code>    P⁻(x,x) = 0.001 m²   (state is very confident — tight covariance)
+
+    S = 0.001 + 0.005 = 0.006 m²
+    d = 0.05 / sqrt(0.006) = 0.05 / 0.077 = 0.65
+</code></pre></div>
+
+<p><strong>Decision: ACCEPTED</strong> (d = 0.65 &lt; 2.0) ✓ — still passes because 5cm is within 2σ.</p>
+<hr />
+<p><strong>Now try with a large drift:</strong></p>
+<div class="highlight"><pre><span></span><code>    Innovation = 0.4m  (robot is 40cm from the line — something went wrong)
+    P⁻(x,x) = 0.010 m²
+
+    S = 0.015 m²
+    d = 0.4 / 0.122 = 3.28
+</code></pre></div>
+
+<p><strong>Decision: REJECTED</strong> (d = 3.28 &gt; 2.0) ✗ — the measurement is 3.3σ away from prediction.</p>
+<p>This is the &ldquo;silent rejection&rdquo; scenario. The sensorbar fired, the measurement was valid,
+but the filter rejected it because dead-reckoning had drifted so far that the correct
+position appeared to be an outlier.</p>
+<hr />
+<h2 id="35-the-danger-zone-when-tight-p-causes-rejections">3.5 The Danger Zone: When Tight P Causes Rejections</h2>
+<p><strong>Counter-intuitive:</strong> A tighter covariance P can cause MORE rejections, not fewer.</p>
+<div class="highlight"><pre><span></span><code>    Scenario: Robot has been on a long straight with many sensorbar updates.
+    P⁻(x,x) is driven very low, say 0.0001 m².
+
+    Next measurement has a genuine 8cm offset (real drift, not outlier):
+    S = 0.0001 + 0.005 = 0.0051 m²
+    d = 0.08 / sqrt(0.0051) = 0.08 / 0.071 = 1.12    ← still accepted
+
+    But at 12cm offset:
+    d = 0.12 / 0.071 = 1.68    ← still accepted
+
+    At 15cm offset:
+    d = 0.15 / 0.071 = 2.11    ← REJECTED
+
+    With looser covariance P = 0.010:
+    d = 0.15 / 0.122 = 1.23    ← accepted!
+</code></pre></div>
+
+<p><strong>Key insight:</strong> After a slip event, P gets inflated to infinity (estimator detects slip and
+sets P → ∞). This WIDENS the acceptance gate, allowing the next sensorbar update to be
+accepted even with a large innovation — which is exactly correct behavior. The filter recovers
+by accepting a measurement it would have rejected pre-slip.</p>
+<hr />
+<h1 id="part-4-oks-clamp-update-non-standard-kalman">PART 4 — OKS CLAMP UPDATE (NON-STANDARD KALMAN)</h1>
+<hr />
+<h2 id="41-standard-kalman-update-vs-oks-clamp-update">4.1 Standard Kalman Update vs OKS Clamp Update</h2>
+<p><strong>Standard Kalman filter</strong> computes a gain K and updates the state:</p>
+<div class="highlight"><pre><span></span><code>    Standard KF update:
+    K = P⁻ Hᵀ (H P⁻ Hᵀ + R)⁻¹       ← Kalman gain
+    x̂⁺ = x̂⁻ + K (z - H x̂⁻)          ← state update (weighted blend)
+    P⁺ = (I - K H) P⁻                 ← covariance update
+
+    K is between 0 and 1:
+      K → 0: sensor has much higher noise than state uncertainty → barely moves
+      K → 1: sensor is much more accurate than state → jump to sensor reading
+</code></pre></div>
+
+<p><strong>OKS XY update</strong> (from ``):</p>
+<div class="highlight"><pre><span></span><code>    OKS clamp update:
+    x̂⁺(x) = clamp(x̂⁻(x), meas.x_min, meas.x_max)
+    P⁺(x,x) = min(P⁻(x,x), (meas.x_range)² / 12)
+
+    where meas.x_range = meas.x_max - meas.x_min
+</code></pre></div>
+
+<p>These are NOT the same operation. Why does OKS use clamp instead of Kalman gain?</p>
+<hr />
+<h2 id="42-why-clamp-is-correct-for-sensorbar">4.2 Why Clamp Is Correct for Sensorbar</h2>
+<p>The sensorbar gives a <strong>range</strong> measurement: &ldquo;the line is somewhere between X=1.985m and
+X=2.015m.&rdquo; A Gaussian model is wrong here — there is no single &ldquo;best guess&rdquo; within the range;
+the true position is equally likely anywhere in the 3cm band. The right model is <strong>uniform</strong>.</p>
+<div class="highlight"><pre><span></span><code>    Probability density over X:
+
+    Gaussian state estimate:                Uniform sensorbar measurement:
+         ▲ p(x)                                  ▲ p(z|x)
+         │    ╭───╮                               │
+         │   ╱     ╲                             ─┤─────────────────┤─
+         │  ╱       ╲                             │
+         │╱           ╲                           └──────────────────── X
+         └──────────── X                          1.985   2.015
+              2.05
+
+    After combining:                        Clamp result:
+         ▲ p(x|z)                                ▲ p(x|z)
+         │ ┌─────┐                               │ ┌─────────┐
+         │ │     │ ← truncated Gaussian          │ │ uniform │
+         │ │     │   (state within range)        │ │  band   │
+         └─┴─────┴──── X                        └─┴─────────┴─── X
+           1.985 2.015                            1.985     2.015
+</code></pre></div>
+
+<p>The <strong>clamp</strong> operation is geometrically equivalent to multiplying the Gaussian state by the
+uniform measurement likelihood and renormalizing — the result is the state truncated to the
+measurement range.</p>
+<hr />
+<h2 id="43-the-variance-of-uniform-formula">4.3 The Variance-of-Uniform Formula</h2>
+<p>For a uniform distribution over <code>[a, b]</code>:</p>
+<div class="highlight"><pre><span></span><code>         (b - a)²
+    σ² = ────────
+             12
+
+    Derivation:
+      E[X] = (a + b) / 2
+      Var[X] = E[(X - μ)²]
+             = ∫_a^b (x - (a+b)/2)² · (1/(b-a)) dx
+             = (b-a)² / 12    ✓
+</code></pre></div>
+
+<p><strong>OKS sensorbar range example:</strong></p>
+<div class="highlight"><pre><span></span><code>    Range = 0.06m (6cm span, ±3cm from line)
+    a = 1.970m, b = 2.030m
+
+    σ²_uniform = (0.06)² / 12 = 0.0036 / 12 = 0.0003 m²
+    σ_uniform  = 0.0173m = 1.73cm
+</code></pre></div>
+
+<p>The covariance update rule <code>P⁺ = min(P⁻, σ²_uniform)</code> says:
+- If the state was already more certain than the sensorbar → keep the current covariance.
+- If the state was less certain (larger P) → tighten it to the sensorbar&rsquo;s uniform variance.</p>
+<hr />
+<h2 id="44-clamp-update-decision-tree">4.4 Clamp Update Decision Tree</h2>
+<div class="highlight"><pre><span></span><code>                  Is state already inside measurement range?
+                          ┌──────────┴──────────┐
+                         YES                    NO
+                          │                     │
+              No position change          Snap to nearest edge
+              x̂⁺ = x̂⁻                  (clamp to [min, max])
+                          │                     │
+                          └──────────┬──────────┘
+                                     │
+                     Is P⁻ &lt; σ²_uniform?
+                          ┌──────────┴──────────┐
+                         YES                    NO
+                          │                     │
+                Keep P (already tight)    Set P = σ²_uniform
+                P⁺ = P⁻                  (loosen to match range)
+</code></pre></div>
+
+<p><strong>Key insight:</strong> The covariance update is asymmetric — it can only DECREASE (tighten).
+It never increases P based on a sensorbar measurement. Only <code>predict()</code> increases P
+(via process noise Q). This means a single bad sensorbar reading that passes the Mahalanobis
+gate can drive P very low, making subsequent measurements harder to accept.</p>
+<hr />
+<h1 id="part-5-offset-ambiguity-check">PART 5 — OFFSET AMBIGUITY CHECK</h1>
+<hr />
+<h2 id="51-the-duplicate-line-problem">5.1 The Duplicate Line Problem</h2>
+<div class="highlight"><pre><span></span><code>    Floor view (Y axis):
+
+    ─────────────────────────────────────────────  Y = 4.500m (line A)
+    ─────────────────────────────────────────────  Y = 3.000m (line B)
+    ─────────────────────────────────────────────  Y = 1.500m (line C)
+
+    Line spacing = 1.5m
+
+    Robot is at Y = 2.980m (near line B, small offset = 0.020m from B)
+
+    But ALSO: Y = 1.520m would give the SAME sensorbar offset from line C!
+    (robot at +0.020m above line C looks identical to robot at -0.020m below line B)
+</code></pre></div>
+
+<p>A single sensorbar crossing is ambiguous between:
+- The robot is near the <strong>intended</strong> line at the predicted position, or
+- The robot is near the <strong>adjacent</strong> line (robot has drifted by ±1 line_spacing)</p>
+<hr />
+<h2 id="52-probability-ratio-gate">5.2 Probability Ratio Gate</h2>
+<p>OKS resolves the ambiguity with a likelihood ratio test:</p>
+<div class="highlight"><pre><span></span><code>    Hypothesis H0: robot is at the primary line (consistent with state estimate)
+    Hypothesis H1: robot is at the secondary line (N lines away)
+
+    Compute p(z | H0) and p(z | H1) using the current state distribution.
+
+    If p(z | H1) / p(z | H0) &gt; threshold:
+        → ambiguous → REJECT measurement
+    Else:
+        → H0 is sufficiently more likely → ACCEPT
+</code></pre></div>
+
+<p>In practice, if the robot state estimate is well within a lane (P is small), H1 requires the
+robot to be ~1.5m away from its estimated position — extremely unlikely — so the ratio is tiny
+and the measurement is accepted. But if P is large (after a slip, or after long dead-reckoning),
+H1 becomes plausible, and the measurement may be rejected.</p>
+<hr />
+<h2 id="53-full-update-decision-sequence">5.3 Full Update Decision Sequence</h2>
+<div class="highlight"><pre><span></span><code>    Sensorbar fires a measurement z at time t
+                    │
+                    ▼
+    ┌───────────────────────────────┐
+    │  1. Advance state to time t   │  ← predict() to sync timestamps
+    │     (grow P via process noise)│
+    └───────────────┬───────────────┘
+                    │
+                    ▼
+    ┌───────────────────────────────┐
+    │  2. is_reliable check         │  ← if False: EXIT (SPI frame miss, all-zero)
+    └───────────────┬───────────────┘
+                    │ (is_reliable = True)
+                    ▼
+    ┌───────────────────────────────┐
+    │  3. Mahalanobis distance      │  ← if d &gt; 2: EXIT (silent rejection)
+    │     d = |ν| / sqrt(P + R)    │
+    └───────────────┬───────────────┘
+                    │ (d ≤ 2)
+                    ▼
+    ┌───────────────────────────────┐
+    │  4. Offset ambiguity check    │  ← if ratio &gt; threshold: EXIT (wrong lane)
+    │     probability ratio test    │
+    └───────────────┬───────────────┘
+                    │ (unambiguous)
+                    ▼
+    ┌───────────────────────────────┐
+    │  5. Clamp state to range      │  ← x̂⁺ = clamp(x̂⁻, meas.min, meas.max)
+    │  6. Update covariance         │  ← P⁺ = min(P⁻, (range)²/12)
+    └───────────────────────────────┘
+</code></pre></div>
+
+<hr />
+<h1 id="part-6-oks-code-connection">PART 6 — OKS CODE CONNECTION</h1>
+<hr />
+<h2 id="61-full-math-to-code-mapping">6.1 Full Math-to-Code Mapping</h2>
+<table>
+<thead>
+<tr>
+<th>Math concept</th>
+<th>OKS source location</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Innovation <code>ν = z - H x̂⁻</code></td>
+<td><code>update()</code> ~L1950</td>
+<td>Computed as <code>(meas.value - state_at_t.x)</code></td>
+</tr>
+<tr>
+<td>Innovation covariance S</td>
+<td><code>update()</code> ~L1960</td>
+<td><code>P_xx + R</code> for scalar case</td>
+</tr>
+<tr>
+<td>Mahalanobis distance d</td>
+<td><code>update()</code> ~L1962</td>
+<td><code>innovation / sqrt(S)</code></td>
+</tr>
+<tr>
+<td>2σ gate</td>
+<td><code>update()</code> ~L1964</td>
+<td><code>if (d &gt; 2.0) continue;</code></td>
+</tr>
+<tr>
+<td>Ambiguity ratio</td>
+<td><code>update()</code> ~L1970</td>
+<td>Computed against secondary line hypothesis</td>
+</tr>
+<tr>
+<td>Clamp state</td>
+<td><code>update()</code> ~L1985</td>
+<td><code>clamp(state, meas.min, meas.max)</code></td>
+</tr>
+<tr>
+<td>Uniform variance</td>
+<td><code>update()</code> ~L1990</td>
+<td><code>(meas.range)² / 12</code></td>
+</tr>
+<tr>
+<td>Covariance min</td>
+<td><code>update()</code> ~L1992</td>
+<td><code>cov = min(cov, uniform_var)</code></td>
+</tr>
+<tr>
+<td>Theta Kalman update</td>
+<td><code>update()</code> ~L2050</td>
+<td>Standard K gain used (not clamp)</td>
+</tr>
+<tr>
+<td>Reliability gate</td>
+<td><code>processOrthogonalCrossing()</code> L876</td>
+<td><code>if (!is_reliable) return;</code></td>
+</tr>
+<tr>
+<td>Reliability gate</td>
+<td><code>processParallelCrossing()</code> L1027</td>
+<td>Same pattern</td>
+</tr>
+<tr>
+<td>All-black surface</td>
+<td><code>detectAllBlack()</code> L1412</td>
+<td>Blanket rejection</td>
+</tr>
+<tr>
+<td>Pose measurement gen</td>
+<td><code>computeMeasurements()</code></td>
+<td>Converts IR pairs to x/y/theta bounds</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="62-the-is_reliable-trap-why-duplicates-are-invisible">6.2 The <code>is_reliable</code> Trap — Why Duplicates Are Invisible</h2>
+<div class="highlight"><pre><span></span><code>    Timeline of sensorbar messages at 50Hz (20ms intervals):
+
+    t=0ms    msg: {offset=-0.015m, is_reliable=True}   ← fresh reading
+    t=20ms   msg: {offset=-0.015m, is_reliable=True}   ← DUPLICATE (SPI retry)
+    t=40ms   msg: {offset=-0.015m, is_reliable=True}   ← DUPLICATE
+    t=60ms   msg: {offset=-0.018m, is_reliable=True}   ← fresh reading (robot moved)
+</code></pre></div>
+
+<p>All four messages have <code>is_reliable=True</code>. The estimator&rsquo;s <code>is_reliable</code> gate at 
+only catches SPI frame misses and all-zero readings (hardware-level failures). It has no
+concept of &ldquo;stale data from a previous read cycle.&rdquo;</p>
+<p><strong>The filter&rsquo;s perspective:</strong>
+- It sees three measurements at t=0ms, t=20ms, t=40ms that all say -0.015m
+- Each one passes the Mahalanobis gate (innovation stays near zero since state isn&rsquo;t changing
+  between them — or covariance is tight from the first update)
+- Each one executes the clamp update, re-confirming the same position
+- P is driven even lower each time (the filter becomes MORE confident)
+- When the fresh reading at t=60ms arrives, P is very tight
+- If the robot has actually moved 5cm and the fresh reading reflects this, the innovation
+  may now EXCEED the 2σ gate because P is so tight</p>
+<div class="highlight"><pre><span></span><code>    Result: Duplicates → over-confident state → genuine updates rejected
+
+    This is the core mechanism behind &quot;silent rejection&quot; in SCL bags.
+</code></pre></div>
+
+<hr />
+<h2 id="63-theta-update-is-different-standard-kalman">6.3 Theta Update Is Different (Standard Kalman)</h2>
+<p>For heading θ, OKS uses the standard Kalman update with gyro bias correction:</p>
+<div class="highlight"><pre><span></span><code>    z_θ = measured heading from sensorbar (line direction gives θ constraint)
+    bias = estimated gyro bias (states b_x, b_y, b_z)
+
+    H_θ = [0, 0, 1, 0, 0, 0, ...]   ← only sees θ, not XY
+
+    K = P⁻ Hᵀ / (H P⁻ Hᵀ + R_θ)   ← standard Kalman gain
+    θ̂⁺ = θ̂⁻ + K (z_θ - θ̂⁻)        ← weighted update
+    P⁺ = (1 - K H) P⁻               ← covariance shrinks
+</code></pre></div>
+
+<p>The reason theta uses a proper Kalman gain while XY uses clamp:
+- θ measurement from the sensorbar line direction IS a precise point measurement (the line
+  has a known orientation, and the robot either aligns or doesn&rsquo;t) — Gaussian noise is honest.
+- XY measurement is a range (the robot is somewhere within the IR span) — uniform is honest.</p>
+<hr />
+<h1 id="part-7-putting-it-all-together-bag-diagnosis">PART 7 — PUTTING IT ALL TOGETHER: BAG DIAGNOSIS</h1>
+<hr />
+<h2 id="71-reading-covariance-traces-to-diagnose-rejection-causes">7.1 Reading Covariance Traces to Diagnose Rejection Causes</h2>
+<p>When investigating a bag where the robot drifts off path despite sensorbar activity:</p>
+<div class="highlight"><pre><span></span><code>    Covariance P_xx trace:
+
+    P_xx  │
+    0.010 │──╮
+          │  │  (growing during prediction)
+    0.001 │  ╰──┐  (sensorbar update — P drops)
+          │     │
+    0.0003│     ╰────┐  (multiple updates — very tight)
+          │          │
+    0.0003│          ════════════  ← stuck at minimum (duplicates!)
+          │
+          └──────────────────────────────────── time
+
+    When P stays flat at ~0.0003 for many seconds, the robot is receiving
+    sensorbar updates (P is being &quot;refreshed&quot;) but not fresh independent ones.
+    Duplicates keep confirming the same position → P never grows.
+
+    A genuine fresh update that differs even slightly now has d &gt; 2:
+    d = 0.05 / sqrt(0.0003 + 0.005) = 0.05 / 0.072 = 0.69  ← still accepted
+    (in this case OK — but see the danger zone example in 3.5 above)
+</code></pre></div>
+
+<hr />
+<h2 id="72-summary-what-to-remember">7.2 Summary — What to Remember</h2>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>Formula / Rule</th>
+<th>OKS Code</th>
+<th>Diagnostic signal in bag</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Innovation</td>
+<td><code>ν = z - H x̂⁻</code></td>
+<td><code>update()</code> L1950</td>
+<td>Large ν with small P → silent rejection</td>
+</tr>
+<tr>
+<td>Mahalanobis gate</td>
+<td><code>d = ν / sqrt(P + R) &lt; 2</code></td>
+<td><code>update()</code> L1964</td>
+<td>P very tight after duplicate flood → gate tightens</td>
+</tr>
+<tr>
+<td>Clamp update</td>
+<td><code>x̂⁺ = clamp(x̂⁻, min, max)</code></td>
+<td><code>update()</code> L1985</td>
+<td>State jumps to range boundary if outside</td>
+</tr>
+<tr>
+<td>Uniform variance</td>
+<td><code>σ² = (range)² / 12</code></td>
+<td><code>update()</code> L1990</td>
+<td>Sets floor on P after update</td>
+</tr>
+<tr>
+<td>P update</td>
+<td><code>P⁺ = min(P⁻, σ²_unif)</code></td>
+<td><code>update()</code> L1992</td>
+<td>P can only decrease from sensorbar</td>
+</tr>
+<tr>
+<td>Ambiguity check</td>
+<td>Likelihood ratio &lt; threshold</td>
+<td><code>update()</code> L1970</td>
+<td>Triggered when P is large and two lanes plausible</td>
+</tr>
+<tr>
+<td>Reliability gate</td>
+<td><code>if (!is_reliable) return</code></td>
+<td>L876, L1027</td>
+<td>Only catches hardware-level SPI fails</td>
+</tr>
+<tr>
+<td>Duplicate blind spot</td>
+<td><code>is_reliable=True</code> on stale data</td>
+<td>L876 (no timestamp check)</td>
+<td>11–30% of sensorbar messages; over-tightens P</td>
+</tr>
+<tr>
+<td>Theta uses KF gain</td>
+<td><code>K = P Hᵀ / (H P Hᵀ + R)</code></td>
+<td><code>update()</code> L2050</td>
+<td>Theta covariance decreases smoothly</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><code>02-kalman-filter.md</code> — derivation of the Kalman gain K and why it minimises posterior variance</li>
+<li><code>04-imu-fusion.md</code> — how gyro bias interacts with the theta update and why drift accumulates</li>
+<li><code>05-failure-modes.md</code> — full classification of bag-observable failure signatures with timestamps</li>
+<li>`` lines 876, 1027, 1412, 1900–2100 — the exact gates and update logic</li>
+<li><code>computeMeasurements()</code> — how raw IR sensor pairs become <code>[x_min, x_max, y_min, y_max, θ_min, θ_max]</code></li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

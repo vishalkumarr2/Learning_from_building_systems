@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>03 — Nav2 Architecture: BehaviorTree, Costmaps, Planners, Controllers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-sky-600 hover:text-sky-800 mb-4 inline-block">&larr; Back to ROS 2 Hands-on</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="03-nav2-architecture-behaviortree-costmaps-planners-controllers">03 — Nav2 Architecture: BehaviorTree, Costmaps, Planners, Controllers</h1>
+<h3 id="why-the-robot-stops-why-recovery-behaviors-trigger-why-a-path-is-never-found">Why the robot stops, why recovery behaviors trigger, why a path is never found</h3>
+<p><strong>Prerequisite:</strong> 01-nodes-topics-actions.md (actions, lifecycle), 02-tf2-time-qos.md (TF2, QoS)
+<strong>Unlocks:</strong> Interpreting Nav2 log output, diagnosing stuck navigation, tuning costmap inflation, choosing between planners and controllers, understanding BehaviorTree XML files</p>
+<hr />
+<h2 id="why-should-i-care-context">Why Should I Care? (Context)</h2>
+<p>Nav2 is the standard ROS2 navigation stack for mobile robots. Nearly every AMR navigation failure traces back to one of four places:</p>
+<ol>
+<li><strong>Localization</strong> — the stack thinks the robot is somewhere it isn&rsquo;t</li>
+<li><strong>Costmap</strong> — there&rsquo;s an obstacle in the costmap that doesn&rsquo;t exist in reality (or vice versa)</li>
+<li><strong>Planner</strong> — no valid path exists given the current costmap state</li>
+<li><strong>BehaviorTree</strong> — the recovery loop ran out of retries and gave up</li>
+</ol>
+<p>Without understanding how these four layers interact, navigation bugs look random. With this mental model, you can read a Nav2 log and immediately identify which layer failed and why.</p>
+<hr />
+<h1 id="part-1-overview-the-4-layer-stack">PART 1 — OVERVIEW: THE 4-LAYER STACK</h1>
+<hr />
+<h2 id="11-the-layered-architecture">1.1 The Layered Architecture</h2>
+<div class="highlight"><pre><span></span><code>  ┌─────────────────────────────────────────────────────────┐
+  │  Layer 4: BehaviorTree Executor (bt_navigator)          │
+  │  Decides WHAT to do and in what sequence                │
+  │  &quot;Try planning → try following → try recovery → repeat&quot; │
+  └───────────────────────────┬─────────────────────────────┘
+                              │ calls actions
+  ┌───────────────────────────▼─────────────────────────────┐
+  │  Layer 3: BT Action Plugins                             │
+  │  ComputePathToPose → nav2_planner                       │
+  │  FollowPath        → nav2_controller                    │
+  │  ClearEntireCostmap → costmap_2d server                 │
+  │  Spin / BackUp / Wait → recovery servers                │
+  └───────────────────────────┬─────────────────────────────┘
+                              │ reads/writes
+  ┌───────────────────────────▼─────────────────────────────┐
+  │  Layer 2: Costmap Servers                               │
+  │  Global costmap: full-map obstacle grid for planning    │
+  │  Local costmap: rolling window for controller           │
+  └───────────────────────────┬─────────────────────────────┘
+                              │ reads
+  ┌───────────────────────────▼─────────────────────────────┐
+  │  Layer 1: Localization                                  │
+  │  AMCL: map + laser → /amcl_pose                         │
+  │  robot_localization EKF: odom + IMU → filtered /odom    │
+  └─────────────────────────────────────────────────────────┘
+</code></pre></div>
+
+<p>Each layer is independent — you can replace AMCL with a different localizer, or swap the planner, without touching the others. The BehaviorTree is the glue that orchestrates them as actions.</p>
+<hr />
+<h2 id="12-nav2-node-graph-simplified">1.2 Nav2 Node Graph (Simplified)</h2>
+<div class="highlight"><pre><span></span><code>                         ┌──────────────┐
+  /map ──────────────────► map_server   │
+                         └──────┬───────┘
+                                │/map (TRANSIENT_LOCAL)
+          ┌─────────────────────▼───────────────────────────┐
+          │           costmap_2d_global                      │
+          │  StaticLayer + ObstacleLayer + InflationLayer    │
+          └──────────────────────┬──────────────────────────┘
+                                 │/global_costmap/costmap
+  /scan ──►┌───────────────────┐ │
+           │ costmap_2d_local  │ │
+           └────────────┬──────┘ │
+                        │/local_costmap/costmap
+                        │        │
+                ┌───────▼───┐    │
+  /odom ───────►│ nav2_     │    │
+  /amcl_pose ──►│ controller│    │
+                └───────┬───┘    │
+                        │        │ ┌────────────┐
+                        │        └─► nav2_planner│
+                        │          └─────┬───────┘
+                     /cmd_vel            │/plan
+                        │          ┌─────▼───────┐
+                        │          │ bt_navigator │◄── NavigateToPose action
+                        └──────────┤             │
+                                   └─────────────┘
+</code></pre></div>
+
+<hr />
+<h1 id="part-2-behavior-trees">PART 2 — BEHAVIOR TREES</h1>
+<hr />
+<h2 id="21-what-a-behavior-tree-is">2.1 What a Behavior Tree IS</h2>
+<p>A BehaviorTree (BT) is a hierarchical state machine where each node returns one of three values:</p>
+<div class="highlight"><pre><span></span><code>SUCCESS   — I completed my task
+FAILURE   — I could not complete my task
+RUNNING   — I am still working (call me again next tick)
+</code></pre></div>
+
+<p>The tree is &ldquo;ticked&rdquo; at a configurable rate (default ~10Hz in Nav2). Each tick propagates from root to leaf, collecting return values.</p>
+<p><strong>Node types:</strong></p>
+<div class="highlight"><pre><span></span><code>Sequence      — AND:  tick children left to right. Stop and return FAILURE
+                      on first FAILURE child. Return SUCCESS only if ALL succeed.
+
+Fallback      — OR:   tick children left to right. Stop and return SUCCESS
+                      on first SUCCESS child. Return FAILURE only if ALL fail.
+
+Decorator     — Modifier: wraps one child and changes its return value
+                (Retry N times, Invert, ForceSuccess, RateController...)
+
+Action        — Leaf: calls an actual ROS2 action server. Returns RUNNING
+                      while the action is in progress.
+</code></pre></div>
+
+<hr />
+<h2 id="22-the-default-navigatetopose-behaviortree">2.2 The Default NavigateToPose BehaviorTree</h2>
+<div class="highlight"><pre><span></span><code><span class="nt">&lt;BehaviorTree&gt;</span>
+<span class="w">  </span><span class="nt">&lt;RecoveryNode</span><span class="w"> </span><span class="na">number_of_retries=</span><span class="s">&quot;6&quot;</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;NavigateRecovery&quot;</span><span class="nt">&gt;</span>
+
+<span class="w">    </span><span class="nt">&lt;PipelineSequence</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;NavigateWithReplanning&quot;</span><span class="nt">&gt;</span>
+<span class="w">      </span><span class="nt">&lt;RateController</span><span class="w"> </span><span class="na">hz=</span><span class="s">&quot;1.0&quot;</span><span class="nt">&gt;</span>
+<span class="w">        </span><span class="nt">&lt;ComputePathToPose</span><span class="w"> </span><span class="na">goal=</span><span class="s">&quot;{goal}&quot;</span><span class="w"> </span><span class="na">path=</span><span class="s">&quot;{path}&quot;</span><span class="nt">/&gt;</span>
+<span class="w">      </span><span class="nt">&lt;/RateController&gt;</span>
+<span class="w">      </span><span class="nt">&lt;FollowPath</span><span class="w"> </span><span class="na">path=</span><span class="s">&quot;{path}&quot;</span><span class="w"> </span><span class="na">controller_id=</span><span class="s">&quot;FollowPath&quot;</span><span class="nt">/&gt;</span>
+<span class="w">    </span><span class="nt">&lt;/PipelineSequence&gt;</span>
+
+<span class="w">    </span><span class="nt">&lt;ReactiveFallback</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;RecoveryFallback&quot;</span><span class="nt">&gt;</span>
+<span class="w">      </span><span class="nt">&lt;GoalUpdated/&gt;</span>
+<span class="w">      </span><span class="nt">&lt;SequenceWithMemory</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;RecoveryActions&quot;</span><span class="nt">&gt;</span>
+<span class="w">        </span><span class="nt">&lt;ClearEntireCostmap</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;ClearGlobalCostmap-Context&quot;</span>
+<span class="w">                            </span><span class="na">service_name=</span><span class="s">&quot;global_costmap/clear_entirely_global_costmap&quot;</span><span class="nt">/&gt;</span>
+<span class="w">        </span><span class="nt">&lt;Spin</span><span class="w"> </span><span class="na">spin_dist=</span><span class="s">&quot;1.57&quot;</span><span class="nt">/&gt;</span>
+<span class="w">        </span><span class="nt">&lt;Wait</span><span class="w"> </span><span class="na">wait_duration=</span><span class="s">&quot;5.0&quot;</span><span class="nt">/&gt;</span>
+<span class="w">        </span><span class="nt">&lt;BackUp</span><span class="w"> </span><span class="na">backup_dist=</span><span class="s">&quot;0.30&quot;</span><span class="w"> </span><span class="na">backup_speed=</span><span class="s">&quot;0.05&quot;</span><span class="nt">/&gt;</span>
+<span class="w">      </span><span class="nt">&lt;/SequenceWithMemory&gt;</span>
+<span class="w">    </span><span class="nt">&lt;/ReactiveFallback&gt;</span>
+
+<span class="w">  </span><span class="nt">&lt;/RecoveryNode&gt;</span>
+<span class="nt">&lt;/BehaviorTree&gt;</span>
+</code></pre></div>
+
+<p><strong>Walk-through — what happens when <code>ComputePathToPose</code> returns FAILURE:</strong></p>
+<div class="highlight"><pre><span></span><code>Tick 1:
+  RecoveryNode ticks PipelineSequence
+  → RateController ticks ComputePathToPose → FAILURE (no path found)
+  → PipelineSequence returns FAILURE
+  RecoveryNode tries fallback: ReactiveFallback
+  → GoalUpdated? No → FAILURE
+  → SequenceWithMemory:
+      ClearEntireCostmap → SUCCESS (costmap cleared)
+      Spin → RUNNING (still spinning)
+
+Tick 2-N: (Spin still running)
+  Spin → RUNNING
+
+Tick N+1: (Spin complete)
+  Wait 5s → RUNNING
+
+...eventually:
+  BackUp → SUCCESS
+  SequenceWithMemory → SUCCESS
+  ReactiveFallback → SUCCESS
+  RecoveryNode: recovery done, retry PipelineSequence
+
+If this fails 6 times total: RecoveryNode returns FAILURE → navigation aborted.
+</code></pre></div>
+
+<hr />
+<h2 id="23-pipelinesequence-vs-sequence">2.3 PipelineSequence vs Sequence</h2>
+<p>This is one of the most misunderstood Nav2 internals:</p>
+<div class="highlight"><pre><span></span><code>Sequence:           Ticks children from the beginning each tick.
+                    If child 1 is RUNNING, re-ticks child 1, skips child 2.
+
+PipelineSequence:   Re-ticks ALL previously-RUNNING children each tick.
+                    If child 1 returns SUCCESS, also ticks child 2 on same tick.
+                    Effect: planner and controller run concurrently.
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>PipelineSequence during navigation:
+  Tick 1:  RateController(ComputePathToPose) → SUCCESS   ← path computed
+           FollowPath → RUNNING                          ← start following
+  Tick 2:  RateController: 1Hz, skip this tick
+           FollowPath → RUNNING                          ← still following
+  Tick 3:  RateController: 1Hz, skip
+           FollowPath → RUNNING
+  ...
+  Tick 10: RateController: 1Hz, replan now
+           ComputePathToPose → SUCCESS                   ← updated path
+           FollowPath → RUNNING (receives updated path)
+</code></pre></div>
+
+<p><strong>Key insight:</strong> The <code>RateController hz="1.0"</code> causes the path to be replanned every second, not every tick. This prevents the planner from consuming CPU on every 10Hz tick.</p>
+<hr />
+<h2 id="24-the-robot-stuck-in-recovery-loop-pattern">2.4 The &ldquo;Robot Stuck in Recovery Loop&rdquo; Pattern</h2>
+<div class="highlight"><pre><span></span><code>Robot behavior:                        BT state:
+  spinning...                            Spin → RUNNING
+  waiting...                             Wait → RUNNING
+  backing up...                          BackUp → RUNNING
+  trying to plan...                      ComputePathToPose → FAILURE
+  spinning again...                      (retry 2 of 6)
+  ...
+  &quot;Goal aborted&quot;                         RecoveryNode: retries exhausted
+</code></pre></div>
+
+<p><strong>Root cause checklist:</strong>
+1. Is there actually a valid path? Check if the goal pose is inside an obstacle in the global costmap.
+2. Is the global costmap showing a phantom obstacle? Old sensor data, mis-configured inflation radius.
+3. Is the robot&rsquo;s localization correct? If AMCL has diverged, the costmap obstacle locations don&rsquo;t match reality.
+4. Is <code>inflation_radius</code> too large for the corridor width? Robot inflation footprint blocks its own path.</p>
+<hr />
+<h1 id="part-3-costmaps">PART 3 — COSTMAPS</h1>
+<hr />
+<h2 id="31-costmap-values">3.1 Costmap Values</h2>
+<div class="highlight"><pre><span></span><code>Cost value  Meaning
+──────────────────────────────────────────────────────────
+  0          FREE — robot can be here
+  1–252      INFLATED — near an obstacle; higher = closer
+  253        INSCRIBED — robot center would touch an obstacle
+  254        LETHAL — obstacle cell; robot cannot be here
+  255        UNKNOWN — not yet observed
+</code></pre></div>
+
+<p>The planner&rsquo;s job: find a path through cells with cost &lt; 253. The controller&rsquo;s job: follow that path while the local costmap stays clear.</p>
+<hr />
+<h2 id="32-costmap-layers">3.2 Costmap Layers</h2>
+<div class="highlight"><pre><span></span><code>Final costmap (master)
+    │
+    ├── StaticLayer     ← reads from /map (the pre-built occupancy grid)
+    │                     FREE cells in map = 0, OCCUPIED = 254
+    │
+    ├── ObstacleLayer   ← reads from /scan, /depth/points
+    │                     marks new obstacles seen by sensors
+    │                     can clear cells when sensor sees free space
+    │
+    └── InflationLayer  ← expands all obstacles outward by inflation_radius
+                          creates cost gradient (253 at robot_radius, 1 at inflation_radius)
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>Before InflationLayer:           After InflationLayer:
+                                  inflation_radius = 0.5m
+  ░░░░░░░░░░░░░░░░                ░░░░░░░░░░░░░░░░
+  ░░░░░░░░░░░░░░░░                ░░1 1 1 1 1░░░░░
+  ░░░░░████░░░░░░░                ░░1 ╔═════╗1░░░░
+  ░░░░░████░░░░░░░   ────────►    ░░1 ║     ║1░░░░
+  ░░░░░████░░░░░░░                ░░1 ║wall ║1░░░░
+  ░░░░░░░░░░░░░░░░                ░░1 ╚═════╝1░░░░
+  ░░░░░░░░░░░░░░░░                ░░1 1 1 1 1░░░░░
+                                  ░░░░░░░░░░░░░░░░
+
+  ░ = FREE (0)                    Numbers = cost gradient (1–252)
+  █ = LETHAL (254)                ╔╗╚╝ = INSCRIBED/LETHAL border
+</code></pre></div>
+
+<hr />
+<h2 id="33-global-vs-local-costmap">3.3 Global vs Local Costmap</h2>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Global Costmap</th>
+<th>Local Costmap</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Size</td>
+<td>Full map (e.g., 50m × 30m)</td>
+<td>Rolling window around robot (e.g., 4m × 4m)</td>
+</tr>
+<tr>
+<td>Update rate</td>
+<td>Slow (~1Hz)</td>
+<td>Fast (~5–10Hz, matches sensor rate)</td>
+</tr>
+<tr>
+<td>Layers</td>
+<td>Static + Obstacle + Inflation</td>
+<td>Obstacle + Inflation only (no static)</td>
+</tr>
+<tr>
+<td>Purpose</td>
+<td>Path planning</td>
+<td>Reactive collision avoidance</td>
+</tr>
+<tr>
+<td>Frame</td>
+<td><code>map</code> frame</td>
+<td>Robot-centered (<code>odom</code> or <code>base_link</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key insight:</strong> The local costmap does NOT use the static map layer. It only sees what the sensors currently see. This is why the robot can drive through a previously-mapped obstacle if the sensor isn&rsquo;t observing it right now.</p>
+<hr />
+<h2 id="34-inflation_radius-tuning">3.4 inflation_radius Tuning</h2>
+<div class="highlight"><pre><span></span><code>Too small (e.g., exactly robot_radius):
+  Robot path hugs walls → robot scrapes obstacles
+  Paths through narrow corridors may work but margins are zero
+
+Too large (e.g., 1.5× corridor width):
+  Inflation from both walls overlaps → entire corridor is high-cost
+  Planner may declare NO PATH even though the robot could fit
+  Robot refuses to enter narrow sections
+
+Correct:
+  inflation_radius = robot_radius + safety_margin
+  safety_margin = 0.1–0.3m depending on robot speed and controller accuracy
+</code></pre></div>
+
+<p><strong>Diagnosis:</strong> If the planner reports &ldquo;no path found&rdquo; but the corridor is clearly passable, reduce <code>inflation_radius</code> or check that the <code>robot_radius</code> parameter matches the actual robot footprint.</p>
+<hr />
+<h1 id="part-4-planners-and-controllers">PART 4 — PLANNERS AND CONTROLLERS</h1>
+<hr />
+<h2 id="41-the-planner-global-path-planning">4.1 The Planner: Global Path Planning</h2>
+<p>The planner receives a goal pose and the global costmap, and returns a path (a list of poses from current position to goal).</p>
+<p><strong>NavFn Planner</strong> (Dijkstra / A*):</p>
+<div class="highlight"><pre><span></span><code>Strengths:  Reliable, well-tested, handles most warehouse maps
+Weaknesses: Doesn&#39;t account for robot kinematics (can produce paths a
+            differential-drive robot can&#39;t physically follow)
+Parameters: use_astar: true/false, allow_unknown: true/false
+</code></pre></div>
+
+<p><strong>SmacPlanner (SE2 or Hybrid-A*)</strong>:</p>
+<div class="highlight"><pre><span></span><code>Strengths:  Kinematically-feasible paths (respects min turn radius)
+            Better for non-holonomic robots in tight spaces
+Weaknesses: Slower than NavFn, more parameters to tune
+Parameters: minimum_turning_radius, motion_model_for_search: DUBIN/REEDS_SHEPP
+</code></pre></div>
+
+<p><strong>When path planning fails:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Check planner logs:</span>
+ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/plan<span class="w">       </span><span class="c1"># should publish a path</span>
+ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/planning_server/goal_status
+
+<span class="c1"># Common log messages:</span>
+<span class="c1"># [nav2_planner] Failed to create a plan from X to Y</span>
+<span class="c1">#   → goal inside obstacle, or costmap not initialized</span>
+<span class="c1"># [nav2_planner] Timeout exceeded</span>
+<span class="c1">#   → map too large, NavFn too slow, reduce resolution or switch to SmacPlanner</span>
+</code></pre></div>
+
+<hr />
+<h2 id="42-the-controller-local-path-following">4.2 The Controller: Local Path Following</h2>
+<p>The controller runs at ~20Hz, receives the planned path + local costmap, and outputs <code>/cmd_vel</code>.</p>
+<h3 id="dwb-dynamic-window-approach">DWB (Dynamic Window Approach)</h3>
+<div class="highlight"><pre><span></span><code>Algorithm:
+  1. Sample N velocity commands (vx, vθ) within the dynamic window
+     (window = what&#39;s kinematically reachable in the next timestep)
+  2. Project each sampled velocity forward for T seconds → trajectory
+  3. Score each trajectory with multiple critics
+  4. Send the velocity with the best total score
+
+Trajectory Critics:
+  PathAlign    — stay close to the planned path heading
+  PathDist     — stay close to the planned path laterally
+  GoalAlign    — point toward goal when close
+  ObstacleDist — penalize trajectories near obstacles
+
+Key parameters:
+  max_vel_x: 0.5         # max forward speed (m/s)
+  min_vel_x: -0.1        # allows slight backward motion
+  max_vel_theta: 1.0     # max angular velocity (rad/s)
+  vx_samples: 20         # number of vx samples → affects CPU
+  vtheta_samples: 20     # number of vθ samples
+</code></pre></div>
+
+<p><strong>DWB failure modes:</strong>
+- Robot oscillates: <code>PathAlign</code> weight too high, fighting <code>PathDist</code>. Balance the weights.
+- Robot stops near obstacles: <code>ObstacleDist</code> too aggressive. Reduce <code>obstacle_scale</code>.
+- Robot can&rsquo;t rotate in place: <code>min_speed_xy</code> &gt; 0. Set to 0.0 for diff-drive.</p>
+<h3 id="rpp-regulated-pure-pursuit">RPP (Regulated Pure Pursuit)</h3>
+<div class="highlight"><pre><span></span><code>Algorithm:
+  1. Find the &quot;lookahead point&quot; on the path at lookahead_dist ahead
+  2. Compute the curvature (1/radius) to reach that point
+  3. Scale linear speed by curvature (slow down on curves)
+     and by proximity to obstacles (slow down near obstacles)
+  4. Output (vx, vθ)
+
+Key parameters:
+  desired_linear_vel: 0.5    # target forward speed (m/s)
+  lookahead_dist: 0.6        # how far ahead to look on the path (m)
+  max_angular_accel: 3.2     # rad/s²
+  use_cost_regulated_linear_velocity_scaling: true  # slow near obstacles
+  regulated_linear_scaling_min_speed: 0.25          # never go below this
+</code></pre></div>
+
+<p><strong>RPP failure modes:</strong>
+- Robot overshoots corners: increase <code>lookahead_dist</code> or decrease speed.
+- Robot cuts corners into obstacles: decrease <code>lookahead_dist</code>.
+- Robot stops short of goal: <code>goal_dist_tol</code> too large. Check <code>xy_goal_tolerance</code>.</p>
+<hr />
+<h2 id="43-dwb-vs-rpp-decision-guide">4.3 DWB vs RPP: Decision Guide</h2>
+<div class="highlight"><pre><span></span><code>Use RPP when:                           Use DWB when:
+  Wide, clear corridors                   Cluttered environments
+  Industrial/warehouse predictable paths  Dynamic obstacles
+  Simpler parameter tuning needed         Need fine-grained trajectory scoring
+  Differential drive, stable odometry     Need custom trajectory critics
+  Speed regulation near obstacles         Multi-objective optimization needed
+</code></pre></div>
+
+<p><strong>Starting point for a warehouse AMR:</strong> RPP with <code>desired_linear_vel: 0.5</code>, <code>lookahead_dist: 0.6</code>. Tune from there.</p>
+<hr />
+<h2 id="44-controller-failure-modes">4.4 Controller Failure Modes</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Controller stopped publishing /cmd_vel:</span>
+ros2<span class="w"> </span>topic<span class="w"> </span>hz<span class="w"> </span>/cmd_vel<span class="w">         </span><span class="c1"># should be ~20Hz when navigating</span>
+
+<span class="c1"># Common log messages:</span>
+<span class="c1"># [nav2_controller] Could not find any valid trajectories</span>
+<span class="c1">#   → DWB: all sampled trajectories are in collision</span>
+<span class="c1">#   → Fix: check local costmap for phantom obstacles</span>
+<span class="c1"># [nav2_controller] Goal not reached within tolerance</span>
+<span class="c1">#   → Robot is circling near goal but not converging</span>
+<span class="c1">#   → Fix: increase xy_goal_tolerance or check localization accuracy</span>
+<span class="c1"># [nav2_controller] Exceeded time tolerance</span>
+<span class="c1">#   → Robot took too long to reach goal (e.g., blocked by real obstacle)</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-5-robot-localization-ekf-node">PART 5 — ROBOT LOCALIZATION (EKF NODE)</h1>
+<hr />
+<h2 id="51-what-robot_localization-does">5.1 What robot_localization Does</h2>
+<p>The <code>robot_localization</code> package provides an Extended Kalman Filter (EKF) that fuses multiple odometry sources into a single, smooth <code>/odom</code> output.</p>
+<div class="highlight"><pre><span></span><code>Sensor inputs:
+  /wheel_odom  (nav_msgs/Odometry)   ← from motor controller
+  /imu/data    (sensor_msgs/Imu)     ← from IMU
+
+                    ┌──────────────┐
+  /wheel_odom ─────►│              │
+                    │  EKF node    ├──► /odometry/filtered  (smooth /odom)
+  /imu/data ───────►│              │      └──► TF: odom → base_link
+                    └──────────────┘
+</code></pre></div>
+
+<p><strong>Why bother with EKF if you already have wheel odometry?</strong>
+- Wheel odometry alone: noisy, susceptible to wheel slip
+- IMU alone: drifts (gyro bias accumulates)
+- EKF fusion: IMU provides fast, high-frequency correction; wheels provide long-term position</p>
+<hr />
+<h2 id="52-key-parameters">5.2 Key Parameters</h2>
+<div class="highlight"><pre><span></span><code><span class="nt">ekf_node</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">ros__parameters</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">frequency</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50.0</span><span class="w">                  </span><span class="c1"># EKF update rate (Hz)</span>
+<span class="w">    </span><span class="nt">two_d_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">                 </span><span class="c1"># robot moves in 2D plane only</span>
+
+<span class="w">    </span><span class="c1"># Which states each sensor provides (x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az)</span>
+<span class="w">    </span><span class="nt">odom0</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/wheel_odom</span>
+<span class="w">    </span><span class="nt">odom0_config</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w">   </span><span class="c1"># x, y, z</span>
+<span class="w">                   </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="c1"># roll, pitch, yaw</span>
+<span class="w">                   </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w">   </span><span class="c1"># vx, vy, vz</span>
+<span class="w">                   </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="c1"># vroll, vpitch, vyaw</span>
+<span class="w">                   </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># ax, ay, az</span>
+
+<span class="w">    </span><span class="nt">imu0</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/imu/data</span>
+<span class="w">    </span><span class="nt">imu0_config</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span>
+<span class="w">                  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="c1"># fuse orientation from IMU</span>
+<span class="w">                  </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span>
+<span class="w">                  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="c1"># fuse angular velocity from IMU</span>
+<span class="w">                  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># fuse linear accel X only</span>
+
+<span class="w">    </span><span class="nt">process_noise_covariance</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">...</span><span class="p p-Indicator">]</span><span class="w">      </span><span class="c1"># how much to trust the process model</span>
+<span class="w">    </span><span class="nt">initial_estimate_covariance</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">...</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># initial uncertainty</span>
+</code></pre></div>
+
+<hr />
+<h2 id="53-amcl-map-based-localization">5.3 AMCL: Map-Based Localization</h2>
+<p>AMCL (Adaptive Monte Carlo Localization) uses a particle filter to localize the robot against a known map.</p>
+<div class="highlight"><pre><span></span><code>Input:   /scan  (laser measurement)
+Input:   /map   (pre-built occupancy grid from SLAM)
+Input:   /initialpose (initial guess, or use /tf odom→base)
+Output:  /amcl_pose  (geometry_msgs/PoseWithCovarianceStamped)
+Output:  TF: map → odom  (the localization correction)
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>Particle filter intuition:
+  100 particles spread around initial pose
+    │
+    ▼ Robot moves (odom update)
+  All particles moved according to motion model
+    │
+    ▼ Robot observes scan
+  Particles consistent with scan get HIGH weight
+  Particles inconsistent with scan get LOW weight
+    │
+    ▼ Resample: high-weight particles survive, low-weight die
+  Particles converge on true pose
+</code></pre></div>
+
+<p><strong>AMCL failure modes:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Localization diverged (particles spread all over map):</span>
+<span class="c1"># - Robot was lifted and moved (external intervention)</span>
+<span class="c1"># - Wheel slip caused large odometry error → particles fell off the true pose</span>
+<span class="c1"># Fix: publish a new /initialpose from rviz2 (2D Pose Estimate button)</span>
+
+<span class="c1"># AMCL not converging:</span>
+<span class="c1"># - Global localization needed: ros2 service call /reinitialize_global_localization</span>
+<span class="c1"># - scan → map mismatch: check if map matches current environment</span>
+
+<span class="c1"># Common log message:</span>
+<span class="c1"># [amcl] Particle filter variance too high</span>
+<span class="c1">#   → Localization is uncertain; Nav2 may still navigate but with degraded accuracy</span>
+</code></pre></div>
+
+<hr />
+<h2 id="54-localization-failure-replanning-loop">5.4 Localization Failure → Replanning Loop</h2>
+<div class="highlight"><pre><span></span><code>Failure chain:
+  robot_localization EKF publishes stale odom
+       │
+       ▼
+  TF odom→base_link not updating at full rate
+       │
+       ▼
+  Nav2 controller believes robot hasn&#39;t moved
+       │
+       ▼
+  Controller keeps commanding velocity to &quot;catch up&quot;
+       │
+       ▼
+  Robot moves faster than intended → overshoots goal
+  OR: replanning loop (controller sees progress=zero → BT triggers recovery)
+
+Diagnosis:
+  ros2 topic hz /odometry/filtered    # should be ~50Hz
+  ros2 topic hz /tf                   # should reflect odom publisher rate
+
+  Low rate or gaps → EKF is stalling → check IMU and wheel odom topics
+</code></pre></div>
+
+<hr />
+<h2 id="summary-what-to-remember">Summary — What to Remember</h2>
+<table>
+<thead>
+<tr>
+<th>Nav2 Component</th>
+<th>Purpose</th>
+<th>Key Failure Mode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BehaviorTree executor (<code>bt_navigator</code>)</td>
+<td>Orchestrates planning, following, recovery in a tree structure</td>
+<td>Recovery loop exhausts retries → goal aborted</td>
+</tr>
+<tr>
+<td><code>PipelineSequence</code></td>
+<td>Runs planner + controller concurrently; replanner fires at <code>RateController</code> hz</td>
+<td>Confused with <code>Sequence</code>; results in either over-replanning or never replanning</td>
+</tr>
+<tr>
+<td><code>RecoveryNode</code></td>
+<td>Retries the navigation sequence N times after recovery actions</td>
+<td>Wrong <code>number_of_retries</code>; robot gives up too early or loops forever</td>
+</tr>
+<tr>
+<td>Global costmap</td>
+<td>Full-map obstacle grid for path planning</td>
+<td>Stale obstacle from old sensor data → path planning fails; fix with <code>ClearEntireCostmap</code></td>
+</tr>
+<tr>
+<td>Local costmap</td>
+<td>Rolling window for reactive control</td>
+<td>Phantom obstacle → controller stops → BT triggers recovery</td>
+</tr>
+<tr>
+<td><code>inflation_radius</code></td>
+<td>Expands obstacles to keep robot body clear</td>
+<td>Too large → robot can&rsquo;t enter corridors; too small → robot scrapes walls</td>
+</tr>
+<tr>
+<td>StaticLayer</td>
+<td>Loads pre-built map into costmap</td>
+<td>Not loaded (TRANSIENT_LOCAL QoS mismatch) → costmap shows only sensor obstacles</td>
+</tr>
+<tr>
+<td>ObstacleLayer</td>
+<td>Adds real-time sensor obstacles to costmap</td>
+<td>Not updating (scan QoS mismatch or sensor driver down) → robot drives into real obstacles</td>
+</tr>
+<tr>
+<td>NavFn planner</td>
+<td>Dijkstra/A* global path</td>
+<td>Slow on large maps; ignores robot kinematics</td>
+</tr>
+<tr>
+<td>SmacPlanner</td>
+<td>Hybrid-A* kinematically feasible path</td>
+<td>Slower; needs <code>minimum_turning_radius</code> tuned</td>
+</tr>
+<tr>
+<td>DWB controller</td>
+<td>Samples trajectories, scores with critics</td>
+<td>CPU heavy; oscillates if <code>PathAlign</code> weight unbalanced</td>
+</tr>
+<tr>
+<td>RPP controller</td>
+<td>Regulated pure pursuit</td>
+<td>Overshoots corners if <code>lookahead_dist</code> too large</td>
+</tr>
+<tr>
+<td><code>robot_localization</code> EKF</td>
+<td>Fuses wheel odom + IMU → smooth <code>/odom</code></td>
+<td>Stale odom if IMU stops; replanning loop if <code>/odom</code> gaps</td>
+</tr>
+<tr>
+<td>AMCL</td>
+<td>Particle filter localization against known map</td>
+<td>Diverges after wheel slip or robot being moved; fix with <code>/initialpose</code></td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

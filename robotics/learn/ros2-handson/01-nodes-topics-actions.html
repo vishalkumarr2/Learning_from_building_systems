@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 — Nodes, Topics, Services, Actions, Lifecycle - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-sky-600 hover:text-sky-800 mb-4 inline-block">&larr; Back to ROS 2 Hands-on</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="01-nodes-topics-services-actions-lifecycle">01 — Nodes, Topics, Services, Actions, Lifecycle</h1>
+<h3 id="the-communication-primitives-behind-every-amr-navigation-stack">The communication primitives behind every AMR navigation stack</h3>
+<p><strong>Prerequisite:</strong> Basic Python or C++, familiarity with the concept of processes and threads
+<strong>Unlocks:</strong> Reading node graphs, debugging silent subscribers, understanding why a robot stops responding during CPU spikes, interpreting Nav2 startup sequences</p>
+<hr />
+<h2 id="why-should-i-care-context">Why Should I Care? (Context)</h2>
+<p>A typical AMR navigation stack runs 15–30 ROS2 nodes simultaneously: localization, costmap servers, planners, controllers, recovery behaviors, sensor drivers, fleet connectors. When a robot stops mid-route or refuses a new goal, the first question is always: <em>which node stopped responding, and why?</em></p>
+<p>Understanding the execution model answers 80% of &ldquo;why is node X not processing messages&rdquo; questions:
+- <strong>Executor + spin</strong> explains why a node goes silent during a CPU spike
+- <strong>Lifecycle nodes</strong> explain &ldquo;configured but not active&rdquo; startup failures
+- <strong>Action vs service</strong> explains why some goals never return a result
+- <strong>Topic QoS</strong> (covered in 02) explains silent subscription failures</p>
+<p>This chapter gives you the mental model. After reading it, you can trace a message from publisher to subscriber in your head and identify exactly where it breaks.</p>
+<hr />
+<h1 id="part-1-the-ros2-node-model">PART 1 — THE ROS2 NODE MODEL</h1>
+<hr />
+<h2 id="11-what-a-node-is-physically">1.1 What a Node IS Physically</h2>
+<p>A ROS2 node is not just a software concept — it maps to concrete OS and network primitives.</p>
+<div class="highlight"><pre><span></span><code>OS Process / Thread
+    │
+    ├── rclcpp::Node (or rclpy.Node)
+    │       ├── DDS Participant (one per Context, usually one per process)
+    │       │       ├── DataWriter (for each publisher)
+    │       │       └── DataReader (for each subscriber)
+    │       ├── Timers
+    │       ├── Services
+    │       └── Action servers/clients
+    │
+    └── Executor (runs the event loop)
+</code></pre></div>
+
+<p><strong>DDS Participant</strong> is the network identity. When a node starts, it announces its presence via multicast. Other participants learn about it and negotiate QoS. There is no central broker — this is peer-to-peer discovery.</p>
+<p><strong>Key insight:</strong> One ROS2 process can host multiple nodes (a <code>NodeContainer</code> / component container does this). All nodes in the same process share the same executor unless you explicitly create multiple.</p>
+<hr />
+<h2 id="12-the-executor-the-heart-of-every-node">1.2 The Executor: The Heart of Every Node</h2>
+<p>The executor is the event loop. It polls for:
+- Incoming messages on subscriptions
+- Timer firings
+- Service requests
+- Action goal/cancel/result requests</p>
+<p>When an event arrives, the executor calls your callback.</p>
+<div class="highlight"><pre><span></span><code>                  Event Queue
+                 ┌───────────┐
+  Subscription   │ msg_cb    │
+  callback ─────►│ timer_cb  │──► Executor ──► calls callbacks
+  Timer          │ srv_cb    │     (spin)       one at a time
+  Service ───────│ ...       │                  (single-threaded)
+                 └───────────┘
+</code></pre></div>
+
+<h3 id="singlethreadedexecutor-vs-multithreadedexecutor">SingleThreadedExecutor vs MultiThreadedExecutor</h3>
+<table>
+<thead>
+<tr>
+<th>Executor</th>
+<th>Behaviour</th>
+<th>Use case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SingleThreadedExecutor</code></td>
+<td>One callback at a time, in order</td>
+<td>Default. Fine for most nodes.</td>
+</tr>
+<tr>
+<td><code>MultiThreadedExecutor</code></td>
+<td>Multiple callbacks concurrently</td>
+<td>High-frequency subscriptions + slow services</td>
+</tr>
+<tr>
+<td><code>StaticSingleThreadedExecutor</code></td>
+<td>Pre-allocates, lower latency</td>
+<td>Real-time critical nodes</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>spin()</code> vs <code>spin_once()</code>:</strong>
+- <code>spin(node)</code> — blocks forever, processes callbacks as they arrive. The normal mode.
+- <code>spin_once(node, timeout)</code> — processes at most one pending callback, then returns. Useful when you need to interleave ROS processing with other work.</p>
+<p><strong>The critical trap:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1"># DANGER: blocking callback in single-threaded executor</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">my_callback</span><span class="p">(</span><span class="n">msg</span><span class="p">):</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">2.0</span><span class="p">)</span>          <span class="c1"># ← blocks for 2 seconds</span>
+    <span class="c1"># During this sleep, ALL other callbacks (timers, other subscriptions)</span>
+    <span class="c1"># are queued and NOT processed. The node appears frozen.</span>
+</code></pre></div>
+
+<p><strong>Fix:</strong> Use a MultiThreadedExecutor + <code>ReentrantCallbackGroup</code>, or offload slow work to a thread.</p>
+<hr />
+<h2 id="13-rclcppnode-vs-rclcpp_lifecyclelifecyclenode">1.3 rclcpp::Node vs rclcpp_lifecycle::LifecycleNode</h2>
+<div class="highlight"><pre><span></span><code>rclcpp::Node
+    │
+    └── rclcpp_lifecycle::LifecycleNode
+            │
+            ├── on_configure()    ← called on configure transition
+            ├── on_activate()     ← called on activate transition
+            ├── on_deactivate()   ← called on deactivate transition
+            └── on_cleanup()      ← called on cleanup transition
+</code></pre></div>
+
+<p>A plain <code>Node</code> starts and immediately begins processing. A <code>LifecycleNode</code> starts in <code>UNCONFIGURED</code> state and requires explicit transitions before it processes anything. Nav2 uses lifecycle nodes for every major component.</p>
+<hr />
+<h2 id="14-useful-node-options">1.4 Useful Node Options</h2>
+<div class="highlight"><pre><span></span><code><span class="n">rclcpp</span><span class="o">::</span><span class="n">NodeOptions</span><span class="w"> </span><span class="n">options</span><span class="p">;</span>
+<span class="n">options</span><span class="p">.</span><span class="n">use_intra_process_comms</span><span class="p">(</span><span class="nb">true</span><span class="p">);</span><span class="w">   </span><span class="c1">// zero-copy for same-process nodes</span>
+<span class="n">options</span><span class="p">.</span><span class="n">arguments</span><span class="p">({</span><span class="s">&quot;--ros-args&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;-r&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;__node:=my_node_name&quot;</span><span class="p">});</span>
+
+<span class="k">auto</span><span class="w"> </span><span class="n">node</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">make_shared</span><span class="o">&lt;</span><span class="n">MyNode</span><span class="o">&gt;</span><span class="p">(</span><span class="n">options</span><span class="p">);</span>
+</code></pre></div>
+
+<ul>
+<li><code>use_intra_process_comms</code>: bypasses serialization when pub and sub are in the same process. Critical for high-frequency image topics.</li>
+<li>Namespace: <code>ros2 run my_pkg my_node --ros-args -r __ns:=/robot1</code> — prefixes all topics</li>
+<li>Remapping: <code>ros2 run my_pkg my_node --ros-args -r /scan:=/robot1/scan</code></li>
+</ul>
+<hr />
+<h1 id="part-2-topics-publishsubscribe">PART 2 — TOPICS: PUBLISH/SUBSCRIBE</h1>
+<hr />
+<h2 id="21-dds-discovery-no-broker-required">2.1 DDS Discovery: No Broker Required</h2>
+<p>Unlike MQTT or ROS1 (which needs <code>rosmaster</code>), ROS2 DDS discovery is fully decentralized.</p>
+<div class="highlight"><pre><span></span><code>Node A starts               Node B starts
+    │                           │
+    │── multicast announce ─────►│
+    │                           │── checks: do I want this topic?
+    │◄─ multicast announce ─────│
+    │── checks: do I want that? │
+    │                           │
+    └── both agree QoS ─────────┘
+            │
+         Data flows directly peer-to-peer
+         (no broker in the middle)
+</code></pre></div>
+
+<p>Discovery uses DDS Simple Discovery Protocol (SDP). By default, multicast on <code>239.255.0.1</code>. This can be blocked by managed network switches — a common fleet deployment problem.</p>
+<hr />
+<h2 id="22-message-flow-what-happens-inside">2.2 Message Flow: What Happens Inside</h2>
+<div class="highlight"><pre><span></span><code>Publisher side                          Subscriber side
+──────────────                          ───────────────
+Your data struct                        Your callback
+    │                                       ▲
+    ▼                                       │
+Serialize (CDR binary)              Deserialize (CDR binary)
+    │                                       │
+    ▼                                       │
+DDS DataWriter                      DDS DataReader
+    │                                       │
+    └──────────── network/IPC ──────────────┘
+</code></pre></div>
+
+<p><strong>CDR</strong> (Common Data Representation) is the binary format. For intra-process comms with <code>use_intra_process_comms(true)</code>, serialization is skipped — the pointer is passed directly.</p>
+<hr />
+<h2 id="23-creating-a-publisher-and-subscriber">2.3 Creating a Publisher and Subscriber</h2>
+<p><strong>Publisher (C++):</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// In node constructor:</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">pub_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">this</span><span class="o">-&gt;</span><span class="n">create_publisher</span><span class="o">&lt;</span><span class="n">geometry_msgs</span><span class="o">::</span><span class="n">msg</span><span class="o">::</span><span class="n">Twist</span><span class="o">&gt;</span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;/cmd_vel&quot;</span><span class="p">,</span><span class="w">          </span><span class="c1">// topic name</span>
+<span class="w">    </span><span class="n">rclcpp</span><span class="o">::</span><span class="n">QoS</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span><span class="w">      </span><span class="c1">// QoS: depth=10, default RELIABLE+VOLATILE</span>
+<span class="p">);</span>
+
+<span class="c1">// To publish:</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">msg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">geometry_msgs</span><span class="o">::</span><span class="n">msg</span><span class="o">::</span><span class="n">Twist</span><span class="p">();</span>
+<span class="n">msg</span><span class="p">.</span><span class="n">linear</span><span class="p">.</span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.5</span><span class="p">;</span>
+<span class="n">pub_</span><span class="o">-&gt;</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">);</span>
+</code></pre></div>
+
+<p><strong>Subscriber (C++):</strong></p>
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="n">sub_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">this</span><span class="o">-&gt;</span><span class="n">create_subscription</span><span class="o">&lt;</span><span class="n">nav_msgs</span><span class="o">::</span><span class="n">msg</span><span class="o">::</span><span class="n">Odometry</span><span class="o">&gt;</span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;/odom&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">rclcpp</span><span class="o">::</span><span class="n">QoS</span><span class="p">(</span><span class="mi">10</span><span class="p">),</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">bind</span><span class="p">(</span><span class="o">&amp;</span><span class="n">MyNode</span><span class="o">::</span><span class="n">odom_callback</span><span class="p">,</span><span class="w"> </span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">placeholders</span><span class="o">::</span><span class="n">_1</span><span class="p">)</span>
+<span class="p">);</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">odom_callback</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">nav_msgs</span><span class="o">::</span><span class="n">msg</span><span class="o">::</span><span class="n">Odometry</span><span class="o">::</span><span class="n">SharedPtr</span><span class="w"> </span><span class="n">msg</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// process msg</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>The depth (queue size):</strong> If your callback is slow and messages arrive fast, the queue fills. With <code>KEEP_LAST(10)</code>, the 11th message evicts the 1st. If you use <code>KEEP_ALL</code>, memory grows unboundedly.</p>
+<hr />
+<h2 id="24-worked-example-odometry-velocity-magnitude-subscriber">2.4 Worked Example: Odometry Velocity Magnitude Subscriber</h2>
+<p><strong>Problem:</strong> Subscribe to <code>/odom</code> and print the robot&rsquo;s speed (magnitude of linear velocity).</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">nav_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Odometry</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">SpeedMonitor</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;speed_monitor&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_subscription</span><span class="p">(</span>
+            <span class="n">Odometry</span><span class="p">,</span>
+            <span class="s1">&#39;/odom&#39;</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">odom_cb</span><span class="p">,</span>
+            <span class="mi">10</span><span class="p">)</span>                         <span class="c1"># queue depth</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">odom_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">):</span>
+        <span class="n">vx</span> <span class="o">=</span> <span class="n">msg</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">linear</span><span class="o">.</span><span class="n">x</span>
+        <span class="n">vy</span> <span class="o">=</span> <span class="n">msg</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">linear</span><span class="o">.</span><span class="n">y</span>
+        <span class="n">speed</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">vx</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">vy</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>   <span class="c1"># m/s</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Speed: </span><span class="si">{</span><span class="n">speed</span><span class="si">:</span><span class="s1">.3f</span><span class="si">}</span><span class="s1"> m/s&#39;</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">()</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">spin</span><span class="p">(</span><span class="n">SpeedMonitor</span><span class="p">())</span>
+
+<span class="c1"># Note: msg.twist.twist.linear is the velocity in the robot body frame.</span>
+<span class="c1"># msg.pose.pose.position is the global position.</span>
+</code></pre></div>
+
+<p><strong>Step by step:</strong>
+1. <code>Odometry.twist.twist.linear.x</code> — forward velocity in body frame
+2. <code>Odometry.twist.twist.linear.y</code> — lateral velocity (zero for diff-drive)
+3. Speed = √(vx² + vy²) — scalar magnitude, direction-agnostic</p>
+<hr />
+<h2 id="25-timers-driving-a-publish-loop">2.5 Timers: Driving a Publish Loop</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// Publish at 50 Hz</span>
+<span class="n">timer_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">this</span><span class="o">-&gt;</span><span class="n">create_wall_timer</span><span class="p">(</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">milliseconds</span><span class="p">(</span><span class="mi">20</span><span class="p">),</span><span class="w">          </span><span class="c1">// 1000ms / 50 = 20ms period</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">bind</span><span class="p">(</span><span class="o">&amp;</span><span class="n">MyNode</span><span class="o">::</span><span class="n">timer_callback</span><span class="p">,</span><span class="w"> </span><span class="k">this</span><span class="p">)</span>
+<span class="p">);</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">timer_callback</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">msg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std_msgs</span><span class="o">::</span><span class="n">msg</span><span class="o">::</span><span class="n">Float64</span><span class="p">();</span>
+<span class="w">    </span><span class="n">msg</span><span class="p">.</span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">compute_something</span><span class="p">();</span>
+<span class="w">    </span><span class="n">pub_</span><span class="o">-&gt;</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><code>create_wall_timer</code> uses wall clock (real time). For simulation/bag replay with <code>use_sim_time: true</code>, use <code>create_timer</code> with the node clock — it respects <code>/clock</code>.</p>
+<hr />
+<h2 id="26-topic-graph-ascii-diagram">2.6 Topic Graph: ASCII Diagram</h2>
+<div class="highlight"><pre><span></span><code>  ┌─────────────────────┐          ┌─────────────────────┐
+  │   lidar_driver      │          │   slam_node         │
+  │  (sensor driver)    │          │  (localization)      │
+  │                     │          │                     │
+  │  [pub] /scan ───────┼──────────┼──► [sub] /scan      │
+  │                     │          │                     │
+  │  [pub] /diagnostics │          │  [pub] /map ────────┼──► ...
+  └─────────────────────┘          └─────────────────────┘
+
+  ┌─────────────────────┐          ┌─────────────────────┐
+  │   odom_publisher    │          │   nav2_controller   │
+  │                     │          │                     │
+  │  [pub] /odom ───────┼──────────┼──► [sub] /odom      │
+  └─────────────────────┘          └─────────────────────┘
+</code></pre></div>
+
+<p>Inspect the live graph: <code>ros2 topic list</code>, <code>ros2 topic echo /topic</code>, <code>ros2 node info /node_name</code></p>
+<hr />
+<h1 id="part-3-services-synchronous-request-response">PART 3 — SERVICES: SYNCHRONOUS REQUEST-RESPONSE</h1>
+<hr />
+<h2 id="31-when-to-use-services-vs-topics">3.1 When to Use Services vs Topics</h2>
+<table>
+<thead>
+<tr>
+<th>Criteria</th>
+<th>Use Topic</th>
+<th>Use Service</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Data rate</td>
+<td>Continuous / high-frequency</td>
+<td>Occasional / on-demand</td>
+</tr>
+<tr>
+<td>Direction</td>
+<td>One-way (pub → sub)</td>
+<td>Bidirectional (request → response)</td>
+</tr>
+<tr>
+<td>Examples</td>
+<td><code>/odom</code>, <code>/scan</code>, <code>/cmd_vel</code></td>
+<td><code>clear_costmap</code>, <code>set_map</code>, <code>get_plan</code></td>
+</tr>
+<tr>
+<td>Persistence</td>
+<td>Subscriber gets only future messages</td>
+<td>Client waits for response</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule of thumb:</strong> If you need a reply and the call is infrequent, use a service. If you&rsquo;re streaming data, use a topic.</p>
+<hr />
+<h2 id="32-service-server-and-client">3.2 Service Server and Client</h2>
+<p><strong>Server (Python):</strong></p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">nav2_msgs.srv</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClearEntireCostmap</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">CostmapClearer</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;costmap_clearer&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">srv</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_service</span><span class="p">(</span>
+            <span class="n">ClearEntireCostmap</span><span class="p">,</span>
+            <span class="s1">&#39;clear_entirely_global_costmap/clear&#39;</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">clear_callback</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">clear_callback</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">,</span> <span class="n">response</span><span class="p">):</span>
+        <span class="c1"># do the work</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Clearing costmap...&#39;</span><span class="p">)</span>
+        <span class="n">response</span><span class="o">.</span><span class="n">return_code</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">return</span> <span class="n">response</span>
+</code></pre></div>
+
+<p><strong>Client (Python) — async pattern:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="n">client</span> <span class="o">=</span> <span class="n">node</span><span class="o">.</span><span class="n">create_client</span><span class="p">(</span><span class="n">ClearEntireCostmap</span><span class="p">,</span>
+                            <span class="s1">&#39;clear_entirely_global_costmap/clear&#39;</span><span class="p">)</span>
+
+<span class="c1"># Wait for server to be available (non-blocking with timeout)</span>
+<span class="k">if</span> <span class="ow">not</span> <span class="n">client</span><span class="o">.</span><span class="n">wait_for_service</span><span class="p">(</span><span class="n">timeout_sec</span><span class="o">=</span><span class="mf">2.0</span><span class="p">):</span>
+    <span class="n">node</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s1">&#39;Service not available!&#39;</span><span class="p">)</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="n">future</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">call_async</span><span class="p">(</span><span class="n">ClearEntireCostmap</span><span class="o">.</span><span class="n">Request</span><span class="p">())</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">spin_until_future_complete</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="n">future</span><span class="p">,</span> <span class="n">timeout_sec</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">future</span><span class="o">.</span><span class="n">done</span><span class="p">():</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">future</span><span class="o">.</span><span class="n">result</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h2 id="33-the-deadlock-trap">3.3 The Deadlock Trap</h2>
+<div class="highlight"><pre><span></span><code>   Callback thread (executor)
+        │
+        ▼
+   service_callback() running
+        │
+        ▼
+   client.call()  ← BLOCKS waiting for a response
+        │
+        ▼
+   ... but the executor is blocked inside service_callback()
+       so it cannot process the response that arrives!
+       DEADLOCK.
+</code></pre></div>
+
+<p><strong>Fix:</strong> Never call a service synchronously from within a callback. Use <code>call_async()</code> and a future, or use a separate thread.</p>
+<hr />
+<h2 id="34-service-timeline">3.4 Service Timeline</h2>
+<div class="highlight"><pre><span></span><code>Client                                    Server
+  │                                         │
+  │─── Request (goal params) ──────────────►│
+  │                                         │ (processes...)
+  │◄─── Response (result) ──────────────────│
+  │                                         │
+  │ (client unblocks, future is ready)      │
+
+  Total time: one round-trip.
+  No intermediate feedback.
+  If server crashes: client times out.
+</code></pre></div>
+
+<hr />
+<h1 id="part-4-actions-async-with-feedback">PART 4 — ACTIONS: ASYNC WITH FEEDBACK</h1>
+<hr />
+<h2 id="41-what-actions-add-over-services">4.1 What Actions Add Over Services</h2>
+<p>Actions are for <strong>long-running goals</strong> that need:
+1. An async goal request (don&rsquo;t block the caller)
+2. Periodic feedback while executing
+3. A final result when done
+4. The ability to cancel mid-execution</p>
+<p>Nav2&rsquo;s <code>NavigateToPose</code> is an action. The robot might take 30 seconds to navigate — you don&rsquo;t want a blocking service call for that.</p>
+<hr />
+<h2 id="42-the-5-message-types">4.2 The 5 Message Types</h2>
+<div class="highlight"><pre><span></span><code>Client ──── GoalRequest ────────────────────────────────────► Server
+Client ◄─── GoalResponse (accepted/rejected) ───────────────  Server
+Client ◄─── FeedbackMessage (current_pose, ETA...) ──────────  Server (repeated)
+Client ──── CancelGoalRequest ──────────────────────────────► Server (optional)
+Client ◄─── GetResultResponse (final result / error code) ───  Server (once)
+</code></pre></div>
+
+<p>The action interface (<code>.action</code> file) defines three sections:</p>
+<div class="highlight"><pre><span></span><code># Goal
+geometry_msgs/PoseStamped pose
+---
+# Result
+std_msgs/Empty result
+---
+# Feedback
+geometry_msgs/PoseStamped current_pose
+float32 navigation_time
+</code></pre></div>
+
+<hr />
+<h2 id="43-preempting-goals-cancellation">4.3 Preempting Goals (Cancellation)</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Cancel an in-progress goal:</span>
+<span class="n">cancel_future</span> <span class="o">=</span> <span class="n">goal_handle</span><span class="o">.</span><span class="n">cancel_goal_async</span><span class="p">()</span>
+<span class="n">rclpy</span><span class="o">.</span><span class="n">spin_until_future_complete</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="n">cancel_future</span><span class="p">)</span>
+
+<span class="c1"># On the server side, implement cancel handling:</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">cancel_callback</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">goal_handle</span><span class="p">):</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Received cancel request&#39;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">CancelResponse</span><span class="o">.</span><span class="n">ACCEPT</span>       <span class="c1"># or REJECT</span>
+</code></pre></div>
+
+<p><strong>Key insight:</strong> Not all action servers honour cancellation. If <code>cancel_callback</code> returns <code>REJECT</code>, the goal continues. Nav2&rsquo;s <code>NavigateToPose</code> server accepts cancellations and stops the robot.</p>
+<hr />
+<h2 id="44-worked-example-counter-action-server-python-pseudocode">4.4 Worked Example: Counter Action Server (Python Pseudocode)</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Action: count from 0 to N, publishing feedback each second</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">CounterActionServer</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;counter_server&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_server</span> <span class="o">=</span> <span class="n">ActionServer</span><span class="p">(</span>
+            <span class="bp">self</span><span class="p">,</span>
+            <span class="n">CountTo</span><span class="p">,</span>                       <span class="c1"># action type</span>
+            <span class="s1">&#39;count_to&#39;</span><span class="p">,</span>                    <span class="c1"># action name</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">execute_callback</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">execute_callback</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">goal_handle</span><span class="p">):</span>
+        <span class="n">n</span> <span class="o">=</span> <span class="n">goal_handle</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">target</span>     <span class="c1"># e.g. 10</span>
+        <span class="n">feedback</span> <span class="o">=</span> <span class="n">CountTo</span><span class="o">.</span><span class="n">Feedback</span><span class="p">()</span>
+
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+            <span class="n">feedback</span><span class="o">.</span><span class="n">current_count</span> <span class="o">=</span> <span class="n">i</span>
+            <span class="n">goal_handle</span><span class="o">.</span><span class="n">publish_feedback</span><span class="p">(</span><span class="n">feedback</span><span class="p">)</span>
+            <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">1.0</span><span class="p">)</span>       <span class="c1"># 1 second per step</span>
+
+            <span class="k">if</span> <span class="n">goal_handle</span><span class="o">.</span><span class="n">is_cancel_requested</span><span class="p">:</span>
+                <span class="n">goal_handle</span><span class="o">.</span><span class="n">canceled</span><span class="p">()</span>
+                <span class="k">return</span> <span class="n">CountTo</span><span class="o">.</span><span class="n">Result</span><span class="p">(</span><span class="n">final_count</span><span class="o">=</span><span class="n">i</span><span class="p">)</span>
+
+        <span class="n">goal_handle</span><span class="o">.</span><span class="n">succeed</span><span class="p">()</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">CountTo</span><span class="o">.</span><span class="n">Result</span><span class="p">()</span>
+        <span class="n">result</span><span class="o">.</span><span class="n">final_count</span> <span class="o">=</span> <span class="n">n</span>
+        <span class="k">return</span> <span class="n">result</span>
+</code></pre></div>
+
+<p><strong>Step by step:</strong>
+1. Server accepts goal → extracts <code>request.target</code>
+2. Loop: publish feedback every iteration
+3. Check for cancellation every loop iteration
+4. On loop completion: call <code>succeed()</code>, return <code>Result</code></p>
+<hr />
+<h2 id="45-action-timeline">4.5 Action Timeline</h2>
+<div class="highlight"><pre><span></span><code>Client                                         Server
+  │                                               │
+  │─── GoalRequest {target: 10} ────────────────►│
+  │◄── GoalResponse {accepted: true} ────────────│
+  │                                               │ (executing loop)
+  │◄── Feedback {current_count: 0} ──────────────│
+  │◄── Feedback {current_count: 1} ──────────────│
+  │     ...                                       │
+  │◄── Feedback {current_count: 9} ──────────────│
+  │◄── Result {final_count: 10, status: SUCCEEDED}│
+  │                                               │
+  (Client&#39;s future is now ready)
+</code></pre></div>
+
+<hr />
+<h1 id="part-5-lifecycle-nodes">PART 5 — LIFECYCLE NODES</h1>
+<hr />
+<h2 id="51-the-4-primary-states">5.1 The 4 Primary States</h2>
+<div class="highlight"><pre><span></span><code>                    configure()
+  UNCONFIGURED ─────────────────► INACTIVE
+       ▲                              │  ▲
+       │            cleanup()         │  │ deactivate()
+       │◄───────────────────────      │  │
+       │                         activate()
+       │                              │
+       │                              ▼
+  FINALIZED ◄────────────────── ACTIVE
+              shutdown()
+</code></pre></div>
+
+<ul>
+<li><strong>UNCONFIGURED</strong> — node just started, no resources allocated. This is the starting state.</li>
+<li><strong>INACTIVE</strong> — node is configured (parameters loaded, publishers/subscribers created), but not processing data.</li>
+<li><strong>ACTIVE</strong> — node is fully operational. Timers fire, callbacks run, data is processed.</li>
+<li><strong>FINALIZED</strong> — node has been shut down cleanly. Cannot transition out.</li>
+<li><strong>ERROR</strong> — any transition callback can throw to enter this state. Requires <code>cleanup()</code> to recover.</li>
+</ul>
+<hr />
+<h2 id="52-the-transition-callbacks">5.2 The Transition Callbacks</h2>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MyLifecycleNode</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">rclcpp_lifecycle</span><span class="o">::</span><span class="n">LifecycleNode</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="c1">// Called when: UNCONFIGURED → INACTIVE</span>
+<span class="w">    </span><span class="c1">// Use for: loading parameters, creating pubs/subs</span>
+<span class="w">    </span><span class="n">CallbackReturn</span><span class="w"> </span><span class="n">on_configure</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">State</span><span class="w"> </span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">pub_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">this</span><span class="o">-&gt;</span><span class="n">create_publisher</span><span class="o">&lt;</span><span class="p">...</span><span class="o">&gt;</span><span class="p">(</span><span class="s">&quot;topic&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">10</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">CallbackReturn</span><span class="o">::</span><span class="n">SUCCESS</span><span class="p">;</span><span class="w">   </span><span class="c1">// or FAILURE to stay UNCONFIGURED</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Called when: INACTIVE → ACTIVE</span>
+<span class="w">    </span><span class="c1">// Use for: starting timers, enabling processing</span>
+<span class="w">    </span><span class="n">CallbackReturn</span><span class="w"> </span><span class="n">on_activate</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">State</span><span class="w"> </span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">timer_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">this</span><span class="o">-&gt;</span><span class="n">create_wall_timer</span><span class="p">(...);</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">CallbackReturn</span><span class="o">::</span><span class="n">SUCCESS</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Called when: ACTIVE → INACTIVE</span>
+<span class="w">    </span><span class="c1">// Use for: stopping timers, pausing processing</span>
+<span class="w">    </span><span class="n">CallbackReturn</span><span class="w"> </span><span class="n">on_deactivate</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">State</span><span class="w"> </span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">timer_</span><span class="p">.</span><span class="n">reset</span><span class="p">();</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">CallbackReturn</span><span class="o">::</span><span class="n">SUCCESS</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Called when: INACTIVE → UNCONFIGURED</span>
+<span class="w">    </span><span class="c1">// Use for: releasing resources, resetting state</span>
+<span class="w">    </span><span class="n">CallbackReturn</span><span class="w"> </span><span class="n">on_cleanup</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">State</span><span class="w"> </span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">pub_</span><span class="p">.</span><span class="n">reset</span><span class="p">();</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">CallbackReturn</span><span class="o">::</span><span class="n">SUCCESS</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p><strong>Key insight:</strong> Publishers and subscribers created in <code>on_configure()</code> still exist in INACTIVE state — they just don&rsquo;t do anything because timers and data processing start in <code>on_activate()</code>. This is why a node in INACTIVE state can receive messages but silently drop them.</p>
+<hr />
+<h2 id="53-the-lifecycle-manager">5.3 The Lifecycle Manager</h2>
+<p>Nav2 ships a <code>lifecycle_manager</code> node that automates the state transitions for all Nav2 nodes in the correct order:</p>
+<div class="highlight"><pre><span></span><code>lifecycle_manager calls:
+    1. configure(amcl)
+    2. configure(map_server)
+    3. configure(costmap_2d_global)
+    4. configure(costmap_2d_local)
+    5. configure(nav2_planner)
+    6. configure(nav2_controller)
+    7. configure(bt_navigator)
+    ... (same for activate)
+</code></pre></div>
+
+<p>If any node fails its <code>on_configure()</code>, the lifecycle manager halts and logs the failure. This is the most common cause of &ldquo;Nav2 won&rsquo;t start&rdquo; — one node&rsquo;s configuration callback returning <code>FAILURE</code>.</p>
+<hr />
+<h2 id="54-debugging-lifecycle-state">5.4 Debugging Lifecycle State</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Check current state of all managed nodes</span>
+ros2<span class="w"> </span>lifecycle<span class="w"> </span>list<span class="w"> </span>/amcl
+ros2<span class="w"> </span>lifecycle<span class="w"> </span>list<span class="w"> </span>/bt_navigator
+
+<span class="c1"># Manually trigger a transition (useful for testing)</span>
+ros2<span class="w"> </span>lifecycle<span class="w"> </span><span class="nb">set</span><span class="w"> </span>/amcl<span class="w"> </span>configure
+ros2<span class="w"> </span>lifecycle<span class="w"> </span><span class="nb">set</span><span class="w"> </span>/amcl<span class="w"> </span>activate
+
+<span class="c1"># Get the full list of available transitions from current state</span>
+ros2<span class="w"> </span>lifecycle<span class="w"> </span>get<span class="w"> </span>/amcl
+</code></pre></div>
+
+<p><strong>&ldquo;Node is in INACTIVE state&rdquo;</strong> — <code>on_configure()</code> succeeded, but <code>on_activate()</code> has not been called yet. Either the lifecycle manager hasn&rsquo;t reached that step, or <code>on_activate()</code> returned FAILURE on a previous attempt.</p>
+<hr />
+<h2 id="summary-what-to-remember">Summary — What to Remember</h2>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Node</td>
+<td>A DDS participant + executor event loop. One process can host many nodes.</td>
+</tr>
+<tr>
+<td>Executor</td>
+<td>Runs callbacks one at a time (single-threaded). Blocking callback = all callbacks stall.</td>
+</tr>
+<tr>
+<td><code>spin()</code></td>
+<td>Never returns. Processes events forever. The normal launch pattern.</td>
+</tr>
+<tr>
+<td><code>spin_once()</code></td>
+<td>Processes at most one event, then returns. For manual event loop control.</td>
+</tr>
+<tr>
+<td>Publisher</td>
+<td><code>create_publisher&lt;T&gt;(topic, QoS)</code>. Depth = how many messages queue before eviction.</td>
+</tr>
+<tr>
+<td>Subscriber</td>
+<td><code>create_subscription&lt;T&gt;(topic, QoS, callback)</code>. Callback runs inside executor.</td>
+</tr>
+<tr>
+<td>Topic</td>
+<td>Unidirectional, continuous stream. No reply. No delivery guarantee by default.</td>
+</tr>
+<tr>
+<td>Service</td>
+<td>Request-response. Bidirectional. Avoid blocking calls inside callbacks (deadlock).</td>
+</tr>
+<tr>
+<td>Action</td>
+<td>Async goal + feedback stream + result. Use for long-running tasks (navigation).</td>
+</tr>
+<tr>
+<td>Lifecycle INACTIVE</td>
+<td>Configured but not active. Pubs/subs exist; timers do not.</td>
+</tr>
+<tr>
+<td>Lifecycle ACTIVE</td>
+<td>Fully operational. Timers fire. Callbacks run.</td>
+</tr>
+<tr>
+<td>Lifecycle manager</td>
+<td>Coordinates ordered startup/shutdown of all Nav2 nodes.</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

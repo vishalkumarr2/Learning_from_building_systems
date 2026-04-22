@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 — Dead-Reckoning &amp; Wheel Odometry - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Navigation Estimator</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="01-dead-reckoning-wheel-odometry">01 — Dead-Reckoning &amp; Wheel Odometry</h1>
+<h3 id="the-math-underneath-oks-predict">The math underneath OKS <code>predict()</code></h3>
+<p><strong>Prerequisite:</strong> None — this is the entry point for the navigation-estimator track.
+<strong>Unlocks:</strong> <code>02-kalman-filter.md</code> — you need to know what <code>delta_trans</code> and <code>delta_theta</code> <em>mean</em> before you can understand how their variances propagate.</p>
+<hr />
+<h2 id="why-should-i-care-oks-project-context">Why Should I Care? (OKS Project Context)</h2>
+<p>Every OKS robot navigation failure starts with <code>predict()</code>. When you open a bag from an incident like a bag from a recent incident and see the robot&rsquo;s estimated position drifting off a tile before the sensorbar could correct it, you&rsquo;re watching dead-reckoning accumulate error in real time.</p>
+<p>Understanding this material lets you answer questions you currently have to guess at:</p>
+<ul>
+<li><strong>&ldquo;Why did the robot overshoot the target by 12 cm on a 3 m move?&rdquo;</strong> → Systematic heading bias from wheel diameter mismatch; you can <em>calculate</em> the drift before even opening the bag.</li>
+<li><strong>&ldquo;Why does <code>lateral_var</code> blow up even when the robot moves in a straight line?&rdquo;</strong> → Because lateral error grows as <code>cov_theta × delta_trans²</code>. The higher the angular uncertainty, the more uncertain your sideways position gets just by driving forward.</li>
+<li><strong>&ldquo;What does <code>k_trans_noise</code> actually model?&rdquo;</strong> → Wheel slip per unit distance: the further you drive, the more uncertain your along-track position. This note gives you the physical derivation of that coefficient.</li>
+<li><strong>&ldquo;Why is the staleness scaling needed?&rdquo;</strong> → If odom goes stale, you have no dead-reckoning input at all — the robot is <em>guessing</em> its position. The scaling inflates variance to reflect that.</li>
+</ul>
+<p>The the navigation estimator is deliberately simple: no full Jacobian, no odom message covariance, a fixed linear noise model. That simplicity is a feature, but it means the noise parameters (<code>k_trans_noise</code>, etc.) are the <em>entire model of wheel reliability</em>. If those are wrong, or if wheel slip is outside their range, every bag you analyse will show systematic unexplained covariance growth.</p>
+<hr />
+<h1 id="part-1-the-differential-drive-robot">PART 1 — THE DIFFERENTIAL DRIVE ROBOT</h1>
+<h2 id="11-physical-setup">1.1 Physical Setup</h2>
+<p>An OKS AMR (and most small robots) uses <strong>differential drive</strong>: two driven wheels on a common axle, no steering mechanism. Turning is achieved by driving the wheels at different speeds. A castor wheel provides balance but contributes no drive.</p>
+<p><strong>ELI15 analogy:</strong> Imagine two people holding opposite ends of a stick. If both walk forward equally fast, the stick moves straight. If the left person walks faster, the stick rotates clockwise (from above). The stick&rsquo;s centre traces an arc. Differential drive is exactly this.</p>
+<div class="highlight"><pre><span></span><code>        TOP VIEW OF ROBOT
+        ==================
+
+              FRONT
+                ^
+                |
+    +-----------+----------+
+    |                      |
+    |   Left       Right   |
+ L --[●]--+---B---+--[●]-- R      ● = driven wheel
+    |      |       |      |       B = wheel baseline (axle width)
+    |      +---+---+      |
+    |          |          |
+    |       castor        |
+    +-----------+----------+
+                |
+               REAR
+
+    Coordinate frame:
+      X  →  forward
+      Y  →  left
+      θ  = heading angle (CCW positive, 0 = facing +X)
+
+    B = distance between wheel contact patches [metres]
+    r = wheel radius [metres]
+    Encoder on each wheel counts ticks per revolution
+</code></pre></div>
+
+<h2 id="12-wheel-encoders-ticks-to-arc-length">1.2 Wheel Encoders: Ticks to Arc Length</h2>
+<p>Each wheel has a quadrature encoder measuring how far the wheel has rotated. The encoder produces <code>ticks</code> — an integer count that increments (or decrements) for each small angular step.</p>
+<p><strong>The formula:</strong></p>
+<div class="highlight"><pre><span></span><code>                  ticks
+arc_length = ─────────────── × 2π × r
+              ticks_per_rev
+</code></pre></div>
+
+<p>Where:
+- <code>ticks</code> = encoder count change since last measurement
+- <code>ticks_per_rev</code> = encoder resolution (counts per full wheel revolution)
+- <code>r</code> = wheel radius in metres
+- <code>2π × r</code> = circumference of the wheel</p>
+<p>Dimensionally: <code>[ticks / (ticks/rev)] × [m/rev] = [m]</code> ✓</p>
+<p><strong>ASCII derivation:</strong></p>
+<div class="highlight"><pre><span></span><code>    Full revolution = 2π × r metres of ground contact
+    Encoder has N = ticks_per_rev counts per revolution
+
+    One tick = (2π × r) / N metres
+
+                     n ticks
+    arc_length = n × ──────── = (n / N) × 2π × r
+                      N ticks
+</code></pre></div>
+
+<h2 id="13-worked-example-encoder-ticks-to-arc-length">1.3 Worked Example — Encoder Ticks to Arc Length</h2>
+<p><strong>Given:</strong>
+- Left wheel: <code>n_L = 100</code> ticks
+- Right wheel: <code>n_R = 98</code> ticks
+- Wheel radius: <code>r = 0.05 m</code>
+- Encoder resolution: <code>N = 1000 ticks/rev</code></p>
+<p><strong>Step 1:</strong> Compute left arc length:</p>
+<div class="highlight"><pre><span></span><code>s_L = (100 / 1000) × 2π × 0.05
+    = 0.1 × 0.3142
+    = 0.03142 m  ≈ 31.4 mm
+</code></pre></div>
+
+<p><strong>Step 2:</strong> Compute right arc length:</p>
+<div class="highlight"><pre><span></span><code>s_R = (98 / 1000) × 2π × 0.05
+    = 0.098 × 0.3142
+    = 0.03079 m  ≈ 30.8 mm
+</code></pre></div>
+
+<p><strong>Step 3:</strong> Difference:</p>
+<div class="highlight"><pre><span></span><code>s_R - s_L = 30.8 - 31.4 = -0.6 mm
+</code></pre></div>
+
+<p>The right wheel travelled 0.6 mm <em>less</em> than the left → the robot turned slightly right.</p>
+<blockquote>
+<p><strong>Key insight:</strong> Even two encoder counts of difference (0.2% asymmetry) causes rotation. Over 100 odom cycles this accumulates. This is why wheel calibration matters so much in warehouses.</p>
+</blockquote>
+<hr />
+<h1 id="part-2-arc-integration-the-unicycle-model">PART 2 — ARC INTEGRATION: THE UNICYCLE MODEL</h1>
+<h2 id="21-the-geometry-of-unequal-wheel-motion">2.1 The Geometry of Unequal Wheel Motion</h2>
+<p>When <code>s_L ≠ s_R</code>, the robot traces an <strong>arc</strong>, not a straight line. Both wheels travel on concentric arcs centred at the same Instantaneous Centre of Curvature (ICC).</p>
+<div class="highlight"><pre><span></span><code>    ARC GEOMETRY (TOP VIEW)
+    =======================
+
+                     ICC
+                      *
+                     /|
+                    / |
+                   /  |
+                  /   |
+    r_L + B      /    | r_R
+                /     |
+               /      |
+    LEFT -----/-------/------ RIGHT
+    WHEEL    /arc_L  /arc_R   WHEEL
+            /       /
+           /       /
+          +-------+
+          robot
+          (start)
+
+    r_L = radius of left wheel arc
+    r_R = radius of right wheel arc
+    B   = axle baseline = r_R - r_L
+
+    Since both wheels rotate over the SAME angle Δθ:
+        s_L = r_L × Δθ
+        s_R = r_R × Δθ
+    Subtracting:
+        s_R - s_L = (r_R - r_L) × Δθ = B × Δθ
+    Therefore:
+        Δθ = (s_R - s_L) / B                  ← HEADING CHANGE
+</code></pre></div>
+
+<h2 id="22-full-derivation-of-the-unicycle-kinematics">2.2 Full Derivation of the Unicycle Kinematics</h2>
+<p><strong>Step 1 — Heading change:</strong></p>
+<p>From the arc geometry above:</p>
+<p>$$\Delta\theta = \frac{s_R - s_L}{B}$$</p>
+<p><strong>Step 2 — Forward distance (arc midpoint):</strong></p>
+<p>The robot&rsquo;s centre travels the average arc:</p>
+<p>$$s = \frac{s_R + s_L}{2}$$</p>
+<p><strong>Step 3 — Why use the midpoint heading <code>θ + Δθ/2</code>?</strong></p>
+<div class="highlight"><pre><span></span><code>    POSITION UPDATE ERROR ILLUSTRATION
+    ====================================
+
+    If we use old heading θ:
+        x&#39; = x + s·cos(θ)    ← wrong: ignores the turn
+                               undershoots curve
+
+    If we use new heading θ&#39;:
+        x&#39; = x + s·cos(θ&#39;)   ← wrong: overcorrects
+                               overshoots curve
+
+    Correct: use MIDPOINT heading (θ + Δθ/2):
+        The robot was pointing BETWEEN old and new headings
+        during the arc. The midpoint is the best single
+        direction to approximate the arc as a chord.
+
+        For Δθ small, this is exact. For large Δθ it&#39;s
+        still better than either endpoint.
+
+    VISUAL:
+          θ                θ + Δθ/2               θ + Δθ
+          |                    |                       |
+    ─────●──────────────────────────────────────────●─────
+          start heading                        end heading
+                              ↑
+                          use THIS for position update
+</code></pre></div>
+
+<p><strong>Step 4 — Position update equations:</strong></p>
+<p>$$x&rsquo; = x + s \cdot \cos!\left(\theta + \frac{\Delta\theta}{2}\right)$$</p>
+<p>$$y&rsquo; = y + s \cdot \sin!\left(\theta + \frac{\Delta\theta}{2}\right)$$</p>
+<p>$$\theta&rsquo; = \theta + \Delta\theta$$</p>
+<p>These five equations <em>are</em> wheel odometry (the unicycle model).</p>
+<h2 id="23-worked-example-full-pose-update">2.3 Worked Example — Full Pose Update</h2>
+<p><strong>Given:</strong> Robot starts at <code>(x=0, y=0, θ=0°)</code>. Encoder readings from Section 1.3:
+- <code>s_L = 0.03142 m</code>, <code>s_R = 0.03079 m</code>, <code>B = 0.30 m</code></p>
+<p><strong>Step 1 — Heading change:</strong></p>
+<div class="highlight"><pre><span></span><code>Δθ = (s_R - s_L) / B
+   = (0.03079 - 0.03142) / 0.30
+   = -0.00063 / 0.30
+   = -0.0021 rad   (≈ -0.12°, turning right)
+</code></pre></div>
+
+<p><strong>Step 2 — Forward distance:</strong></p>
+<div class="highlight"><pre><span></span><code>s = (s_R + s_L) / 2
+  = (0.03079 + 0.03142) / 2
+  = 0.03111 m   (≈ 31.1 mm)
+</code></pre></div>
+
+<p><strong>Step 3 — Midpoint heading:</strong></p>
+<div class="highlight"><pre><span></span><code>θ_mid = θ + Δθ/2 = 0 + (-0.0021)/2 = -0.00105 rad
+</code></pre></div>
+
+<p><strong>Step 4 — Position update:</strong></p>
+<div class="highlight"><pre><span></span><code>x&#39; = 0 + 0.03111 × cos(-0.00105)
+   = 0 + 0.03111 × 0.99999945
+   ≈ 0.03111 m
+
+y&#39; = 0 + 0.03111 × sin(-0.00105)
+   = 0 + 0.03111 × (-0.00105)
+   ≈ -0.0000327 m   (≈ -0.03 mm lateral shift)
+
+θ&#39; = 0 + (-0.0021) = -0.0021 rad
+</code></pre></div>
+
+<p><strong>Result:</strong> <code>(x'=31.1 mm, y'=-0.033 mm, θ'=-0.12°)</code> — nearly straight, with a tiny clockwise drift.</p>
+<blockquote>
+<p><strong>Key insight:</strong> The lateral displacement (<code>y'</code>) from 2 missing encoder ticks is only 0.033 mm per step. But <code>Δθ</code> is -0.0021 rad per step. After 1000 steps (31 metres of travel), heading error is <code>1000 × 0.0021 = 2.1 rad</code> — the robot has spun 120°! This is why <strong>heading error is the primary concern</strong>, not per-step position error.</p>
+</blockquote>
+<hr />
+<h1 id="part-3-error-accumulation">PART 3 — ERROR ACCUMULATION</h1>
+<h2 id="31-why-heading-error-is-catastrophic">3.1 Why Heading Error Is Catastrophic</h2>
+<p>The unicycle equations show that <code>x'</code> and <code>y'</code> depend on <code>cos(θ)</code> and <code>sin(θ)</code>. A heading error of <code>ε</code> causes a <em>lateral</em> position error that grows proportionally to distance:</p>
+<p>$$\text{lateral error} \approx s_{\text{total}} \times \sin(\varepsilon) \approx s_{\text{total}} \times \varepsilon \quad \text{(for small } \varepsilon \text{)}$$</p>
+<p><strong>Quantified example: 1° heading error after 10 m of travel:</strong></p>
+<div class="highlight"><pre><span></span><code>ε = 1° = 0.01745 rad
+lateral_error = 10 m × sin(0.01745)
+              = 10 × 0.01745
+              = 0.1745 m  ≈ 17.5 cm
+</code></pre></div>
+
+<p>A 1° heading miscalibration produces <strong>17 cm of sideways drift per 10 metres</strong>. In a warehouse with 50 cm aisle margins, that is a navigation failure after ~30 m of travel.</p>
+<h2 id="32-types-of-error">3.2 Types of Error</h2>
+<div class="highlight"><pre><span></span><code>    ERROR TAXONOMY
+    ===============
+
+    SYSTEMATIC (deterministic, repeatable)
+    ├── Wheel diameter mismatch
+    │     Left wheel 0.1% larger than right
+    │     → constant rotation at constant speed
+    │     → grows linearly with distance
+    │
+    ├── Baseline (axle width) calibration error
+    │     B is 1 mm off → all Δθ computations are wrong by B_err/B²
+    │
+    └── Encoder resolution (if mis-set)
+          Wrong ticks_per_rev → wrong arc length every tick
+
+    RANDOM (stochastic, unpredictable)
+    ├── Wheel slip (on smooth floors, sharp turns)
+    │     Encoder counts, but wheel doesn&#39;t move ground contact
+    │
+    ├── Ground height variation (floor bumps, ramps)
+    │     r_effective changes if floor isn&#39;t flat
+    │
+    └── Encoder quantisation noise
+          ±1 tick uncertainty per reading
+</code></pre></div>
+
+<p><strong>Why systematic errors are worse:</strong> They accumulate <em>monotonically</em>. Random errors partially cancel over time. Systematic errors never cancel — they compound.</p>
+<h2 id="33-why-oks-uses-sensorbar-corrections">3.3 Why OKS Uses Sensorbar Corrections</h2>
+<p>Without external corrections, the table below shows what happens:</p>
+<div class="highlight"><pre><span></span><code>    DEAD-RECKONING DRIFT IN AN OKS WAREHOUSE
+    ==========================================
+
+    Assumptions:
+      • Heading bias: 0.05°/m (typical without calibration)
+      • Straight path, 100 m total travel
+
+    After  10 m: heading error = 0.5°,  lateral drift ≈  87 mm
+    After  20 m: heading error = 1.0°,  lateral drift ≈ 349 mm  ← off tile
+    After  50 m: heading error = 2.5°,  lateral drift ≈ 2.18 m  ← wrong aisle
+    After 100 m: heading error = 5.0°,  lateral drift ≈ 8.72 m  ← wall collision
+
+    ────────────────────────────────────────────────────────────
+    VISUAL DRIFT:
+
+    ──────────────────────────────────────── true path (straight)
+     ╲
+      ╲ 0.5° drift
+       ╲
+        ──────────────────────────────── 10 m
+         ╲
+          ╲ 1.0° total
+           ╲
+            ──────────────────── 20 m
+             ╲
+              ╲
+               ╲
+                ─────── 50 m (off path by 2 m)
+</code></pre></div>
+
+<p>The OKS sensorbar provides a measurement every time the robot crosses a floor line. This corrects the accumulated heading and position error back toward ground truth. Without sensorbar updates, a 100 m warehouse run is not navigable with wheel odometry alone.</p>
+<h2 id="34-the-encoder-wrap-around-trap">3.4 The Encoder Wrap-Around Trap</h2>
+<p>Most embedded systems use <code>uint16_t</code> or <code>int16_t</code> for encoder counts. When the counter overflows:</p>
+<div class="highlight"><pre><span></span><code>    uint16 wraps:  65535 → 0     (appears as -65535 ticks)
+    int16 wraps:   32767 → -32768 (appears as ±65535 ticks)
+
+    Correct handling:
+        delta = (int16_t)(new_count - old_count)
+                 ↑ explicit int16 cast handles wrap-around
+
+    Wrong handling:
+        delta = new_count - old_count
+                 ↑ if both are uint32, no wrap-around occurs
+                   but the delta is 65535 ticks instead of 1
+</code></pre></div>
+
+<p>A single wrap-around event produces a <code>delta_trans</code> spike of ~(65535/N) × 2πr metres. With N=1000 and r=0.05, that is <strong>20.6 m</strong> of phantom movement in one tick. This causes a covariance spike of <code>k_trans_noise × 20.6</code>, potentially setting variance to INF.</p>
+<hr />
+<h1 id="part-4-oks-code-connection">PART 4 — OKS CODE CONNECTION</h1>
+<h2 id="41-how-oks-predict-uses-this-math">4.1 How OKS <code>predict()</code> Uses This Math</h2>
+<p>OKS&rsquo;s <code>predict()</code> function (, ) receives the <em>already-computed</em> <code>delta_trans</code> and <code>delta_theta</code> from the odom message comparison. It does <strong>not</strong> re-derive them from encoder ticks — the ROS nav_msgs/Odometry message already integrates wheel odometry (via the robot&rsquo;s base driver). The estimator receives the <em>state change</em> directly.</p>
+<p>The prediction step does two things:</p>
+<ol>
+<li><strong>State propagation</strong> — applies the unicycle equations to advance <code>(x, y, θ)</code>.</li>
+<li><strong>Covariance propagation</strong> — grows the covariance matrix using a linear noise model.</li>
+</ol>
+<h2 id="42-the-oks-linear-noise-model">4.2 The OKS Linear Noise Model</h2>
+<p>OKS uses a <strong>simplified</strong> noise model that is NOT the standard EKF Jacobian-based propagation. Instead:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// From  predict() ~</span>
+
+<span class="n">trans_var</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">k_trans_noise</span><span class="w">   </span><span class="o">*</span><span class="w"> </span><span class="n">delta_trans</span>
+<span class="w">            </span><span class="o">+</span><span class="w"> </span><span class="n">k_rot_pos_noise</span><span class="w">     </span><span class="o">*</span><span class="w"> </span><span class="n">delta_theta</span>
+<span class="w">            </span><span class="o">+</span><span class="w"> </span><span class="n">k_time_pos_noise</span><span class="w">      </span><span class="o">*</span><span class="w"> </span><span class="n">delta_t</span>
+
+<span class="n">theta_var</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">k_trans_rot_noise</span><span class="w">  </span><span class="o">*</span><span class="w"> </span><span class="n">delta_trans</span>
+<span class="w">            </span><span class="o">+</span><span class="w"> </span><span class="n">k_rot_noise</span><span class="w">  </span><span class="o">*</span><span class="w"> </span><span class="n">delta_theta</span>
+<span class="w">            </span><span class="o">+</span><span class="w"> </span><span class="n">k_time_rot_noise</span><span class="w">   </span><span class="o">*</span><span class="w"> </span><span class="n">delta_t</span>
+
+<span class="n">lateral_var</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k_trans_lat_noise</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">delta_trans</span>
+<span class="w">            </span><span class="o">+</span><span class="w"> </span><span class="p">...</span>
+<span class="w">            </span><span class="o">+</span><span class="w"> </span><span class="n">min</span><span class="p">(</span><span class="n">cov_theta</span><span class="p">,</span><span class="w"> </span><span class="mf">1e5</span><span class="p">)</span><span class="w">        </span><span class="o">*</span><span class="w"> </span><span class="n">delta_trans</span><span class="o">^</span><span class="mi">2</span>
+</code></pre></div>
+
+<p>Each line is a <strong>linear combination of the motion inputs</strong> with fixed scaling coefficients. This is a deliberate simplification over the full EKF Jacobian propagation:</p>
+<div class="highlight"><pre><span></span><code>    STANDARD EKF COVARIANCE UPDATE:
+        P&#39; = F × P × Fᵀ + Q
+
+    OKS SIMPLIFICATION:
+        ΔP = k₁ × |delta_trans| + k₂ × |delta_theta| + k₃ × delta_t
+</code></pre></div>
+
+<p>Why? The full Jacobian requires computing partial derivatives of the unicycle model and multiplying two 3×3 matrices per prediction step. For OKS&rsquo;s use case (sensorbar corrections every ~10 cm), the simplified model is accurate enough — the measurement update dominates.</p>
+<h2 id="43-why-mincov_theta-1e5-delta_trans2-in-lateral_var">4.3 Why <code>min(cov_theta, 1e5) × delta_trans²</code> in <code>lateral_var</code></h2>
+<p>This term is the most subtle in the noise model. Here&rsquo;s the physical intuition:</p>
+<div class="highlight"><pre><span></span><code>    IF YOU DON&#39;T KNOW YOUR HEADING, MOVING FORWARD MAKES X AND Y BOTH UNCERTAIN
+
+    Scenario: cov_theta = 0.01 rad² (small, well-known heading)
+               delta_trans = 0.1 m
+               lateral contribution = 0.01 × 0.1² = 0.0001 m²  (very small)
+
+    Scenario: cov_theta = 1.0 rad² (heading very uncertain after a slip)
+               delta_trans = 0.1 m
+               lateral contribution = 1.0 × 0.1² = 0.01 m²  (100× larger!)
+
+                HEADING UNCERTAINTY → LATERAL POSITION UNCERTAINTY
+
+                     θ + σ_θ
+                    /
+                   /     ← uncertain heading: position could be ANYWHERE
+                  /         along this fan after driving delta_trans
+    ─────────●──────────────  θ
+              \
+               \     θ - σ_θ
+
+    Width of the fan at distance d = d × σ_θ
+    Variance of fan width = d² × var(θ)  ← This is exactly cov_theta × delta_trans²
+</code></pre></div>
+
+<p>The <code>min(cov_theta, 1e5)</code> cap prevents numerical overflow when heading variance is INF (after slip detection). Without the cap, a single slip would propagate infinite lateral variance immediately — the cap limits it to a finite but very large value.</p>
+<h2 id="44-complete-concept-to-code-mapping">4.4 Complete Concept-to-Code Mapping</h2>
+<table>
+<thead>
+<tr>
+<th>Concept (this document)</th>
+<th>OKS Code Location</th>
+<th>Variable Name</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Arc length from encoders</td>
+<td>Robot base driver (not estimator)</td>
+<td>Published in <code>odom.pose.pose</code></td>
+</tr>
+<tr>
+<td><code>s = (s_R + s_L) / 2</code></td>
+<td><code>predict()</code> input</td>
+<td><code>delta_trans</code></td>
+</tr>
+<tr>
+<td><code>Δθ = (s_R - s_L) / B</code></td>
+<td><code>predict()</code> input</td>
+<td><code>delta_theta</code></td>
+</tr>
+<tr>
+<td>Along-track noise (wheel slip per metre)</td>
+<td><code>predict()</code> noise formula</td>
+<td><code>k_trans_noise</code></td>
+</tr>
+<tr>
+<td>Rotation noise per rad of turn</td>
+<td><code>predict()</code> noise formula</td>
+<td><code>k_rot_noise</code></td>
+</tr>
+<tr>
+<td>Temporal drift (jitter, latency)</td>
+<td><code>predict()</code> noise formula</td>
+<td><code>k_time_pos_noise</code></td>
+</tr>
+<tr>
+<td>Heading uncertainty × travel → lateral error</td>
+<td><code>predict()</code> <code>lateral_var</code></td>
+<td><code>min(cov_theta, 1e5) * delta_trans²</code></td>
+</tr>
+<tr>
+<td>Odom message staleness</td>
+<td><code>predict()</code> scaling</td>
+<td><code>scaling_factor</code> (if <code>Δt &gt; 2×expected_period</code>)</td>
+</tr>
+<tr>
+<td>Midpoint heading <code>θ + Δθ/2</code></td>
+<td>State propagation in <code>predict()</code></td>
+<td>Implicit in <code>cos/sin</code> decomposition</td>
+</tr>
+</tbody>
+</table>
+<h2 id="45-what-oks-does-not-do">4.5 What OKS Does NOT Do</h2>
+<p>Understanding the omissions prevents wrong mental models:</p>
+<div class="highlight"><pre><span></span><code>    OKS DOES NOT:
+    ─────────────
+    ✗ Read odom.twist.covariance or odom.pose.covariance
+      (these fields are set by the base driver but estimator ignores them)
+
+    ✗ Compute the full EKF Jacobian F for covariance propagation
+      (the Jacobian-based P&#39; = FPFᵀ + Q is replaced by the linear noise model)
+
+    ✗ Distinguish between different surfaces (tiles vs. concrete)
+      (noise parameters are fixed; slip on shiny tile is not modelled differently)
+
+    ✗ Handle encoder wrap-around itself
+      (relies on the base driver to provide correct delta_trans, delta_theta)
+</code></pre></div>
+
+<hr />
+<h1 id="part-5-common-mistakes-debug-tips">PART 5 — COMMON MISTAKES &amp; DEBUG TIPS</h1>
+<h2 id="51-wrong-wheel-radius-calibration">5.1 Wrong Wheel Radius Calibration</h2>
+<p><strong>Symptom in bags:</strong> Systematic drift in a fixed direction on every straight run. The drift is proportional to distance. Plot <code>estimated_x</code> vs <code>ground_truth_x</code> — if the slope is not 1.0, wheel radius is wrong.</p>
+<p><strong>Formula for diagnosis:</strong></p>
+<div class="highlight"><pre><span></span><code>    Measured radius r_m, true radius r_t:
+    Odometry scale error = r_m / r_t
+
+    If r_m = 0.0505 m, r_t = 0.0500 m (1% error):
+    - Every 10 m of odom reads as 10.1 m of true distance
+    - On a 100 m path, robot is 1 m ahead of where it thinks
+    - Results in systematic undershoot of final position
+</code></pre></div>
+
+<p><strong>Important:</strong> Asymmetric wheel wear causes the same effect, but only on the worn wheel. This appears as heading drift, not pure scale error.</p>
+<h2 id="52-encoder-wrap-around-uint16-int16-conversion">5.2 Encoder Wrap-Around (uint16 → int16 Conversion)</h2>
+<p><strong>When it happens:</strong> Robot runs continuously for a long time; encoders count past 65535. The base driver wraps the counter but does not sign-extend correctly.</p>
+<p><strong>How to spot in a bag:</strong> Single-tick <code>delta_trans</code> spike of ~20 m at a precise time in the <code>/odom</code> topic. This causes a <code>trans_var</code> spike that may or may not clear depending on the next sensorbar update.</p>
+<p><strong>The correct C++ cast:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="kt">int16_t</span><span class="w"> </span><span class="n">delta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">int16_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">current_encoder</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">prev_encoder</span><span class="p">);</span>
+<span class="c1">//              ↑ explicit int16 cast: wraps correctly at ±32768</span>
+</code></pre></div>
+
+<h2 id="53-why-oks-computes-variance-from-delta-not-cumulative-state">5.3 Why OKS Computes Variance from Delta, Not Cumulative State</h2>
+<p>In a naive dead-reckoning system you might track total path length and compute total variance. OKS does NOT do this — it adds variance <em>incrementally</em> based on each new <code>delta_trans</code> and <code>delta_theta</code>.</p>
+<p><strong>Why this is correct:</strong> Variance is <em>additive</em> for independent increments. Each odom step is assumed independent (no correlation between wheel slips at step 5 and step 6). This is the Markov property: the state covariance at time <code>t+1</code> only depends on the state covariance at time <code>t</code> and the new measurement, not on all previous measurements.</p>
+<p><strong>What would go wrong with cumulative:</strong> Cumulative variance would be wrong after a sensorbar measurement <em>decreases</em> covariance. You&rsquo;d be summing over the whole history rather than propagating from the post-measurement state.</p>
+<h2 id="54-how-to-spot-dead-reckoning-failure-in-a-bag">5.4 How to Spot Dead-Reckoning Failure in a Bag</h2>
+<div class="highlight"><pre><span></span><code>    DIAGNOSIS CHECKLIST FOR BAG ANALYSIS
+    ======================================
+
+    1. Compare /odom and /estimated_state position tracks
+       │ If they diverge SLOWLY over many seconds → dead-reckoning drift
+       │ If they jump SUDDENLY → sensorbar rejected update or slip event
+
+    2. Check delta_trans magnitude in odom deltas
+       │ Normal: ≤ 0.01 m per 50 Hz odom step (≤ 0.5 m/s)
+       │ Anomaly: delta_trans &gt; 0.1 m in one step → wrap-around or encoder fault
+
+    3. Correlate position jump with velocity
+       │ A position jump WITHOUT matching velocity in cmd_vel or odom.twist
+       │ means the estimator moved without the robot moving → EKF divergence
+       │ (not dead-reckoning failure, but a different kind)
+
+    4. Plot cov_xx and cov_yy over time:
+       │ Gradual growth between sensorbar updates → normal prediction
+       │ Growth without any measurement shrinks → sensorbar not triggering
+       │ Sudden jump to 1e5 → hit cov_theta cap in lateral_var formula
+       │ Jump to INF → slip detection triggered
+
+    5. Check staleness scaling events:
+         Log line: &quot;odom stale, applying scaling_factor&quot;
+         Covariance will grow faster than normal for that window
+</code></pre></div>
+
+<h2 id="55-the-staleness-scaling-mechanism">5.5 The Staleness Scaling Mechanism</h2>
+<p>OKS&rsquo;s <code>predict()</code> checks how long ago odom was received. If the gap exceeds <code>2 × expected_period</code>:</p>
+<div class="highlight"><pre><span></span><code>    scaling_factor = (actual_gap / expected_period)²
+
+    Example: expected period = 20 ms, odom missed for 100 ms
+    scaling_factor = (100/20)² = 25×
+
+    trans_var (applied) = 25 × (normal trans_var)
+</code></pre></div>
+
+<p>This inflates variance to reflect that the robot&rsquo;s true position is much less certain when odom is stale. Common cause: CPU overload on the Jetson, ROS callback queue backup, network drop on WiFi-tethered odom.</p>
+<hr />
+<h2 id="implementation-connection">Implementation Connection</h2>
+<p>Full cross-reference of the concepts in this document to ``:</p>
+<div class="highlight"><pre><span></span><code>01-dead-reckoning.md concept               reference
+─────────────────────────────────────────────────────────────────
+Wheel arc length formula                  Not in estimator; in base driver
+                                          Estimator receives odom.pose delta
+
+Unicycle model (x&#39;, y&#39;, θ&#39;)               predict() ~+
+                                          State propagation using delta_trans,
+                                          delta_theta, and heading decomposition
+
+Along-track variance growth               k_trans_noise * delta_trans
+Heading variance growth                   k_rot_noise * delta_theta
+Temporal variance growth                  k_time_pos_noise * delta_t
+
+Lateral variance from heading uncertainty min(cov_theta, 1e5) * delta_trans^2
+  (Section 2.2 fan geometry)
+
+Staleness scaling                         _last_odom_received_time comparison
+                                          scaling_factor inflation
+
+Encoder wrap-around (Section 5.2)        NOT handled by estimator;
+                                         must be handled by base driver
+
+INF covariance → ESTIMATED_STATE_NOT_FINITE
+                                          isFinite() check
+                                         (triggered by slip or collision,
+                                          NOT by prediction step alone)
+</code></pre></div>
+
+<hr />
+<h2 id="summary-what-to-remember">Summary — What to Remember</h2>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>Formula</th>
+<th>OKS Parameter</th>
+<th>What Goes Wrong If Wrong</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Arc length from encoder</td>
+<td><code>s = (n/N) × 2π × r</code></td>
+<td>Inputs to base driver</td>
+<td>Wrong <code>r</code> → systematic scale drift</td>
+</tr>
+<tr>
+<td>Heading change</td>
+<td><code>Δθ = (s_R − s_L) / B</code></td>
+<td><code>delta_theta</code> input</td>
+<td>Wrong <code>B</code> → systematic heading drift</td>
+</tr>
+<tr>
+<td>Forward distance</td>
+<td><code>s = (s_R + s_L) / 2</code></td>
+<td><code>delta_trans</code> input</td>
+<td>Wrong <code>r</code> asymmetry → scale error</td>
+</tr>
+<tr>
+<td>Position update</td>
+<td><code>x' = x + s·cos(θ + Δθ/2)</code></td>
+<td>State propagation</td>
+<td>— (derived from above)</td>
+</tr>
+<tr>
+<td>Midpoint heading</td>
+<td><code>θ_mid = θ + Δθ/2</code></td>
+<td>Implicit in cos/sin</td>
+<td>Using old θ → systematic undershoot on arcs</td>
+</tr>
+<tr>
+<td>Along-track variance</td>
+<td><code>k₁ × delta_trans</code></td>
+<td><code>k_trans_noise</code></td>
+<td>Too low → overconfident → Mahalanobis rejection of valid sensorbar</td>
+</tr>
+<tr>
+<td>Heading variance</td>
+<td><code>k₂ × delta_theta</code></td>
+<td><code>k_rot_noise</code></td>
+<td>Too high → sensorbar rejected prematurely</td>
+</tr>
+<tr>
+<td>Lateral variance</td>
+<td><code>min(cov_θ, 1e5) × delta_trans²</code></td>
+<td><code>cov_theta</code> at time of prediction</td>
+<td>Uncapped → overflow after slip; over-capped → underestimates lateral uncertainty</td>
+</tr>
+<tr>
+<td>Staleness scaling</td>
+<td><code>(gap / period)²</code> × variance</td>
+<td><code>scaling_factor</code></td>
+<td>Missing → overconfident during odom dropout</td>
+</tr>
+<tr>
+<td>Encoder wrap</td>
+<td><code>(int16_t)(new − old)</code></td>
+<td>Base driver, not estimator</td>
+<td>Phantom 20 m spike → covariance spike → possible ESTIMATED_STATE_NOT_FINITE</td>
+</tr>
+<tr>
+<td>Heading error propagation</td>
+<td>lateral_err ≈ <code>d × ε</code></td>
+<td>All of the above</td>
+<td>1° bias → 17 cm per 10 m → navigation failure</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The one equation to burn into memory:</strong></p>
+<p>$$\boxed{\Delta\theta = \frac{s_R - s_L}{B}}$$</p>
+<p>This drives everything else. Heading error accumulates; position error follows from heading error. Every OKS navigation failure investigation should start by asking: <em>is the heading estimate correct?</em></p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

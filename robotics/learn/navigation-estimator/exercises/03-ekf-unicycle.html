@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exercises: Measurement Models &amp; Mahalanobis Gating - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Navigation Estimator</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="exercises-measurement-models-mahalanobis-gating">Exercises: Measurement Models &amp; Mahalanobis Gating</h1>
+<h3 id="chapter-03-line-constraints-innovation-gating-and-the-oks-clamp-update">Chapter 03: Line constraints, innovation gating, and the OKS clamp update</h3>
+<p><strong>Self-assessment guide:</strong> Work each section in order. Write your answer before expanding the
+details block. This chapter is the core of daily bag diagnosis — spend extra time on Section B
+(numerical). If you can compute d by hand in under 2 minutes, you can diagnose silent rejections
+in the field without a script.</p>
+<p><strong>OKS context:</strong> Every time you see a robot drift off a lane line while the sensorbar is active,
+one of the gates in <code>update()</code> is silently dropping measurements. This exercise set
+builds the muscle to compute which gate, and why.</p>
+<hr />
+<h2 id="section-a-conceptual-questions">Section A — Conceptual Questions</h2>
+<p><strong>A1.</strong> Explain the difference between an <em>orthogonal</em> and a <em>parallel</em> sensorbar measurement
+in the the navigation estimator. Which component of the state vector does each update? Why can a single
+line crossing only update one state component, not two?</p>
+<details><summary>Answer</summary>
+
+**Orthogonal measurement:** The robot crosses a floor line approximately perpendicularly.
+The sensorbar fires across the line, measuring the lateral offset. If the line runs N-S
+(vertical), the perpendicular direction is E-W, so the measurement updates **X**. If the
+line runs E-W (horizontal), it updates **Y**.
+
+**Parallel measurement:** The robot travels along a line. The sensorbar detects the line
+running parallel to travel. The perpendicular offset from the robot's path to the line updates
+the **opposite lateral axis** from travel direction.
+
+**Why only one component?** A line is a 1D constraint — it eliminates one degree of freedom.
+Knowing "the robot is on this line" tells us the perpendicular position, but nothing about where
+along the line the robot is. The measurement matrix H for a scalar measurement has only one
+non-zero entry: `H = [1, 0, 0]` (for X) or `H = [0, 1, 0]` (for Y). The heading θ remains
+unobservable from this single crossing.
+
+**ELI15:** A train on a track knows it's on the track (lateral = 0) but the track itself says
+nothing about how far along the route it has travelled.
+</details>
+
+<hr />
+<p><strong>A2.</strong> The Mahalanobis distance gate rejects a measurement when <code>d &gt; 2</code>. Explain why a
+<em>tighter</em> state covariance P can paradoxically cause MORE measurements to be rejected.
+Give a concrete scenario where this leads to navigation failure.</p>
+<details><summary>Answer</summary>
+
+**Mahalanobis distance:** `d = |ν| / sqrt(P_component + R)`
+
+The denominator is `sqrt(P + R)`. When P is small (tight covariance), the denominator shrinks,
+so the same innovation ν produces a larger d.
+
+**Concrete scenario:**
+1. Robot travels a long straight corridor, receiving many sensorbar updates.
+2. Due to duplicate sensorbar messages (11–30% of SCL frames), P is repeatedly confirmed
+   without genuine new information. P shrinks to near the uniform-variance floor (~0.0003 m²).
+3. A wheelspin event causes the robot to drift 12cm laterally. The estimator does NOT detect
+   this (P is tight, so slip detection threshold may not trigger).
+4. The next genuine sensorbar update has innovation ν = 0.12m.
+   `d = 0.12 / sqrt(0.0003 + 0.005) = 0.12 / 0.072 = 1.67` ← still accepted (barely)
+5. But if ν = 0.15m: `d = 0.15 / 0.072 = 2.08` ← REJECTED.
+6. The state is now stuck at the wrong position, and every subsequent sensorbar update
+   (which correctly reports the line location) appears as an outlier to the over-confident filter.
+
+**Root cause:** Duplicate measurements made P artificially tight. A genuine recovery measurement
+was rejected because the filter "knew" too confidently where it was.
+</details>
+
+<hr />
+<p><strong>A3.</strong> OKS uses a clamp update (<code>x̂⁺ = clamp(x̂⁻, min, max)</code>) instead of the standard
+Kalman gain update (<code>x̂⁺ = x̂⁻ + K ν</code>). For what physical reason is the clamp model more
+honest for sensorbar XY measurements? What probability distribution does the clamp represent?</p>
+<details><summary>Answer</summary>
+
+**Physical reason:** The sensorbar reports a *range*, not a point. The robot is somewhere
+within the span of activated IR sensors — approximately ±3cm around the line centroid. There
+is no "most likely position" within this band; the robot could genuinely be anywhere in it.
+
+**Probability distribution:** The clamp update corresponds to multiplying the Gaussian state
+prior by a **uniform likelihood** over `[meas.min, meas.max]` and renormalising. The result is
+the state truncated to the measurement range — equivalent to a truncated Gaussian.
+
+**Contrast with Kalman gain:** The standard update `x̂⁺ = x̂⁻ + K ν` assumes the measurement
+is a point estimate corrupted by Gaussian noise. Using this for a range measurement would
+place the updated state at a weighted average between x̂⁻ and the band centre — which could
+be *outside* the measurement range if x̂⁻ is close to an edge. The clamp prevents this
+physically impossible outcome.
+
+**Covariance update `P⁺ = min(P⁻, (range)²/12)`:** The variance of a uniform distribution
+over width w is `w²/12`. Setting P to this value means the filter honestly represents
+"after this measurement, we know the robot is somewhere in the band, with uniform confidence."
+</details>
+
+<hr />
+<p><strong>A4.</strong> What is the purpose of the offset ambiguity check in <code>update()</code>?
+Describe the scenario where it would reject an otherwise valid sensorbar measurement.
+Under what state-covariance condition is the ambiguity check most likely to trigger?</p>
+<details><summary>Answer</summary>
+
+**Purpose:** The floor has many parallel lines with known spacing (e.g. 1.5m apart). A single
+sensorbar crossing is geometrically identical whether the robot is near line A or near the
+adjacent line B (the offset from the line looks the same; only the absolute position differs).
+The ambiguity check uses a likelihood ratio to determine which hypothesis (near A or near B)
+is better supported by the current state estimate.
+
+**Rejection scenario:** The robot is at Y = 3.02m (near line B at Y = 3.0m). But after a
+slip event, the state estimates Y = 4.48m (near line A at Y = 4.5m). The sensorbar fires
+and reports offset = +0.02m. This is consistent with both:
+- Robot near line B: predicted Y = 3.0 + 0.02 = 3.02m (correct)
+- Robot near line A: predicted Y = 4.5 - 0.02 = 4.48m (the wrong hypothesis that matches
+  the drifted state estimate)
+
+The probability ratio `p(H1) / p(H0)` is high → measurement rejected as ambiguous → the
+robot cannot self-correct with this sensorbar reading.
+
+**When most likely to trigger:** When P is **large** (after a slip, after long dead-reckoning
+without updates). Large P means the state distribution is spread over multiple line spacings,
+making both hypotheses plausible. With tight P, the state is localised within a single lane
+and the secondary hypothesis is strongly penalised.
+</details>
+
+<hr />
+<p><strong>A5.</strong> The <code>is_reliable</code> flag in sensorbar messages is checked at lines 876 and 1027 in
+<code>`. Explain what</code>is_reliable=False` indicates and why it only catches ~1% of
+problematic messages. What type of problem does it miss entirely?</p>
+<details><summary>Answer</summary>
+
+**`is_reliable=False` indicates:**
+- An SPI frame miss (the STM32 firmware did not deliver a fresh sensor reading to the Jetson
+  in time — the ring buffer contained stale data)
+- All-zero sensor readings (the sensorbar reported all sensors as identical, which indicates
+  a hardware-level fault — broken sensor, blocked IR emitters, or power issue)
+
+**Why only ~1% of messages:** These are hardware-level failures. The sensorbar firmware sets
+`is_reliable=False` only when it *knows* the reading is invalid (CRC error, timeout, all-zero).
+In normal operation, 99% of messages have well-formed data that passes hardware checks.
+
+**What it misses entirely:** SPI *retry duplicates* — when the Jetson re-requests the last
+sensorbar frame and receives an identical copy of a previous valid reading. This data is
+hardware-valid (correct CRC, non-zero, properly formatted) so `is_reliable=True` is set.
+But the *timestamp* is stale and the *content* is identical to the previous message.
+
+In SCL bags, 11–30% of sensorbar messages are such duplicates. All of them have `is_reliable=True`.
+The filter has no way to distinguish them from genuine updates without explicit duplicate
+detection (checking if the content and/or timestamp matches the previous message).
+
+**Fix direction:** The estimator would need a "content change" or "message sequence number"
+check in addition to the `is_reliable` gate to catch duplicates.
+</details>
+
+<hr />
+<h2 id="section-b-numerical-exercises">Section B — Numerical Exercises</h2>
+<p>For each scenario below, compute the Mahalanobis distance d and state whether the measurement
+is <strong>ACCEPTED</strong> (d ≤ 2) or <strong>REJECTED</strong> (d &gt; 2).</p>
+<p><strong>Given constants for all scenarios:</strong>
+- Measurement noise: <code>R = 0.005 m²</code>
+- Mahalanobis threshold: <code>d_max = 2.0</code></p>
+<hr />
+<p><strong>B1. Scenario: Normal operation (should be accepted)</strong></p>
+<div class="highlight"><pre><span></span><code>    State estimate:      x̂⁻(x) = 1.520m
+    State covariance:    P⁻(x,x) = 0.008 m²
+    Sensorbar reading:   z = 1.500m   (line at X = 1.5m)
+</code></pre></div>
+
+<details><summary>Solution</summary>
+
+
+<div class="highlight"><pre><span></span><code>    Innovation:        ν = z - x̂⁻ = 1.500 - 1.520 = -0.020m
+
+    Innovation var:    S = P⁻(x,x) + R = 0.008 + 0.005 = 0.013 m²
+    Innovation std:    √S = 0.1140m
+
+    Mahalanobis d:     d = |ν| / √S = 0.020 / 0.1140 = 0.175
+
+    Decision: ACCEPTED ✓  (d = 0.18 &lt;&lt; 2.0)
+</code></pre></div>
+
+
+
+**Interpretation:** The robot is 2cm from its predicted line crossing. With moderate covariance,
+this is well within the acceptance ellipse. The clamp update will snap the state to within
+`[meas.min, meas.max]` (likely already inside).
+</details>
+
+<hr />
+<p><strong>B2. Scenario: Borderline case — robot drifted after long corridor (accepted, just)</strong></p>
+<div class="highlight"><pre><span></span><code>    State estimate:      x̂⁻(x) = 1.270m
+    State covariance:    P⁻(x,x) = 0.025 m²   (large — long dead-reckoning stretch)
+    Sensorbar reading:   z = 1.500m   (line at X = 1.5m, robot drifted ~23cm)
+</code></pre></div>
+
+<details><summary>Solution</summary>
+
+
+<div class="highlight"><pre><span></span><code>    Innovation:        ν = 1.500 - 1.270 = +0.230m
+
+    Innovation var:    S = 0.025 + 0.005 = 0.030 m²
+    Innovation std:    √S = 0.1732m
+
+    Mahalanobis d:     d = 0.230 / 0.1732 = 1.328
+
+    Decision: ACCEPTED ✓  (d = 1.33 &lt; 2.0)
+</code></pre></div>
+
+
+
+**Interpretation:** The robot has drifted 23cm but the large P (built up over the long
+dead-reckoning stretch) widens the acceptance ellipse enough to accept the measurement.
+This is correct and desired behaviour — large P allows recovery from genuine drift.
+
+Note: if P had been tight (e.g. 0.001 m²) due to duplicate flooding:
+`d = 0.230 / sqrt(0.001 + 0.005) = 0.230 / 0.0775 = 2.97` → **REJECTED** — the recovery
+measurement would have been silently dropped.
+</details>
+
+<hr />
+<p><strong>B3. Scenario: Rejection — genuine outlier (wrong lane or sensor fault)</strong></p>
+<div class="highlight"><pre><span></span><code>    State estimate:      x̂⁻(x) = 1.490m
+    State covariance:    P⁻(x,x) = 0.010 m²
+    Sensorbar reading:   z = 3.000m   (robot at X=1.5m seeing X=3.0m line — wrong lane)
+</code></pre></div>
+
+<details><summary>Solution</summary>
+
+
+<div class="highlight"><pre><span></span><code>    Innovation:        ν = 3.000 - 1.490 = +1.510m
+
+    Innovation var:    S = 0.010 + 0.005 = 0.015 m²
+    Innovation std:    √S = 0.1225m
+
+    Mahalanobis d:     d = 1.510 / 0.1225 = 12.33
+
+    Decision: REJECTED ✗  (d = 12.3 &gt;&gt; 2.0)
+</code></pre></div>
+
+
+
+**Interpretation:** A measurement 1.5m away from the predicted position is a clear outlier —
+12σ is astronomically unlikely under a Gaussian model. The Mahalanobis gate correctly rejects
+this as either a wrong-lane reading, a spurious reflection, or a sensor fault.
+
+Note: this would also be caught by the offset ambiguity check at step 4 — the probability
+ratio would flag this as belonging to a different line entirely.
+</details>
+
+<hr />
+<h2 id="section-c-python-implementation">Section C — Python Implementation</h2>
+<p><strong>Task:</strong> Implement the standard Kalman filter update step as a Python function.
+This is the <em>standard</em> update (not the OKS clamp variant) — it forms the mathematical
+foundation for understanding why OKS deviated from it.</p>
+<p><strong>Function signature:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">ekf_update</span><span class="p">(</span>
+    <span class="n">x</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>    <span class="c1"># Prior state estimate, shape (n,)</span>
+    <span class="n">P</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>    <span class="c1"># Prior covariance, shape (n, n)</span>
+    <span class="n">z</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>    <span class="c1"># Measurement, shape (m,)</span>
+    <span class="n">H</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>    <span class="c1"># Measurement matrix, shape (m, n)</span>
+    <span class="n">R</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>    <span class="c1"># Measurement noise covariance, shape (m, m)</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Standard Kalman filter update step.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        x_post: Posterior state estimate, shape (n,)</span>
+<span class="sd">        P_post: Posterior covariance, shape (n, n)</span>
+<span class="sd">        mahal_d: Mahalanobis distance (scalar) — for gating decisions</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+</code></pre></div>
+
+<p><strong>Expected behaviour:</strong>
+- Innovation: <code>nu = z - H @ x</code>
+- Innovation covariance: <code>S = H @ P @ H.T + R</code>
+- Kalman gain: <code>K = P @ H.T @ np.linalg.inv(S)</code>
+- State update: <code>x_post = x + K @ nu</code>
+- Covariance update: <code>P_post = (I - K @ H) @ P</code>
+- Mahalanobis distance: <code>sqrt(nu.T @ inv(S) @ nu)</code></p>
+<details><summary>Reference implementation</summary>
+
+
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">ekf_update</span><span class="p">(</span>
+    <span class="n">x</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">P</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">z</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">H</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">nu</span> <span class="o">=</span> <span class="n">z</span> <span class="o">-</span> <span class="n">H</span> <span class="o">@</span> <span class="n">x</span>                          <span class="c1"># innovation</span>
+    <span class="n">S</span> <span class="o">=</span> <span class="n">H</span> <span class="o">@</span> <span class="n">P</span> <span class="o">@</span> <span class="n">H</span><span class="o">.</span><span class="n">T</span> <span class="o">+</span> <span class="n">R</span>                     <span class="c1"># innovation covariance</span>
+    <span class="n">K</span> <span class="o">=</span> <span class="n">P</span> <span class="o">@</span> <span class="n">H</span><span class="o">.</span><span class="n">T</span> <span class="o">@</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">inv</span><span class="p">(</span><span class="n">S</span><span class="p">)</span>          <span class="c1"># Kalman gain</span>
+    <span class="n">x_post</span> <span class="o">=</span> <span class="n">x</span> <span class="o">+</span> <span class="n">K</span> <span class="o">@</span> <span class="n">nu</span>                     <span class="c1"># state update</span>
+    <span class="n">P_post</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="n">n</span><span class="p">)</span> <span class="o">-</span> <span class="n">K</span> <span class="o">@</span> <span class="n">H</span><span class="p">)</span> <span class="o">@</span> <span class="n">P</span>        <span class="c1"># covariance update (Joseph form safer)</span>
+    <span class="n">mahal_sq</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">nu</span><span class="o">.</span><span class="n">T</span> <span class="o">@</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">inv</span><span class="p">(</span><span class="n">S</span><span class="p">)</span> <span class="o">@</span> <span class="n">nu</span><span class="p">)</span>
+    <span class="n">mahal_d</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="n">mahal_sq</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span>   <span class="c1"># numerical guard</span>
+    <span class="k">return</span> <span class="n">x_post</span><span class="p">,</span> <span class="n">P_post</span><span class="p">,</span> <span class="n">mahal_d</span>
+
+
+<span class="c1"># --- Test cases ---</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_identity_measurement</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;H=I, R small: posterior should be close to measurement.&quot;&quot;&quot;</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">2.05</span><span class="p">,</span> <span class="mf">1.00</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">])</span>
+    <span class="n">P</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">diag</span><span class="p">([</span><span class="mf">0.01</span><span class="p">,</span> <span class="mf">0.01</span><span class="p">,</span> <span class="mf">0.01</span><span class="p">])</span>
+    <span class="n">z</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">2.00</span><span class="p">,</span> <span class="mf">1.00</span><span class="p">])</span>
+    <span class="n">H</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span>
+                  <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]])</span>
+    <span class="n">R</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">diag</span><span class="p">([</span><span class="mf">0.005</span><span class="p">,</span> <span class="mf">0.005</span><span class="p">])</span>
+    <span class="n">x_post</span><span class="p">,</span> <span class="n">P_post</span><span class="p">,</span> <span class="n">d</span> <span class="o">=</span> <span class="n">ekf_update</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">z</span><span class="p">,</span> <span class="n">H</span><span class="p">,</span> <span class="n">R</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">x_post</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">x</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;X should move toward measurement&quot;</span>
+    <span class="k">assert</span> <span class="n">P_post</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">P</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;Covariance should shrink&quot;</span>
+    <span class="k">assert</span> <span class="n">d</span> <span class="o">&lt;</span> <span class="mf">2.0</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Expected accepted measurement, got d=</span><span class="si">{</span><span class="n">d</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;x_post[0] = </span><span class="si">{</span><span class="n">x_post</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">  (expected ~2.017)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;P_post[0,0] = </span><span class="si">{</span><span class="n">P_post</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span><span class="mi">0</span><span class="p">]</span><span class="si">:</span><span class="s2">.5f</span><span class="si">}</span><span class="s2">  (expected ~0.00333)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Mahal d = </span><span class="si">{</span><span class="n">d</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">  (expected 0.41)&quot;</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_large_innovation_rejected</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Innovation far from prediction: d should exceed 2.&quot;&quot;&quot;</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.49</span><span class="p">])</span>
+    <span class="n">P</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mf">0.010</span><span class="p">]])</span>
+    <span class="n">z</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">3.00</span><span class="p">])</span>
+    <span class="n">H</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mf">1.0</span><span class="p">]])</span>
+    <span class="n">R</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mf">0.005</span><span class="p">]])</span>
+    <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">d</span> <span class="o">=</span> <span class="n">ekf_update</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">z</span><span class="p">,</span> <span class="n">H</span><span class="p">,</span> <span class="n">R</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">d</span> <span class="o">&gt;</span> <span class="mf">2.0</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Expected rejection, got d=</span><span class="si">{</span><span class="n">d</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Mahal d = </span><span class="si">{</span><span class="n">d</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">  (expected ~12.3 → REJECTED)&quot;</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_covariance_shrinks</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;After update, covariance must be smaller than prior.&quot;&quot;&quot;</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">])</span>
+    <span class="n">P</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">diag</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">])</span>
+    <span class="n">z</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">0.1</span><span class="p">])</span>
+    <span class="n">H</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">]])</span>
+    <span class="n">R</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mf">0.1</span><span class="p">]])</span>
+    <span class="n">_</span><span class="p">,</span> <span class="n">P_post</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">ekf_update</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">z</span><span class="p">,</span> <span class="n">H</span><span class="p">,</span> <span class="n">R</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">P_post</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">P</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;X covariance must shrink after measurement&quot;</span>
+    <span class="k">assert</span> <span class="nb">abs</span><span class="p">(</span><span class="n">P_post</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">P</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">])</span> <span class="o">&lt;</span> <span class="mf">1e-10</span><span class="p">,</span> <span class="s2">&quot;Y covariance unchanged (H only observes X)&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;P_post = </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">diag</span><span class="p">(</span><span class="n">P_post</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">test_identity_measurement</span><span class="p">()</span>
+    <span class="n">test_large_innovation_rejected</span><span class="p">()</span>
+    <span class="n">test_covariance_shrinks</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;All tests passed.&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+
+
+**Expected output:**
+
+<div class="highlight"><pre><span></span><code>x_post[0] = 2.0167  (weighted average: x moved 2/3 toward measurement)
+P_post[0,0] = 0.00333  (1/3 of original P — sensor reduces uncertainty)
+Mahal d = 0.409  (well within 2σ gate)
+Mahal d = 12.327  (REJECTED)
+P_post = [0.09091  1.0]   (X tightened, Y unchanged)
+All tests passed.
+</code></pre></div>
+
+
+
+**Key observation for OKS:** Notice how `x_post[0] = 2.0167`, *not* 2.0 (the measurement).
+The Kalman gain K = 0.667 here, so the state moves 2/3 of the way toward the measurement.
+In OKS's clamp update, the state would instead be forced inside `[meas.min, meas.max]`
+regardless of K — a fundamentally different (and for range measurements, more honest) update.
+</details>
+
+<hr />
+<h2 id="section-d-oks-specific-uniform-variance-gate-analysis">Section D — OKS-Specific: Uniform Variance Gate Analysis</h2>
+<p><strong>Problem:</strong></p>
+<p>A sensorbar measurement has a range of <strong>0.06m</strong> (the IR array span covers 6cm — 3cm either
+side of the detected line centroid):
+- <code>meas.min = 2.470m</code>
+- <code>meas.max = 2.530m</code>
+- <code>meas.range = 0.060m</code></p>
+<p>The current state estimate and covariance are:
+- <code>x̂⁻(x) = 2.510m</code>  (state estimate is inside the range)
+- Two cases: <code>P⁻(x,x) = 0.010 m²</code> and <code>P⁻(x,x) = 0.0001 m²</code></p>
+<p>Answer these questions:</p>
+<ol>
+<li>What variance <code>σ²_uniform</code> does OKS assign to this measurement range?</li>
+<li>In each P case, what does the covariance update rule <code>P⁺ = min(P⁻, σ²_uniform)</code> produce?</li>
+<li>What does the clamp update do to the state (x̂⁺) in both cases?</li>
+<li>Suppose <code>x̂⁻(x) = 2.450m</code> (state is OUTSIDE the range). What happens?</li>
+</ol>
+<details><summary>Solution</summary>
+
+**1. Uniform variance:**
+
+
+<div class="highlight"><pre><span></span><code>    σ²_uniform = (meas.range)² / 12
+               = (0.060)² / 12
+               = 0.0036 / 12
+               = 0.0003 m²
+    σ_uniform  = 0.01732m ≈ 1.73cm
+</code></pre></div>
+
+
+
+**2. Covariance update:**
+
+
+<div class="highlight"><pre><span></span><code>    Case A: P⁻ = 0.010 m²  (large — 10x bigger than σ²_uniform)
+        P⁺ = min(0.010, 0.0003) = 0.0003 m²
+        → Covariance tightened to the sensorbar range variance
+        → After this update the filter is &quot;as confident as the sensorbar allows&quot;
+
+    Case B: P⁻ = 0.0001 m²  (very tight — 3x smaller than σ²_uniform)
+        P⁺ = min(0.0001, 0.0003) = 0.0001 m²
+        → Covariance UNCHANGED — the state is already MORE precise than the measurement
+        → The sensorbar cannot improve on what the filter already &quot;knows&quot;
+</code></pre></div>
+
+
+
+**3. Clamp update (state estimate inside range in both cases):**
+
+
+<div class="highlight"><pre><span></span><code>    x̂⁻ = 2.510m   (inside [2.470, 2.530])
+
+    x̂⁺ = clamp(2.510, 2.470, 2.530) = 2.510m
+
+    → No change to state position in either P case.
+    → The state is already consistent with the measurement range; no correction needed.
+</code></pre></div>
+
+
+
+**4. State outside range:**
+
+
+<div class="highlight"><pre><span></span><code>    x̂⁻ = 2.450m   (below meas.min = 2.470m)
+
+    x̂⁺ = clamp(2.450, 2.470, 2.530) = 2.470m
+
+    → State SNAPPED to the nearest edge of the range.
+    → The innovation here would be:
+        ν = (meas centre) - x̂⁻ = 2.500 - 2.450 = 0.050m
+
+    Check Mahalanobis gate first (using Case A, P = 0.010):
+        d = 0.050 / sqrt(0.010 + 0.0003) = 0.050 / 0.1015 = 0.493
+        → ACCEPTED ✓ (d &lt; 2)
+
+    After clamp: x̂⁺ = 2.470m (snapped from 2.450m to range boundary)
+    Covariance: P⁺ = min(0.010, 0.0003) = 0.0003 m²
+</code></pre></div>
+
+
+
+**Summary table for this measurement:**
+
+| Scenario | x̂⁻ | P⁻ | x̂⁺ (after clamp) | P⁺ | Gate decision |
+|---|---|---|---|---|---|
+| State inside range, large P | 2.510m | 0.010 m² | 2.510m (unchanged) | 0.0003 m² | Accepted |
+| State inside range, tight P | 2.510m | 0.0001 m² | 2.510m (unchanged) | 0.0001 m² | Accepted |
+| State outside range, large P | 2.450m | 0.010 m² | 2.470m (snapped) | 0.0003 m² | Accepted (d=0.49) |
+
+**Key takeaway:** A 6cm sensorbar range sets the covariance floor at `0.0003 m²` (σ = 1.73cm).
+This is larger than the tight case `P = 0.0001 m²`. So in Case B, repeated valid sensorbar
+updates cannot tighten P below 0.0003 m² — the floor is set by the physical measurement range.
+However, **duplicate** sensorbar messages (with stale identical content) will keep executing the
+clamp update and confirming `P⁺ = min(P, 0.0003)` — the covariance is correctly bounded but
+the position is stale. A future fresh measurement then has a very tight P = 0.0003 m², and if
+the genuine line position disagrees by more than `2 × sqrt(0.0003 + 0.005) ≈ 14.5cm`, it will
+be rejected. This is the 14.5cm rejection threshold for a state that has been over-confirmed
+by duplicates.
+</details>
+
+<hr />
+<h2 id="bonus-connecting-back-to-scl-bag-analysis">Bonus — Connecting Back to SCL Bag Analysis</h2>
+<p>When you see <code>P_xx</code> trace in a bag that goes:</p>
+<div class="highlight"><pre><span></span><code>    0.010 → 0.0030 → 0.0010 → 0.0003 → 0.0003 → 0.0003 → [flat]
+</code></pre></div>
+
+<p>&hellip;and the flat region spans 3+ seconds, that is the duplicate flood signature. The covariance
+has reached the <code>σ²_uniform</code> floor and is being confirmed there by stale readings. The robot&rsquo;s
+position belief is locked at one value while the physical robot may have moved. The next
+fresh sensorbar reading that reports a different position will be evaluated against
+<code>d = ν / sqrt(0.0003 + 0.005) = ν / 0.0724</code>. Any drift above <code>2 × 0.0724 = 14.5cm</code>
+causes silent rejection — and the robot continues drifting.</p>
+<p>This is why sensorbar duplicate detection upstream of the estimator (sequence numbers, content
+hashing, or timestamp monotonicity checks) would fix the silent-rejection failure class without
+changing any estimator math.
+</details></p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

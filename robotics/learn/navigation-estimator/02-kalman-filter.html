@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>02 — The Kalman Filter &amp; EKF - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Navigation Estimator</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="02-the-kalman-filter-ekf">02 — The Kalman Filter &amp; EKF</h1>
+<h3 id="why-oks-covariance-grows-during-motion-and-shrinks-on-measurement">Why OKS covariance grows during motion and shrinks on measurement</h3>
+<p><strong>Prerequisite:</strong> <code>01-dead-reckoning.md</code> — unicycle motion model, arc integration, dead-reckoning drift
+<strong>Unlocks:</strong> <code>03-measurement-models.md</code> — sensorbar line constraints, Mahalanobis gating, innovation residuals</p>
+<hr />
+<h2 id="why-should-i-care-oks-project-context">Why Should I Care? (OKS Project Context)</h2>
+<p>Every <code>ERROR_INVALID_STATE</code> ticket you investigate is, at its core, a Kalman filter
+story: something caused <code>P</code> (the covariance matrix) to blow up to ∞. Before you can read a
+covariance trace from a bag file and say <em>&ldquo;this was a slip event, not a delocalization&rdquo;</em> you
+need to understand <strong>what P represents</strong>, <strong>how it grows</strong>, and <strong>under what conditions it is
+forced to ∞</strong>.</p>
+<p>Concretely, the the navigation estimator is an Extended Kalman Filter running at the odometry rate (~25 Hz).
+The pattern you will see in every failing bag:</p>
+<div class="highlight"><pre><span></span><code>[OK]   P(x,x) ~0.01   →  robot moving, P grows slowly to ~0.05
+[OK]   P(x,x) ~0.05   →  sensorbar update, P drops back to ~0.01
+[FAIL] P(x,x) = inf   →  slip_detection OR collision_detection forced P→∞
+[FAIL] isFinite(P) = false →  fires ERROR_INVALID_STATE
+</code></pre></div>
+
+<p>After this module you will be able to:
+1. Predict, by inspection, whether a covariance trace is &ldquo;normal dead-reckoning drift&rdquo; or &ldquo;anomaly&rdquo;
+2. Identify which code path set P to ∞ from the covariance value alone
+3. Explain why the OKS shortcut <code>min(cov_theta, 1e5) * delta_trans²</code> is a valid approximation
+   to the full EKF Jacobian term</p>
+<hr />
+<h1 id="part-1-the-kalman-filter-intuition">PART 1 — THE KALMAN FILTER INTUITION</h1>
+<h2 id="11-a-robots-pose-is-a-probability-distribution-not-a-point">1.1 A Robot&rsquo;s Pose Is a Probability Distribution, Not a Point</h2>
+<p>The dead-reckoning integrator from Module 01 gives you a single pose estimate:
+<code>(x, y, θ) = (2.31, 0.87, 0.14 rad)</code>. That looks precise. But it carries error.</p>
+<p>The Kalman filter forces you to be honest: <strong>the robot&rsquo;s true pose is unknown</strong>. What you have
+is a <em>belief</em> — a probability distribution over all possible poses. The filter tracks:</p>
+<ul>
+<li><strong>The mean</strong> <code>x̂</code> — your best single-point estimate</li>
+<li><strong>The covariance</strong> <code>P</code> — how uncertain you are, and in which directions</li>
+</ul>
+<p>For a 1D example (robot on a line, only tracking position x):</p>
+<div class="highlight"><pre><span></span><code>Uncertainty σ = 0.3 m  →  P(x,x) = σ² = 0.09 m²
+
+         Belief: x ~ N(5.0, 0.09)
+
+    Probability
+    density
+         │
+   0.13  │              ██
+         │            ██████
+   0.09  │          ██████████
+         │        ██████████████
+   0.05  │      ██████████████████
+         │    ████████████████████████
+   0.01  │ ██████████████████████████████
+         └──────────────────────────────── x (m)
+              4.1  4.4  4.7  5.0  5.3  5.6  5.9
+                               ↑
+                           Best estimate
+                          (mean = 5.0 m)
+</code></pre></div>
+
+<p><strong>The shading represents probability mass.</strong> 68% of the area falls within ±σ = ±0.3 m of the
+mean. In OKS terms: <code>P(x,x) = 0.09</code> means <code>σ = 0.30 m</code>, so the robot is within ±0.30 m of
+the estimated position with 68% probability.</p>
+<h2 id="12-two-sources-of-information">1.2 Two Sources of Information</h2>
+<p>The filter combines two independent sources of information about the robot&rsquo;s pose:</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>How it works</th>
+<th>Error grows over time?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Motion model</strong> (prediction)</td>
+<td>Integrate wheel odometry</td>
+<td>YES — dead-reckoning drift accumulates</td>
+</tr>
+<tr>
+<td><strong>Sensor measurement</strong> (update)</td>
+<td>Compare prediction to sensorbar line</td>
+<td>NO — resets uncertainty each time</td>
+</tr>
+</tbody>
+</table>
+<p>The key insight that makes Kalman filtering work:</p>
+<blockquote>
+<p><strong>Two uncertain estimates, when independent, can be combined into one estimate that is MORE
+certain than either alone.</strong></p>
+</blockquote>
+<h2 id="13-fusion-of-two-gaussians">1.3 Fusion of Two Gaussians</h2>
+<p>Suppose you have two estimates of the same quantity x:</p>
+<ul>
+<li>Estimate A: mean = 4.0, variance = 1.0  (dead-reckoning, vague)</li>
+<li>Estimate B: mean = 5.0, variance = 0.25 (sensorbar, sharper)</li>
+</ul>
+<div class="highlight"><pre><span></span><code>           A: N(4.0, 1.0)           B: N(5.0, 0.25)
+         (wide, from odometry)    (narrow, from sensor)
+
+Prob  ↑                              ↑
+      │     ▓▓▓                      │      ▓
+      │   ▓▓▓▓▓▓▓                    │    ▓▓▓▓▓
+      │  ▓▓▓▓▓▓▓▓▓▓                  │   ▓▓▓▓▓▓▓
+      │ ▓▓▓▓▓▓▓▓▓▓▓▓▓                │  ▓▓▓▓▓▓▓▓▓
+      └──────────────── x            └──────────────── x
+          2   3   4   5                  4   5   6
+
+          Fused: N(4.8, 0.2)
+          ↑ Sharper than either source!
+
+Prob  ↑
+      │         ▓▓▓
+      │       ▓▓▓▓▓▓▓
+      │      ▓▓▓▓▓▓▓▓▓▓
+      └──────────────────── x
+              4.3 4.8 5.3
+</code></pre></div>
+
+<p>The fused result (mean = 4.8, variance = 0.2) is:
+- Pulled toward B (the more certain estimate)
+- Narrower than either source alone</p>
+<h2 id="14-the-weighting-formula">1.4 The Weighting Formula</h2>
+<p>The fusion weights are the <strong>Kalman gain</strong> K:</p>
+<div class="highlight"><pre><span></span><code>          P_A
+K = ───────────────    →   x_fused = x_A + K × (x_B - x_A)
+       P_A + P_B
+
+With numbers:
+K = 1.0 / (1.0 + 0.25) = 0.80
+
+x_fused = 4.0 + 0.80 × (5.0 - 4.0) = 4.0 + 0.80 = 4.80  ✓
+
+P_fused = (1 - K) × P_A = (1 - 0.80) × 1.0 = 0.20        ✓
+</code></pre></div>
+
+<p><strong>Key insight:</strong> When the measurement is perfect (P_B → 0), K → 1 and we trust the sensor
+completely. When the measurement is terrible (P_B → ∞), K → 0 and we trust only odometry.</p>
+<hr />
+<h1 id="part-2-kalman-filter-equations-linear-case">PART 2 — KALMAN FILTER EQUATIONS (LINEAR CASE)</h1>
+<h2 id="21-state-and-notation">2.1 State and Notation</h2>
+<p>State vector for a 1D robot tracking position and velocity:</p>
+<div class="highlight"><pre><span></span><code>        ┌   ┐
+x̂  =   │ x │   (position estimate, m)
+        │ ẋ │   (velocity estimate, m/s)
+        └   ┘
+
+P  =   ┌  P_xx   P_xẋ  ┐   (2×2 covariance matrix)
+       │  P_ẋx   P_ẋẋ  │
+       └                ┘
+
+P_xx  = variance of position
+P_ẋẋ  = variance of velocity
+P_xẋ  = cross-covariance (how position error correlates with velocity error)
+</code></pre></div>
+
+<h2 id="22-prediction-step">2.2 Prediction Step</h2>
+<p>Apply the motion model to propagate both the mean and the covariance forward by one time step Δt:</p>
+<div class="highlight"><pre><span></span><code>State prediction:
+    x̂⁻  =  F x̂                             ... (1)
+
+Covariance prediction:
+    P⁻   =  F P Fᵀ + Q                     ... (2)
+</code></pre></div>
+
+<p><strong>F</strong> — State transition matrix (encodes the motion model):</p>
+<div class="highlight"><pre><span></span><code>For constant-velocity model:
+
+F = ┌ 1   Δt ┐     x_new = x_old + ẋ·Δt
+    │ 0    1 ┘     ẋ_new = ẋ_old  (velocity unchanged)
+</code></pre></div>
+
+<p><strong>Q</strong> — Process noise covariance (how much uncertainty to ADD each step from model errors):</p>
+<div class="highlight"><pre><span></span><code>Q = ┌ σ²_pos    0    ┐     (position noise, e.g. from wheel slip)
+    │   0    σ²_vel  ┘     (velocity noise, e.g. from acceleration)
+</code></pre></div>
+
+<p><strong>Physical meaning of Eq. (2):</strong>
+- <code>F P Fᵀ</code> — transforms the existing uncertainty through the motion model
+- <code>+ Q</code> — ADDS uncertainty because the motion model is imperfect</p>
+<div class="highlight"><pre><span></span><code>BEFORE prediction:                    AFTER prediction:
+uncertainty ellipse (small)          uncertainty ellipse (larger)
+
+     θ                                     θ
+     │     ●                               │        ●
+     │    ███                              │     ████████
+     │     ●                               │        ●
+     └──────── x                           └──────────── x
+               σ_x small                           σ_x grew by √Q_xx
+</code></pre></div>
+
+<blockquote>
+<p>OKS note: <code>predict()</code> computes <code>P⁻ = F P Fᵀ + Q</code> where Q is built from
+<code>k_trans_noise</code>, <code>k_trans_rot_noise</code>, <code>k_rot_trans_noise</code>,
+<code>k_rot_rot_noise</code>, and a time-based noise <code>k_time_trans_noise</code>.
+The staleness scaling: if odom is late by &gt;2× its period, all Q terms are multiplied by
+<code>scaling_factor</code> to inflate variance proportionally.</p>
+</blockquote>
+<h2 id="23-update-step">2.3 Update Step</h2>
+<p>When a measurement z arrives, use it to correct the prediction:</p>
+<div class="highlight"><pre><span></span><code>Innovation (prediction error):
+    ν  =  z - H x̂⁻                          ... (3)
+
+Kalman gain:
+    K  =  P⁻ Hᵀ (H P⁻ Hᵀ + R)⁻¹             ... (4)
+
+State update:
+    x̂  =  x̂⁻ + K ν                          ... (5)
+
+Covariance update:
+    P  =  (I - KH) P⁻                        ... (6)
+</code></pre></div>
+
+<p><strong>H</strong> — Measurement matrix: maps the state to what the sensor measures.</p>
+<div class="highlight"><pre><span></span><code>If we only measure position (not velocity) via GPS:
+
+H = [ 1   0 ]     z = x_true + noise ~ N(0, R)
+</code></pre></div>
+
+<p><strong>R</strong> — Measurement noise covariance: how noisy is the sensor?</p>
+<div class="highlight"><pre><span></span><code>R = [σ²_gps]   (e.g., 0.25 m²  →  σ_gps = 0.5 m)
+</code></pre></div>
+
+<p><strong>ν = z − H x̂⁻</strong> — The <em>innovation</em>: how far off was our prediction from what we measured?</p>
+<div class="highlight"><pre><span></span><code>Prediction said:  x̂⁻ = 5.0 m
+GPS measured:     z   = 5.3 m
+Innovation:       ν   = 5.3 - 5.0 = 0.3 m   ← &quot;we were 0.3 m off&quot;
+</code></pre></div>
+
+<p><strong>Physical meaning of Eq. (6):</strong>
+After absorbing the measurement, covariance SHRINKS:</p>
+<div class="highlight"><pre><span></span><code>    P = P⁻ - K H P⁻          (the &quot;K H P⁻&quot; term is always subtracted)
+
+    More precise measurement (small R)  →  large K  →  large reduction
+    Worse measurement (large R)         →  small K  →  small reduction
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>BEFORE update:                         AFTER update:
+(prediction, uncertain)              (measurement absorbed, confident)
+
+     θ                                     θ
+     │        ●                            │    ●
+     │     ████████                        │   ███
+     │        ●                            │    ●
+     └──────────── x                       └──────── x
+           σ_x large                           σ_x small
+</code></pre></div>
+
+<h2 id="24-worked-example-1d-robot-one-full-predictupdate-cycle">2.4 Worked Example — 1D Robot: One Full Predict/Update Cycle</h2>
+<p><strong>Setup:</strong> Robot moving at ~1 m/s. Δt = 0.1 s.</p>
+<div class="highlight"><pre><span></span><code>Initial state:
+    x̂ = [2.0 m,  1.0 m/s]ᵀ
+
+Initial covariance:
+    P = ┌ 0.04   0.0 ┐   (σ_x = 0.2 m,  σ_ẋ = 0.1 m/s)
+        │ 0.0   0.01 ┘
+
+Parameters:
+    F = ┌ 1   0.1 ┐     Q = ┌ 0.001   0.0 ┐     R = [0.09]  (σ_gps = 0.3 m)
+        │ 0   1.0 ┘         │  0.0   0.001┘
+
+GPS measurement arrives: z = 2.12 m
+</code></pre></div>
+
+<p><strong>STEP 1: Predict</strong></p>
+<div class="highlight"><pre><span></span><code>x̂⁻ = F x̂ = ┌ 1   0.1 ┐ ┌ 2.0 ┐ = ┌ 2.0 + 0.1×1.0 ┐ = ┌ 2.10 ┐
+             │ 0   1.0 ┘ │ 1.0 ┘   │ 0.0 + 1.0×1.0 ┘   │ 1.00 ┘
+
+P⁻ = F P Fᵀ + Q
+
+F P = ┌ 1  0.1 ┐ ┌ 0.04  0.0 ┐ = ┌ 0.04+0.1×0.0   0.0+0.1×0.01 ┐
+      │ 0  1.0 ┘ │ 0.0  0.01 ┘   │ 0.0             0.01          ┘
+    = ┌ 0.040   0.001 ┐
+      │ 0.000   0.010 ┘
+
+F P Fᵀ = ┌ 0.040  0.001 ┐ ┌ 1   0 ┐ = ┌ 0.040+0.001×0.1  0.001 ┐
+          │ 0.000  0.010 ┘ │ 0.1 1 ┘   │ 0.000+0.010×0.1  0.010 ┘
+        = ┌ 0.0401   0.001 ┐
+          │ 0.001    0.010 ┘
+
+P⁻ = F P Fᵀ + Q = ┌ 0.0401+0.001  0.001 ┐ = ┌ 0.0411   0.001 ┐
+                   │ 0.001         0.011 ┘   │ 0.001    0.011 ┘
+</code></pre></div>
+
+<p>After prediction: σ_x grew from 0.200 m to √0.0411 = <strong>0.203 m</strong> (tiny — Δt was short)</p>
+<p><strong>STEP 2: Update</strong></p>
+<div class="highlight"><pre><span></span><code>H = [1  0]   (we only measure position)
+
+Innovation:
+    ν = z - H x̂⁻ = 2.12 - [1 0]×[2.10, 1.00]ᵀ = 2.12 - 2.10 = 0.02 m
+
+Innovation covariance:
+    S = H P⁻ Hᵀ + R = [1 0] ┌0.0411  0.001┐ [1]ᵀ + [0.09]
+                             │0.001   0.011┘ [0]
+      = 0.0411 + 0.09 = 0.1311
+
+Kalman gain:
+    K = P⁻ Hᵀ S⁻¹ = ┌0.0411┐ × (1/0.1311) = ┌ 0.3135 ┐
+                     │0.001 ┘                 │ 0.0076 ┘
+
+State update:
+    x̂ = x̂⁻ + K ν = ┌2.10┐ + ┌0.3135┐ × 0.02 = ┌ 2.1063 ┐
+                     │1.00┘   │0.0076┘             │ 1.0002 ┘
+
+Covariance update:
+    I - KH = ┌1 0┐ - ┌0.3135┐[1 0] = ┌1-0.3135  0┐ = ┌0.6865   0┐
+             │0 1┘   │0.0076┘         │0-0.0076  1┘   │-0.0076  1┘
+
+    P = (I-KH) P⁻ = ┌0.6865   0 ┐ ┌0.0411  0.001┐
+                     │-0.0076  1 ┘ │0.001   0.011┘
+      ≈ ┌ 0.0282   0.000687 ┐
+        │ -0.000313  0.01089 ┘
+</code></pre></div>
+
+<p>After update: σ_x dropped from <strong>0.203 m</strong> to <strong>√0.0282 = 0.168 m</strong> — the GPS helped.</p>
+<hr />
+<h1 id="part-3-extended-kalman-filter-ekf-for-nonlinear-systems">PART 3 — EXTENDED KALMAN FILTER (EKF) FOR NONLINEAR SYSTEMS</h1>
+<h2 id="31-why-linear-kf-fails-for-robots">3.1 Why Linear KF Fails for Robots</h2>
+<p>The linear KF assumes the motion model is a matrix multiplication: <code>x̂⁻ = F x̂</code>. But the
+unicycle motion model from Module 01 is nonlinear:</p>
+<div class="highlight"><pre><span></span><code>  x_new = x + s × cos(θ + Δθ/2)
+  y_new = y + s × sin(θ + Δθ/2)
+  θ_new = θ + Δθ
+
+where s = arc length, Δθ = heading change
+</code></pre></div>
+
+<p>The sin/cos of the current heading angle θ means we <strong>cannot</strong> write this as a matrix times the
+state vector. If we pretend it&rsquo;s linear and use <code>F × [x, y, θ]ᵀ</code>, we will get the wrong answer,
+especially when uncertainty in θ is large.</p>
+<h2 id="32-ekf-solution-linearize-around-the-current-estimate">3.2 EKF Solution: Linearize Around the Current Estimate</h2>
+<p>The EKF solution: <strong>linearize</strong> the nonlinear function <code>f(x)</code> around the current estimate <code>x̂</code>
+using the first-order Taylor expansion:</p>
+<div class="highlight"><pre><span></span><code>f(x) ≈ f(x̂) + F × (x - x̂)
+
+where F = Jacobian of f evaluated at x̂:
+
+    ∂f₁/∂x₁   ∂f₁/∂x₂   ∂f₁/∂x₃
+F = ∂f₂/∂x₁   ∂f₂/∂x₂   ∂f₂/∂x₃
+    ∂f₃/∂x₁   ∂f₃/∂x₂   ∂f₃/∂x₃
+</code></pre></div>
+
+<p>The EKF prediction equations become:</p>
+<div class="highlight"><pre><span></span><code>    x̂⁻  =  f(x̂)           ← use the FULL nonlinear model for the mean
+    P⁻   =  F P Fᵀ + Q     ← use the LINEARIZED model (Jacobian) for the covariance
+</code></pre></div>
+
+<h2 id="33-jacobian-of-the-unicycle-model">3.3 Jacobian of the Unicycle Model</h2>
+<p>From the unicycle equations above, the partial derivatives with respect to state <code>[x, y, θ]</code>:</p>
+<div class="highlight"><pre><span></span><code>∂x_new/∂x = 1,   ∂x_new/∂y = 0,   ∂x_new/∂θ = -s × sin(θ + Δθ/2)
+∂y_new/∂x = 0,   ∂y_new/∂y = 1,   ∂y_new/∂θ =  s × cos(θ + Δθ/2)
+∂θ_new/∂x = 0,   ∂θ_new/∂y = 0,   ∂θ_new/∂θ = 1
+
+    ┌  1    0    -s·sin(θ+Δθ/2) ┐
+F = │  0    1     s·cos(θ+Δθ/2) │
+    │  0    0          1        ┘
+</code></pre></div>
+
+<p>The critical off-diagonal term is in row 0 or row 1, column 2 (θ):</p>
+<div class="highlight"><pre><span></span><code>∂x_new/∂θ = -s·sin(θ + Δθ/2)   ≈  -s·sin(θ)   for small Δθ
+∂y_new/∂θ =  s·cos(θ + Δθ/2)   ≈   s·cos(θ)   for small Δθ
+</code></pre></div>
+
+<p><strong>Physical meaning:</strong> If I move forward a distance <code>s</code> and I&rsquo;m uncertain about my heading by
+δθ, my lateral position uncertainty grows by <code>s × δθ</code>. This is the source of lateral drift in
+dead-reckoning.</p>
+<h2 id="34-ekf-covariance-propagation-in-full">3.4 EKF Covariance Propagation in Full</h2>
+<p>After applying <code>P⁻ = F P Fᵀ + Q</code>, the new lateral covariance (for a robot driving roughly
+along the x-axis) expands approximately as:</p>
+<div class="highlight"><pre><span></span><code>P⁻_yy  ≈  P_yy  +  (∂y/∂θ)² × P_θθ  +  Q_yy
+
+         = P_yy  +  s²·cos²(θ) × P_θθ  +  Q_yy
+
+         ≈ P_yy  +  s² × P_θθ  +  Q_yy    (for θ ≈ 0)
+                   ─────────────
+                   This is the dominant cross-term:
+                   lateral uncertainty grows quadratically with distance
+                   when heading uncertainty is large
+</code></pre></div>
+
+<h2 id="35-the-oks-shortcut">3.5 The OKS Shortcut</h2>
+<p><strong>OKS does NOT compute the Jacobian.</strong> Instead, <code>predict()</code> uses a fixed noise model:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// From OKS  (simplified)</span>
+<span class="n">lateral_var</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k_trans_lat_noise</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">delta_trans</span>
+<span class="w">            </span><span class="o">+</span><span class="w"> </span><span class="n">k_rot_lat_noise</span><span class="w">   </span><span class="o">*</span><span class="w"> </span><span class="n">delta_rot</span>
+<span class="w">            </span><span class="o">+</span><span class="w"> </span><span class="n">min</span><span class="p">(</span><span class="n">cov_theta</span><span class="p">,</span><span class="w"> </span><span class="mf">1e5</span><span class="p">)</span><span class="w">        </span><span class="o">*</span><span class="w"> </span><span class="n">delta_trans</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">delta_trans</span>
+<span class="w">                  </span><span class="err">────────────────────────────────────────────────────</span>
+<span class="w">                  </span><span class="err">↑</span><span class="w"> </span><span class="n">This</span><span class="w"> </span><span class="n">IS</span><span class="w"> </span><span class="n">the</span><span class="w"> </span><span class="n">EKF</span><span class="w"> </span><span class="n">Jacobian</span><span class="w"> </span><span class="n">term</span><span class="w"> </span><span class="p">(</span><span class="err">∂</span><span class="n">y</span><span class="o">/</span><span class="err">∂</span><span class="n">θ</span><span class="p">)</span><span class="n">²</span><span class="w"> </span><span class="err">×</span><span class="w"> </span><span class="n">P_θθ</span><span class="w"> </span><span class="err">≈</span><span class="w"> </span><span class="n">s²</span><span class="w"> </span><span class="err">×</span><span class="w"> </span><span class="n">P_θθ</span>
+</code></pre></div>
+
+<p>The term <code>min(cov_theta, 1e5) * delta_trans²</code> is mathematically equivalent to the EKF
+cross-covariance contribution <code>(∂y_new/∂θ)² × P_θθ = s² × P_θθ</code>, with the simplification
+that it uses the current heading covariance <code>P_θθ</code> directly (no sin/cos approximation needed
+when the robot drives mostly straight).</p>
+<p><strong>The <code>min(..., 1e5)</code> cap</strong> prevents runaway variance growth during a slip event: if P_θθ
+was already set to ∞ by slip detection, this cap keeps the lateral variance growth bounded
+at <code>1e5 × delta_trans²</code> per step.</p>
+<h2 id="36-when-the-ekf-approximation-breaks">3.6 When the EKF Approximation Breaks</h2>
+<p>The linearization <code>F P Fᵀ</code> is only valid when the uncertainty <code>P</code> is <strong>small relative to
+the curvature of f</strong>. In practice, for robots:</p>
+<div class="highlight"><pre><span></span><code>✓ Safe: σ_θ &lt; 5°  (P_θθ &lt; 0.008 rad²)  — linearization error is negligible
+⚠ Caution: σ_θ ≈ 10-20°  — lateral covariance underestimated
+✗ Broken: σ_θ &gt; 45°  — the Gaussian is no longer a good representation of the belief
+
+Visualization:
+                   True belief                    Gaussian approximation
+
+    y   (bimodal after severe                  y  (single mode, too narrow)
+         heading ambiguity)
+    │      ●●●        ●●●                      │
+    │     ●●●●●●    ●●●●●●                     │        ●●●●●
+    │         ●●●●●●●                          │      ●●●●●●●●●
+    └──────────────────── x                    └──────────────── x
+</code></pre></div>
+
+<p>In OKS, this situation is pre-empted: if <code>P_θθ</code> grows large enough to be capped by the
+<code>min(..., 1e5)</code> guard, or slip detection fires, the state is flagged as unreliable before
+the approximation breaks catastrophically.</p>
+<hr />
+<h1 id="part-4-reading-covariance-traces">PART 4 — READING COVARIANCE TRACES</h1>
+<h2 id="41-interpreting-covariance-values">4.1 Interpreting Covariance Values</h2>
+<div class="highlight"><pre><span></span><code>P(x,x) value    σ = √P(x,x)    Meaning
+─────────────   ───────────    ──────────────────────────────────────────────
+0.0001          0.01 m         After sensorbar update — very tight
+0.0025          0.05 m         Typical after recent sensorbar update
+0.01            0.10 m         Normal during short motion segment
+0.04            0.20 m         Moderate dead-reckoning accumulation (caution)
+0.25            0.50 m         Long travel without sensorbar — borderline
+1.0             1.00 m         Bad — need localization ASAP
+∞ (inf)         ∞              Slip/collision detection fired
+</code></pre></div>
+
+<p><strong>Key insight:</strong> In the OKS planner, obstacles are avoided using the estimated pose. If
+<code>P(x,x) = 0.25</code> and the robot is nominally 0.4 m from a shelf, the 2-sigma envelope extends
+to <code>0.4 - 2×0.5 = -0.6 m</code> — inside the shelf. This is why large covariance causes planning
+failures before it causes a physical collision.</p>
+<h2 id="42-what-normal-growth-looks-like">4.2 What Normal Growth Looks Like</h2>
+<p>Between sensorbar updates, covariance grows approximately linearly with distance traveled:</p>
+<div class="highlight"><pre><span></span><code>P(x,x)_new ≈ P(x,x)_old + k_trans_noise × delta_trans
+                         + min(P_θθ, 1e5) × delta_trans²
+</code></pre></div>
+
+<p>For typical OKS parameters (<code>k_trans_noise = 0.01</code>) and short moves:
+- Moving 0.1 m: ΔP_xx ≈ 0.01 × 0.1 = 0.001 → negligible
+- Moving 1.0 m: ΔP_xx ≈ 0.01 × 1.0 = 0.010 → noticeable
+- Moving 5.0 m: ΔP_xx ≈ 0.01 × 5.0 = 0.050 → significant</p>
+<h2 id="43-ascii-plot-covariance-time-trace">4.3 ASCII Plot: Covariance Time Trace</h2>
+<div class="highlight"><pre><span></span><code>P(x,x)
+  ↑
+  │
+0.30 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  (planning threshold)
+  │
+0.20 ─                                          ╭────── slip detection fires
+  │                                         ╭───╯
+  │                                     ╭───╯   ← covariance growing fast
+0.10 ─          ╭────╮          ╭───────╯         (no sensorbar on this aisle)
+  │             │    │          │
+  │      ╭──────╯    ╰──────────╯
+0.02 ─ ──╯                                       ← after sensorbar update
+  │
+0.00 ─────┬──────────┬──────────┬────────────────── time (s)
+         t=0        t=5        t=10
+          ↑          ↑          ↑
+      robot starts   sensorbar  sensorbar
+      moving         update     missed
+                  (P drops)    (P keeps growing)
+
+KEY: ────── = normal    ────↑─ = measurement update   ──X─ = slip event
+</code></pre></div>
+
+<h2 id="44-sudden-jumps-to-inf">4.4 Sudden Jumps to INF</h2>
+<p>When you see <code>P(x,x) = inf</code> in a bag, there are exactly two OKS code paths that write ∞:</p>
+<p><strong>Path A — Slip detection (velocity window check in <code>odometryCallback()</code>):</strong></p>
+<div class="highlight"><pre><span></span><code>Trigger: |v_window_mean - v_current| &gt; slip_threshold
+Effect:  P(x,x) = INF, P(y,y) = INF, P(θ,θ) = INF
+Why:     Wheel slipped — odometry is unreliable, position completely unknown
+</code></pre></div>
+
+<p><strong>Path B — Collision detection (gyro discontinuity in <code>imuCallback()</code>):</strong></p>
+<div class="highlight"><pre><span></span><code>Trigger: |ω_imu - ω_predicted| &gt; collision_threshold
+Effect:  transitions estimator to terminal/collision state, P → ∞
+Why:     Unexpected rotation = likely collision = pose is unknown
+</code></pre></div>
+
+<p><strong>Path C — Staleness (odom not arriving):</strong></p>
+<div class="highlight"><pre><span></span><code>Trigger: odom message period &gt; 2× expected period
+Effect:  scaling_factor × Q applied — P grows, but not necessarily to INF
+         (unless this persists for many cycles)
+Why:     Cannot dead-reckon without odometry
+</code></pre></div>
+
+<p>To distinguish A from B in a bag:
+1. Check if <code>/imu</code> topic shows a rotation spike (Path B)
+2. Check if <code>/odom</code> shows velocity discontinuity with no IMU anomaly (Path A)
+3. Check if <code>/odom</code> has gaps &gt; 2× expected period (Path C)</p>
+<h2 id="45-the-isfinite-guard">4.5 The <code>isFinite()</code> Guard</h2>
+<p>In ``, <strong>before every motion command</strong> (and often in the control loop),
+the estimator checks:</p>
+<div class="highlight"><pre><span></span><code><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">nav_state</span><span class="p">.</span><span class="n">isFinite</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// fires ERROR_INVALID_STATE</span>
+<span class="w">    </span><span class="c1">// robot stops, recovery behavior triggered</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><code>isFinite()</code> returns false if ANY of the following are NaN or ±Inf:
+- Position: x, y, θ
+- Velocity: v_x, v_y, ω
+- Any diagonal element of P: P(x,x), P(y,y), P(θ,θ)</p>
+<p><strong>This means:</strong> Even if only <code>P(θ,θ)</code> is ∞ (e.g., from a small heading slip), the ENTIRE
+estimated state is considered invalid and navigation halts. This is conservative by design.</p>
+<hr />
+<h1 id="part-5-oks-code-connection">PART 5 — OKS CODE CONNECTION</h1>
+<h2 id="51-kf-concept-oks-code-mapping">5.1 KF Concept → OKS Code Mapping</h2>
+<table>
+<thead>
+<tr>
+<th>KF Concept</th>
+<th>OKS Code</th>
+<th>Location</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>State vector <code>x̂</code></td>
+<td><code>NavigatorState.pose</code> (x, y, θ, v, ω)</td>
+<td>``</td>
+<td>5-element state</td>
+</tr>
+<tr>
+<td>State transition <code>f(x̂)</code></td>
+<td>Unicycle arc integration</td>
+<td><code>predict()</code></td>
+<td>Nonlinear — applied to mean directly</td>
+</tr>
+<tr>
+<td>Jacobian <code>F = ∂f/∂x</code></td>
+<td><strong>NOT computed</strong></td>
+<td>—</td>
+<td>OKS uses fixed noise model instead</td>
+</tr>
+<tr>
+<td>Process noise <code>Q</code></td>
+<td>Fixed noise params: <code>k_trans_noise</code>, etc.</td>
+<td><code>predict()</code></td>
+<td>Parameters from config YAML</td>
+</tr>
+<tr>
+<td>Covariance prediction <code>P⁻ = FPFᵀ + Q</code></td>
+<td><code>noise_model.apply(delta_trans, delta_rot, delta_t)</code></td>
+<td><code>predict()</code></td>
+<td>Q dominant; FPFᵀ approximated via OKS shortcut</td>
+</tr>
+<tr>
+<td>Measurement matrix <code>H</code></td>
+<td>Sensorbar line constraint</td>
+<td><code>update()</code></td>
+<td>Projects state to line offset</td>
+</tr>
+<tr>
+<td>Measurement noise <code>R</code></td>
+<td>Sensorbar uncertainty params</td>
+<td><code>update()</code></td>
+<td>From sensor calibration</td>
+</tr>
+<tr>
+<td>Innovation <code>ν = z - Hx̂⁻</code></td>
+<td>Sensorbar offset residual</td>
+<td><code>update()</code></td>
+<td>Gated by Mahalanobis distance</td>
+</tr>
+<tr>
+<td>Kalman gain <code>K</code></td>
+<td>Computed in <code>update()</code></td>
+<td><code>update()</code></td>
+<td>Standard formula</td>
+</tr>
+<tr>
+<td>State update <code>x̂ = x̂⁻ + Kν</code></td>
+<td>Pose correction from sensorbar</td>
+<td><code>update()</code></td>
+<td>Applied to mean</td>
+</tr>
+<tr>
+<td>Covariance update <code>P = (I-KH)P⁻</code></td>
+<td>Covariance shrink after sensorbar</td>
+<td><code>update()</code></td>
+<td>Standard formula</td>
+</tr>
+<tr>
+<td><code>P → ∞</code></td>
+<td>Slip detection or collision state</td>
+<td><code>odometryCallback()</code> / <code>imuCallback()</code></td>
+<td>Writes literal <code>std::numeric_limits&lt;double&gt;::infinity()</code></td>
+</tr>
+<tr>
+<td><code>isFinite(P)</code> check</td>
+<td><code>nav_state.isFinite()</code></td>
+<td>``</td>
+<td>Fires <code>ERROR_INVALID_STATE</code></td>
+</tr>
+<tr>
+<td>Odom staleness</td>
+<td>Scaling factor on Q</td>
+<td><code>predict()</code></td>
+<td>If dt &gt; 2× period</td>
+</tr>
+</tbody>
+</table>
+<h2 id="52-the-oks-noise-model-vs-the-textbook-ekf">5.2 The OKS Noise Model vs. the Textbook EKF</h2>
+<p>Textbook EKF:</p>
+<div class="highlight"><pre><span></span><code>P⁻ = F P Fᵀ + Q_odometry
+       ↑
+   F = Jacobian of unicycle model (computed at runtime from θ, s)
+   Q_odometry = noise proportional to wheel encoder resolution
+</code></pre></div>
+
+<p>OKS implementation:</p>
+<div class="highlight"><pre><span></span><code>P⁻_xx += k_trans_noise * delta_trans
+       +  min(P_θθ, 1e5) * delta_trans²         ← ≈ F P Fᵀ cross-term
+       +  k_time_trans_noise * delta_t          ← time-based noise
+
+P⁻_θθ += k_rot_rot_noise * |delta_rot|
+       +  k_trans_rot_noise * delta_trans
+</code></pre></div>
+
+<p><strong>Why this approximation is valid:</strong> For an OKS robot traveling mostly in straight lines along
+aisle corridors, θ ≈ 0 for the majority of motion. Under this condition:
+- <code>cos²(θ) ≈ 1</code> so lateral ≈ y
+- <code>sin²(θ) ≈ 0</code> so longitudinal ≈ x
+- The OKS <code>delta_trans²</code> term correctly captures lateral growth proportional to <code>P_θθ</code></p>
+<p>The approximation degrades during sharp turns, but sensorbar updates on line crossings
+typically reset the covariance before the approximation error accumulates significantly.</p>
+<h2 id="53-oks-does-not-use-odom-covariance">5.3 OKS Does NOT Use odom Covariance</h2>
+<p>The <code>/odom</code> ROS message has a <code>pose.covariance</code> field (6×6 matrix). OKS <strong>ignores this</strong>.
+Instead, noise parameters are loaded from the configuration file and treated as constants.</p>
+<div class="highlight"><pre><span></span><code>odom.pose.covariance  ──IGNORED──→  OKS uses fixed yaml params instead:
+                                        k_trans_noise: 0.01
+                                        k_rot_rot_noise:     0.05
+                                        ...
+</code></pre></div>
+
+<p>This is a deliberate design choice: the wheel encoder publishers on OKS robots do not
+provide reliable covariance estimates, so a calibrated fixed model is more trustworthy.</p>
+<hr />
+<h2 id="implementation-connection">Implementation Connection</h2>
+<p>Consolidated reference for connecting this module&rsquo;s theory to the codebase:</p>
+<div class="highlight"><pre><span></span><code>File: 
+├── predict()
+│   ├── Applies unicycle f(x̂) to propagate mean state
+│   ├── Builds Q from: k_trans_noise, k_rot_rot_noise,
+│   │                  k_trans_lat_noise, k_time_trans_noise
+│   ├── Key term: min(cov_theta, 1e5) * delta_trans² (EKF Jacobian approximation)
+│   └── Staleness: if dt &gt; 2×period → Q *= scaling_factor
+│
+├── update()
+│   ├── Takes sensorbar measurement z (line offset + orientation)
+│   ├── Computes innovation ν = z - H x̂⁻
+│   ├── Computes Kalman gain K = P⁻Hᵀ(HP⁻Hᵀ + R)⁻¹
+│   ├── Applies state update x̂ = x̂⁻ + Kν
+│   └── Applies covariance update P = (I-KH)P⁻
+│
+├── odometryCallback() slip detection
+│   ├── Velocity window comparison: |mean(v_window) - v_current| &gt; threshold
+│   └── If triggered: P(x,x) = P(y,y) = P(θ,θ) = ∞  ← fires ERROR_INVALID_STATE
+│
+└── imuCallback() collision detection
+    ├── Gyro discontinuity check: |ω_imu - ω_predicted| &gt; threshold
+    └── If triggered: transition to collision state, P → ∞
+
+File: 
+└── isFinite()
+    ├── Checks all pose elements (x, y, θ, v, ω)
+    ├── Checks all diagonal covariance elements (P_xx, P_yy, P_θθ)
+    └── Returns false if ANY is NaN or ±Inf → triggers ERROR_INVALID_STATE
+</code></pre></div>
+
+<hr />
+<h2 id="summary-what-to-remember">Summary — What to Remember</h2>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>Formula</th>
+<th>OKS Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Belief</td>
+<td>Gaussian N(x̂, P)</td>
+<td>Robot pose is uncertain, tracked by mean + covariance</td>
+</tr>
+<tr>
+<td>Prediction grows P</td>
+<td>P⁻ = FPFᵀ + Q</td>
+<td>Every <code>predict()</code> call increases covariance</td>
+</tr>
+<tr>
+<td>Update shrinks P</td>
+<td>P = (I-KH)P⁻</td>
+<td>Every sensorbar <code>update()</code> decreases covariance</td>
+</tr>
+<tr>
+<td>Kalman gain</td>
+<td>K = P⁻Hᵀ(HP⁻Hᵀ+R)⁻¹</td>
+<td>How much to trust sensor vs. prediction</td>
+</tr>
+<tr>
+<td>Innovation</td>
+<td>ν = z - Hx̂⁻</td>
+<td>How far off prediction was from measurement</td>
+</tr>
+<tr>
+<td>EKF linearization</td>
+<td>F = ∂f/∂x</td>
+<td>OKS approximates this with the <code>min(P_θθ,1e5)×s²</code> term</td>
+</tr>
+<tr>
+<td>Lateral variance growth</td>
+<td>ΔP_yy ≈ s² × P_θθ</td>
+<td>Robot drifts laterally when heading uncertain</td>
+</tr>
+<tr>
+<td>P → ∞</td>
+<td>slip or collision</td>
+<td><code>odometryCallback()</code>/<code>imuCallback()</code> write literal infinity</td>
+</tr>
+<tr>
+<td>isFinite check</td>
+<td>ANY infinite/NaN → stop</td>
+<td>`` guards all motion commands</td>
+</tr>
+<tr>
+<td>σ = √P</td>
+<td>P(x,x)=0.0025 → σ=5cm</td>
+<td>68% of mass within ±σ of the estimated position</td>
+</tr>
+</tbody>
+</table>
+<h3 id="quick-diagnostic-checklist">Quick Diagnostic Checklist</h3>
+<p>When you see <code>ERROR_INVALID_STATE</code> in a bag:</p>
+<div class="highlight"><pre><span></span><code>1. Find the timestamp where P(x,x) first becomes inf
+2. Look back 50-100 ms:
+   a. IMU gyro spike?          → collision_detection fired (Path B)
+   b. Odom velocity drop?      → slip_detection fired (Path A)
+   c. Odom topic gap?          → staleness path → gradual P growth → eventual inf
+3. Check prior covariance level: was P already high before the event?
+   High P before event  → prior drift, sensor updates missed (aisle with no lines)
+   Low P before event   → sudden mechanical event (actual slip/bump)
+4. Confirm with isFinite() log timestamp matching the P→inf timestamp
+</code></pre></div>
+
+<hr />
+<p><em>Next: <code>03-measurement-models.md</code> — Sensorbar line constraints, Mahalanobis gating,
+and how the update() function decides whether to accept or reject a measurement.</em></p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

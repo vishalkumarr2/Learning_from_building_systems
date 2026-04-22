@@ -1,0 +1,1161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 — Type Annotations, Dataclasses, and Pydantic - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Back to Python / OKS</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="01-type-annotations-dataclasses-and-pydantic">01 — Type Annotations, Dataclasses, and Pydantic</h1>
+<h3 id="stop-chasing-runtime-attributeerrors-catch-them-before-the-script-runs">Stop chasing runtime AttributeErrors — catch them before the script runs</h3>
+<p><strong>Prerequisite:</strong> Python functions, dicts, classes. You&rsquo;ve written scripts with argparse before.
+<strong>Unlocks:</strong> mypy static analysis, validated config loading, self-documenting function signatures, Pydantic models</p>
+<hr />
+<h2 id="why-should-i-care-context">Why Should I Care? (Context)</h2>
+<p>Analysis scripts that process large log files or call external APIs contain dozens of implicit assumptions:
+- &ldquo;This function always returns a list, never <code>None</code>&rdquo;
+- &ldquo;The config dict definitely has a <code>confidence</code> key&rdquo;
+- &ldquo;Ticket ID is an int, robot ID is a string — don&rsquo;t mix them up&rdquo;</p>
+<p>Without type annotations, every one of those assumptions is invisible until the script crashes at 2 AM on real data. With type annotations + mypy:
+- A mismatched function argument is a <strong>red underline in the editor</strong>, not a runtime traceback
+- Pydantic turns your <code>.env</code> file into a validated, typed Python object — missing <code>ADO_PAT</code>? Crash at startup with a clear error, not 40 lines into processing
+- <code>NewType</code> makes <code>ticket_id</code> and <code>robot_id</code> incompatible types — the compiler prevents passing one where the other is expected</p>
+<p>This chapter is a force multiplier for every script in this repo.</p>
+<hr />
+<h1 id="part-1-python-type-annotations-basics">PART 1 — PYTHON TYPE ANNOTATIONS BASICS</h1>
+<hr />
+<h2 id="11-the-syntax">1.1 The Syntax</h2>
+<p>Type annotations are hints — they don&rsquo;t change runtime behavior, but tools like mypy and your editor use them to catch errors before the code runs.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Variable annotations</span>
+<span class="n">count</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;default&quot;</span>
+<span class="n">ratio</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.95</span>
+<span class="n">active</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="n">result</span><span class="p">:</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>          <span class="c1"># rarely useful as a variable annotation</span>
+
+<span class="c1"># Function annotations</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">greet</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Hello, </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">process_log</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">verbose</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Returns number of lines processed.&quot;&quot;&quot;</span>
+    <span class="o">...</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">log_event</span><span class="p">(</span><span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>   <span class="c1"># -&gt; None = does not return a value</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>Key insight:</strong> <code>-&gt; None</code> is not the same as omitting the return type. Omitting means &ldquo;I haven&rsquo;t annotated this yet.&rdquo; <code>-&gt; None</code> says &ldquo;I explicitly guarantee this returns nothing.&rdquo;</p>
+<hr />
+<h2 id="12-collection-types-python-39">1.2 Collection Types (Python 3.9+)</h2>
+<p>Python 3.9 added built-in generic types — you no longer need to import from <code>typing</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Python 3.9+ (preferred)</span>
+<span class="n">scores</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="mf">0.8</span><span class="p">,</span> <span class="mf">0.9</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">]</span>
+<span class="n">lookup</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;alpha&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;beta&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">}</span>
+<span class="n">coords</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">)</span>
+<span class="n">ids</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">}</span>
+
+<span class="c1"># Python 3.8 and earlier (still works, just verbose)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Set</span>
+<span class="n">scores</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="n">lookup</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+</code></pre></div>
+
+<p>Fixed-length tuples are annotated with each element&rsquo;s type:</p>
+<div class="highlight"><pre><span></span><code><span class="n">Point3D</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span>        <span class="c1"># exactly 3 floats</span>
+<span class="n">LogLine</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span>            <span class="c1"># (timestamp, level, message)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_log_line</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">LogLine</span><span class="p">:</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="n">raw</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">parts</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+</code></pre></div>
+
+<p>Variable-length tuples of uniform type use <code>...</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">Numbers</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span>    <span class="c1"># any number of ints</span>
+</code></pre></div>
+
+<hr />
+<h2 id="13-optional-and-union">1.3 Optional and Union</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="c1"># Optional[X] means &quot;X or None&quot; — equivalent to X | None (Python 3.10+)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">find_session</span><span class="p">(</span><span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+    <span class="o">...</span>
+
+<span class="c1"># Python 3.10+ syntax (cleaner)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">find_session</span><span class="p">(</span><span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="o">...</span>
+
+<span class="c1"># Union: accept multiple types</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">format_id</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+
+<span class="c1"># Python 3.10+</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">format_id</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>Common mistake:</strong> returning <code>None</code> from a function annotated <code>-&gt; str</code> is a type error. Always annotate with <code>str | None</code> if None is possible.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># BAD — mypy will flag this</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_error_code</span><span class="p">(</span><span class="n">log</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">if</span> <span class="s2">&quot;ERROR&quot;</span> <span class="ow">in</span> <span class="n">log</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">log</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;ERROR:&quot;</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">return</span> <span class="kc">None</span>  <span class="c1"># Type error: None is not str</span>
+
+<span class="c1"># GOOD</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_error_code</span><span class="p">(</span><span class="n">log</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">if</span> <span class="s2">&quot;ERROR&quot;</span> <span class="ow">in</span> <span class="n">log</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">log</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;ERROR:&quot;</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">return</span> <span class="kc">None</span>
+</code></pre></div>
+
+<hr />
+<h2 id="14-worked-example-annotating-a-log-parser">1.4 Worked Example: Annotating a Log Parser</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_incident_log</span><span class="p">(</span>
+    <span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span>
+    <span class="n">error_only</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">max_lines</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Parse a structured log file into (timestamp, level, message) tuples.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        path: Path to the log file.</span>
+<span class="sd">        error_only: If True, only return ERROR-level entries.</span>
+<span class="sd">        max_lines: Stop after this many lines (None = read all).</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        List of (timestamp_seconds, level, message) tuples.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">entries</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">()</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">line</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">f</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">max_lines</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">i</span> <span class="o">&gt;=</span> <span class="n">max_lines</span><span class="p">:</span>
+                <span class="k">break</span>
+
+            <span class="n">line</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">line</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="n">parts</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">3</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="n">ts_str</span><span class="p">,</span> <span class="n">level</span><span class="p">,</span> <span class="n">message</span> <span class="o">=</span> <span class="n">parts</span>
+            <span class="k">if</span> <span class="n">error_only</span> <span class="ow">and</span> <span class="n">level</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;ERROR&quot;</span><span class="p">:</span>
+                <span class="k">continue</span>
+
+            <span class="n">entries</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="nb">float</span><span class="p">(</span><span class="n">ts_str</span><span class="p">),</span> <span class="n">level</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="n">message</span><span class="o">.</span><span class="n">strip</span><span class="p">()))</span>
+
+    <span class="k">return</span> <span class="n">entries</span>
+
+
+<span class="c1"># The return type makes it clear: callers know they get a list of 3-tuples.</span>
+<span class="c1"># Without the annotation, they&#39;d have to read the whole function to know.</span>
+<span class="n">results</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">parse_incident_log</span><span class="p">(</span>
+    <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;session.log&quot;</span><span class="p">),</span>
+    <span class="n">error_only</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">max_lines</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="k">for</span> <span class="n">ts</span><span class="p">,</span> <span class="n">level</span><span class="p">,</span> <span class="n">msg</span> <span class="ow">in</span> <span class="n">results</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">ts</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">msg</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-2-advanced-types">PART 2 — ADVANCED TYPES</h1>
+<hr />
+<h2 id="21-typeddict-typed-dictionary-keys">2.1 TypedDict: Typed Dictionary Keys</h2>
+<p>Plain <code>dict[str, Any]</code> loses all type information about what keys exist. <code>TypedDict</code> fixes this:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">TypedDict</span><span class="p">,</span> <span class="n">Any</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">IncidentSummary</span><span class="p">(</span><span class="n">TypedDict</span><span class="p">):</span>
+    <span class="n">ticket_id</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">robot_id</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">error_code</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">duration_s</span><span class="p">:</span> <span class="nb">float</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">SearchResult</span><span class="p">(</span><span class="n">TypedDict</span><span class="p">):</span>
+    <span class="n">query</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">matches</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span>
+    <span class="n">confidence</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">source</span><span class="p">:</span> <span class="nb">str</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">summarise_incident</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">IncidentSummary</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">IncidentSummary</span><span class="p">(</span>
+        <span class="n">ticket_id</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">raw</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">]),</span>
+        <span class="n">robot_id</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">raw</span><span class="p">[</span><span class="s2">&quot;robot&quot;</span><span class="p">]),</span>
+        <span class="n">error_code</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;code&quot;</span><span class="p">,</span> <span class="s2">&quot;UNKNOWN&quot;</span><span class="p">)),</span>
+        <span class="n">duration_s</span><span class="o">=</span><span class="nb">float</span><span class="p">(</span><span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;duration&quot;</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)),</span>
+    <span class="p">)</span>
+
+
+<span class="c1"># Now the editor knows summary[&quot;ticket_id&quot;] is an int</span>
+<span class="n">summary</span> <span class="o">=</span> <span class="n">summarise_incident</span><span class="p">({</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="s2">&quot;123&quot;</span><span class="p">,</span> <span class="s2">&quot;robot&quot;</span><span class="p">:</span> <span class="s2">&quot;bot-01&quot;</span><span class="p">,</span> <span class="s2">&quot;code&quot;</span><span class="p">:</span> <span class="s2">&quot;NAV_ERR&quot;</span><span class="p">})</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">summary</span><span class="p">[</span><span class="s2">&quot;ticket_id&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>   <span class="c1"># OK — int + int</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">summary</span><span class="p">[</span><span class="s2">&quot;robot_id&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>   <span class="c1"># mypy ERROR: str + int</span>
+</code></pre></div>
+
+<p><code>TypedDict</code> also supports optional keys via <code>total=False</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">PartialResult</span><span class="p">(</span><span class="n">TypedDict</span><span class="p">,</span> <span class="n">total</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="n">confidence</span><span class="p">:</span> <span class="nb">float</span>    <span class="c1"># this key may or may not be present</span>
+    <span class="n">source</span><span class="p">:</span> <span class="nb">str</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">RequiredResult</span><span class="p">(</span><span class="n">TypedDict</span><span class="p">):</span>
+    <span class="n">query</span><span class="p">:</span> <span class="nb">str</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">FullResult</span><span class="p">(</span><span class="n">RequiredResult</span><span class="p">,</span> <span class="n">PartialResult</span><span class="p">):</span>
+    <span class="k">pass</span>   <span class="c1"># query is required, confidence/source are optional</span>
+</code></pre></div>
+
+<hr />
+<h2 id="22-protocol-structural-subtyping">2.2 Protocol: Structural Subtyping</h2>
+<p>A <code>Protocol</code> defines an interface by behaviour, not inheritance. Any class that has the right methods satisfies the protocol — no need to explicitly inherit.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Protocol</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Searchable</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span> <span class="o">...</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Serialisable</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">to_dict</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span> <span class="o">...</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">from_dict</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Serialisable&quot;</span><span class="p">:</span> <span class="o">...</span>
+
+
+<span class="c1"># Any class with a .search() method satisfies Searchable</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">KbSearcher</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="p">[]</span>    <span class="c1"># real impl goes here</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MemorySearcher</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="p">[]</span>    <span class="c1"># different backend, same interface</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">run_search</span><span class="p">(</span><span class="n">backend</span><span class="p">:</span> <span class="n">Searchable</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="k">return</span> <span class="n">backend</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">query</span><span class="p">)</span>
+
+
+<span class="c1"># Both work — no inheritance required</span>
+<span class="n">run_search</span><span class="p">(</span><span class="n">KbSearcher</span><span class="p">(),</span> <span class="s2">&quot;motor stall&quot;</span><span class="p">)</span>
+<span class="n">run_search</span><span class="p">(</span><span class="n">MemorySearcher</span><span class="p">(),</span> <span class="s2">&quot;slip event&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>Key insight:</strong> <code>Protocol</code> lets you write generic functions that work with any object satisfying a contract. This is especially useful for dependency injection in tests — replace the real searcher with a fake one.</p>
+<hr />
+<h2 id="23-callable-literal-final-classvar">2.3 Callable, Literal, Final, ClassVar</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Literal</span><span class="p">,</span> <span class="n">Final</span><span class="p">,</span> <span class="n">ClassVar</span>
+
+
+<span class="c1"># Callable[[ArgTypes...], ReturnType]</span>
+<span class="n">Scorer</span> <span class="o">=</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span> <span class="nb">float</span><span class="p">]</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">apply_scorer</span><span class="p">(</span><span class="n">scorer</span><span class="p">:</span> <span class="n">Scorer</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">candidates</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">scorer</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">candidates</span><span class="p">)</span>
+
+
+<span class="c1"># Literal: restrict to specific values</span>
+<span class="n">LogLevel</span> <span class="o">=</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;DEBUG&quot;</span><span class="p">,</span> <span class="s2">&quot;INFO&quot;</span><span class="p">,</span> <span class="s2">&quot;WARN&quot;</span><span class="p">,</span> <span class="s2">&quot;ERROR&quot;</span><span class="p">]</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">log</span><span class="p">(</span><span class="n">level</span><span class="p">:</span> <span class="n">LogLevel</span><span class="p">,</span> <span class="n">msg</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="n">msg</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">log</span><span class="p">(</span><span class="s2">&quot;INFO&quot;</span><span class="p">,</span> <span class="s2">&quot;started&quot;</span><span class="p">)</span>       <span class="c1"># OK</span>
+<span class="n">log</span><span class="p">(</span><span class="s2">&quot;VERBOSE&quot;</span><span class="p">,</span> <span class="s2">&quot;too much&quot;</span><span class="p">)</span>   <span class="c1"># mypy ERROR: &quot;VERBOSE&quot; not in Literal</span>
+
+
+<span class="c1"># Final: a constant that cannot be reassigned</span>
+<span class="n">MAX_RETRIES</span><span class="p">:</span> <span class="n">Final</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="mi">3</span>
+<span class="n">KB_VERSION</span><span class="p">:</span> <span class="n">Final</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;2.0&quot;</span>
+
+<span class="n">MAX_RETRIES</span> <span class="o">=</span> <span class="mi">4</span>   <span class="c1"># mypy ERROR: Cannot assign to final name</span>
+
+
+<span class="c1"># ClassVar: a class-level variable (not per-instance)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">SearchConfig</span><span class="p">:</span>
+    <span class="n">DEFAULT_LIMIT</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="mi">20</span>
+    <span class="n">MIN_CONFIDENCE</span><span class="p">:</span> <span class="n">ClassVar</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.5</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">limit</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">SearchConfig</span><span class="o">.</span><span class="n">DEFAULT_LIMIT</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">limit</span> <span class="o">=</span> <span class="n">limit</span>
+</code></pre></div>
+
+<hr />
+<h2 id="24-type-aliases-and-newtype">2.4 Type Aliases and NewType</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">NewType</span>
+
+
+<span class="c1"># Type alias: just a shorthand name</span>
+<span class="n">LogLine</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span>
+<span class="n">ScoreMap</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span>
+<span class="n">Findings</span> <span class="o">=</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">score_results</span><span class="p">(</span><span class="n">lines</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">LogLine</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">ScoreMap</span><span class="p">:</span>
+    <span class="o">...</span>
+
+
+<span class="c1"># NewType: create a *distinct* type that cannot be confused with its base</span>
+<span class="n">TicketId</span> <span class="o">=</span> <span class="n">NewType</span><span class="p">(</span><span class="s2">&quot;TicketId&quot;</span><span class="p">,</span> <span class="nb">int</span><span class="p">)</span>
+<span class="n">RobotId</span> <span class="o">=</span> <span class="n">NewType</span><span class="p">(</span><span class="s2">&quot;RobotId&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">fetch_ticket</span><span class="p">(</span><span class="n">ticket_id</span><span class="p">:</span> <span class="n">TicketId</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+    <span class="o">...</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">fetch_robot_logs</span><span class="p">(</span><span class="n">robot_id</span><span class="p">:</span> <span class="n">RobotId</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="o">...</span>
+
+
+<span class="n">ticket</span> <span class="o">=</span> <span class="n">TicketId</span><span class="p">(</span><span class="mi">12345</span><span class="p">)</span>
+<span class="n">robot</span> <span class="o">=</span> <span class="n">RobotId</span><span class="p">(</span><span class="s2">&quot;bot-07&quot;</span><span class="p">)</span>
+
+<span class="n">fetch_ticket</span><span class="p">(</span><span class="n">ticket</span><span class="p">)</span>          <span class="c1"># OK</span>
+<span class="n">fetch_ticket</span><span class="p">(</span><span class="n">robot</span><span class="p">)</span>           <span class="c1"># mypy ERROR: RobotId is not TicketId</span>
+<span class="n">fetch_ticket</span><span class="p">(</span><span class="mi">12345</span><span class="p">)</span>           <span class="c1"># mypy ERROR: plain int is not TicketId (strict mode)</span>
+
+<span class="c1"># Create NewType values explicitly</span>
+<span class="n">my_ticket</span> <span class="o">=</span> <span class="n">TicketId</span><span class="p">(</span><span class="mi">67890</span><span class="p">)</span>
+<span class="n">my_robot</span> <span class="o">=</span> <span class="n">RobotId</span><span class="p">(</span><span class="s2">&quot;bot-12&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>Key insight:</strong> <code>NewType</code> costs nothing at runtime (it&rsquo;s the identity function) but prevents entire classes of mix-up bugs. Use it whenever two values have the same underlying type but different meanings — IDs are the classic case.</p>
+<hr />
+<h1 id="part-3-dataclass">PART 3 — @DATACLASS</h1>
+<hr />
+<h2 id="31-basics">3.1 Basics</h2>
+<p><code>@dataclass</code> auto-generates <code>__init__</code>, <code>__repr__</code>, and <code>__eq__</code> from your field annotations.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span><span class="p">,</span> <span class="n">field</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
+
+
+<span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Hypothesis</span><span class="p">:</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">confidence</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">evidence</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+
+<span class="c1"># Generated __init__:</span>
+<span class="c1"># def __init__(self, description: str, confidence: float, evidence: list[str])</span>
+
+<span class="n">h</span> <span class="o">=</span> <span class="n">Hypothesis</span><span class="p">(</span><span class="s2">&quot;slip due to surface change&quot;</span><span class="p">,</span> <span class="mf">0.8</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;velocity drop at t=12.3&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">h</span><span class="p">)</span>
+<span class="c1"># Hypothesis(description=&#39;slip due to surface change&#39;, confidence=0.8,</span>
+<span class="c1">#            evidence=[&#39;velocity drop at t=12.3&#39;])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">h</span> <span class="o">==</span> <span class="n">Hypothesis</span><span class="p">(</span><span class="s2">&quot;slip due to surface change&quot;</span><span class="p">,</span> <span class="mf">0.8</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;velocity drop at t=12.3&quot;</span><span class="p">]))</span>
+<span class="c1"># True — __eq__ compares all fields</span>
+</code></pre></div>
+
+<hr />
+<h2 id="32-field-defaults-and-mutable-defaults">3.2 field() — Defaults and Mutable Defaults</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span><span class="p">,</span> <span class="n">field</span>
+
+
+<span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">SearchRequest</span><span class="p">:</span>
+    <span class="n">query</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">limit</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">20</span>                         <span class="c1"># simple default</span>
+    <span class="n">sources</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span>            <span class="c1"># mutable default MUST use field()</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;kb&quot;</span><span class="p">,</span> <span class="s2">&quot;memory&quot;</span><span class="p">]</span>
+    <span class="p">)</span>
+    <span class="n">metadata</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="nb">dict</span>
+    <span class="p">)</span>
+    <span class="n">created_at</span><span class="p">:</span> <span class="n">datetime</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">utcnow</span>
+    <span class="p">)</span>
+
+<span class="c1"># BAD — will raise ValueError at class definition time:</span>
+<span class="c1"># @dataclass</span>
+<span class="c1"># class Bad:</span>
+<span class="c1">#     items: list[str] = []   # Python: mutable default is dangerous</span>
+
+<span class="n">r1</span> <span class="o">=</span> <span class="n">SearchRequest</span><span class="p">(</span><span class="s2">&quot;motor stall&quot;</span><span class="p">)</span>
+<span class="n">r2</span> <span class="o">=</span> <span class="n">SearchRequest</span><span class="p">(</span><span class="s2">&quot;slip event&quot;</span><span class="p">)</span>
+<span class="n">r1</span><span class="o">.</span><span class="n">sources</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;ado&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">r1</span><span class="o">.</span><span class="n">sources</span><span class="p">)</span>  <span class="c1"># [&quot;kb&quot;, &quot;memory&quot;, &quot;ado&quot;]</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">r2</span><span class="o">.</span><span class="n">sources</span><span class="p">)</span>  <span class="c1"># [&quot;kb&quot;, &quot;memory&quot;] — r2 has its own list</span>
+</code></pre></div>
+
+<hr />
+<h2 id="33-frozentrue-immutable-dataclasses">3.3 frozen=True: Immutable Dataclasses</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span>
+
+
+<span class="nd">@dataclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">EventKey</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Immutable key identifying a specific event in a log.&quot;&quot;&quot;</span>
+    <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">timestamp</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">event_type</span><span class="p">:</span> <span class="nb">str</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">before</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">:</span> <span class="s2">&quot;EventKey&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">timestamp</span> <span class="o">&lt;</span> <span class="n">other</span><span class="o">.</span><span class="n">timestamp</span>
+
+
+<span class="n">key</span> <span class="o">=</span> <span class="n">EventKey</span><span class="p">(</span><span class="s2">&quot;sess-001&quot;</span><span class="p">,</span> <span class="mf">1714300000.0</span><span class="p">,</span> <span class="s2">&quot;NAV_ERR&quot;</span><span class="p">)</span>
+<span class="n">key</span><span class="o">.</span><span class="n">timestamp</span> <span class="o">=</span> <span class="mf">0.0</span>   <span class="c1"># raises FrozenInstanceError</span>
+
+<span class="c1"># frozen dataclasses are hashable — can be used in sets and dict keys</span>
+<span class="n">seen</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="n">EventKey</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+<span class="n">seen</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+<span class="n">cache</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="n">EventKey</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="s2">&quot;delocalized&quot;</span><span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="34-post_init-computed-fields">3.4 <strong>post_init</strong>: Computed Fields</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span><span class="p">,</span> <span class="n">field</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
+
+
+<span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">IncidentWindow</span><span class="p">:</span>
+    <span class="n">start_ts</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">end_ts</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">_duration_s</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>   <span class="c1"># computed, not a constructor arg</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">end_ts</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_ts</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;end_ts (</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">end_ts</span><span class="si">}</span><span class="s2">) must be &gt;= start_ts (</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">start_ts</span><span class="si">}</span><span class="s2">)&quot;</span>
+            <span class="p">)</span>
+        <span class="nb">object</span><span class="o">.</span><span class="fm">__setattr__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_duration_s&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">end_ts</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_ts</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">duration_s</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_duration_s</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">duration_min</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_duration_s</span> <span class="o">/</span> <span class="mf">60.0</span>
+
+
+<span class="n">window</span> <span class="o">=</span> <span class="n">IncidentWindow</span><span class="p">(</span><span class="n">start_ts</span><span class="o">=</span><span class="mf">1714300000.0</span><span class="p">,</span> <span class="n">end_ts</span><span class="o">=</span><span class="mf">1714300300.0</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">window</span><span class="o">.</span><span class="n">duration_min</span><span class="p">)</span>   <span class="c1"># 5.0</span>
+</code></pre></div>
+
+<hr />
+<h2 id="35-dataclass-vs-namedtuple">3.5 @dataclass vs NamedTuple</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">NamedTuple</span>
+
+
+<span class="c1"># NamedTuple: immutable, supports positional access and unpacking</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">LogEntry</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
+    <span class="n">timestamp</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">level</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">message</span><span class="p">:</span> <span class="nb">str</span>
+
+<span class="n">entry</span> <span class="o">=</span> <span class="n">LogEntry</span><span class="p">(</span><span class="mf">1714300000.0</span><span class="p">,</span> <span class="s2">&quot;ERROR&quot;</span><span class="p">,</span> <span class="s2">&quot;localization failed&quot;</span><span class="p">)</span>
+<span class="n">ts</span><span class="p">,</span> <span class="n">level</span><span class="p">,</span> <span class="n">msg</span> <span class="o">=</span> <span class="n">entry</span>      <span class="c1"># unpacking works</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">entry</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>             <span class="c1"># positional access works</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">entry</span><span class="o">.</span><span class="n">timestamp</span><span class="p">)</span>      <span class="c1"># named access works</span>
+
+<span class="c1"># dataclass: mutable by default, better for complex entities</span>
+<span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">SessionState</span><span class="p">:</span>
+    <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">phase</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;orient&quot;</span>
+    <span class="n">hypotheses</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="c1"># ... many more fields</span>
+
+<span class="n">state</span> <span class="o">=</span> <span class="n">SessionState</span><span class="p">(</span><span class="s2">&quot;sess-001&quot;</span><span class="p">)</span>
+<span class="n">state</span><span class="o">.</span><span class="n">phase</span> <span class="o">=</span> <span class="s2">&quot;analyse&quot;</span>    <span class="c1"># mutation is natural</span>
+<span class="n">state</span><span class="o">.</span><span class="n">hypotheses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;slip event at t=12.3&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<table>
+<thead>
+<tr>
+<th></th>
+<th>NamedTuple</th>
+<th>@dataclass</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Immutable</td>
+<td>Yes (always)</td>
+<td>Only with <code>frozen=True</code></td>
+</tr>
+<tr>
+<td>Positional access</td>
+<td>Yes (<code>x[0]</code>)</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Unpacking</td>
+<td>Yes</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Default values</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Mutable defaults</td>
+<td>No (workaround needed)</td>
+<td>Yes via <code>field()</code></td>
+</tr>
+<tr>
+<td>Inheritance</td>
+<td>Limited</td>
+<td>Full</td>
+</tr>
+<tr>
+<td>Best for</td>
+<td>Small value objects (points, keys)</td>
+<td>Entities with many fields</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="36-worked-example-sessionstate">3.6 Worked Example: SessionState</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span><span class="p">,</span> <span class="n">field</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Literal</span>
+
+
+<span class="n">Phase</span> <span class="o">=</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;orient&quot;</span><span class="p">,</span> <span class="s2">&quot;scope&quot;</span><span class="p">,</span> <span class="s2">&quot;analyse&quot;</span><span class="p">,</span> <span class="s2">&quot;hypothesise&quot;</span><span class="p">,</span> <span class="s2">&quot;close&quot;</span><span class="p">]</span>
+
+
+<span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Finding</span><span class="p">:</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">confidence</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">evidence</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">tags</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+
+
+<span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">SessionState</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Tracks progress of a root-cause analysis session.&quot;&quot;&quot;</span>
+    <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">ticket_id</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">title</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">phase</span><span class="p">:</span> <span class="n">Phase</span> <span class="o">=</span> <span class="s2">&quot;orient&quot;</span>
+    <span class="n">hypotheses</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">findings</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Finding</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">started_at</span><span class="p">:</span> <span class="n">datetime</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">utcnow</span><span class="p">)</span>
+    <span class="n">closed_at</span><span class="p">:</span> <span class="n">datetime</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">notes</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">dict</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">advance_phase</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">next_phase</span><span class="p">:</span> <span class="n">Phase</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">phase</span> <span class="o">=</span> <span class="n">next_phase</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">add_hypothesis</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">h</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">h</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">hypotheses</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">hypotheses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">h</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">add_finding</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">description</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">confidence</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+                   <span class="n">evidence</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Finding</span><span class="p">:</span>
+        <span class="n">f</span> <span class="o">=</span> <span class="n">Finding</span><span class="p">(</span>
+            <span class="n">description</span><span class="o">=</span><span class="n">description</span><span class="p">,</span>
+            <span class="n">confidence</span><span class="o">=</span><span class="n">confidence</span><span class="p">,</span>
+            <span class="n">evidence</span><span class="o">=</span><span class="n">evidence</span> <span class="ow">or</span> <span class="p">[],</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">findings</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">f</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">phase</span> <span class="o">=</span> <span class="s2">&quot;close&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">closed_at</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">utcnow</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">to_dict</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s2">&quot;session_id&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">session_id</span><span class="p">,</span>
+            <span class="s2">&quot;ticket_id&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">ticket_id</span><span class="p">,</span>
+            <span class="s2">&quot;phase&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">phase</span><span class="p">,</span>
+            <span class="s2">&quot;hypotheses&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">hypotheses</span><span class="p">,</span>
+            <span class="s2">&quot;findings&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="n">f</span><span class="o">.</span><span class="n">description</span><span class="p">,</span>
+                    <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="n">f</span><span class="o">.</span><span class="n">confidence</span><span class="p">,</span>
+                    <span class="s2">&quot;evidence&quot;</span><span class="p">:</span> <span class="n">f</span><span class="o">.</span><span class="n">evidence</span><span class="p">,</span>
+                <span class="p">}</span>
+                <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">findings</span>
+            <span class="p">],</span>
+        <span class="p">}</span>
+
+
+<span class="c1"># Usage</span>
+<span class="n">state</span> <span class="o">=</span> <span class="n">SessionState</span><span class="p">(</span><span class="n">session_id</span><span class="o">=</span><span class="s2">&quot;sess-042&quot;</span><span class="p">,</span> <span class="n">ticket_id</span><span class="o">=</span><span class="mi">99999</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s2">&quot;robot stopped mid-run&quot;</span><span class="p">)</span>
+<span class="n">state</span><span class="o">.</span><span class="n">advance_phase</span><span class="p">(</span><span class="s2">&quot;scope&quot;</span><span class="p">)</span>
+<span class="n">state</span><span class="o">.</span><span class="n">add_hypothesis</span><span class="p">(</span><span class="s2">&quot;localization diverged due to featureless corridor&quot;</span><span class="p">)</span>
+<span class="n">f</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">add_finding</span><span class="p">(</span>
+    <span class="s2">&quot;covariance xx exceeded threshold at t=12.3s&quot;</span><span class="p">,</span>
+    <span class="n">confidence</span><span class="o">=</span><span class="mf">0.87</span><span class="p">,</span>
+    <span class="n">evidence</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;cov_xx=0.018 &gt; limit=0.010&quot;</span><span class="p">,</span> <span class="s2">&quot;vel dropped from 0.8 to 0.0 in 200ms&quot;</span><span class="p">],</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-4-pydantic-basemodel">PART 4 — PYDANTIC BASEMODEL</h1>
+<hr />
+<h2 id="41-why-pydantic">4.1 Why Pydantic?</h2>
+<p><code>@dataclass</code> is great for pure Python objects. Pydantic goes further:
+- <strong>Runtime validation</strong>: invalid types raise <code>ValidationError</code>, not silent corruption
+- <strong>Type coercion</strong>: <code>"42"</code> → <code>42</code>, <code>"true"</code> → <code>True</code>
+- <strong>Serialisation</strong>: <code>.model_dump()</code> → dict, <code>.model_dump_json()</code> → JSON string
+- <strong>Parsing</strong>: <code>.model_validate(raw_dict)</code> validates a dict from an API or file</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">pydantic</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseModel</span><span class="p">,</span> <span class="n">Field</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Literal</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">SearchResult</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+    <span class="n">query</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">matches</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span>
+    <span class="n">confidence</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">ge</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">le</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;0–1 match confidence&quot;</span><span class="p">)</span>
+    <span class="n">source</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;kb&quot;</span><span class="p">,</span> <span class="s2">&quot;ado&quot;</span><span class="p">,</span> <span class="s2">&quot;memory&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;kb&quot;</span>
+
+
+<span class="c1"># Pydantic coerces types and validates constraints</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">SearchResult</span><span class="p">(</span>
+    <span class="n">query</span><span class="o">=</span><span class="s2">&quot;motor stall&quot;</span><span class="p">,</span>
+    <span class="n">matches</span><span class="o">=</span><span class="p">[{</span><span class="s2">&quot;title&quot;</span><span class="p">:</span> <span class="s2">&quot;motor fault pattern&quot;</span><span class="p">,</span> <span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="mf">0.91</span><span class="p">}],</span>
+    <span class="n">confidence</span><span class="o">=</span><span class="mf">0.91</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">confidence</span><span class="p">)</span>            <span class="c1"># 0.91</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">model_dump</span><span class="p">())</span>          <span class="c1"># dict with all fields</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">model_dump_json</span><span class="p">())</span>     <span class="c1"># JSON string</span>
+
+<span class="c1"># Validation failure — clear error, not a silent bug</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">bad</span> <span class="o">=</span> <span class="n">SearchResult</span><span class="p">(</span><span class="n">query</span><span class="o">=</span><span class="s2">&quot;test&quot;</span><span class="p">,</span> <span class="n">matches</span><span class="o">=</span><span class="p">[],</span> <span class="n">confidence</span><span class="o">=</span><span class="mf">1.5</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+    <span class="c1"># confidence: Input should be less than or equal to 1</span>
+</code></pre></div>
+
+<hr />
+<h2 id="42-field-constraints-defaults-aliases">4.2 Field() — Constraints, Defaults, Aliases</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">pydantic</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseModel</span><span class="p">,</span> <span class="n">Field</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">IncidentReport</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+    <span class="n">ticket_id</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">gt</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Positive ticket identifier&quot;</span><span class="p">)</span>
+    <span class="n">title</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">min_length</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>
+    <span class="n">confidence</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">ge</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">le</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span>
+    <span class="n">tags</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">max_length</span><span class="o">=</span><span class="mi">20</span><span class="p">)</span>
+    <span class="n">summary</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">alias</span><span class="o">=</span><span class="s2">&quot;exec_summary&quot;</span><span class="p">)</span>
+
+    <span class="c1"># alias: when the source dict uses a different key name</span>
+    <span class="c1"># model_validate({&quot;exec_summary&quot;: &quot;...&quot;}) → summary = &quot;...&quot;</span>
+
+    <span class="n">model_config</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;populate_by_name&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>   <span class="c1"># allow both alias and field name</span>
+
+
+<span class="n">report</span> <span class="o">=</span> <span class="n">IncidentReport</span><span class="p">(</span>
+    <span class="n">ticket_id</span><span class="o">=</span><span class="mi">99999</span><span class="p">,</span>
+    <span class="n">title</span><span class="o">=</span><span class="s2">&quot;Robot stopped at turn&quot;</span><span class="p">,</span>
+    <span class="n">confidence</span><span class="o">=</span><span class="mf">0.75</span><span class="p">,</span>
+    <span class="n">exec_summary</span><span class="o">=</span><span class="s2">&quot;Slip event at waypoint 12&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="o">.</span><span class="n">summary</span><span class="p">)</span>  <span class="c1"># &quot;Slip event at waypoint 12&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="43-validators">4.3 Validators</h2>
+<p>Pydantic v2 uses <code>@field_validator</code> for per-field validation:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">pydantic</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseModel</span><span class="p">,</span> <span class="n">Field</span><span class="p">,</span> <span class="n">field_validator</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">KbSearchRequest</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+    <span class="n">query</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">limit</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">ge</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">le</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
+    <span class="n">min_confidence</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">ge</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">le</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+
+    <span class="nd">@field_validator</span><span class="p">(</span><span class="s2">&quot;query&quot;</span><span class="p">)</span>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">query_not_empty</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">v</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="n">v</span> <span class="o">=</span> <span class="n">v</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">v</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;query must not be empty after stripping whitespace&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">3</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;query too short (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="si">}</span><span class="s2"> chars); minimum 3&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">v</span>
+
+    <span class="nd">@field_validator</span><span class="p">(</span><span class="s2">&quot;limit&quot;</span><span class="p">)</span>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">limit_reasonable</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">v</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">v</span> <span class="o">&gt;</span> <span class="mi">50</span><span class="p">:</span>
+            <span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;limit=</span><span class="si">{</span><span class="n">v</span><span class="si">}</span><span class="s2"> is large; consider reducing for performance&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">v</span>
+</code></pre></div>
+
+<hr />
+<h2 id="44-model_validate-model_dump-nested-models">4.4 model_validate(), model_dump(), Nested Models</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">pydantic</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseModel</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Evidence</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">timestamp_s</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">data</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">RcaFinding</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+    <span class="n">root_cause</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">confidence</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">evidence</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Evidence</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">recommended_fix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+
+
+<span class="c1"># Parse from dict (e.g., loaded from a JSON file)</span>
+<span class="n">raw</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;root_cause&quot;</span><span class="p">:</span> <span class="s2">&quot;localization diverged due to reflective floor&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="mf">0.88</span><span class="p">,</span>
+    <span class="s2">&quot;evidence&quot;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="p">{</span><span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;cov_xx spike&quot;</span><span class="p">,</span> <span class="s2">&quot;timestamp_s&quot;</span><span class="p">:</span> <span class="mf">1714300012.3</span><span class="p">},</span>
+        <span class="p">{</span><span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;velocity drop to zero&quot;</span><span class="p">},</span>
+    <span class="p">],</span>
+<span class="p">}</span>
+<span class="n">finding</span> <span class="o">=</span> <span class="n">RcaFinding</span><span class="o">.</span><span class="n">model_validate</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">finding</span><span class="o">.</span><span class="n">evidence</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">timestamp_s</span><span class="p">)</span>  <span class="c1"># 1714300012.3</span>
+
+<span class="c1"># Serialize back to dict</span>
+<span class="n">d</span> <span class="o">=</span> <span class="n">finding</span><span class="o">.</span><span class="n">model_dump</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+
+<span class="c1"># Serialize to JSON</span>
+<span class="n">json_str</span> <span class="o">=</span> <span class="n">finding</span><span class="o">.</span><span class="n">model_dump_json</span><span class="p">(</span><span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+
+<span class="c1"># Auto-generate JSON schema</span>
+<span class="n">schema</span> <span class="o">=</span> <span class="n">RcaFinding</span><span class="o">.</span><span class="n">model_json_schema</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">schema</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-5-pydantic-settings-config-from-env">PART 5 — PYDANTIC SETTINGS (CONFIG FROM .env)</h1>
+<hr />
+<h2 id="51-basesettings">5.1 BaseSettings</h2>
+<p><code>pydantic-settings</code> extends Pydantic to read values from environment variables and <code>.env</code> files automatically:</p>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>pydantic-settings
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">pydantic_settings</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseSettings</span><span class="p">,</span> <span class="n">SettingsConfigDict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pydantic</span><span class="w"> </span><span class="kn">import</span> <span class="n">Field</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Settings</span><span class="p">(</span><span class="n">BaseSettings</span><span class="p">):</span>
+    <span class="c1"># Required — will raise ValidationError if not set in env or .env</span>
+    <span class="n">ado_pat</span><span class="p">:</span> <span class="nb">str</span>
+
+    <span class="c1"># Optional — have defaults</span>
+    <span class="n">slack_token</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">grafana_url</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;http://localhost:3000&quot;</span>
+    <span class="n">kb_min_confidence</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.7</span>
+    <span class="n">max_search_results</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">20</span>
+    <span class="n">debug</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="c1"># Field with alias: env var ADO_ORG maps to .ado_org</span>
+    <span class="n">ado_org</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="s2">&quot;my-org&quot;</span><span class="p">,</span> <span class="n">alias</span><span class="o">=</span><span class="s2">&quot;ADO_ORG&quot;</span><span class="p">)</span>
+
+    <span class="n">model_config</span> <span class="o">=</span> <span class="n">SettingsConfigDict</span><span class="p">(</span>
+        <span class="n">env_file</span><span class="o">=</span><span class="s2">&quot;.env&quot;</span><span class="p">,</span>
+        <span class="n">env_file_encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span>
+        <span class="n">case_sensitive</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>      <span class="c1"># ADO_PAT and ado_pat both work</span>
+        <span class="n">extra</span><span class="o">=</span><span class="s2">&quot;ignore&quot;</span><span class="p">,</span>            <span class="c1"># ignore unknown env vars</span>
+    <span class="p">)</span>
+
+
+<span class="c1"># Usage — typically at module level or in main()</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_settings</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Settings</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Singleton-style settings loader.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">Settings</span><span class="p">()</span>   <span class="c1"># raises ValidationError if ADO_PAT is missing</span>
+</code></pre></div>
+
+<hr />
+<h2 id="52-how-it-reads-values">5.2 How it reads values</h2>
+<p>Priority order (highest wins):
+1. Direct constructor argument: <code>Settings(ado_pat="override")</code>
+2. Environment variable: <code>export ADO_PAT=abc123</code>
+3. <code>.env</code> file: <code>ADO_PAT=abc123</code>
+4. Field default</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># .env file</span>
+<span class="c1"># ADO_PAT=abc123</span>
+<span class="c1"># SLACK_TOKEN=xoxb-...</span>
+<span class="c1"># KB_MIN_CONFIDENCE=0.8</span>
+<span class="c1"># DEBUG=true            ← &quot;true&quot; is coerced to True</span>
+
+<span class="n">settings</span> <span class="o">=</span> <span class="n">Settings</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">settings</span><span class="o">.</span><span class="n">ado_pat</span><span class="p">)</span>              <span class="c1"># &quot;abc123&quot;</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">settings</span><span class="o">.</span><span class="n">kb_min_confidence</span><span class="p">)</span>    <span class="c1"># 0.8 (float, not string)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">settings</span><span class="o">.</span><span class="n">debug</span><span class="p">)</span>                <span class="c1"># True (bool, not string)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="53-worked-example-settings-for-an-analysis-tool">5.3 Worked Example: Settings for an Analysis Tool</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">pydantic_settings</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseSettings</span><span class="p">,</span> <span class="n">SettingsConfigDict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pydantic</span><span class="w"> </span><span class="kn">import</span> <span class="n">Field</span><span class="p">,</span> <span class="n">field_validator</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">AnalysisSettings</span><span class="p">(</span><span class="n">BaseSettings</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Settings for the incident analysis toolkit.&quot;&quot;&quot;</span>
+
+    <span class="c1"># Auth tokens</span>
+    <span class="n">ado_pat</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="s2">&quot;Azure DevOps Personal Access Token&quot;</span><span class="p">)</span>
+    <span class="n">slack_token</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="c1"># Service URLs</span>
+    <span class="n">grafana_url</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;http://localhost:3000&quot;</span>
+    <span class="n">grafana_token</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">ado_org</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;my-org&quot;</span>
+    <span class="n">ado_project</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;my-project&quot;</span>
+
+    <span class="c1"># Search / KB settings</span>
+    <span class="n">kb_min_confidence</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">ge</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">le</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+    <span class="n">max_search_results</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">Field</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span> <span class="n">ge</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">le</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>
+
+    <span class="c1"># Paths</span>
+    <span class="n">attachments_dir</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;attachments&quot;</span><span class="p">)</span>
+    <span class="n">kb_dir</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;scripts/kb&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Behaviour</span>
+    <span class="n">dry_run</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">verbose</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="nd">@field_validator</span><span class="p">(</span><span class="s2">&quot;grafana_url&quot;</span><span class="p">,</span> <span class="s2">&quot;ado_org&quot;</span><span class="p">)</span>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">not_empty</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">v</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">v</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;must not be empty&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">v</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+    <span class="nd">@field_validator</span><span class="p">(</span><span class="s2">&quot;attachments_dir&quot;</span><span class="p">,</span> <span class="s2">&quot;kb_dir&quot;</span><span class="p">)</span>
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dir_exists_warning</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">v</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">v</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Directory </span><span class="si">{</span><span class="n">v</span><span class="si">}</span><span class="s2"> does not exist yet&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">v</span>
+
+    <span class="n">model_config</span> <span class="o">=</span> <span class="n">SettingsConfigDict</span><span class="p">(</span>
+        <span class="n">env_file</span><span class="o">=</span><span class="s2">&quot;.env&quot;</span><span class="p">,</span>
+        <span class="n">env_file_encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span>
+        <span class="n">case_sensitive</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span>
+
+
+<span class="c1"># Fail fast at startup — better than failing 40 lines into processing</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_settings</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">AnalysisSettings</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">AnalysisSettings</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Configuration error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
+
+
+<span class="c1"># In main():</span>
+<span class="c1"># settings = load_settings()</span>
+<span class="c1"># print(f&quot;KB confidence threshold: {settings.kb_min_confidence}&quot;)</span>
+<span class="c1"># print(f&quot;ADO org: {settings.ado_org}&quot;)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="54-testing-settings-preview">5.4 Testing Settings (Preview)</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">unittest.mock</span><span class="w"> </span><span class="kn">import</span> <span class="n">patch</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_settings_loads_from_env</span><span class="p">(</span><span class="n">monkeypatch</span><span class="p">):</span>
+    <span class="n">monkeypatch</span><span class="o">.</span><span class="n">setenv</span><span class="p">(</span><span class="s2">&quot;ADO_PAT&quot;</span><span class="p">,</span> <span class="s2">&quot;test-token-123&quot;</span><span class="p">)</span>
+    <span class="n">monkeypatch</span><span class="o">.</span><span class="n">setenv</span><span class="p">(</span><span class="s2">&quot;KB_MIN_CONFIDENCE&quot;</span><span class="p">,</span> <span class="s2">&quot;0.9&quot;</span><span class="p">)</span>
+
+    <span class="n">settings</span> <span class="o">=</span> <span class="n">AnalysisSettings</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="n">settings</span><span class="o">.</span><span class="n">ado_pat</span> <span class="o">==</span> <span class="s2">&quot;test-token-123&quot;</span>
+    <span class="k">assert</span> <span class="n">settings</span><span class="o">.</span><span class="n">kb_min_confidence</span> <span class="o">==</span> <span class="mf">0.9</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_settings_fails_without_ado_pat</span><span class="p">(</span><span class="n">monkeypatch</span><span class="p">):</span>
+    <span class="n">monkeypatch</span><span class="o">.</span><span class="n">delenv</span><span class="p">(</span><span class="s2">&quot;ADO_PAT&quot;</span><span class="p">,</span> <span class="n">raising</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="k">with</span> <span class="n">pytest</span><span class="o">.</span><span class="n">raises</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>   <span class="c1"># ValidationError</span>
+        <span class="n">AnalysisSettings</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-6-mypy-pyright-basics">PART 6 — mypy / pyright BASICS</h1>
+<hr />
+<h2 id="61-running-mypy">6.1 Running mypy</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install</span>
+pip<span class="w"> </span>install<span class="w"> </span>mypy
+
+<span class="c1"># Check a single file</span>
+mypy<span class="w"> </span>scripts/kb_search.py
+
+<span class="c1"># Strict mode — catches more (recommended for new files)</span>
+mypy<span class="w"> </span>--strict<span class="w"> </span>scripts/kb_search.py
+
+<span class="c1"># Check all scripts</span>
+mypy<span class="w"> </span>scripts/<span class="w"> </span>--ignore-missing-imports
+
+<span class="c1"># With config file (mypy.ini or pyproject.toml)</span>
+mypy<span class="w"> </span>.
+</code></pre></div>
+
+<p>Example output:</p>
+<div class="highlight"><pre><span></span><code>scripts/kb_search.py:42: error: Argument 1 to &quot;fetch_ticket&quot; has incompatible
+    type &quot;str&quot;; expected &quot;TicketId&quot;  [arg-type]
+scripts/kb_search.py:67: error: Item &quot;None&quot; of &quot;str | None&quot; has no attribute
+    &quot;split&quot;  [union-attr]
+</code></pre></div>
+
+<hr />
+<h2 id="62-common-errors-and-how-to-fix-them">6.2 Common Errors and How to Fix Them</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Error: Item &quot;None&quot; of &quot;str | None&quot; has no attribute &quot;split&quot;</span>
+<span class="c1"># Fix: guard against None before using the value</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="k">return</span> <span class="n">value</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)</span>    <span class="c1"># now mypy knows value is str</span>
+
+
+<span class="c1"># Error: Argument 1 to &quot;int&quot; has incompatible type &quot;str | int&quot;</span>
+<span class="c1"># Fix: cast or check type first</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">cast</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">ensure_int</span><span class="p">(</span><span class="n">v</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">v</span>
+    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+
+
+<span class="c1"># Error: Function is missing a return type annotation</span>
+<span class="c1"># Fix: add -&gt; ReturnType</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">compute</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">*</span> <span class="mf">2.0</span>
+
+
+<span class="c1"># Error: Need type annotation for ... (hint: use ...)</span>
+<span class="c1"># Fix: annotate the variable</span>
+<span class="n">results</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="n">lookup</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="63-cast-and-type-ignore">6.3 cast() and type: ignore</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">cast</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+<span class="c1"># cast(): tell mypy &quot;trust me, this is X&quot;</span>
+<span class="c1"># Use sparingly — it&#39;s a lie that can hide real bugs</span>
+<span class="n">raw</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="s1">&#39;{&quot;id&quot;: 1}&#39;</span><span class="p">)</span>
+<span class="c1"># raw has type dict[str, Any]</span>
+<span class="n">ticket_id</span> <span class="o">=</span> <span class="n">cast</span><span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">])</span>   <span class="c1"># mypy now treats ticket_id as int</span>
+
+
+<span class="c1"># type: ignore — suppress a specific error</span>
+<span class="c1"># Include the error code so it&#39;s clear what you&#39;re ignoring</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">some_third_party_function</span><span class="p">()</span>  <span class="c1"># type: ignore[no-any-return]</span>
+
+
+<span class="c1"># Better: use a proper annotation on the third-party call</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
+<span class="n">result2</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="n">some_third_party_function</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h2 id="64-mypyini-pyprojecttoml-configuration">6.4 mypy.ini / pyproject.toml Configuration</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># mypy.ini</span>
+<span class="k">[mypy]</span>
+<span class="na">python_version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">3.11</span>
+<span class="na">warn_return_any</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">True</span>
+<span class="na">warn_unused_ignores</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">True</span>
+<span class="na">disallow_untyped_defs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">True</span>
+<span class="na">ignore_missing_imports</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">True</span>
+
+<span class="k">[mypy-boto3.*]</span>
+<span class="na">ignore_missing_imports</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">True</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1"># pyproject.toml</span>
+<span class="k">[tool.mypy]</span>
+<span class="n">python_version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;3.11&quot;</span>
+<span class="n">warn_return_any</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<span class="n">warn_unused_ignores</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<span class="n">disallow_untyped_defs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<span class="n">ignore_missing_imports</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+</code></pre></div>
+
+<hr />
+<h2 id="65-pre-commit-integration">6.5 Pre-commit Integration</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># .pre-commit-config.yaml</span>
+<span class="nt">repos</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">repo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/pre-commit/mirrors-mypy</span>
+<span class="w">    </span><span class="nt">rev</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1.8.0</span>
+<span class="w">    </span><span class="nt">hooks</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mypy</span>
+<span class="w">        </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">--strict</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">--ignore-missing-imports</span><span class="p p-Indicator">]</span>
+<span class="w">        </span><span class="nt">additional_dependencies</span><span class="p">:</span>
+<span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pydantic</span>
+<span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pydantic-settings</span>
+</code></pre></div>
+
+<hr />
+<h2 id="summary-what-to-remember">Summary — What to Remember</h2>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Optional[X]</code> / <code>X \| None</code></td>
+<td>Use whenever a function can return None or a parameter is optional</td>
+</tr>
+<tr>
+<td><code>TypedDict</code></td>
+<td>Use instead of <code>dict[str, Any]</code> when you know the exact keys</td>
+</tr>
+<tr>
+<td><code>Protocol</code></td>
+<td>Define interfaces without inheritance; great for testable dependency injection</td>
+</tr>
+<tr>
+<td><code>NewType</code></td>
+<td>Create distinct ID types (<code>TicketId</code>, <code>RobotId</code>) to prevent mix-ups</td>
+</tr>
+<tr>
+<td><code>@dataclass</code></td>
+<td>Auto-generates <code>__init__</code>/<code>__repr__</code>/<code>__eq__</code>; use <code>field(default_factory=...)</code> for mutable defaults</td>
+</tr>
+<tr>
+<td><code>frozen=True</code></td>
+<td>Makes dataclass immutable and hashable; use for dict keys and set members</td>
+</tr>
+<tr>
+<td><code>BaseModel</code> (Pydantic)</td>
+<td>Runtime validation + coercion + serialisation; use for API responses and parsed data</td>
+</tr>
+<tr>
+<td><code>BaseSettings</code></td>
+<td>Reads from env/<code>.env</code>, coerces types, fails fast at startup if required vars missing</td>
+</tr>
+<tr>
+<td><code>Literal[...]</code></td>
+<td>Restricts a string param to specific allowed values</td>
+</tr>
+<tr>
+<td><code>cast()</code> / <code># type: ignore</code></td>
+<td>Use sparingly; always include the error code in ignore comments</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="quick-reference-card">QUICK REFERENCE CARD</h1>
+<div class="highlight"><pre><span></span><code>┌──────────────────────────────── TYPE ANNOTATIONS CHEAT SHEET ───────────────────────────────┐
+│                                                                                              │
+│  BASIC:         x: int   y: str   z: float   b: bool   n: None                             │
+│  COLLECTIONS:   list[int]   dict[str, float]   tuple[int, str]   set[str]                   │
+│  OPTIONAL:      str | None    (or Optional[str] for 3.8)                                    │
+│  UNION:         int | str     (or Union[int, str] for 3.8)                                  │
+│                                                                                              │
+│  FUNCTIONS:     def f(x: int, y: str = &quot;a&quot;) -&gt; float: ...                                  │
+│                 def g() -&gt; None: ...                                                         │
+│                                                                                              │
+│  ADVANCED:      TypedDict  — typed dict with known keys                                     │
+│                 Protocol   — structural interface (duck typing)                              │
+│                 NewType    — distinct type alias (zero runtime cost)                         │
+│                 Literal    — value-restricted string/int                                     │
+│                 Final      — constant, cannot be reassigned                                  │
+│                 Callable[[A,B], R]  — function type                                          │
+│                                                                                              │
+│  DATACLASS:     @dataclass → auto __init__/__repr__/__eq__                                  │
+│                 field(default_factory=list)  — mutable default                               │
+│                 frozen=True  → immutable, hashable                                           │
+│                 __post_init__  → computed fields after init                                  │
+│                                                                                              │
+│  PYDANTIC:      BaseModel → validated, serialisable model                                   │
+│                 Field(ge=0, le=1)  → constraints                                             │
+│                 .model_validate(dict) → parse from dict                                     │
+│                 .model_dump()  → serialize to dict                                           │
+│                 @field_validator → custom validation logic                                   │
+│                                                                                              │
+│  SETTINGS:      BaseSettings → reads .env + env vars automatically                          │
+│                 SettingsConfigDict(env_file=&quot;.env&quot;)  → config                               │
+│                 Settings() raises ValidationError if required field missing                  │
+│                                                                                              │
+│  mypy:          mypy --strict file.py                                                        │
+│                 cast(Type, value)  — assert type (use sparingly)                             │
+│                 # type: ignore[error-code]  — suppress specific error                        │
+│                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

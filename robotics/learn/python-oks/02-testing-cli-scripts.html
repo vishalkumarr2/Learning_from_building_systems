@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>02 — Testing CLI Scripts with pytest - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Back to Python / OKS</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="02-testing-cli-scripts-with-pytest">02 — Testing CLI Scripts with pytest</h1>
+<h3 id="ill-add-tests-later-is-how-a-buggy-scorer-silently-mis-routes-incidents-for-months">&ldquo;I&rsquo;ll add tests later&rdquo; is how a buggy scorer silently mis-routes incidents for months</h3>
+<p><strong>Prerequisite:</strong> Python functions, basic argparse scripts, <code>pip install pytest pytest-mock</code>
+<strong>Unlocks:</strong> Reliable refactoring, confident changes to shared scripts, monkeypatching env vars and HTTP calls</p>
+<hr />
+<h2 id="why-should-i-care-context">Why Should I Care? (Context)</h2>
+<p>Analysis scripts that run against real data and take action — posting comments, tagging squads, updating knowledge bases — have bugs with delayed consequences. A scoring function that ranks the wrong pattern as most similar will silently produce misleading diagnoses. You won&rsquo;t notice until someone asks why the same root cause keeps being misidentified.</p>
+<p>pytest makes testing cheap enough that &ldquo;I&rsquo;ll test this later&rdquo; stops being an excuse:
+- A fixture that creates a temp <code>.env</code> file takes 5 lines
+- Monkeypatching an HTTP call takes 1 line
+- Running your test suite takes 3 seconds</p>
+<p>The investment: 20 minutes writing tests. The payoff: never wondering if your script is quietly broken.</p>
+<hr />
+<h1 id="part-1-pytest-basics">PART 1 — PYTEST BASICS</h1>
+<hr />
+<h2 id="11-test-discovery">1.1 Test Discovery</h2>
+<p>pytest finds tests automatically based on naming conventions:</p>
+<div class="highlight"><pre><span></span><code>tests/
+    conftest.py           # shared fixtures — auto-discovered by pytest
+    test_kb_search.py     # any file matching test_*.py or *_test.py
+    unit/
+        test_scorer.py
+    integration/
+        test_session.py
+</code></pre></div>
+
+<p>Function naming rules:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># pytest discovers these</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">test_scorer_returns_float</span><span class="p">():</span>
+    <span class="o">...</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_scorer_handles_empty_query</span><span class="p">():</span>
+    <span class="o">...</span>
+
+<span class="c1"># pytest ignores these (wrong prefix)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">scorer_test</span><span class="p">():</span>
+    <span class="o">...</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">check_scorer</span><span class="p">():</span>
+    <span class="o">...</span>
+</code></pre></div>
+
+<hr />
+<h2 id="12-running-pytest">1.2 Running pytest</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Run all tests</span>
+pytest
+
+<span class="c1"># Verbose output (shows each test name)</span>
+pytest<span class="w"> </span>-v
+
+<span class="c1"># Run a specific file</span>
+pytest<span class="w"> </span>tests/unit/test_scorer.py
+
+<span class="c1"># Run a specific test by name substring</span>
+pytest<span class="w"> </span>-k<span class="w"> </span><span class="s2">&quot;test_score&quot;</span>
+pytest<span class="w"> </span>-k<span class="w"> </span><span class="s2">&quot;test_score and not empty&quot;</span>
+
+<span class="c1"># Stop after first failure</span>
+pytest<span class="w"> </span>-x
+
+<span class="c1"># Show local variable values on failure</span>
+pytest<span class="w"> </span>-l
+
+<span class="c1"># Run with coverage</span>
+pytest<span class="w"> </span>--cov<span class="o">=</span>scripts<span class="w"> </span>--cov-report<span class="o">=</span>term-missing
+
+<span class="c1"># Run and show slowest 5 tests</span>
+pytest<span class="w"> </span>--durations<span class="o">=</span><span class="m">5</span>
+</code></pre></div>
+
+<hr />
+<h2 id="13-writing-assertions">1.3 Writing Assertions</h2>
+<p>pytest uses plain <code>assert</code> — it intercepts assertion failures and shows detailed diffs:</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_score_high_match</span><span class="p">():</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">compute_score</span><span class="p">(</span><span class="s2">&quot;motor stall&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;motor stall pattern&quot;</span><span class="p">])</span>
+    <span class="k">assert</span> <span class="n">result</span> <span class="o">&gt;</span> <span class="mf">0.8</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_parse_returns_list</span><span class="p">():</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="n">parse_log_lines</span><span class="p">(</span><span class="s2">&quot;1.0|ERROR|fault</span><span class="se">\n</span><span class="s2">2.0|INFO|ok</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">lines</span> <span class="o">==</span> <span class="p">[(</span><span class="mf">1.0</span><span class="p">,</span> <span class="s2">&quot;ERROR&quot;</span><span class="p">,</span> <span class="s2">&quot;fault&quot;</span><span class="p">),</span> <span class="p">(</span><span class="mf">2.0</span><span class="p">,</span> <span class="s2">&quot;INFO&quot;</span><span class="p">,</span> <span class="s2">&quot;ok&quot;</span><span class="p">)]</span>
+    <span class="c1"># On failure, pytest shows:</span>
+    <span class="c1"># AssertionError: assert [(1.0, &#39;WARN&#39;, ...)] == [(1.0, &#39;ERROR&#39;, ...)]</span>
+    <span class="c1"># At index 0 diff: (1.0, &#39;WARN&#39;, &#39;fault&#39;) != (1.0, &#39;ERROR&#39;, &#39;fault&#39;)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_score_range</span><span class="p">():</span>
+    <span class="n">score</span> <span class="o">=</span> <span class="n">compute_score</span><span class="p">(</span><span class="s2">&quot;test&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;test&quot;</span><span class="p">])</span>
+    <span class="k">assert</span> <span class="mf">0.0</span> <span class="o">&lt;=</span> <span class="n">score</span> <span class="o">&lt;=</span> <span class="mf">1.0</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Score </span><span class="si">{</span><span class="n">score</span><span class="si">}</span><span class="s2"> out of range [0, 1]&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="14-pytestraises-testing-exceptions">1.4 pytest.raises: Testing Exceptions</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_empty_query_raises</span><span class="p">():</span>
+    <span class="k">with</span> <span class="n">pytest</span><span class="o">.</span><span class="n">raises</span><span class="p">(</span><span class="ne">ValueError</span><span class="p">):</span>
+        <span class="n">compute_score</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;pattern&quot;</span><span class="p">])</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_empty_query_message</span><span class="p">():</span>
+    <span class="k">with</span> <span class="n">pytest</span><span class="o">.</span><span class="n">raises</span><span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span> <span class="n">match</span><span class="o">=</span><span class="s2">&quot;query must not be empty&quot;</span><span class="p">):</span>
+        <span class="n">compute_score</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;pattern&quot;</span><span class="p">])</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_invalid_confidence_raises</span><span class="p">():</span>
+    <span class="k">with</span> <span class="n">pytest</span><span class="o">.</span><span class="n">raises</span><span class="p">(</span><span class="ne">Exception</span><span class="p">)</span> <span class="k">as</span> <span class="n">exc_info</span><span class="p">:</span>
+        <span class="n">validate_confidence</span><span class="p">(</span><span class="mf">1.5</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="s2">&quot;1.0&quot;</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">exc_info</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>   <span class="c1"># check the message</span>
+</code></pre></div>
+
+<hr />
+<h2 id="15-parametrize-multiple-inputs-in-one-test">1.5 Parametrize: Multiple Inputs in One Test</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">parametrize</span><span class="p">(</span><span class="s2">&quot;query,candidates,expected_min_score&quot;</span><span class="p">,</span> <span class="p">[</span>
+    <span class="p">(</span><span class="s2">&quot;motor stall&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;motor stall pattern&quot;</span><span class="p">],</span> <span class="mf">0.8</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;slip event&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;wheel slip on wet surface&quot;</span><span class="p">],</span> <span class="mf">0.5</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;completely unrelated&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;motor stall pattern&quot;</span><span class="p">],</span> <span class="mf">0.0</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;motor stall pattern&quot;</span><span class="p">],</span> <span class="mf">0.0</span><span class="p">),</span>
+<span class="p">])</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">test_score_ranges</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">candidates</span><span class="p">,</span> <span class="n">expected_min_score</span><span class="p">):</span>
+    <span class="n">score</span> <span class="o">=</span> <span class="n">compute_score</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">candidates</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">score</span> <span class="o">&gt;=</span> <span class="n">expected_min_score</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">parametrize</span><span class="p">(</span><span class="s2">&quot;level,expected_count&quot;</span><span class="p">,</span> <span class="p">[</span>
+    <span class="p">(</span><span class="s2">&quot;ERROR&quot;</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;INFO&quot;</span><span class="p">,</span> <span class="mi">5</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;WARN&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;DEBUG&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+<span class="p">])</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">test_filter_by_level</span><span class="p">(</span><span class="n">level</span><span class="p">,</span> <span class="n">expected_count</span><span class="p">,</span> <span class="n">sample_log_lines</span><span class="p">):</span>
+    <span class="n">filtered</span> <span class="o">=</span> <span class="n">filter_by_level</span><span class="p">(</span><span class="n">sample_log_lines</span><span class="p">,</span> <span class="n">level</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">filtered</span><span class="p">)</span> <span class="o">==</span> <span class="n">expected_count</span>
+</code></pre></div>
+
+<p>Each parameter combination runs as a separate test case — you see them individually in <code>pytest -v</code> output.</p>
+<hr />
+<h2 id="16-skip-and-xfail">1.6 Skip and XFail</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">skip</span><span class="p">(</span><span class="n">reason</span><span class="o">=</span><span class="s2">&quot;ADO API not available in CI&quot;</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">test_fetch_real_ticket</span><span class="p">():</span>
+    <span class="o">...</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">skipif</span><span class="p">(</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">platform</span> <span class="o">==</span> <span class="s2">&quot;win32&quot;</span><span class="p">,</span>
+    <span class="n">reason</span><span class="o">=</span><span class="s2">&quot;relies on /tmp — not portable to Windows&quot;</span>
+<span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">test_temp_file_handling</span><span class="p">():</span>
+    <span class="o">...</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">xfail</span><span class="p">(</span><span class="n">reason</span><span class="o">=</span><span class="s2">&quot;known bug in score normalisation, tracked in backlog&quot;</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">test_score_with_unicode</span><span class="p">():</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">compute_score</span><span class="p">(</span><span class="s2">&quot;résumé&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;resume pattern&quot;</span><span class="p">])</span>
+    <span class="k">assert</span> <span class="n">result</span> <span class="o">&gt;</span> <span class="mf">0.5</span>
+</code></pre></div>
+
+<p><code>xfail</code> (expected failure) is different from <code>skip</code>: the test still runs. If it passes, it&rsquo;s marked <code>XPASS</code> — a signal that the bug may be fixed.</p>
+<hr />
+<h1 id="part-2-fixtures">PART 2 — FIXTURES</h1>
+<hr />
+<h2 id="21-pytestfixture-basics">2.1 @pytest.fixture Basics</h2>
+<p>A fixture is a function that provides a value (or setup/teardown) to tests that declare it as a parameter:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sample_log_lines</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A small representative set of log lines for testing.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="p">[</span>
+        <span class="p">(</span><span class="mf">1714300000.0</span><span class="p">,</span> <span class="s2">&quot;INFO&quot;</span><span class="p">,</span> <span class="s2">&quot;session started&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">1714300005.0</span><span class="p">,</span> <span class="s2">&quot;WARN&quot;</span><span class="p">,</span> <span class="s2">&quot;velocity below threshold&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">1714300010.0</span><span class="p">,</span> <span class="s2">&quot;ERROR&quot;</span><span class="p">,</span> <span class="s2">&quot;localization failed&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">1714300012.0</span><span class="p">,</span> <span class="s2">&quot;ERROR&quot;</span><span class="p">,</span> <span class="s2">&quot;emergency stop triggered&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">1714300015.0</span><span class="p">,</span> <span class="s2">&quot;INFO&quot;</span><span class="p">,</span> <span class="s2">&quot;session closed&quot;</span><span class="p">),</span>
+    <span class="p">]</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">empty_log</span><span class="p">():</span>
+    <span class="k">return</span> <span class="p">[]</span>
+
+
+<span class="c1"># Any test can request these fixtures by name</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">test_filter_errors</span><span class="p">(</span><span class="n">sample_log_lines</span><span class="p">):</span>
+    <span class="n">errors</span> <span class="o">=</span> <span class="p">[</span><span class="n">line</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">sample_log_lines</span> <span class="k">if</span> <span class="n">line</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;ERROR&quot;</span><span class="p">]</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">errors</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_empty_log_returns_empty</span><span class="p">(</span><span class="n">empty_log</span><span class="p">):</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">filter_by_level</span><span class="p">(</span><span class="n">empty_log</span><span class="p">,</span> <span class="s2">&quot;ERROR&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">result</span> <span class="o">==</span> <span class="p">[]</span>
+</code></pre></div>
+
+<hr />
+<h2 id="22-fixture-scope">2.2 Fixture Scope</h2>
+<div class="highlight"><pre><span></span><code><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">&quot;function&quot;</span><span class="p">)</span>   <span class="c1"># default: new instance per test</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">db_connection</span><span class="p">():</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="n">create_test_db</span><span class="p">()</span>
+    <span class="k">yield</span> <span class="n">conn</span>
+    <span class="n">conn</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">&quot;module&quot;</span><span class="p">)</span>     <span class="c1"># once per test file</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">loaded_kb</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Loading the KB is slow; reuse across tests in the file.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">load_knowledge_base</span><span class="p">(</span><span class="s2">&quot;tests/fixtures/kb_sample.json&quot;</span><span class="p">)</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">&quot;session&quot;</span><span class="p">)</span>    <span class="c1"># once per entire test run</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">settings</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Settings object shared across all tests.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;ADO_PAT&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;test-token&quot;</span>
+    <span class="k">return</span> <span class="n">load_settings</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h2 id="23-yield-fixtures-setup-and-teardown">2.3 Yield Fixtures: Setup and Teardown</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">temp_session_file</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a session JSON file that tests can read/modify.&quot;&quot;&quot;</span>
+    <span class="n">session_data</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;session_id&quot;</span><span class="p">:</span> <span class="s2">&quot;test-001&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;ticket_id&quot;</span><span class="p">:</span> <span class="mi">99999</span><span class="p">,</span>
+        <span class="s2">&quot;phase&quot;</span><span class="p">:</span> <span class="s2">&quot;orient&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;hypotheses&quot;</span><span class="p">:</span> <span class="p">[],</span>
+    <span class="p">}</span>
+    <span class="n">session_file</span> <span class="o">=</span> <span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">&quot;session.json&quot;</span>
+    <span class="n">session_file</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">session_data</span><span class="p">))</span>
+
+    <span class="k">yield</span> <span class="n">session_file</span>   <span class="c1"># tests receive this path</span>
+
+    <span class="c1"># Teardown: nothing needed here — tmp_path is auto-cleaned</span>
+    <span class="c1"># But you could close DB connections, delete external resources, etc.</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">running_server</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Start a mock server, yield its URL, stop it after the test.&quot;&quot;&quot;</span>
+    <span class="n">server</span> <span class="o">=</span> <span class="n">MockServer</span><span class="p">()</span>
+    <span class="n">server</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+    <span class="k">yield</span> <span class="n">server</span><span class="o">.</span><span class="n">url</span>
+    <span class="n">server</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>   <span class="c1"># always runs, even if test fails</span>
+</code></pre></div>
+
+<hr />
+<h2 id="24-fixtures-using-other-fixtures">2.4 Fixtures Using Other Fixtures</h2>
+<div class="highlight"><pre><span></span><code><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">base_settings</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A minimal .env file for testing.&quot;&quot;&quot;</span>
+    <span class="n">env_file</span> <span class="o">=</span> <span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">&quot;.env&quot;</span>
+    <span class="n">env_file</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="s2">&quot;ADO_PAT=test-token-123</span><span class="se">\n</span><span class="s2">KB_MIN_CONFIDENCE=0.8</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">env_file</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">settings_obj</span><span class="p">(</span><span class="n">base_settings</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Load Settings from the test .env file.&quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">scripts.settings</span><span class="w"> </span><span class="kn">import</span> <span class="n">Settings</span>
+    <span class="k">return</span> <span class="n">Settings</span><span class="p">(</span><span class="n">_env_file</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">base_settings</span><span class="p">))</span>
+
+
+<span class="c1"># settings_obj automatically gets base_settings</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">test_confidence_loaded</span><span class="p">(</span><span class="n">settings_obj</span><span class="p">):</span>
+    <span class="k">assert</span> <span class="n">settings_obj</span><span class="o">.</span><span class="n">kb_min_confidence</span> <span class="o">==</span> <span class="mf">0.8</span>
+</code></pre></div>
+
+<hr />
+<h2 id="25-conftestpy-shared-fixtures">2.5 conftest.py: Shared Fixtures</h2>
+<p>pytest auto-imports <code>conftest.py</code> from the test directory and all parent directories. Put shared fixtures there:</p>
+<div class="highlight"><pre><span></span><code>tests/
+    conftest.py           ← fixtures available to ALL tests
+    unit/
+        conftest.py       ← fixtures available to unit tests only
+        test_scorer.py
+    integration/
+        conftest.py       ← fixtures available to integration tests only
+        test_session.py
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1"># tests/conftest.py</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">&quot;session&quot;</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">project_root</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">parent</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sample_incident</span><span class="p">():</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;ticket_id&quot;</span><span class="p">:</span> <span class="mi">99999</span><span class="p">,</span>
+        <span class="s2">&quot;title&quot;</span><span class="p">:</span> <span class="s2">&quot;Robot stopped mid-run&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;error_code&quot;</span><span class="p">:</span> <span class="s2">&quot;NAV_ERR_001&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;duration_s&quot;</span><span class="p">:</span> <span class="mf">45.2</span><span class="p">,</span>
+    <span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-3-tmp_path-and-file-based-tests">PART 3 — tmp_path AND FILE-BASED TESTS</h1>
+<hr />
+<h2 id="31-tmp_path-built-in-fixture">3.1 tmp_path Built-in Fixture</h2>
+<p><code>tmp_path</code> is a <code>pathlib.Path</code> pointing to a unique temporary directory managed by pytest. It&rsquo;s cleaned up after each test.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_save_and_load_session</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">):</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">scripts.rca_session</span><span class="w"> </span><span class="kn">import</span> <span class="n">save_session</span><span class="p">,</span> <span class="n">load_session</span><span class="p">,</span> <span class="n">SessionState</span>
+
+    <span class="n">state</span> <span class="o">=</span> <span class="n">SessionState</span><span class="p">(</span>
+        <span class="n">session_id</span><span class="o">=</span><span class="s2">&quot;test-001&quot;</span><span class="p">,</span>
+        <span class="n">ticket_id</span><span class="o">=</span><span class="mi">99999</span><span class="p">,</span>
+        <span class="n">title</span><span class="o">=</span><span class="s2">&quot;test incident&quot;</span><span class="p">,</span>
+        <span class="n">phase</span><span class="o">=</span><span class="s2">&quot;analyse&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">session_file</span> <span class="o">=</span> <span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">&quot;session.json&quot;</span>
+    <span class="n">save_session</span><span class="p">(</span><span class="n">session_file</span><span class="p">,</span> <span class="n">state</span><span class="p">)</span>
+
+    <span class="c1"># Verify the file was created</span>
+    <span class="k">assert</span> <span class="n">session_file</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span>
+
+    <span class="c1"># Verify the file content</span>
+    <span class="n">loaded</span> <span class="o">=</span> <span class="n">load_session</span><span class="p">(</span><span class="n">session_file</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">loaded</span><span class="o">.</span><span class="n">session_id</span> <span class="o">==</span> <span class="s2">&quot;test-001&quot;</span>
+    <span class="k">assert</span> <span class="n">loaded</span><span class="o">.</span><span class="n">phase</span> <span class="o">==</span> <span class="s2">&quot;analyse&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_json_output_format</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">):</span>
+    <span class="n">output_file</span> <span class="o">=</span> <span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">&quot;results.json&quot;</span>
+    <span class="n">write_results</span><span class="p">(</span><span class="n">output_file</span><span class="p">,</span> <span class="p">[{</span><span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="mf">0.9</span><span class="p">,</span> <span class="s2">&quot;match&quot;</span><span class="p">:</span> <span class="s2">&quot;pattern A&quot;</span><span class="p">}])</span>
+
+    <span class="n">data</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">output_file</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
+    <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="nb">list</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">data</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;score&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mf">0.9</span>
+</code></pre></div>
+
+<hr />
+<h2 id="32-testing-scripts-that-write-files">3.2 Testing Scripts That Write Files</h2>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_csv_export</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">):</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
+
+    <span class="n">output_csv</span> <span class="o">=</span> <span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">&quot;export.csv&quot;</span>
+    <span class="n">export_findings_to_csv</span><span class="p">(</span>
+        <span class="n">findings</span><span class="o">=</span><span class="p">[</span>
+            <span class="p">{</span><span class="s2">&quot;root_cause&quot;</span><span class="p">:</span> <span class="s2">&quot;slip&quot;</span><span class="p">,</span> <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="mf">0.9</span><span class="p">},</span>
+            <span class="p">{</span><span class="s2">&quot;root_cause&quot;</span><span class="p">:</span> <span class="s2">&quot;localization&quot;</span><span class="p">,</span> <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="mf">0.7</span><span class="p">},</span>
+        <span class="p">],</span>
+        <span class="n">output_path</span><span class="o">=</span><span class="n">output_csv</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="k">with</span> <span class="n">output_csv</span><span class="o">.</span><span class="n">open</span><span class="p">()</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">reader</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="n">rows</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">reader</span><span class="p">)</span>
+
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span>
+    <span class="k">assert</span> <span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;confidence&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;0.9&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_creates_output_directory</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">):</span>
+    <span class="n">nested</span> <span class="o">=</span> <span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">&quot;deep&quot;</span> <span class="o">/</span> <span class="s2">&quot;nested&quot;</span> <span class="o">/</span> <span class="s2">&quot;output.txt&quot;</span>
+    <span class="n">write_output</span><span class="p">(</span><span class="n">nested</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">)</span>   <span class="c1"># function should create parent dirs</span>
+
+    <span class="k">assert</span> <span class="n">nested</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="n">nested</span><span class="o">.</span><span class="n">read_text</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;content&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="33-tmp_path_factory-session-scoped-temp-dirs">3.3 tmp_path_factory: Session-Scoped Temp Dirs</h2>
+<p>When a fixture needs a temp dir shared across the whole test session (not per-test):</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span><span class="p">(</span><span class="n">scope</span><span class="o">=</span><span class="s2">&quot;session&quot;</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">shared_temp_dir</span><span class="p">(</span><span class="n">tmp_path_factory</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A temp dir that persists for the entire test session.&quot;&quot;&quot;</span>
+    <span class="n">tmp_dir</span> <span class="o">=</span> <span class="n">tmp_path_factory</span><span class="o">.</span><span class="n">mktemp</span><span class="p">(</span><span class="s2">&quot;shared&quot;</span><span class="p">)</span>
+    <span class="c1"># Set up expensive shared resources here</span>
+    <span class="n">kb_file</span> <span class="o">=</span> <span class="n">tmp_dir</span> <span class="o">/</span> <span class="s2">&quot;kb.json&quot;</span>
+    <span class="n">kb_file</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="s1">&#39;{&quot;patterns&quot;: []}&#39;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">tmp_dir</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-4-monkeypatch-env-vars-and-functions">PART 4 — MONKEYPATCH: ENV VARS AND FUNCTIONS</h1>
+<hr />
+<h2 id="41-environment-variables">4.1 Environment Variables</h2>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_loads_ado_pat</span><span class="p">(</span><span class="n">monkeypatch</span><span class="p">):</span>
+    <span class="n">monkeypatch</span><span class="o">.</span><span class="n">setenv</span><span class="p">(</span><span class="s2">&quot;ADO_PAT&quot;</span><span class="p">,</span> <span class="s2">&quot;fake-token-for-test&quot;</span><span class="p">)</span>
+    <span class="n">monkeypatch</span><span class="o">.</span><span class="n">setenv</span><span class="p">(</span><span class="s2">&quot;KB_MIN_CONFIDENCE&quot;</span><span class="p">,</span> <span class="s2">&quot;0.9&quot;</span><span class="p">)</span>
+
+    <span class="n">settings</span> <span class="o">=</span> <span class="n">load_settings</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="n">settings</span><span class="o">.</span><span class="n">ado_pat</span> <span class="o">==</span> <span class="s2">&quot;fake-token-for-test&quot;</span>
+    <span class="k">assert</span> <span class="n">settings</span><span class="o">.</span><span class="n">kb_min_confidence</span> <span class="o">==</span> <span class="mf">0.9</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_fails_without_required_env</span><span class="p">(</span><span class="n">monkeypatch</span><span class="p">):</span>
+    <span class="n">monkeypatch</span><span class="o">.</span><span class="n">delenv</span><span class="p">(</span><span class="s2">&quot;ADO_PAT&quot;</span><span class="p">,</span> <span class="n">raising</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>   <span class="c1"># remove if present</span>
+
+    <span class="k">with</span> <span class="n">pytest</span><span class="o">.</span><span class="n">raises</span><span class="p">(</span><span class="ne">SystemExit</span><span class="p">):</span>   <span class="c1"># load_settings() calls sys.exit on failure</span>
+        <span class="n">load_settings</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_default_used_when_optional_absent</span><span class="p">(</span><span class="n">monkeypatch</span><span class="p">):</span>
+    <span class="n">monkeypatch</span><span class="o">.</span><span class="n">setenv</span><span class="p">(</span><span class="s2">&quot;ADO_PAT&quot;</span><span class="p">,</span> <span class="s2">&quot;fake-token&quot;</span><span class="p">)</span>
+    <span class="n">monkeypatch</span><span class="o">.</span><span class="n">delenv</span><span class="p">(</span><span class="s2">&quot;KB_MIN_CONFIDENCE&quot;</span><span class="p">,</span> <span class="n">raising</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="n">settings</span> <span class="o">=</span> <span class="n">load_settings</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="n">settings</span><span class="o">.</span><span class="n">kb_min_confidence</span> <span class="o">==</span> <span class="mf">0.7</span>   <span class="c1"># the default value</span>
+</code></pre></div>
+
+<p><strong>Key insight:</strong> monkeypatch changes are automatically reverted after each test. You don&rsquo;t need cleanup code — the fixture handles it.</p>
+<hr />
+<h2 id="42-replacing-functions">4.2 Replacing Functions</h2>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_search_uses_correct_query</span><span class="p">(</span><span class="n">monkeypatch</span><span class="p">):</span>
+    <span class="n">calls</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">fake_search</span><span class="p">(</span><span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">limit</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+        <span class="n">calls</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;query&quot;</span><span class="p">:</span> <span class="n">query</span><span class="p">,</span> <span class="s2">&quot;limit&quot;</span><span class="p">:</span> <span class="n">limit</span><span class="p">})</span>
+        <span class="k">return</span> <span class="p">[{</span><span class="s2">&quot;match&quot;</span><span class="p">:</span> <span class="s2">&quot;pattern A&quot;</span><span class="p">,</span> <span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="mf">0.9</span><span class="p">}]</span>
+
+    <span class="n">monkeypatch</span><span class="o">.</span><span class="n">setattr</span><span class="p">(</span><span class="s2">&quot;scripts.kb_search.run_query&quot;</span><span class="p">,</span> <span class="n">fake_search</span><span class="p">)</span>
+
+    <span class="n">results</span> <span class="o">=</span> <span class="n">search_and_format</span><span class="p">(</span><span class="s2">&quot;motor stall&quot;</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">calls</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span>
+    <span class="k">assert</span> <span class="n">calls</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;query&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;motor stall&quot;</span>
+    <span class="k">assert</span> <span class="n">calls</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;limit&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">5</span>
+    <span class="k">assert</span> <span class="n">results</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;match&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;pattern A&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="43-changing-working-directory">4.3 Changing Working Directory</h2>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_script_finds_env_file</span><span class="p">(</span><span class="n">monkeypatch</span><span class="p">,</span> <span class="n">tmp_path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Script reads .env from the current working directory.&quot;&quot;&quot;</span>
+    <span class="n">env_file</span> <span class="o">=</span> <span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">&quot;.env&quot;</span>
+    <span class="n">env_file</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="s2">&quot;ADO_PAT=test-token</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">monkeypatch</span><span class="o">.</span><span class="n">chdir</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">)</span>   <span class="c1"># change cwd to tmp_path</span>
+
+    <span class="n">settings</span> <span class="o">=</span> <span class="n">load_settings</span><span class="p">()</span>   <span class="c1"># will find .env in tmp_path</span>
+    <span class="k">assert</span> <span class="n">settings</span><span class="o">.</span><span class="n">ado_pat</span> <span class="o">==</span> <span class="s2">&quot;test-token&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="44-worked-example-testing-a-config-loading-function">4.4 Worked Example: Testing a Config-Loading Function</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># scripts/config.py</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pydantic_settings</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseSettings</span><span class="p">,</span> <span class="n">SettingsConfigDict</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Settings</span><span class="p">(</span><span class="n">BaseSettings</span><span class="p">):</span>
+    <span class="n">ado_pat</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">kb_min_confidence</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.7</span>
+    <span class="n">model_config</span> <span class="o">=</span> <span class="n">SettingsConfigDict</span><span class="p">(</span><span class="n">env_file</span><span class="o">=</span><span class="s2">&quot;.env&quot;</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_settings</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Settings</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">Settings</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Config error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
+
+
+<span class="c1"># tests/test_config.py</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scripts.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_settings</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">TestLoadSettings</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_loads_required_fields</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">monkeypatch</span><span class="p">):</span>
+        <span class="n">monkeypatch</span><span class="o">.</span><span class="n">setenv</span><span class="p">(</span><span class="s2">&quot;ADO_PAT&quot;</span><span class="p">,</span> <span class="s2">&quot;my-pat-token&quot;</span><span class="p">)</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="n">load_settings</span><span class="p">()</span>
+        <span class="k">assert</span> <span class="n">s</span><span class="o">.</span><span class="n">ado_pat</span> <span class="o">==</span> <span class="s2">&quot;my-pat-token&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_default_confidence</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">monkeypatch</span><span class="p">):</span>
+        <span class="n">monkeypatch</span><span class="o">.</span><span class="n">setenv</span><span class="p">(</span><span class="s2">&quot;ADO_PAT&quot;</span><span class="p">,</span> <span class="s2">&quot;any-token&quot;</span><span class="p">)</span>
+        <span class="n">monkeypatch</span><span class="o">.</span><span class="n">delenv</span><span class="p">(</span><span class="s2">&quot;KB_MIN_CONFIDENCE&quot;</span><span class="p">,</span> <span class="n">raising</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="n">load_settings</span><span class="p">()</span>
+        <span class="k">assert</span> <span class="n">s</span><span class="o">.</span><span class="n">kb_min_confidence</span> <span class="o">==</span> <span class="mf">0.7</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_env_overrides_default</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">monkeypatch</span><span class="p">):</span>
+        <span class="n">monkeypatch</span><span class="o">.</span><span class="n">setenv</span><span class="p">(</span><span class="s2">&quot;ADO_PAT&quot;</span><span class="p">,</span> <span class="s2">&quot;any-token&quot;</span><span class="p">)</span>
+        <span class="n">monkeypatch</span><span class="o">.</span><span class="n">setenv</span><span class="p">(</span><span class="s2">&quot;KB_MIN_CONFIDENCE&quot;</span><span class="p">,</span> <span class="s2">&quot;0.95&quot;</span><span class="p">)</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="n">load_settings</span><span class="p">()</span>
+        <span class="k">assert</span> <span class="n">s</span><span class="o">.</span><span class="n">kb_min_confidence</span> <span class="o">==</span> <span class="mf">0.95</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_missing_required_exits</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">monkeypatch</span><span class="p">):</span>
+        <span class="n">monkeypatch</span><span class="o">.</span><span class="n">delenv</span><span class="p">(</span><span class="s2">&quot;ADO_PAT&quot;</span><span class="p">,</span> <span class="n">raising</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">pytest</span><span class="o">.</span><span class="n">raises</span><span class="p">(</span><span class="ne">SystemExit</span><span class="p">):</span>
+            <span class="n">load_settings</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_float_coercion</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">monkeypatch</span><span class="p">):</span>
+        <span class="n">monkeypatch</span><span class="o">.</span><span class="n">setenv</span><span class="p">(</span><span class="s2">&quot;ADO_PAT&quot;</span><span class="p">,</span> <span class="s2">&quot;token&quot;</span><span class="p">)</span>
+        <span class="n">monkeypatch</span><span class="o">.</span><span class="n">setenv</span><span class="p">(</span><span class="s2">&quot;KB_MIN_CONFIDENCE&quot;</span><span class="p">,</span> <span class="s2">&quot;0.85&quot;</span><span class="p">)</span>   <span class="c1"># string in env</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="n">load_settings</span><span class="p">()</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">kb_min_confidence</span><span class="p">,</span> <span class="nb">float</span><span class="p">)</span>     <span class="c1"># coerced to float</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-5-mocking-with-pytest-mock">PART 5 — MOCKING WITH pytest-mock</h1>
+<hr />
+<h2 id="51-installing-and-basic-usage">5.1 Installing and Basic Usage</h2>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>pytest-mock
+</code></pre></div>
+
+<p><code>pytest-mock</code> provides a <code>mocker</code> fixture with cleaner syntax than <code>unittest.mock</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_api_call_made</span><span class="p">(</span><span class="n">mocker</span><span class="p">):</span>
+    <span class="n">mock_get</span> <span class="o">=</span> <span class="n">mocker</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span><span class="s2">&quot;requests.get&quot;</span><span class="p">)</span>
+    <span class="n">mock_get</span><span class="o">.</span><span class="n">return_value</span><span class="o">.</span><span class="n">status_code</span> <span class="o">=</span> <span class="mi">200</span>
+    <span class="n">mock_get</span><span class="o">.</span><span class="n">return_value</span><span class="o">.</span><span class="n">json</span><span class="o">.</span><span class="n">return_value</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;results&quot;</span><span class="p">:</span> <span class="p">[]}</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="n">fetch_from_api</span><span class="p">(</span><span class="s2">&quot;http://example.com/search&quot;</span><span class="p">,</span> <span class="s2">&quot;motor stall&quot;</span><span class="p">)</span>
+
+    <span class="n">mock_get</span><span class="o">.</span><span class="n">assert_called_once</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="n">result</span> <span class="o">==</span> <span class="p">{</span><span class="s2">&quot;results&quot;</span><span class="p">:</span> <span class="p">[]}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="52-controlling-return-values">5.2 Controlling Return Values</h2>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_scorer_uses_embedding</span><span class="p">(</span><span class="n">mocker</span><span class="p">):</span>
+    <span class="c1"># Simple return value</span>
+    <span class="n">mock_embed</span> <span class="o">=</span> <span class="n">mocker</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span><span class="s2">&quot;scripts.scorer.get_embedding&quot;</span><span class="p">)</span>
+    <span class="n">mock_embed</span><span class="o">.</span><span class="n">return_value</span> <span class="o">=</span> <span class="p">[</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">]</span>
+
+    <span class="n">score</span> <span class="o">=</span> <span class="n">compute_similarity</span><span class="p">(</span><span class="s2">&quot;test query&quot;</span><span class="p">,</span> <span class="s2">&quot;test candidate&quot;</span><span class="p">)</span>
+    <span class="n">mock_embed</span><span class="o">.</span><span class="n">assert_called</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_multiple_calls_return_different_values</span><span class="p">(</span><span class="n">mocker</span><span class="p">):</span>
+    <span class="n">mock_fetch</span> <span class="o">=</span> <span class="n">mocker</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span><span class="s2">&quot;scripts.session.fetch_ticket&quot;</span><span class="p">)</span>
+    <span class="c1"># Each call returns a different value</span>
+    <span class="n">mock_fetch</span><span class="o">.</span><span class="n">side_effect</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;title&quot;</span><span class="p">:</span> <span class="s2">&quot;first&quot;</span><span class="p">},</span>
+        <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="s2">&quot;title&quot;</span><span class="p">:</span> <span class="s2">&quot;second&quot;</span><span class="p">},</span>
+        <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s2">&quot;title&quot;</span><span class="p">:</span> <span class="s2">&quot;third&quot;</span><span class="p">},</span>
+    <span class="p">]</span>
+
+    <span class="n">r1</span> <span class="o">=</span> <span class="n">fetch_ticket</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">r2</span> <span class="o">=</span> <span class="n">fetch_ticket</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+
+    <span class="k">assert</span> <span class="n">r1</span><span class="p">[</span><span class="s2">&quot;title&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;first&quot;</span>
+    <span class="k">assert</span> <span class="n">r2</span><span class="p">[</span><span class="s2">&quot;title&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;second&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="53-simulating-failures">5.3 Simulating Failures</h2>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_handles_api_timeout</span><span class="p">(</span><span class="n">mocker</span><span class="p">):</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">requests</span>
+
+    <span class="n">mock_get</span> <span class="o">=</span> <span class="n">mocker</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span><span class="s2">&quot;requests.get&quot;</span><span class="p">)</span>
+    <span class="n">mock_get</span><span class="o">.</span><span class="n">side_effect</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">Timeout</span><span class="p">(</span><span class="s2">&quot;Connection timed out&quot;</span><span class="p">)</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="n">fetch_from_api</span><span class="p">(</span><span class="s2">&quot;http://example.com&quot;</span><span class="p">,</span> <span class="s2">&quot;query&quot;</span><span class="p">)</span>
+
+    <span class="c1"># The function should handle the timeout gracefully</span>
+    <span class="k">assert</span> <span class="n">result</span> <span class="ow">is</span> <span class="kc">None</span>   <span class="c1"># or assert result == []</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_retries_on_failure</span><span class="p">(</span><span class="n">mocker</span><span class="p">):</span>
+    <span class="n">mock_get</span> <span class="o">=</span> <span class="n">mocker</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span><span class="s2">&quot;requests.get&quot;</span><span class="p">)</span>
+    <span class="n">mock_response</span> <span class="o">=</span> <span class="n">mocker</span><span class="o">.</span><span class="n">Mock</span><span class="p">()</span>
+    <span class="n">mock_response</span><span class="o">.</span><span class="n">status_code</span> <span class="o">=</span> <span class="mi">200</span>
+    <span class="n">mock_response</span><span class="o">.</span><span class="n">json</span><span class="o">.</span><span class="n">return_value</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;ok&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+
+    <span class="c1"># Fail twice, succeed on third attempt</span>
+    <span class="n">mock_get</span><span class="o">.</span><span class="n">side_effect</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;network error&quot;</span><span class="p">),</span>
+        <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;network error&quot;</span><span class="p">),</span>
+        <span class="n">mock_response</span><span class="p">,</span>
+    <span class="p">]</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="n">fetch_with_retry</span><span class="p">(</span><span class="s2">&quot;http://example.com&quot;</span><span class="p">,</span> <span class="n">max_retries</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">result</span> <span class="o">==</span> <span class="p">{</span><span class="s2">&quot;ok&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+    <span class="k">assert</span> <span class="n">mock_get</span><span class="o">.</span><span class="n">call_count</span> <span class="o">==</span> <span class="mi">3</span>
+</code></pre></div>
+
+<hr />
+<h2 id="54-verifying-calls">5.4 Verifying Calls</h2>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_posts_comment_with_correct_content</span><span class="p">(</span><span class="n">mocker</span><span class="p">):</span>
+    <span class="n">mock_post</span> <span class="o">=</span> <span class="n">mocker</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span><span class="s2">&quot;scripts.ado_client.post_comment&quot;</span><span class="p">)</span>
+
+    <span class="n">process_and_comment</span><span class="p">(</span><span class="n">ticket_id</span><span class="o">=</span><span class="mi">99999</span><span class="p">,</span> <span class="n">findings</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;slip event detected&quot;</span><span class="p">])</span>
+
+    <span class="c1"># Verify the function was called exactly once</span>
+    <span class="n">mock_post</span><span class="o">.</span><span class="n">assert_called_once</span><span class="p">()</span>
+
+    <span class="c1"># Verify it was called with specific arguments</span>
+    <span class="n">mock_post</span><span class="o">.</span><span class="n">assert_called_once_with</span><span class="p">(</span>
+        <span class="n">ticket_id</span><span class="o">=</span><span class="mi">99999</span><span class="p">,</span>
+        <span class="n">comment</span><span class="o">=</span><span class="s2">&quot;slip event detected&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Check keyword argument specifically</span>
+    <span class="n">call_kwargs</span> <span class="o">=</span> <span class="n">mock_post</span><span class="o">.</span><span class="n">call_args</span><span class="o">.</span><span class="n">kwargs</span>
+    <span class="k">assert</span> <span class="n">call_kwargs</span><span class="p">[</span><span class="s2">&quot;ticket_id&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">99999</span>
+
+    <span class="c1"># Verify it was NOT called</span>
+    <span class="n">mock_other</span> <span class="o">=</span> <span class="n">mocker</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span><span class="s2">&quot;scripts.ado_client.create_ticket&quot;</span><span class="p">)</span>
+    <span class="n">mock_other</span><span class="o">.</span><span class="n">assert_not_called</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h2 id="55-worked-example-testing-a-search-function-with-http">5.5 Worked Example: Testing a Search Function with HTTP</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># scripts/kb_search.py</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">requests</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">search_kb</span><span class="p">(</span><span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">min_confidence</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.5</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Search the knowledge base via HTTP.&quot;&quot;&quot;</span>
+    <span class="n">response</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+        <span class="s2">&quot;http://localhost:8000/search&quot;</span><span class="p">,</span>
+        <span class="n">params</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;q&quot;</span><span class="p">:</span> <span class="n">query</span><span class="p">,</span> <span class="s2">&quot;min_confidence&quot;</span><span class="p">:</span> <span class="n">min_confidence</span><span class="p">},</span>
+        <span class="n">timeout</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">response</span><span class="o">.</span><span class="n">raise_for_status</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">response</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="s2">&quot;results&quot;</span><span class="p">]</span>
+
+
+<span class="c1"># tests/test_kb_search.py</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scripts.kb_search</span><span class="w"> </span><span class="kn">import</span> <span class="n">search_kb</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">TestSearchKb</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_returns_results</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mocker</span><span class="p">):</span>
+        <span class="n">mock_get</span> <span class="o">=</span> <span class="n">mocker</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span><span class="s2">&quot;scripts.kb_search.requests.get&quot;</span><span class="p">)</span>
+        <span class="n">mock_get</span><span class="o">.</span><span class="n">return_value</span><span class="o">.</span><span class="n">json</span><span class="o">.</span><span class="n">return_value</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;results&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="p">{</span><span class="s2">&quot;match&quot;</span><span class="p">:</span> <span class="s2">&quot;motor stall pattern&quot;</span><span class="p">,</span> <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="mf">0.91</span><span class="p">},</span>
+            <span class="p">]</span>
+        <span class="p">}</span>
+        <span class="n">mock_get</span><span class="o">.</span><span class="n">return_value</span><span class="o">.</span><span class="n">raise_for_status</span> <span class="o">=</span> <span class="k">lambda</span><span class="p">:</span> <span class="kc">None</span>
+
+        <span class="n">results</span> <span class="o">=</span> <span class="n">search_kb</span><span class="p">(</span><span class="s2">&quot;motor stall&quot;</span><span class="p">)</span>
+
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span>
+        <span class="k">assert</span> <span class="n">results</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;confidence&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mf">0.91</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_passes_min_confidence</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mocker</span><span class="p">):</span>
+        <span class="n">mock_get</span> <span class="o">=</span> <span class="n">mocker</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span><span class="s2">&quot;scripts.kb_search.requests.get&quot;</span><span class="p">)</span>
+        <span class="n">mock_get</span><span class="o">.</span><span class="n">return_value</span><span class="o">.</span><span class="n">json</span><span class="o">.</span><span class="n">return_value</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;results&quot;</span><span class="p">:</span> <span class="p">[]}</span>
+        <span class="n">mock_get</span><span class="o">.</span><span class="n">return_value</span><span class="o">.</span><span class="n">raise_for_status</span> <span class="o">=</span> <span class="k">lambda</span><span class="p">:</span> <span class="kc">None</span>
+
+        <span class="n">search_kb</span><span class="p">(</span><span class="s2">&quot;test query&quot;</span><span class="p">,</span> <span class="n">min_confidence</span><span class="o">=</span><span class="mf">0.8</span><span class="p">)</span>
+
+        <span class="n">call_params</span> <span class="o">=</span> <span class="n">mock_get</span><span class="o">.</span><span class="n">call_args</span><span class="o">.</span><span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;params&quot;</span><span class="p">]</span>
+        <span class="k">assert</span> <span class="n">call_params</span><span class="p">[</span><span class="s2">&quot;min_confidence&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mf">0.8</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_raises_on_http_error</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mocker</span><span class="p">):</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">requests</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">req</span>
+        <span class="n">mock_get</span> <span class="o">=</span> <span class="n">mocker</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span><span class="s2">&quot;scripts.kb_search.requests.get&quot;</span><span class="p">)</span>
+        <span class="n">mock_get</span><span class="o">.</span><span class="n">return_value</span><span class="o">.</span><span class="n">raise_for_status</span><span class="o">.</span><span class="n">side_effect</span> <span class="o">=</span> <span class="n">req</span><span class="o">.</span><span class="n">HTTPError</span><span class="p">(</span><span class="s2">&quot;404&quot;</span><span class="p">)</span>
+
+        <span class="k">with</span> <span class="n">pytest</span><span class="o">.</span><span class="n">raises</span><span class="p">(</span><span class="n">req</span><span class="o">.</span><span class="n">HTTPError</span><span class="p">):</span>
+            <span class="n">search_kb</span><span class="p">(</span><span class="s2">&quot;query&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_returns_empty_on_no_results</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mocker</span><span class="p">):</span>
+        <span class="n">mock_get</span> <span class="o">=</span> <span class="n">mocker</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span><span class="s2">&quot;scripts.kb_search.requests.get&quot;</span><span class="p">)</span>
+        <span class="n">mock_get</span><span class="o">.</span><span class="n">return_value</span><span class="o">.</span><span class="n">json</span><span class="o">.</span><span class="n">return_value</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;results&quot;</span><span class="p">:</span> <span class="p">[]}</span>
+        <span class="n">mock_get</span><span class="o">.</span><span class="n">return_value</span><span class="o">.</span><span class="n">raise_for_status</span> <span class="o">=</span> <span class="k">lambda</span><span class="p">:</span> <span class="kc">None</span>
+
+        <span class="n">results</span> <span class="o">=</span> <span class="n">search_kb</span><span class="p">(</span><span class="s2">&quot;obscure unmatched query&quot;</span><span class="p">,</span> <span class="n">min_confidence</span><span class="o">=</span><span class="mf">0.99</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="n">results</span> <span class="o">==</span> <span class="p">[]</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-6-testing-cli-scripts">PART 6 — TESTING CLI SCRIPTS</h1>
+<hr />
+<h2 id="61-subprocess-approach">6.1 Subprocess Approach</h2>
+<p>Use subprocess when the CLI script has complex argument handling or side effects that are hard to isolate:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">subprocess</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_search_cli_returns_results</span><span class="p">():</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+        <span class="p">[</span><span class="n">sys</span><span class="o">.</span><span class="n">executable</span><span class="p">,</span> <span class="s2">&quot;scripts/kb_search.py&quot;</span><span class="p">,</span> <span class="s2">&quot;search&quot;</span><span class="p">,</span> <span class="s2">&quot;motor stall&quot;</span><span class="p">],</span>
+        <span class="n">capture_output</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">text</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">cwd</span><span class="o">=</span><span class="s2">&quot;/path/to/project&quot;</span><span class="p">,</span>
+        <span class="n">env</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;PATH&quot;</span><span class="p">:</span> <span class="s2">&quot;/usr/bin&quot;</span><span class="p">,</span> <span class="s2">&quot;ADO_PAT&quot;</span><span class="p">:</span> <span class="s2">&quot;test-token&quot;</span><span class="p">},</span>
+    <span class="p">)</span>
+    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">returncode</span> <span class="o">==</span> <span class="mi">0</span>
+    <span class="k">assert</span> <span class="s2">&quot;confidence&quot;</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">stdout</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_search_cli_json_output</span><span class="p">():</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+        <span class="p">[</span><span class="n">sys</span><span class="o">.</span><span class="n">executable</span><span class="p">,</span> <span class="s2">&quot;scripts/kb_search.py&quot;</span><span class="p">,</span> <span class="s2">&quot;search&quot;</span><span class="p">,</span> <span class="s2">&quot;--format=json&quot;</span><span class="p">,</span> <span class="s2">&quot;slip&quot;</span><span class="p">],</span>
+        <span class="n">capture_output</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">text</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">returncode</span> <span class="o">==</span> <span class="mi">0</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">stdout</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="nb">list</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_missing_required_arg_fails</span><span class="p">():</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+        <span class="p">[</span><span class="n">sys</span><span class="o">.</span><span class="n">executable</span><span class="p">,</span> <span class="s2">&quot;scripts/kb_search.py&quot;</span><span class="p">,</span> <span class="s2">&quot;search&quot;</span><span class="p">],</span>  <span class="c1"># no query</span>
+        <span class="n">capture_output</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">text</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">returncode</span> <span class="o">!=</span> <span class="mi">0</span>
+    <span class="k">assert</span> <span class="s2">&quot;required&quot;</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">stderr</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h2 id="62-import-approach-unit-testing-individual-functions">6.2 Import Approach: Unit Testing Individual Functions</h2>
+<p>Better for testing specific logic without the overhead of subprocess:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Directly import and test the logic</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scripts.kb_search</span><span class="w"> </span><span class="kn">import</span> <span class="n">compute_score</span><span class="p">,</span> <span class="n">format_results</span><span class="p">,</span> <span class="n">parse_args</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_compute_score_perfect_match</span><span class="p">():</span>
+    <span class="n">score</span> <span class="o">=</span> <span class="n">compute_score</span><span class="p">(</span><span class="s2">&quot;motor stall&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;motor stall pattern&quot;</span><span class="p">])</span>
+    <span class="k">assert</span> <span class="n">score</span> <span class="o">&gt;</span> <span class="mf">0.85</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_compute_score_no_match</span><span class="p">():</span>
+    <span class="n">score</span> <span class="o">=</span> <span class="n">compute_score</span><span class="p">(</span><span class="s2">&quot;completely unrelated query&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;motor stall pattern&quot;</span><span class="p">])</span>
+    <span class="k">assert</span> <span class="n">score</span> <span class="o">&lt;</span> <span class="mf">0.2</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_format_results_truncates_long_titles</span><span class="p">():</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[{</span><span class="s2">&quot;title&quot;</span><span class="p">:</span> <span class="s2">&quot;A&quot;</span> <span class="o">*</span> <span class="mi">200</span><span class="p">,</span> <span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="mf">0.9</span><span class="p">}]</span>
+    <span class="n">formatted</span> <span class="o">=</span> <span class="n">format_results</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">max_title_len</span><span class="o">=</span><span class="mi">80</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">formatted</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;title&quot;</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="mi">80</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_parse_args_defaults</span><span class="p">():</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parse_args</span><span class="p">([</span><span class="s2">&quot;search&quot;</span><span class="p">,</span> <span class="s2">&quot;motor stall&quot;</span><span class="p">])</span>
+    <span class="k">assert</span> <span class="n">args</span><span class="o">.</span><span class="n">query</span> <span class="o">==</span> <span class="s2">&quot;motor stall&quot;</span>
+    <span class="k">assert</span> <span class="n">args</span><span class="o">.</span><span class="n">limit</span> <span class="o">==</span> <span class="mi">10</span>   <span class="c1"># default</span>
+    <span class="k">assert</span> <span class="n">args</span><span class="o">.</span><span class="n">format</span> <span class="o">==</span> <span class="s2">&quot;text&quot;</span>   <span class="c1"># default</span>
+</code></pre></div>
+
+<hr />
+<h2 id="63-capsys-capturing-stdoutstderr">6.3 capsys: Capturing stdout/stderr</h2>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">test_prints_results_to_stdout</span><span class="p">(</span><span class="n">capsys</span><span class="p">):</span>
+    <span class="n">print_search_results</span><span class="p">([</span>
+        <span class="p">{</span><span class="s2">&quot;match&quot;</span><span class="p">:</span> <span class="s2">&quot;motor stall&quot;</span><span class="p">,</span> <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="mf">0.9</span><span class="p">},</span>
+        <span class="p">{</span><span class="s2">&quot;match&quot;</span><span class="p">:</span> <span class="s2">&quot;slip event&quot;</span><span class="p">,</span> <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="mf">0.7</span><span class="p">},</span>
+    <span class="p">])</span>
+
+    <span class="n">captured</span> <span class="o">=</span> <span class="n">capsys</span><span class="o">.</span><span class="n">readouterr</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="s2">&quot;motor stall&quot;</span> <span class="ow">in</span> <span class="n">captured</span><span class="o">.</span><span class="n">out</span>
+    <span class="k">assert</span> <span class="s2">&quot;0.9&quot;</span> <span class="ow">in</span> <span class="n">captured</span><span class="o">.</span><span class="n">out</span>
+    <span class="k">assert</span> <span class="n">captured</span><span class="o">.</span><span class="n">err</span> <span class="o">==</span> <span class="s2">&quot;&quot;</span>   <span class="c1"># nothing to stderr</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_warns_to_stderr_on_low_confidence</span><span class="p">(</span><span class="n">capsys</span><span class="p">):</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+
+    <span class="n">print_search_results</span><span class="p">([{</span><span class="s2">&quot;match&quot;</span><span class="p">:</span> <span class="s2">&quot;weak match&quot;</span><span class="p">,</span> <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="mf">0.3</span><span class="p">}])</span>
+
+    <span class="n">captured</span> <span class="o">=</span> <span class="n">capsys</span><span class="o">.</span><span class="n">readouterr</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="s2">&quot;low confidence&quot;</span> <span class="ow">in</span> <span class="n">captured</span><span class="o">.</span><span class="n">err</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h2 id="64-choosing-subprocess-vs-import">6.4 Choosing Subprocess vs Import</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Testing argument parsing and exit codes</td>
+<td>subprocess</td>
+</tr>
+<tr>
+<td>Testing that the script fails gracefully on bad input</td>
+<td>subprocess</td>
+</tr>
+<tr>
+<td>Unit testing scoring/parsing logic</td>
+<td>import</td>
+</tr>
+<tr>
+<td>Mocking HTTP calls and external services</td>
+<td>import + mocker</td>
+</tr>
+<tr>
+<td>Testing file output</td>
+<td>import + tmp_path</td>
+</tr>
+<tr>
+<td>CI smoke test (&ldquo;does it run?&rdquo;)</td>
+<td>subprocess</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="part-7-test-coverage">PART 7 — TEST COVERAGE</h1>
+<hr />
+<h2 id="71-running-coverage">7.1 Running Coverage</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Run tests with coverage for the scripts directory</span>
+pytest<span class="w"> </span>--cov<span class="o">=</span>scripts<span class="w"> </span>--cov-report<span class="o">=</span>term-missing
+
+<span class="c1"># Generate HTML report (open htmlcov/index.html in browser)</span>
+pytest<span class="w"> </span>--cov<span class="o">=</span>scripts<span class="w"> </span>--cov-report<span class="o">=</span>html
+
+<span class="c1"># Fail if coverage drops below 80%</span>
+pytest<span class="w"> </span>--cov<span class="o">=</span>scripts<span class="w"> </span>--cov-fail-under<span class="o">=</span><span class="m">80</span>
+</code></pre></div>
+
+<p>Example output:</p>
+<div class="highlight"><pre><span></span><code>Name                    Stmts   Miss  Cover   Missing
+-----------------------------------------------------
+scripts/kb_search.py       45      7    84%   23, 47-51, 89
+scripts/rca_session.py     62     15    76%   34-38, 71-82
+scripts/scorer.py          28      2    93%   45, 67
+-----------------------------------------------------
+TOTAL                     135     24    82%
+</code></pre></div>
+
+<p>&ldquo;Missing&rdquo; shows the line numbers not covered — these are your test gaps.</p>
+<hr />
+<h2 id="72-what-to-cover-and-what-not-to">7.2 What to Cover (and What Not To)</h2>
+<p><strong>DO test:</strong>
+- Scoring/ranking logic
+- Data parsing (log lines, JSON, CSV)
+- Threshold comparisons and edge cases (<code>== limit</code>, <code>&gt; limit</code>, <code>&lt; 0</code>)
+- Error handling paths (what happens when the API returns 404?)
+- Config validation (missing fields, invalid values)</p>
+<p><strong>DON&rsquo;T test directly (mock instead):</strong>
+- File I/O — use <code>tmp_path</code> or mock the file operations
+- HTTP calls — use <code>mocker.patch("requests.get")</code>
+- Database queries — use a test database or mock the client
+- External CLI tools — mock the <code>subprocess.run</code> call</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># DON&#39;T do this — it makes your test depend on a real file</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">test_bad</span><span class="p">():</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="n">load_kb</span><span class="p">(</span><span class="s2">&quot;/home/user/real_kb.json&quot;</span><span class="p">)</span>   <span class="c1"># fragile!</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span>
+
+
+<span class="c1"># DO this — test with controlled data</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">test_good</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">):</span>
+    <span class="n">kb_file</span> <span class="o">=</span> <span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">&quot;kb.json&quot;</span>
+    <span class="n">kb_file</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="s1">&#39;[{&quot;pattern&quot;: &quot;motor stall&quot;, &quot;confidence&quot;: 0.9}]&#39;</span><span class="p">)</span>
+
+    <span class="n">results</span> <span class="o">=</span> <span class="n">load_kb</span><span class="p">(</span><span class="n">kb_file</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span>
+    <span class="k">assert</span> <span class="n">results</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;pattern&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;motor stall&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="73-coverage-targets">7.3 Coverage Targets</h2>
+<table>
+<thead>
+<tr>
+<th>Script type</th>
+<th>Target</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Scoring / ranking functions</td>
+<td>90%+</td>
+<td>These directly affect output quality</td>
+</tr>
+<tr>
+<td>Parsing functions</td>
+<td>85%+</td>
+<td>Edge cases here cause silent data corruption</td>
+</tr>
+<tr>
+<td>Config loading</td>
+<td>80%+</td>
+<td>Missing coverage = untested failure modes</td>
+</tr>
+<tr>
+<td>IO-heavy scripts (download, upload)</td>
+<td>60%+</td>
+<td>Mock the IO; test the logic around it</td>
+</tr>
+<tr>
+<td>One-off utility scripts</td>
+<td>40%+</td>
+<td>Better than nothing</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="74-putting-it-together-test-file-template">7.4 Putting It Together: Test File Template</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># tests/unit/test_scorer.py</span>
+<span class="sd">&quot;&quot;&quot;Tests for the scoring and ranking logic in scripts/scorer.py.&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
+
+
+<span class="c1"># ── Fixtures ────────────────────────────────────────────────────────────────</span>
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sample_patterns</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+    <span class="k">return</span> <span class="p">[</span>
+        <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;motor stall on ramp&quot;</span><span class="p">,</span> <span class="s2">&quot;tags&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;motor&quot;</span><span class="p">,</span> <span class="s2">&quot;ramp&quot;</span><span class="p">]},</span>
+        <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;wheel slip on wet surface&quot;</span><span class="p">,</span> <span class="s2">&quot;tags&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;slip&quot;</span><span class="p">,</span> <span class="s2">&quot;wet&quot;</span><span class="p">]},</span>
+        <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;localization failure in corridor&quot;</span><span class="p">,</span> <span class="s2">&quot;tags&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;nav&quot;</span><span class="p">]},</span>
+    <span class="p">]</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">scorer</span><span class="p">(</span><span class="n">sample_patterns</span><span class="p">):</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">scripts.scorer</span><span class="w"> </span><span class="kn">import</span> <span class="n">PatternScorer</span>
+    <span class="k">return</span> <span class="n">PatternScorer</span><span class="p">(</span><span class="n">patterns</span><span class="o">=</span><span class="n">sample_patterns</span><span class="p">)</span>
+
+
+<span class="c1"># ── Happy path ───────────────────────────────────────────────────────────────</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">TestScore</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_returns_float</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scorer</span><span class="p">):</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">scorer</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">&quot;motor fault&quot;</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;score&quot;</span><span class="p">],</span> <span class="nb">float</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_score_in_range</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scorer</span><span class="p">):</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">scorer</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">&quot;test query&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">result</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="mf">0.0</span> <span class="o">&lt;=</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;score&quot;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mf">1.0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_top_k_limits_results</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scorer</span><span class="p">,</span> <span class="n">sample_patterns</span><span class="p">):</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">scorer</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">&quot;any query&quot;</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">result</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">2</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_exact_match_scores_high</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scorer</span><span class="p">):</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">scorer</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">&quot;motor stall&quot;</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="n">result</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;score&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="mf">0.7</span>
+
+
+<span class="c1"># ── Edge cases ───────────────────────────────────────────────────────────────</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">TestScoreEdgeCases</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_empty_query_raises</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scorer</span><span class="p">):</span>
+        <span class="k">with</span> <span class="n">pytest</span><span class="o">.</span><span class="n">raises</span><span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span> <span class="n">match</span><span class="o">=</span><span class="s2">&quot;empty&quot;</span><span class="p">):</span>
+            <span class="n">scorer</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_empty_patterns_returns_empty</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">scripts.scorer</span><span class="w"> </span><span class="kn">import</span> <span class="n">PatternScorer</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="n">PatternScorer</span><span class="p">(</span><span class="n">patterns</span><span class="o">=</span><span class="p">[])</span>
+        <span class="k">assert</span> <span class="n">s</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="s2">&quot;motor stall&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="p">[]</span>
+
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">parametrize</span><span class="p">(</span><span class="s2">&quot;query&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;a&quot;</span><span class="p">,</span> <span class="s2">&quot;  &quot;</span><span class="p">,</span> <span class="s2">&quot;</span><span class="se">\t</span><span class="s2">&quot;</span><span class="p">])</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_short_or_whitespace_query_raises</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scorer</span><span class="p">,</span> <span class="n">query</span><span class="p">):</span>
+        <span class="k">with</span> <span class="n">pytest</span><span class="o">.</span><span class="n">raises</span><span class="p">(</span><span class="ne">ValueError</span><span class="p">):</span>
+            <span class="n">scorer</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">query</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="summary-what-to-remember">Summary — What to Remember</h2>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Test discovery</td>
+<td>Files: <code>test_*.py</code> or <code>*_test.py</code>; Functions: <code>test_*</code></td>
+</tr>
+<tr>
+<td><code>pytest.raises(Exc)</code></td>
+<td>Context manager for asserting that code raises a specific exception</td>
+</tr>
+<tr>
+<td><code>@pytest.mark.parametrize</code></td>
+<td>Run one test with multiple input/expected pairs</td>
+</tr>
+<tr>
+<td><code>@pytest.fixture</code></td>
+<td>Setup/teardown; add as parameter to receive it</td>
+</tr>
+<tr>
+<td><code>scope="module"</code></td>
+<td>Share fixture across tests in one file (useful for slow setup)</td>
+</tr>
+<tr>
+<td><code>yield</code> in fixture</td>
+<td>Code before yield = setup; code after yield = teardown</td>
+</tr>
+<tr>
+<td><code>tmp_path</code></td>
+<td>pytest-managed temp directory; cleaned up automatically</td>
+</tr>
+<tr>
+<td><code>monkeypatch.setenv</code></td>
+<td>Set env var for one test only; auto-reverted afterward</td>
+</tr>
+<tr>
+<td><code>monkeypatch.setattr</code></td>
+<td>Replace a function for one test only</td>
+</tr>
+<tr>
+<td><code>mocker.patch</code></td>
+<td>From pytest-mock; returns a MagicMock; cleaner than unittest.mock</td>
+</tr>
+<tr>
+<td><code>mock.side_effect = [v1, v2]</code></td>
+<td>Return different values on successive calls</td>
+</tr>
+<tr>
+<td><code>capsys.readouterr()</code></td>
+<td>Capture stdout/stderr from the tested code</td>
+</tr>
+<tr>
+<td>subprocess vs import</td>
+<td>subprocess for CLI/argparse tests; import for logic unit tests</td>
+</tr>
+<tr>
+<td>Coverage targets</td>
+<td>90% scoring logic, 80% parsing, 60% IO-heavy</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="quick-reference-card">QUICK REFERENCE CARD</h1>
+<div class="highlight"><pre><span></span><code>┌──────────────────────────────── pytest CHEAT SHEET ─────────────────────────────────────────┐
+│                                                                                              │
+│  RUN:       pytest -v                 pytest -k &quot;test_score&quot;                                │
+│             pytest -x                 (stop on first failure)                               │
+│             pytest --cov=scripts --cov-report=term-missing                                  │
+│                                                                                              │
+│  ASSERT:    assert result == expected                                                        │
+│             assert 0.0 &lt;= score &lt;= 1.0                                                      │
+│             pytest.raises(ValueError, match=&quot;msg&quot;)                                          │
+│                                                                                              │
+│  FIXTURES:  @pytest.fixture                  → function scope (default)                     │
+│             @pytest.fixture(scope=&quot;module&quot;)  → one per test file                           │
+│             yield value                      → setup before, teardown after                 │
+│             tmp_path                         → managed temp dir (Path)                      │
+│             capsys / caplog / monkeypatch    → built-in helpers                             │
+│                                                                                              │
+│  MONKEYPATCH:                                                                                │
+│             monkeypatch.setenv(&quot;KEY&quot;, &quot;val&quot;)                                                │
+│             monkeypatch.delenv(&quot;KEY&quot;, raising=False)                                        │
+│             monkeypatch.setattr(module, &quot;fn_name&quot;, replacement)                             │
+│             monkeypatch.chdir(tmp_path)                                                     │
+│                                                                                              │
+│  MOCKING (pytest-mock):                                                                      │
+│             mocker.patch(&quot;module.function&quot;)   → MagicMock                                  │
+│             mock.return_value = value                                                        │
+│             mock.side_effect = [v1, v2, ...]                                                │
+│             mock.side_effect = SomeException(&quot;msg&quot;)                                         │
+│             mock.assert_called_once_with(arg1, kwarg=val)                                   │
+│             mock.assert_not_called()                                                         │
+│                                                                                              │
+│  PARAMETRIZE:                                                                                │
+│             @pytest.mark.parametrize(&quot;a,b,expected&quot;, [(1,2,3), (4,5,9)])                   │
+│                                                                                              │
+│  SKIP / XFAIL:                                                                               │
+│             @pytest.mark.skip(reason=&quot;...&quot;)                                                  │
+│             @pytest.mark.skipif(condition, reason=&quot;...&quot;)                                     │
+│             @pytest.mark.xfail(reason=&quot;known bug&quot;)                                          │
+│                                                                                              │
+│  SUBPROCESS TEST PATTERN:                                                                    │
+│             result = subprocess.run([sys.executable, &quot;script.py&quot;, &quot;arg&quot;],                   │
+│                                      capture_output=True, text=True)                        │
+│             assert result.returncode == 0                                                    │
+│                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

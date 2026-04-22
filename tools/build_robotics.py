@@ -26,6 +26,9 @@ SECTION_COLORS = {
     "cpp-advanced": {"accent": "indigo", "hex": "#4338ca"},
     "zephyr": {"accent": "emerald", "hex": "#047857"},
     "electronics": {"accent": "amber", "hex": "#b45309"},
+    "navigation-estimator": {"accent": "cyan", "hex": "#0891b2"},
+    "ros2-handson": {"accent": "sky", "hex": "#0284c7"},
+    "python-oks": {"accent": "violet", "hex": "#7c3aed"},
 }
 
 # ── HTML template for content pages ──────────────────────────────────────────
@@ -380,6 +383,94 @@ def build_electronics():
     return len(cards)
 
 
+def build_generic_section(dir_name, title, subtitle, accent):
+    """Generic builder for flat sections: 00-learning-plan.md + NN-*.md lessons + exercises."""
+    section = LEARN / dir_name
+    cards = []
+
+    # Learning plan / overview
+    plan = section / "00-learning-plan.md"
+    if plan.exists():
+        out = section / "00-learning-plan.html"
+        convert_md_to_html(plan, out, "index.html", f"Back to {title}", accent)
+        cards.append(card_html("00-learning-plan.html", "Learning Plan", f"{title} learning roadmap", accent))
+
+    # Numbered lessons (01-*.md, 02-*.md, …)
+    lessons = sorted([f for f in section.iterdir()
+                      if f.is_file() and f.suffix == ".md"
+                      and re.match(r"\d{2}-", f.name) and f.name != "00-learning-plan.md"])
+    for md in lessons:
+        md_text = md.read_text(encoding="utf-8")
+        t = extract_title(md_text)
+        sub = extract_subtitle(md_text)
+        out_name = md.stem + ".html"
+        out = section / out_name
+        convert_md_to_html(md, out, "index.html", f"Back to {title}", accent)
+        cards.append(card_html(out_name, t, sub[:100] if sub else slug_to_title(md.stem), accent))
+
+    # Exercises
+    exercises_dir = section / "exercises"
+    if exercises_dir.exists():
+        for md in sorted(exercises_dir.glob("*.md")):
+            md_text = md.read_text(encoding="utf-8")
+            t = extract_title(md_text)
+            out = exercises_dir / (md.stem + ".html")
+            convert_md_to_html(md, out, "../index.html", f"Back to {title}", accent)
+            cards.append(card_html(f"exercises/{md.stem}.html", f"Exercise: {t}", "", accent))
+
+    idx = index_page(
+        title,
+        subtitle,
+        "\n".join(cards),
+        "../index.html", "Back to Robotics",
+        accent,
+    )
+    (section / "index.html").write_text(idx, encoding="utf-8")
+    return len(cards)
+
+
+def build_navigation_estimator():
+    return build_generic_section(
+        "navigation-estimator",
+        "Navigation Estimator",
+        "Dead reckoning, Kalman filters, IMU fusion, measurement models, and failure mode diagnosis",
+        "cyan",
+    )
+
+
+def build_ros2_handson():
+    return build_generic_section(
+        "ros2-handson",
+        "ROS 2 Hands-on",
+        "Nodes, topics, actions, TF2, QoS, and Nav2 architecture — practical exercises included",
+        "sky",
+    )
+
+
+def build_python_oks():
+    return build_generic_section(
+        "python-oks",
+        "Python / OKS",
+        "Type annotations, testing, CLI scripts, and time-series log analysis for OKS diagnostics",
+        "violet",
+    )
+
+
+def build_resources():
+    """Build RESOURCES.md and GAPS-ROADMAP.md pages."""
+    pages = [
+        ("RESOURCES.md", "resources.html", "External Resources"),
+        ("GAPS-ROADMAP.md", "gaps-roadmap.html", "Gaps Roadmap"),
+    ]
+    built = 0
+    for src_name, out_name, label in pages:
+        md = LEARN / src_name
+        if md.exists():
+            convert_md_to_html(md, LEARN / out_name, "../index.html", "Back to Robotics", "blue")
+            built += 1
+    return built
+
+
 def build_study_plan():
     """Build the top-level STUDY-PLAN page."""
     md = LEARN / "STUDY-PLAN.md"
@@ -398,6 +489,10 @@ def build_robotics_index():
                            "Unified Study Plan",
                            "120–130 hour roadmap: Electronics → Protocols → Embedded Systems",
                            "blue"))
+    cards.append(card_html("learn/resources.html",
+                           "External Resources",
+                           "Curated high-star GitHub repos for robotics, embedded, and ROS 2 learning",
+                           "blue"))
     cards.append(card_html("learn/cpp-advanced/index.html",
                            "Advanced C++ for Robotics",
                            "Real-time, safety-critical & production systems — 18 modules",
@@ -410,10 +505,22 @@ def build_robotics_index():
                            "Electronics Fundamentals",
                            "Passive components through CAN bus — 7 deep-dive lessons + exercises",
                            "amber"))
+    cards.append(card_html("learn/navigation-estimator/index.html",
+                           "Navigation Estimator",
+                           "Dead reckoning, Kalman filters, IMU fusion, failure modes — 5 lessons + exercises",
+                           "cyan"))
+    cards.append(card_html("learn/ros2-handson/index.html",
+                           "ROS 2 Hands-on",
+                           "Nodes, TF2, QoS, Nav2 architecture — 3 lessons + 4 exercises",
+                           "sky"))
+    cards.append(card_html("learn/python-oks/index.html",
+                           "Python / OKS",
+                           "Type annotations, testing, CLI scripts, time-series log analysis — 3 lessons + exercises",
+                           "violet"))
 
     idx = index_page(
         "Robotics",
-        "Embedded systems, real-time C++, Zephyr RTOS, electronics, and protocol deep-dives",
+        "Embedded systems, real-time C++, Zephyr RTOS, electronics, navigation, ROS 2, and Python diagnostics",
         "\n".join(cards),
         "../index.html", "Back to Home",
         "blue",
@@ -427,23 +534,34 @@ def main():
     print("Building robotics HTML pages...")
 
     n1 = build_cpp_advanced()
-    print(f"  C++ Advanced: {n1} pages")
+    print(f"  C++ Advanced:          {n1} pages")
 
     n2 = build_zephyr()
-    print(f"  Zephyr RTOS:  {n2} pages")
+    print(f"  Zephyr RTOS:           {n2} pages")
 
     n3 = build_electronics()
-    print(f"  Electronics:  {n3} pages")
+    print(f"  Electronics:           {n3} pages")
+
+    n4 = build_navigation_estimator()
+    print(f"  Navigation Estimator:  {n4} pages")
+
+    n5 = build_ros2_handson()
+    print(f"  ROS 2 Hands-on:        {n5} pages")
+
+    n6 = build_python_oks()
+    print(f"  Python / OKS:          {n6} pages")
+
+    nr = build_resources()
+    print(f"  Resources/Roadmap:     {nr} pages")
 
     build_study_plan()
-    print("  Study Plan:   1 page")
+    print("  Study Plan:            1 page")
 
     build_robotics_index()
-    print("  Robotics index: 1 page")
+    print("  Robotics index:        1 page")
 
-    total = n1 + n2 + n3 + 2  # +2 for study plan + robotics index
+    total = n1 + n2 + n3 + n4 + n5 + n6 + nr + 2
     print(f"\nDone! Generated {total} HTML files.")
-    print("Next: add Robotics link to index.html sidebar and category grid.")
 
 
 if __name__ == "__main__":

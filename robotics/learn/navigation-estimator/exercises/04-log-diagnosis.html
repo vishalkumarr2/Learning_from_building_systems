@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exercises: IMU Fusion &amp; Gyroscope Integration - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Navigation Estimator</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="exercises-imu-fusion-gyroscope-integration">Exercises: IMU Fusion &amp; Gyroscope Integration</h1>
+<h3 id="chapter-04-imu-fusion-gyroscope-integration">Chapter 04: IMU Fusion &amp; Gyroscope Integration</h3>
+<p><strong>Self-assessment guide:</strong> Write your answers on paper before expanding the details blocks. Cover 80% without hints → ready for <code>05-slip-detection.md</code>.</p>
+<hr />
+<h2 id="section-a-conceptual-questions">Section A — Conceptual Questions</h2>
+<p><strong>A1.</strong> A gyroscope reads <code>omega_z = 0.008 rad/s</code> while the robot is completely stationary. Is this a problem? What is this error called, and what physical mechanism causes it in a MEMS sensor?</p>
+<details><summary>Answer</summary>
+
+Yes, this is a problem — it is **gyroscope bias** (also called zero-rate output or ZRO). The sensor is outputting a non-zero angular velocity when the true angular velocity is zero.
+
+**Physical mechanism in MEMS sensors:**
+A MEMS gyroscope uses a vibrating proof mass. The Coriolis force deflects the mass perpendicular to its drive direction when the chip rotates. However, manufacturing imperfections mean the drive and sense axes are not perfectly orthogonal — there is a small mechanical coupling that produces a signal even at zero rotation. Additionally:
+- **Temperature effects:** The resonant frequency of the proof mass changes with temperature, shifting the baseline output.
+- **Stress on the die:** PCB flex or component mounting stress can deflect the proof mass slightly.
+- **Quadrature error:** Drive vibration leaks into the sense channel due to imperfect geometry.
+
+**OKS consequence:** If `omega_z = 0.008 rad/s` is uncompensated and the robot drives for 60 seconds:
+
+<div class="highlight"><pre><span></span><code>θ_error = 0.008 × 60 = 0.480 rad ≈ 27.5°
+</code></pre></div>
+
+
+At 0.5 m/s: lateral drift = 0.5 × 60 × sin(0.48) ≈ 13.7 m. The robot would be completely off course.
+
+The EMA bias estimator in `imuCallback()` is designed to measure and subtract exactly this value. You should always check `omega_z` in a bag during periods where `cmd_vel.angular.z = 0` to assess bias magnitude.
+
+</details>
+
+<hr />
+<p><strong>A2.</strong> OKS uses a <strong>full Kalman gain</strong> for the theta correction in <code>imuCallback()</code>, but uses a <strong>clamp</strong> for the XY correction in <code>onSensorbar()</code>. Explain the engineering rationale for this asymmetry. Why would using a clamp for theta (like XY) be incorrect?</p>
+<details><summary>Answer</summary>
+
+The asymmetry reflects fundamentally different properties of the two measurements:
+
+**Sensorbar (XY correction) — clamp is correct:**
+- The sensorbar measures lateral offset from a physical line feature.
+- Bar detection can return outliers: bar misidentified, noise in the detection pipeline, multiple candidate bars nearby.
+- An outlier can produce an innovation of several metres — a full Kalman update would teleport the robot's estimated position by metres.
+- Clamping limits the correction per step to a physically plausible maximum (e.g., 5 cm), rejecting outliers gracefully while still converging over multiple passes.
+
+**IMU (theta correction) — clamp is wrong:**
+- The IMU produces a heading measurement by integrating `(omega_z - bias) × dt`.
+- Both the encoder-based heading prediction and the IMU-based measurement have well-characterised Gaussian uncertainty (P_θ and R_θ).
+- The collision detector runs *before* the Kalman update and rejects any large-delta-omega event before it can corrupt the update. So if execution reaches the Kalman step, both sensors are confirmed healthy.
+- Under these conditions, the Kalman formula `θ_new = θ_enc + K × (θ_imu - θ_enc)` is the **optimal linear unbiased estimator** — it is provably correct. Clamping would introduce a bias: if the true correction is 0.07 rad and the clamp is 0.05 rad, we'd systematically underestimate every correction, causing the heading to lag behind its true value permanently.
+
+**Summary:** Clamp = outlier rejection for unreliable sensors. Kalman = optimal fusion for well-modelled Gaussian sensors with prior outlier rejection done separately.
+
+</details>
+
+<hr />
+<p><strong>A3.</strong> What happens to the gyro bias estimate in <code>imuCallback()</code> if the robot spends 30 minutes doing high-speed continuous rotation (a calibration spin)? Is the bias estimate reliable afterwards?</p>
+<details><summary>Answer</summary>
+
+**During the 30-minute spin:**
+The EMA update `bias += α × (omega_z - bias)` is applied at every IMU sample. During rotation, `omega_z_true >> bias`, so `omega_z_measured ≈ omega_z_true + bias`. The EMA slowly pulls `bias_estimate` toward the average `omega_z_measured` over the integration window.
+
+Since the robot is *intentionally* rotating, `omega_z` is large and positive (or negative). The EMA accumulates this rotation rate into the bias estimate. After 30 minutes at, say, 1.0 rad/s average:
+
+<div class="highlight"><pre><span></span><code>bias_estimate will drift toward 1.0 rad/s
+</code></pre></div>
+
+
+This is **catastrophically wrong** — the true bias is ~0.008 rad/s but the estimator now thinks it's ~1.0 rad/s.
+
+**After the spin ends:**
+When the robot stops, `omega_z_measured ≈ 0.008 rad/s` (true bias). Now the EMA will slowly pull the estimate back toward the true bias. With α = 0.001, recovery time τ ≈ 3000 steps = 30 seconds. However, during the recovery period the bias overcorrection causes theta updates to be subtracted by the wrong amount — theta will drift in the opposite direction.
+
+**Practical consequence for bag analysis:**
+If an incident happened immediately after a long rotational manoeuvre (robot just finished a 180° turn sequence), the bias estimate may be temporarily wrong. You would see theta drift in a specific direction right after the turns, correcting slowly. This is distinct from a sensorbar failure.
+
+**Fix:** For robots that do calibration spins, the bias estimate should be re-initialised from a stationary period after the spin, not carried over.
+
+</details>
+
+<hr />
+<p><strong>A4.</strong> The OKS collision detector checks <code>|omega_z_current - omega_z_previous| &gt; collision_threshold</code>. A colleague suggests changing this to check <code>|omega_z| &gt; collision_threshold</code> instead (absolute angular velocity, not the delta). Which approach is better for collision detection, and why?</p>
+<details><summary>Answer</summary>
+
+The **delta approach (current OKS)** is better for collision detection. Here's why:
+
+**Problem with absolute threshold (`|omega_z| > threshold`):**
+A robot making a normal tight turn can reach angular velocities of 1–2 rad/s. If `threshold = 2.0 rad/s`, sharp turns would trigger false COLLISION events. If the threshold is raised to avoid this, real collisions that produce moderate (but sudden) angular velocity changes would be missed.
+
+**Why delta is correct:**
+A collision is characterised not by *how fast* the robot is rotating, but by a **sudden change** in rotation rate — an angular jerk. Physics: a collision applies an impulsive torque, which changes angular velocity rapidly (over one or two IMU samples). Normal motions (acceleration, deceleration, turning) produce gradual changes in angular velocity governed by the motor controllers.
+
+
+<div class="highlight"><pre><span></span><code>  Normal turn ramp-up:
+    omega_z: 0 → 0.1 → 0.2 → 0.3 → 0.4  (smooth, Δ ≈ 0.1/step)
+
+  Collision (robot hits wall, chassis jolts):
+    omega_z: 0.1 → 0.1 → [IMPACT] → 2.4 → -0.2  (Δ = 2.3 in one step)
+</code></pre></div>
+
+
+
+The delta check distinguishes these cases. The absolute check cannot.
+
+**Edge case:** If the robot is already rotating fast and hits a wall, the delta from the impact is still large (the impact adds angular velocity on top of current rotation, or suddenly removes it). Delta captures this correctly.
+
+</details>
+
+<hr />
+<p><strong>A5.</strong> In <code>imuCallback()</code>, the variable <code>theta_imu_</code> is reset to <code>state_.theta</code> after each Kalman update. Why is this reset necessary? What would happen if it were not reset?</p>
+<details><summary>Answer</summary>
+
+**Why the reset is necessary:**
+`theta_imu_` is an accumulator that integrates `(omega_z - bias) × dt` between Kalman updates. Its purpose is to produce `theta_imu = Σ(omega_corrected × dt)`, i.e., the angle change estimated by the IMU since the *last* Kalman update. The innovation `ν = theta_imu_ - state_.theta` must therefore represent the **current disagreement** between the two estimates.
+
+After the Kalman update, `state_.theta` has been corrected toward the fused estimate. The accumulator must be reset to `state_.theta` so that:
+- The *next* Kalman update computes innovation relative to the fused state (not the old uncorrected state).
+- The innovation reflects only new information since the last update.
+
+**Without the reset:**
+`theta_imu_` would continue accumulating from `t = 0` (start of operation). Each Kalman innovation would be:
+
+<div class="highlight"><pre><span></span><code>ν = theta_imu_total_from_start - state_.theta
+</code></pre></div>
+
+
+But `state_.theta` has been incrementally corrected by each prior Kalman update. The innovation grows unboundedly, reflecting not the *current* disagreement but the entire history of corrections. After `n` Kalman updates, `ν` would be approximately `n × K × previous_innovations` — growing exponentially. The heading estimate would oscillate and diverge.
+
+The reset is equivalent to saying: "We have agreed on the current best estimate. From now on, measure only *new* disagreement." This is a standard technique in integration-based Kalman filters (often called "IMU pre-integration reset").
+
+</details>
+
+<hr />
+<h2 id="section-b-numerical">Section B — Numerical</h2>
+<p><strong>B1.</strong> Given IMU readings: <code>[0.012, 0.013, 0.009, 0.011, 0.010]</code> rad/s, measured at 10 ms intervals. EMA learning rate α = 0.01. Initial bias estimate: <code>bias_0 = 0.008 rad/s</code>.</p>
+<p><strong>(a)</strong> Compute the bias estimate after each of the 5 updates.
+<strong>(b)</strong> Compute the bias-corrected angular velocity at each step.
+<strong>(c)</strong> Compute the accumulated heading change after all 5 steps (Δt = 0.010 s each).
+<strong>(d)</strong> What would the accumulated heading be if bias were completely ignored (raw integration)?
+<strong>(e)</strong> What is the bias-induced heading error after these 5 steps?</p>
+<details><summary>Answer</summary>
+
+**EMA update rule:** `bias_new = bias_old + α × (omega_z - bias_old)`
+**With α = 0.01:**
+
+
+<div class="highlight"><pre><span></span><code>Step 1: omega_z = 0.012
+  bias_1 = 0.008 + 0.01 × (0.012 - 0.008)
+          = 0.008 + 0.01 × 0.004
+          = 0.008 + 0.000040
+          = 0.008040
+
+  corrected_omega = 0.012 - 0.008040 = 0.003960 rad/s
+  heading contribution = 0.003960 × 0.010 = 0.000040 rad
+
+Step 2: omega_z = 0.013
+  bias_2 = 0.008040 + 0.01 × (0.013 - 0.008040)
+          = 0.008040 + 0.01 × 0.004960
+          = 0.008040 + 0.000050
+          = 0.008090
+
+  corrected_omega = 0.013 - 0.008090 = 0.004910 rad/s
+  heading contribution = 0.004910 × 0.010 = 0.000049 rad
+
+Step 3: omega_z = 0.009
+  bias_3 = 0.008090 + 0.01 × (0.009 - 0.008090)
+          = 0.008090 + 0.01 × 0.000910
+          = 0.008090 + 0.000009
+          = 0.008099
+
+  corrected_omega = 0.009 - 0.008099 = 0.000901 rad/s
+  heading contribution = 0.000901 × 0.010 = 0.000009 rad
+
+Step 4: omega_z = 0.011
+  bias_4 = 0.008099 + 0.01 × (0.011 - 0.008099)
+          = 0.008099 + 0.01 × 0.002901
+          = 0.008099 + 0.000029
+          = 0.008128
+
+  corrected_omega = 0.011 - 0.008128 = 0.002872 rad/s
+  heading contribution = 0.002872 × 0.010 = 0.000029 rad
+
+Step 5: omega_z = 0.010
+  bias_5 = 0.008128 + 0.01 × (0.010 - 0.008128)
+          = 0.008128 + 0.01 × 0.001872
+          = 0.008128 + 0.000019
+          = 0.008147
+
+  corrected_omega = 0.010 - 0.008147 = 0.001853 rad/s
+  heading contribution = 0.001853 × 0.010 = 0.000019 rad
+</code></pre></div>
+
+
+
+**(a) Bias estimates:**
+| Step | omega_z | bias_estimate |
+|------|---------|---------------|
+| 0 (initial) | — | 0.008000 |
+| 1 | 0.012 | 0.008040 |
+| 2 | 0.013 | 0.008090 |
+| 3 | 0.009 | 0.008099 |
+| 4 | 0.011 | 0.008128 |
+| 5 | 0.010 | 0.008147 |
+
+Note: The bias estimate has only moved from 0.008000 to 0.008147 — a change of 0.000147 rad/s over 5 steps. This shows how slowly the EMA converges with α = 0.01. The bias is being pulled upward by the consistently-above-0.008 readings.
+
+**(b) Bias-corrected omega at each step:**
+| Step | omega_z | bias_used | corrected_omega |
+|------|---------|-----------|-----------------|
+| 1 | 0.012 | 0.008000 | 0.004000 |
+| 2 | 0.013 | 0.008040 | 0.004960 |
+| 3 | 0.009 | 0.008090 | 0.000910 |
+| 4 | 0.011 | 0.008099 | 0.002901 |
+| 5 | 0.010 | 0.008128 | 0.001872 |
+
+Note: The bias used at each step is the estimate *before* that step's update (causal — we use what we know, then update).
+
+**(c) Accumulated heading change (bias-corrected):**
+
+<div class="highlight"><pre><span></span><code>  Δθ = Σ corrected_omega × Δt
+     = (0.004000 + 0.004960 + 0.000910 + 0.002901 + 0.001872) × 0.010
+     = 0.014643 × 0.010
+     = 0.000146 rad  ≈  0.0084°
+</code></pre></div>
+
+
+(Over 50ms this is tiny — realistic, as 50ms is a very short time window.)
+
+**(d) Raw integration (ignoring bias entirely):**
+
+<div class="highlight"><pre><span></span><code>  Δθ_raw = Σ omega_z × Δt
+          = (0.012 + 0.013 + 0.009 + 0.011 + 0.010) × 0.010
+          = 0.055 × 0.010
+          = 0.000550 rad  ≈  0.032°
+</code></pre></div>
+
+
+
+**(e) Bias-induced error over these 5 steps:**
+
+<div class="highlight"><pre><span></span><code>  error = Δθ_raw - Δθ_corrected
+        = 0.000550 - 0.000146
+        = 0.000404 rad  ≈  0.023°
+</code></pre></div>
+
+
+
+Over just 50ms, the error is tiny. But extrapolate to 60 seconds (6000 steps of similar readings):
+
+<div class="highlight"><pre><span></span><code>  error_60s ≈ 0.000404 × (6000/5) = 0.000404 × 1200 ≈ 0.485 rad ≈ 27.8°
+</code></pre></div>
+
+
+This confirms the importance of bias correction over longer timescales.
+
+</details>
+
+<hr />
+<h2 id="section-c-log-diagnosis">Section C — Log Diagnosis</h2>
+<p><strong>C1.</strong> Given the following log snippet from an OKS incident bag, identify the failure mode, explain the progression, and state what you would check in the next investigation step.</p>
+<div class="highlight"><pre><span></span><code>  T=0.000s: theta_encoder=0.000, omega_z=0.008, theta_imu=0.000
+  T=0.100s: theta_encoder=0.012, omega_z=0.009, theta_imu=0.008
+  T=1.000s: theta_encoder=0.115, omega_z=0.011, theta_imu=0.095
+  T=5.000s: theta_encoder=0.540, omega_z=0.008, theta_imu=0.456
+  T=5.010s: omega_z=2.340  ← sudden spike
+  T=5.020s: status=COLLISION
+</code></pre></div>
+
+<details><summary>Answer</summary>
+
+**Failure mode: Collision detection triggered by legitimate angular jerk (possibly an actual collision or floor impact).**
+
+**Progression analysis:**
+
+1. **T=0.000s to T=1.000s:** Both encoder and IMU are tracking well. The robot is turning (theta increasing). At T=1s, `theta_encoder=0.115` and `theta_imu=0.095` — a disagreement of 0.020 rad (1.1°). This is a small but non-trivial innovation. **Possible early sign:** the encoder is predicting slightly more rotation than the IMU measured.
+
+2. **T=1.000s to T=5.000s:** The divergence grows. At T=5s:
+   - `theta_encoder = 0.540 rad`
+   - `theta_imu = 0.456 rad`
+   - **Divergence = 0.084 rad (4.8°)**
+
+   This growing gap is suspicious. Over 5 seconds, the encoder-estimated heading is accumulating 0.084 rad more than the IMU. This suggests **either** wheel slip inflating the encoder's delta_theta, **or** a gyro bias that is pulling the IMU estimate low. The `omega_z ≈ 0.008-0.011 rad/s` throughout is consistent with a bias of ~0.008 rad/s, but the encoder divergence exceeds what a 0.008 bias would cause over 5s (= 0.040 rad) — suggesting the encoder has some slip component.
+
+3. **T=5.010s: omega_z = 2.340 rad/s** — a spike from ~0.008 to 2.340 rad/s in one IMU sample.
+   - `Δω_z = 2.340 - 0.008 = 2.332 rad/s` in one 10ms step
+   - If `collision_threshold = 2.0 rad/s` (on raw Δω_z): **2.332 > 2.0 → threshold exceeded**
+   - At T=5.020s: `status=COLLISION` confirmed.
+
+**What caused the spike?** Three candidates:
+1. **Actual collision:** Robot hit an obstacle at T≈5.01s, producing an angular jerk.
+2. **Floor bump:** Robot drove over a tile edge or ramp at this location.
+3. **External vibration:** Unlikely — single spike, not sustained oscillation.
+
+**Next investigation steps:**
+1. Check `cmd_vel.linear.x` and `cmd_vel.angular.z` at T=5.000s–5.020s. Was the robot moving? (If stationary, the spike is even more suspicious — external vibration or EMI.)
+2. Check the robot's map position at T=5.01s. Is there a known tile gap, ramp edge, or obstacle at that location?
+3. Check `accel_z` from the IMU (if logged) — a floor bump typically shows both `omega_z` and `accel_z` spikes simultaneously. A wall collision mostly shows `omega_z` change.
+4. Look at the **pre-collision divergence** (encoder 0.084 rad ahead of IMU over 5s) — file this as a separate finding about wheel slip or bias miscalibration, independent of the collision event.
+5. Check if this collision fires repeatedly at the same map coordinate across multiple incidents (infrastructure problem vs. one-off obstacle).
+
+**Key finding to document:** Two issues in this log:
+- **(Primary)** Collision triggered at T=5.01s by angular jerk — cause TBD (floor vs. actual obstacle).
+- **(Secondary)** Systematic heading divergence of 0.084 rad over 5s pre-collision — encoder running high or IMU bias low. Worth checking if this contributed to the robot being in the wrong position that led to the collision.
+
+</details>
+
+<hr />
+<h2 id="section-d-oks-specific-calculation">Section D — OKS-Specific Calculation</h2>
+<p><strong>D1.</strong> The OKS collision detector checks whether consecutive gyro readings differ by more than <code>collision_threshold</code>. Based on the codebase note in <code>04-imu-fusion.md</code>, the threshold is compared against the raw Δω_z (angular velocity change per sample, not divided by Δt).</p>
+<p>Scenario: A robot drives at <code>v = 0.3 m/s</code> and goes over a <strong>2 cm floor step</strong> (e.g., a raised tile edge). The robot&rsquo;s wheelbase is <code>L = 0.30 m</code> (distance from front wheel to rear axle).</p>
+<p><strong>(a)</strong> Estimate the peak angular velocity <code>ω_z_peak</code> as the front wheel rises over the step.
+<strong>(b)</strong> Estimate the time duration of the angular velocity event (how long the wheel is on the step edge).
+<strong>(c)</strong> Estimate <code>Δω_z</code> in a single 10 ms IMU sample at the worst moment.
+<strong>(d)</strong> With <code>collision_threshold = 2.0 rad/s</code> (on raw Δω_z), does the collision detector fire?
+<strong>(e)</strong> What floor step height would be the <em>minimum</em> to trigger the collision detector at this speed?</p>
+<details><summary>Answer</summary>
+
+**Setup:**
+
+<div class="highlight"><pre><span></span><code>  v         = 0.3 m/s   (forward speed)
+  h         = 0.02 m    (step height)
+  L         = 0.30 m    (wheelbase)
+  Δt_imu    = 0.010 s   (IMU sample interval)
+  threshold = 2.0 rad/s (on Δω_z per sample)
+</code></pre></div>
+
+
+
+**(a) Peak angular velocity:**
+
+As the front wheel rides up a step of height `h`, the robot's chassis pitches forward (and slightly yaws depending on wheel alignment). For the z-axis angular velocity (yaw), the bump contribution depends on chassis geometry. However, for a symmetric step (robot hits it head-on), the primary motion is **pitch** (rotation around the lateral axis, not the vertical axis). For `omega_z`, the relevant case is when the robot hits the step at an **angle**, producing yaw.
+
+For a more tractable model: treat the bump as causing the robot chassis to rotate by angle `φ = h/L` over the time the wheel is on the step edge.
+
+
+<div class="highlight"><pre><span></span><code>  Contact time (front wheel on edge before clearing):
+    t_contact = h / v = 0.02 / 0.3 = 0.067 s
+
+  Angular displacement during contact:
+    φ = arctan(h / L) ≈ h/L = 0.02/0.30 = 0.0667 rad  (small angle approx)
+
+  Average angular velocity during contact:
+    ω_avg = φ / t_contact = 0.0667 / 0.067 = 0.995 rad/s
+
+  Peak angular velocity (assuming triangular profile, peak ≈ 2× average):
+    ω_z_peak ≈ 2 × 0.995 ≈ 1.99 rad/s
+</code></pre></div>
+
+
+
+Note: This is the *pitch* angular velocity mapped to the chassis frame. For a perfectly head-on bump, this is omega_x (pitch), not omega_z (yaw). The OKS collision detector uses omega_z. If the robot hits the step perfectly symmetrically, omega_z ≈ 0. The worst case for omega_z is when the robot hits the step edge at a corner — one front wheel hits first, twisting the chassis.
+
+**For the corner-hit case (one wheel):**
+The torsional jerk is approximately the same magnitude but now in the z-axis (yaw). So `ω_z_peak ≈ 1.99 rad/s` is a reasonable upper estimate for the z-axis component.
+
+**(b) Duration of angular velocity event:**
+
+<div class="highlight"><pre><span></span><code>  t_contact ≈ h / v = 0.02 / 0.3 ≈ 0.067 s  =  67 ms
+</code></pre></div>
+
+
+This spans approximately `67 / 10 = 6.7 IMU samples`.
+
+**(c) Maximum Δω_z in a single 10 ms sample:**
+
+The angular velocity rises from 0 to peak over the first half of the contact time (~33 ms ≈ 3 samples), then falls back. The steepest change is at the onset:
+
+
+<div class="highlight"><pre><span></span><code>  ω_z before step: ~0 rad/s
+  ω_z at peak (1 sample = 10ms later):
+
+  If the rise happens in approximately 2 samples (20ms):
+    Δω_z per sample ≈ ω_z_peak / 2 = 1.99 / 2 ≈ 1.0 rad/s
+
+  If the rise happens abruptly in 1 sample (10ms):
+    Δω_z = ω_z_peak = 1.99 rad/s
+</code></pre></div>
+
+
+
+Best estimate for worst-case single-sample delta:
+
+<div class="highlight"><pre><span></span><code>  Δω_z_max ≈ 1.0 to 2.0 rad/s  (depending on step sharpness)
+</code></pre></div>
+
+
+
+**(d) Does collision detector fire?**
+
+<div class="highlight"><pre><span></span><code>  Δω_z_max ≈ 1.0 to 2.0 rad/s
+  collision_threshold = 2.0 rad/s
+
+  At the lower estimate (1.0): NO, does not fire (1.0 &lt; 2.0)
+  At the upper estimate (2.0): BORDERLINE (2.0 = 2.0, depends on ≥ vs &gt;)
+  With an abrupt step and corner hit: could slightly exceed 2.0 → fires
+</code></pre></div>
+
+
+
+**Conclusion: A 2 cm step at 0.3 m/s is borderline.** Whether it triggers depends on:
+- Whether the robot hits it head-on or corner-first (corner is worse)
+- How sharp the step edge is (sharper = more abrupt angular velocity change)
+- The exact threshold comparison (`>` vs `>=`)
+
+This explains why 2 cm tile gaps are known false-positive sources — they sit right at the detection boundary.
+
+**(e) Minimum step height to guarantee collision detection:**
+
+We need `Δω_z_max ≥ 2.0 rad/s`. From the analysis above, worst case `Δω_z ≈ ω_z_peak / 2`. For `Δω_z = 2.0`:
+
+<div class="highlight"><pre><span></span><code>  ω_z_peak ≥ 4.0 rad/s  (if the rise takes 2 samples)
+  ω_z_peak ≥ 2.0 rad/s  (if the rise takes 1 sample — abrupt step)
+
+  From: ω_z_peak = 2 × φ / t_contact = 2 × (h/L) / (h/v) = 2v/L
+
+  Solving for h to get ω_z_peak = 4.0 (2-sample rise):
+    4.0 = 2 × 0.3 / 0.30 = 2.0  ← this gives ω_z_peak = 2.0, not 4.0
+</code></pre></div>
+
+
+
+Hmm — recalculate:
+
+<div class="highlight"><pre><span></span><code>  ω_z_peak = 2 × (h/L) / (h/v) = 2v/L = 2×0.3/0.30 = 2.0 rad/s
+
+  This result is INDEPENDENT OF h! (h cancels out)
+  The peak angular velocity depends on v and L, not on step height.
+</code></pre></div>
+
+
+
+**Key insight from the algebra:** The peak angular velocity from a step bump scales as `2v/L`, independent of step height. At `v = 0.3 m/s`, `L = 0.30 m`:
+
+<div class="highlight"><pre><span></span><code>  ω_z_peak = 2 × 0.3 / 0.30 = 2.0 rad/s regardless of step height
+</code></pre></div>
+
+
+
+What *does* change with height is the **duration** and **total angular displacement**. A taller step keeps the robot at elevated omega_z for longer, giving more IMU samples to capture it. But the *peak* and the *initial slope* are dominated by speed and geometry.
+
+**Therefore:** At `v = 0.3 m/s` and `L = 0.30 m`, any non-trivial step bump produces `Δω_z ≈ 1–2 rad/s` per IMU sample, right at the 2.0 rad/s threshold. To reliably avoid false positives, either:
+1. Increase threshold (risk missing real collisions)
+2. Require multiple consecutive threshold-exceeding samples (debounce)
+3. Fix the floor infrastructure
+4. Slow down near known step locations (operational solution)
+
+This analysis supports the recommendation to always check map tile coordinates when investigating false COLLISION events.
+
+</details>
+
+<hr />
+<h2 id="quick-check-are-you-ready-for-chapter-05">Quick-Check: Are You Ready for Chapter 05?</h2>
+<p>Before moving to <code>05-slip-detection.md</code>, you should be able to:</p>
+<ul>
+<li>[ ] State three types of gyro error and which the OKS bias estimator targets</li>
+<li>[ ] Compute bias-induced heading error: <code>θ_err = b × t</code></li>
+<li>[ ] Explain why the EMA learning rate α must be small</li>
+<li>[ ] Walk through a single Kalman update for theta with numbers</li>
+<li>[ ] Explain why a floor bump can trigger collision detection even at low speeds</li>
+<li>[ ] Identify bias drift vs. collision vs. slip vs. sensorbar-failure in a log snippet</li>
+</ul>
+<p>If you missed Section D, that&rsquo;s fine — it requires geometric reasoning that is more advanced. But you should be comfortable with Sections A, B, and C.</p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

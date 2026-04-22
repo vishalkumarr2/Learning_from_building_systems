@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exercise04 — Nav2 Diagnostics: BT Traces and Parameter Tuning - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-sky-600 hover:text-sky-800 mb-4 inline-block">&larr; Back to ROS 2 Hands-on</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="exercise04-nav2-diagnostics-bt-traces-and-parameter-tuning">Exercise04 — Nav2 Diagnostics: BT Traces and Parameter Tuning</h1>
+<h3 id="companion-exercises-for-03-nav2-architecturemd">Companion exercises for <code>03-nav2-architecture.md</code></h3>
+<p><strong>Estimated time:</strong> 45 minutes<br />
+<strong>Prerequisite:</strong> <a href="../03-nav2-architecture.md">03-nav2-architecture.md</a></p>
+<p><strong>Self-assessment guide:</strong> Section A and B are pure analysis — no code to run. Work through
+each scenario before expanding the answer. If you can diagnose Section A in under
+2 minutes per scenario, you can triage Nav2 failures in field logs at speed.</p>
+<hr />
+<h2 id="overview">Overview</h2>
+<p>Nav2 failures in the field rarely announce themselves clearly. Instead, you see a robot
+standing still, spinning in place, or taking a 5-minute detour — and a wall of log output
+that contains the answer if you know where to look. This exercise set practises reading
+BehaviorTree execution traces and Nav2 YAML parameters to find the root cause without
+needing to reproduce the issue.</p>
+<hr />
+<h2 id="section-a-bt-trace-reading">Section A — BT Trace Reading</h2>
+<p>Each scenario gives an abbreviated Nav2 log. Diagnose what went wrong and what to check.</p>
+<hr />
+<h3 id="scenario-1-robot-never-leaves-starting-position">Scenario 1 — Robot Never Leaves Starting Position</h3>
+<div class="highlight"><pre><span></span><code>[bt_navigator] BT tick
+[bt_navigator]   ComputePathToPose: RUNNING
+[bt_navigator]   ComputePathToPose: FAILURE
+[bt_navigator]   ClearEntireCostmap: RUNNING
+[bt_navigator]   ClearEntireCostmap: SUCCESS
+[bt_navigator]   ComputePathToPose: RUNNING
+[bt_navigator]   ComputePathToPose: FAILURE
+[bt_navigator]   ClearEntireCostmap: RUNNING
+[bt_navigator]   ClearEntireCostmap: SUCCESS
+[bt_navigator]   ComputePathToPose: RUNNING
+[bt_navigator]   ComputePathToPose: FAILURE
+[bt_navigator] Goal aborted after 3 recovery attempts
+[nav2_planner]  No path found between (1.2, 0.8) and (5.5, 3.1)
+</code></pre></div>
+
+<p><strong>Questions:</strong><br />
+1. What is wrong?<br />
+2. What three things would you check to diagnose this?<br />
+3. <code>ClearEntireCostmap SUCCESS</code> appears — why does this not fix the issue?</p>
+<details><summary>Answer</summary>
+
+**What is wrong:**
+The global planner (`nav2_planner`) cannot find a valid path from the robot's position to
+the goal. Clearing the costmap (removing transient obstacles) does not help — this means
+either the goal is unreachable (in a wall, behind an impassable barrier), or the
+`inflation_radius` is so large that every path through the environment is blocked.
+
+**Three things to check:**
+
+1. **Is the goal pose inside an obstacle?** Visualize the global costmap in RViz. If the
+   goal marker is on a lethal (red) cell, the planner will always fail regardless of the
+   path. This is the most common cause.
+
+2. **Is `inflation_radius` too large for the environment?** If `inflation_radius` is
+   wider than half the narrowest corridor, there is no passable path even in an open map.
+   Check `global_costmap.inflation_layer.inflation_radius` against the corridor width.
+   Rule: `inflation_radius` must be < (corridor_width / 2).
+
+3. **Is the static map up to date?** An outdated map may show passable areas that are
+   physically blocked (or vice versa). Check whether the `map_server` is publishing the
+   correct map and that it matches the current environment layout.
+
+**Why ClearEntireCostmap does not fix it:**
+`ClearEntireCostmap` removes *transient* obstacles from the costmap — obstacles added by
+the obstacle layer from sensor data. It does NOT remove:
+- The static layer (loaded from the map file)
+- The inflation layer around static obstacles
+
+If the path is blocked by a permanent wall in the static map, or by inflation from a wall,
+clearing transient obstacles does nothing. The planner will fail again immediately.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<h3 id="scenario-2-robot-oscillates-near-goal">Scenario 2 — Robot Oscillates Near Goal</h3>
+<div class="highlight"><pre><span></span><code>[bt_navigator]   FollowPath: RUNNING
+[bt_navigator]   FollowPath: RUNNING
+[bt_navigator]   FollowPath: RUNNING
+...  (50 more RUNNING ticks)
+[bt_navigator]   FollowPath: FAILURE
+[bt_navigator]   ComputePathToPose: RUNNING   (replanning to same goal)
+[bt_navigator]   ComputePathToPose: SUCCESS
+[bt_navigator]   FollowPath: RUNNING
+...  (repeating cycle, robot oscillating ~0.5m from goal)
+[nav2_controller] [WARN] Goal not reached after 30s timeout
+</code></pre></div>
+
+<p><strong>Questions:</strong><br />
+1. Why is <code>FollowPath</code> reporting FAILURE near the goal?<br />
+2. What parameter is most likely misconfigured?<br />
+3. Why does <code>ComputePathToPose: SUCCESS</code> appear repeatedly? Is replanning the problem?</p>
+<details><summary>Answer</summary>
+
+**Why FollowPath reports FAILURE near the goal:**
+The controller is running `FollowPath` (tracking the path), but the `GoalReached` BT
+condition never triggers because the robot never gets close enough to satisfy the goal
+tolerance. The controller oscillates around the goal position — the DWB or RPP controller
+generates velocity commands that overshoot, causing the robot to swing back and forth
+around the tolerance boundary.
+
+`FollowPath` eventually fails when the controller's own timeout (`goal_time_tolerance`,
+or the controller's oscillation detector) triggers.
+
+**Most likely misconfigured parameter:**
+`xy_goal_tolerance` or `yaw_goal_tolerance` is too tight relative to the controller's
+ability to stop precisely. For a typical differential drive robot:
+- `xy_goal_tolerance: 0.05` m with a high-mass robot may be impossible to hit reliably.
+- Try increasing to `0.25` m for initial testing, then tighten if needed.
+
+Also check `goal_checker` type in the controller server config — some goal checkers apply
+both XY and yaw tolerance simultaneously; if the robot arrives at the correct position
+but with the wrong heading, it will oscillate trying to rotate in place.
+
+**Why ComputePathToPose SUCCESS keeps appearing:**
+Replanning is NOT the problem — it is the symptom. The BT's `GoalUpdated` or
+`DistanceToGoal` condition triggers replanning because the controller failed. The planner
+CAN find a path (short path from current position to the goal nearby), so it succeeds.
+But the controller then fails again for the same reason. The loop continues indefinitely
+until the overall timeout fires.
+
+Replanning to the same nearby goal is correct behaviour; the root cause is in the
+controller's goal tolerance settings.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<h3 id="scenario-3-robot-ignores-an-obstacle-and-runs-into-it">Scenario 3 — Robot Ignores an Obstacle and Runs Into It</h3>
+<div class="highlight"><pre><span></span><code>[costmap_2d] [WARN] Laser scan dropped: stamp 2026-04-01T12:00:00.420Z is
+             0.42s behind current time (threshold: 0.20s)
+[costmap_2d] [WARN] Laser scan dropped: stamp 2026-04-01T12:00:00.423Z is
+             0.42s behind current time (threshold: 0.20s)
+...  (repeated at 10Hz — every scan is dropped)
+[nav2_controller] FollowPath: RUNNING
+[nav2_controller] FollowPath: RUNNING
+[nav2_controller] FollowPath: FAILURE   (obstacle collision)
+</code></pre></div>
+
+<p><strong>Questions:</strong><br />
+1. Why is the local costmap not showing the obstacle?<br />
+2. What is the root cause — is this a sensor failure or a timing issue?<br />
+3. What two things would you check or change to fix this?</p>
+<details><summary>Answer</summary>
+
+**Why the local costmap does not show the obstacle:**
+The `costmap_2d` obstacle layer receives laser scan messages but rejects every single one
+with "stamp behind current time threshold". Because no scans are accepted, the obstacle
+layer never marks any cells as occupied. The local costmap appears empty even though the
+physical sensor is detecting the obstacle.
+
+**Root cause — timing issue, not sensor failure:**
+The laser scan's `header.stamp` is approximately 0.42 s behind the costmap's current time.
+This means the scan was timestamped on the sensor's clock, and there is a ~420 ms lag
+between the sensor clock and the ROS2 system clock.
+
+This is typically caused by one of:
+1. **Clock offset between a sensor driver running on a separate embedded system** (sensor
+   publishes with its own MCU clock) and the main computer running ROS2.
+2. **A bag replay** where the bag's timestamps are old but the system clock is real-time.
+3. **High processing delay** — the scan is computed/republished by a pre-processing node
+   that adds significant latency before costmap_2d sees it.
+
+The sensor is working correctly (it produces valid data). The issue is time synchronization.
+
+**Two fixes:**
+
+1. **Increase the stamp tolerance (quick fix):**
+   ```yaml
+   local_costmap:
+     obstacle_layer:
+       observation_sources: scan
+       scan:
+         max_obstacle_height: 2.0
+         expected_update_rate: 10.0
+         observation_persistence: 0.0
+         inf_is_valid: false
+         # Increase tolerance from 0.2s to 0.5s:
+         min_obstacle_height: 0.0
+   ```
+   In newer Nav2 versions, the parameter is `obstacle_max_range` + `observation_source`
+   `raytrace_max_range`. The stamp tolerance is `obstacle_persistence_time`. Check your
+   version's parameter names.
+
+   The correct parameter is typically in `costmap_2d` plugin config as the tolerance field.
+
+2. **Fix the clock synchronization (proper fix):**
+   Use `chrony` or `PTP` to sync the sensor computer's clock to the navigation computer.
+   If replaying a bag, use `--clock` flag: `ros2 bag play --clock <bag>` so nodes use
+   bag time instead of wall clock time.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<h3 id="scenario-4-robot-takes-a-very-long-detour">Scenario 4 — Robot Takes a Very Long Detour</h3>
+<div class="highlight"><pre><span></span><code>Environment: warehouse corridor, 4m wide, 30m long
+inflation_radius: 3.5  (in global_costmap params)
+[nav2_planner] Path found: length=67.2m
+               (expected direct path: ~12m)
+[nav2_planner] Path found: length=67.2m
+</code></pre></div>
+
+<p>The global costmap looks visually correct — no unexpected obstacles.</p>
+<p><strong>Questions:</strong><br />
+1. What is wrong with the <code>inflation_radius</code> value?<br />
+2. Draw (in text) what the inflated costmap looks like in a 4m-wide corridor.<br />
+3. What value should <code>inflation_radius</code> be set to for this environment?</p>
+<details><summary>Answer</summary>
+
+**What is wrong:**
+`inflation_radius = 3.5` m means every wall cell inflates its "danger zone" by 3.5 m in
+all directions. In a 4 m wide corridor, both walls inflate toward the centre:
+- Left wall inflates 3.5 m to the right.
+- Right wall inflates 3.5 m to the left.
+
+These inflation zones overlap in the middle of the corridor. The planner sees no
+"free" (cost 0) cells anywhere in the corridor — the entire passable area has non-zero
+cost (inflated lethal or near-lethal). The planner finds a path that goes *around* the
+entire corridor through much wider areas, producing the 67 m detour.
+
+**Text diagram of the inflated costmap:**
+
+
+<div class="highlight"><pre><span></span><code>Wall (lethal) ████████████████████████████████████████████
+Inflated      ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+              ←────────── 3.5m ──────────→
+Corridor      ░░░░░░░░░░░░░░░░░░░░░░░░░░░░  (only 4m total width)
+              ←──────────── 4.0m ────────────→
+Inflated      ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+              ←────────── 3.5m ──────────→
+Wall (lethal) ████████████████████████████████████████████
+
+Overlap zone: 3.5 + 3.5 = 7m &gt; 4m corridor width → FULLY INFLATED, no free cells
+</code></pre></div>
+
+
+
+**Correct value:**
+For a robot with footprint radius `r` in a corridor of width `w`, the inflation radius
+should satisfy:
+
+<div class="highlight"><pre><span></span><code>inflation_radius &lt; (w / 2) - r
+</code></pre></div>
+
+
+
+For a 4 m corridor and a typical robot with `r = 0.3 m`:
+
+<div class="highlight"><pre><span></span><code>inflation_radius &lt; (4.0 / 2) - 0.3 = 1.7 m
+</code></pre></div>
+
+
+
+A safe value is `inflation_radius = 0.5` for conservative inflation, or up to `1.5` if you
+want cost gradients that guide the robot away from walls without blocking the path entirely.
+
+**Rule of thumb:** `inflation_radius` should be set to 1.5–2× the robot's collision radius
+as a minimum to create a smooth cost gradient, but must never exceed `corridor_width / 2`.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<h2 id="section-b-parameter-tuning">Section B — Parameter Tuning</h2>
+<p>Each YAML snippet below has one parameter problem. Identify it and give the corrected value.</p>
+<hr />
+<p><strong>B1.</strong> DWB controller that fails to turn in place (robot drives in large circles instead
+of rotating toward the goal).</p>
+<div class="highlight"><pre><span></span><code><span class="nt">controller_server</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">ros__parameters</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">controller_plugins</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;FollowPath&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">FollowPath</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">plugin</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;dwb_core::DWBLocalPlanner&quot;</span>
+<span class="w">      </span><span class="nt">min_vel_theta</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span><span class="w">      </span><span class="c1"># minimum rotational velocity</span>
+<span class="w">      </span><span class="nt">max_vel_theta</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.5</span><span class="w">      </span><span class="c1"># maximum rotational velocity</span>
+<span class="w">      </span><span class="nt">min_speed_xy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.3</span><span class="w">       </span><span class="c1"># minimum linear speed</span>
+<span class="w">      </span><span class="nt">acc_lim_theta</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3.2</span>
+<span class="w">      </span><span class="nt">decel_lim_theta</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-3.2</span>
+</code></pre></div>
+
+<details><summary>Answer</summary>
+
+**Problem:** `min_speed_xy: 0.3` prevents the controller from producing zero linear
+velocity. In-place rotation requires `vx = 0, vy = 0, ω ≠ 0`. If `min_speed_xy` is
+non-zero, DWB cannot generate a trajectory with zero linear speed — it must always move
+forward or backward at least 0.3 m/s. The controller compensates by pairing rotation with
+linear motion, producing the circular arc behaviour.
+
+**Fix:**
+
+<div class="highlight"><pre><span></span><code><span class="w">      </span><span class="nt">min_speed_xy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span><span class="w">    </span><span class="c1"># allow pure rotation (vx=0, vy=0)</span>
+</code></pre></div>
+
+
+
+**Secondary check:** Also verify that `min_vel_x` is not set to a non-zero minimum.
+On a differential drive robot, both `min_speed_xy` and `min_vel_x` must allow zero to
+enable in-place turns.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<p><strong>B2.</strong> Global costmap that never shows sensor data (obstacle layer shows only static
+map, never live sensor readings).</p>
+<div class="highlight"><pre><span></span><code><span class="nt">global_costmap</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">global_costmap</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">ros__parameters</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">plugins</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;static_layer&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;obstacle_layer&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;inflation_layer&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">      </span><span class="nt">obstacle_layer</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">plugin</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;nav2_costmap_2d::ObstacleLayer&quot;</span>
+<span class="w">        </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">        </span><span class="nt">observation_sources</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">scan</span>
+<span class="w">        </span><span class="nt">scan</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">topic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/scan</span>
+<span class="w">          </span><span class="nt">max_obstacle_height</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0</span>
+<span class="w">          </span><span class="nt">clearing</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">          </span><span class="nt">marking</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">          </span><span class="nt">data_type</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;LaserScan&quot;</span>
+<span class="w">          </span><span class="nt">raytrace_max_range</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span>
+<span class="w">          </span><span class="nt">obstacle_max_range</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span>
+<span class="w">      </span><span class="nt">update_frequency</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+<span class="w">      </span><span class="nt">publish_frequency</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0</span>
+<span class="w">      </span><span class="nt">global_frame</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">map</span>
+<span class="w">      </span><span class="nt">robot_base_frame</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">base_link</span>
+<span class="w">      </span><span class="nt">static_map</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</code></pre></div>
+
+<details><summary>Answer</summary>
+
+**Problem:** `update_frequency: 1.0` — the global costmap only updates at 1 Hz. For a
+robot moving at even 0.3 m/s, this means obstacles are added to the costmap only once per
+second. Combined with `publish_frequency: 1.0`, the planner is working with stale data.
+
+However, the deeper problem in most "never shows sensor data" cases is the **QoS mismatch
+or TF issue**. In this config, check:
+
+1. **`/scan` topic QoS:** The obstacle layer subscribes with `BEST_EFFORT`. If the laser
+   driver publishes with `RELIABLE`, there is no mismatch (RELIABLE satisfies BEST_EFFORT
+   requests). But if reversed, scans are silently dropped.
+
+2. **Missing `rolling_window: true`:** For the *global* costmap, `static_map: true` and
+   rolling window are mutually exclusive. If the obstacle layer is not marking on the
+   static map, check whether the layer is within the static map bounds.
+
+**For live sensor responsiveness, fix `update_frequency`:**
+
+<div class="highlight"><pre><span></span><code><span class="w">      </span><span class="nt">update_frequency</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span><span class="w">     </span><span class="c1"># update 10× per second</span>
+<span class="w">      </span><span class="nt">publish_frequency</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5.0</span><span class="w">     </span><span class="c1"># publish 5× per second</span>
+</code></pre></div>
+
+
+
+**Note:** `update_frequency` for the global costmap is typically set lower (1–5 Hz) than
+the local costmap (10 Hz) to reduce CPU load. But 1 Hz means a new obstacle is invisible
+to the planner for up to 1 second after it appears.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<p><strong>B3.</strong> AMCL that loses localization when the robot is stationary (pose estimate slowly
+drifts even while the robot is not moving).</p>
+<div class="highlight"><pre><span></span><code><span class="nt">amcl</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">ros__parameters</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">min_particles</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">500</span>
+<span class="w">    </span><span class="nt">max_particles</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2000</span>
+<span class="w">    </span><span class="nt">update_min_d</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span><span class="w">     </span><span class="c1"># update on any movement, including zero</span>
+<span class="w">    </span><span class="nt">update_min_a</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span><span class="w">     </span><span class="c1"># update on any rotation, including zero</span>
+<span class="w">    </span><span class="nt">resample_interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">    </span><span class="nt">laser_max_range</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10.0</span>
+<span class="w">    </span><span class="nt">laser_min_range</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.2</span>
+<span class="w">    </span><span class="nt">set_initial_pose</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">initial_pose</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">      </span><span class="nt">y</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">      </span><span class="nt">z</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">      </span><span class="nt">yaw</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+</code></pre></div>
+
+<details><summary>Answer</summary>
+
+**Problem:** `update_min_d: 0.0` and `update_min_a: 0.0` mean AMCL runs its particle filter
+update on *every* incoming laser scan, even when the robot has not moved. This causes
+two issues:
+
+1. **Spurious particle diffusion:** Each MCL update cycle adds process noise to the
+   particle cloud (to handle motion uncertainty). With zero thresholds, this noise is added
+   continuously even at rest, gradually spreading the particle cloud and causing the pose
+   estimate to drift.
+
+2. **CPU waste:** Running the full particle filter update at laser scan rate (10 Hz) while
+   stationary is expensive and unnecessary.
+
+**Fix:** Set meaningful minimum movement thresholds. AMCL should only update when the robot
+has moved enough for the laser data to provide genuinely new information.
+
+
+<div class="highlight"><pre><span></span><code><span class="w">    </span><span class="nt">update_min_d</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.2</span><span class="w">    </span><span class="c1"># update after moving at least 0.2m</span>
+<span class="w">    </span><span class="nt">update_min_a</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span><span class="w">    </span><span class="c1"># update after rotating at least ~6 degrees (radians)</span>
+</code></pre></div>
+
+
+
+These are the Nav2 default values. They ensure:
+- AMCL only runs expensive updates when new information is available.
+- Process noise is only injected when the robot is actually moving.
+- The particle cloud stays tight when the robot is stationary.
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<h2 id="section-c-the-robot-stuck-diagnostic-checklist">Section C — The &ldquo;Robot Stuck&rdquo; Diagnostic Checklist</h2>
+<p><strong>Task:</strong> Without looking at any references, write out a step-by-step diagnostic checklist
+for investigating a robot that has stopped navigating. Your checklist should have at least
+6 steps and cover the four Nav2 layers (localization, costmap, planner, BT).</p>
+<p>Write your checklist now, then expand the answer to compare.</p>
+<details><summary>Answer</summary>
+
+### 6-Step Nav2 "Robot Stuck" Diagnostic Checklist
+
+---
+
+**Step 1 — Read the BT navigator status**
+
+<div class="highlight"><pre><span></span><code>ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/bt_navigator/transition_event
+ros2<span class="w"> </span>action<span class="w"> </span>list
+ros2<span class="w"> </span>action<span class="w"> </span>info<span class="w"> </span>/navigate_to_pose
+</code></pre></div>
+
+
+Is the `NavigateToPose` action still EXECUTING, ABORTED, CANCELED, or SUCCEEDED?
+- `ABORTED` → the BT ran out of recovery attempts. Look for `[bt_navigator] Goal aborted`.
+- `SUCCEEDED` → the robot thinks it arrived. Check goal tolerance settings.
+- Action not listed → the BT navigator node crashed or was never activated.
+
+---
+
+**Step 2 — Check the last BT tick in the logs**
+Look for the repeating pattern in the BT log output:
+
+<div class="highlight"><pre><span></span><code>grep -E &quot;FAILURE|RUNNING|SUCCESS&quot; &lt;log&gt;
+</code></pre></div>
+
+
+Identify which BT node is failing. Common patterns:
+- `ComputePathToPose: FAILURE` → planner problem (Step 4)
+- `FollowPath: FAILURE` repeating → controller problem (Step 5)
+- `ComputePathToPose: RUNNING` never returns → planner timeout / stuck in computation
+
+---
+
+**Step 3 — Check localization**
+
+<div class="highlight"><pre><span></span><code>ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/amcl_pose<span class="w"> </span>--once
+ros2<span class="w"> </span>run<span class="w"> </span>tf2_ros<span class="w"> </span>tf2_echo<span class="w"> </span>map<span class="w"> </span>base_link
+</code></pre></div>
+
+
+Is the `map → base_link` transform being published and updating?
+- Transform not available → AMCL crashed, or `map → odom` not being published.
+- Transform frozen (same value for >5s) → AMCL stalled (check particle filter params).
+- Transform updating but visually wrong in RViz → AMCL lost localization.
+
+---
+
+**Step 4 — Inspect the global costmap**
+Open RViz, add the `/global_costmap/costmap` display.
+- **Goal inside lethal cell (red)?** → goal is unreachable. Move the goal.
+- **Entire corridor inflated?** → `inflation_radius` too large. Reduce it.
+- **Costmap not updating?** → check `/scan` QoS, `update_frequency`, obstacle layer enabled.
+- **Static map wrong?** → reload map server or fix the map file.
+
+---
+
+**Step 5 — Inspect the local costmap and controller**
+
+<div class="highlight"><pre><span></span><code>ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/cmd_vel<span class="w"> </span>--once<span class="w">      </span><span class="c1"># is the controller publishing velocity?</span>
+ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/local_costmap/costmap<span class="w"> </span>--once<span class="w">  </span><span class="c1"># is the local costmap populated?</span>
+</code></pre></div>
+
+
+- `cmd_vel` zero → controller not running or goal already considered reached.
+- `cmd_vel` non-zero → controller running, but something (e-stop, motor driver) not
+  applying velocity.
+- Local costmap empty despite obstacles nearby → sensor timestamp issue (check
+  `[costmap_2d] scan dropped` warnings).
+- Oscillation near goal → check `xy_goal_tolerance`, `min_speed_xy`.
+
+---
+
+**Step 6 — Check TF tree health**
+
+<div class="highlight"><pre><span></span><code>ros2<span class="w"> </span>run<span class="w"> </span>tf2_tools<span class="w"> </span>view_frames<span class="w">     </span><span class="c1"># look for disconnected subtrees</span>
+ros2<span class="w"> </span>run<span class="w"> </span>tf2_ros<span class="w"> </span>tf2_echo<span class="w"> </span>map<span class="w"> </span>base_link<span class="w">  </span><span class="c1"># confirms full chain works</span>
+</code></pre></div>
+
+
+TF failures cause silent failures across all layers simultaneously. A single dead TF node
+blocks the costmap, planner, and controller all at once. This is the first thing to verify
+if multiple layers fail simultaneously.
+
+Also check:
+
+<div class="highlight"><pre><span></span><code>ros2<span class="w"> </span>node<span class="w"> </span>list<span class="w">               </span><span class="c1"># are all expected nodes present?</span>
+ros2<span class="w"> </span>node<span class="w"> </span>info<span class="w"> </span>/nav2_controller<span class="w">  </span><span class="c1"># are all expected topics subscribed?</span>
+</code></pre></div>
+
+
+
+---
+
+**Summary table:**
+
+| Symptom | Most likely cause | Step |
+|---|---|---|
+| Action not listed | BT navigator not active/crashed | 1 |
+| `ComputePathToPose FAILURE` | Goal in wall, inflation too large | 2, 4 |
+| `FollowPath FAILURE` near goal | Goal tolerance too tight | 2, 5 |
+| Costmap empty | Sensor QoS mismatch, stamp threshold | 4, 5 |
+| All layers failing simultaneously | TF tree broken | 6 |
+| Robot spinning in place | Yaw goal tolerance, DWB min_speed_xy | 5 |
+
+</details>
+
+<ul>
+<li>[ ] Done</li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>
