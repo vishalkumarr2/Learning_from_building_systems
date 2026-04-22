@@ -1,6 +1,6 @@
 # External Resources
 
-Curated external references for the OKS learning curriculum.
+Curated external references for the robot learning curriculum.
 
 **Tag axes** (one per entry):
 - **Domain:** `embedded` `zephyr` `ros2` `navigation` `llm` `electronics` `linux-rt` `python`
@@ -61,11 +61,11 @@ Curated external references for the OKS learning curriculum.
 
 ### [nav2 documentation](https://navigation.ros.org/) {#nav2-docs}
 `ros2` `navigation` `reference-manual` `comprehensive` `before-hardware`
-> Nav2 stack: costmaps, planners, controllers, BT navigator. Read §Concepts before touching any OKS navigation code.
+> Nav2 stack: costmaps, planners, controllers, BT navigator. Read §Concepts before touching any AMR navigation code.
 
 ### [AtsushiSakai/PythonRobotics](https://github.com/AtsushiSakai/PythonRobotics) {#python-robotics}
 `robotics` `navigation` `python` `repo` `comprehensive` `hands-on` `intermediate`
-> Python code + textbook for robotics algorithms: EKF, Particle Filter, FastSLAM, A*, RRT, MPC, and more (29 k ★). Run the simulations to build intuition for the same algorithms used in the OKS navigation stack before reading estimator source code.
+> Python code + textbook for robotics algorithms: EKF, Particle Filter, FastSLAM, A*, RRT, MPC, and more (29 k ★). Run the simulations to build intuition for the same algorithms used in the robot navigation stack before reading estimator source code.
 
 ### [MichaelGrupp/evo](https://github.com/MichaelGrupp/evo) {#evo}
 `ros2` `navigation` `python` `repo` `deep-dive` `when-debugging` `intermediate`
@@ -73,7 +73,7 @@ Curated external references for the OKS learning curriculum.
 
 ### [henki-robotics/robotics_essentials_ros2](https://github.com/henki-robotics/robotics_essentials_ros2) {#robotics-essentials-ros2}
 `ros2` `course` `comprehensive` `hands-on` `beginner`
-> Hands-on ROS2 + Gazebo course covering SLAM, navigation, and odometry with lab exercises. Good companion or prerequisite for the OKS navigation-estimator track.
+> Hands-on ROS2 + Gazebo course covering SLAM, navigation, and odometry with lab exercises. Good companion or prerequisite for the robot navigation-estimator track.
 
 ### [fkromer/awesome-ros2](https://github.com/fkromer/awesome-ros2) {#awesome-ros2}
 `ros2` `repo` `quickref` `before-hardware` `all-levels`
@@ -81,15 +81,15 @@ Curated external references for the OKS learning curriculum.
 
 ### [Kiloreux/awesome-robotics](https://github.com/Kiloreux/awesome-robotics) {#awesome-robotics}
 `robotics` `repo` `quickref` `before-hardware` `all-levels`
-> Aggregated list of robotics courses, textbooks, simulators, competitions, and software libraries (6.4 k ★). Use to map the wider robotics landscape or find learning resources beyond the OKS curriculum.
+> Aggregated list of robotics courses, textbooks, simulators, competitions, and software libraries (6.4 k ★). Use to map the wider robotics landscape or find learning resources beyond the robot curriculum.
 
 ### [mithi/robotics-coursework](https://github.com/mithi/robotics-coursework) {#robotics-coursework}
 `robotics` `course` `comprehensive` `before-hardware` `intermediate`
-> Curated list of robotics course series (Coursera, EdX, university lecture playlists) covering kinematics, dynamics, SLAM, motion planning, and computer vision. Use to find a structured study path before tackling OKS navigation theory. 4.5k ★
+> Curated list of robotics course series (Coursera, EdX, university lecture playlists) covering kinematics, dynamics, SLAM, motion planning, and computer vision. Use to find a structured study path before tackling AMR navigation theory. 4.5k ★
 
 ### [ai-winter/ros_motion_planning](https://github.com/ai-winter/ros_motion_planning) {#ros-motion-planning}
 `navigation` `cpp` `repo` `hands-on` `intermediate`
-> ROS implementations of 20+ path-planning algorithms (A*, JPS, D*, RRT, RRT*, DWA, MPC, TEB, Pure Pursuit) with animated demos. Use to build hands-on intuition for the planners and local controllers before reading OKS navigation source. (ROS1/Noetic) 3.5k ★
+> ROS implementations of 20+ path-planning algorithms (A*, JPS, D*, RRT, RRT*, DWA, MPC, TEB, Pure Pursuit) with animated demos. Use to build hands-on intuition for the planners and local controllers before reading AMR navigation source. (ROS1/Noetic) 3.5k ★
 
 ### [cartographer-project/cartographer](https://github.com/cartographer-project/cartographer) {#cartographer}
 `ros2` `navigation` `repo` `deep-dive` `theory-only` `expert-only`

@@ -8,7 +8,7 @@
 
 ## Section A — Conceptual Questions
 
-**A1.** A robot with perfect encoders drives in a perfect straight line for 10 metres on a concrete floor, then a shiny tile floor. Its position estimate ends up 8 cm off from where a tape measure says it should be. No sensorbar updates occurred. What is the most likely cause, and how would you distinguish it from a baseline calibration error?
+**A1.** A robot with perfect encoders drives in a perfect straight line for 10 metres on a concrete floor, then a shiny tile floor. Its position estimate ends up 8 cm off from where a tape measure says it should be. No line-sensor updates occurred. What is the most likely cause, and how would you distinguish it from a baseline calibration error?
 
 <details><summary>Answer</summary>
 
@@ -46,15 +46,15 @@ The mean value theorem says `[sin(θ + Δθ) − sin(θ)] / Δθ = cos(θ + c)` 
 
 </details>
 
-**A3.** OKS's `predict()` does NOT read `odom.twist.covariance` or `odom.pose.covariance` from the incoming ROS message. Your colleague says "this means OKS can't know how reliable the odometry is." Are they right? Explain what OKS uses instead and why the design choice makes sense.
+**A3.** AMR's `predict()` does NOT read `odom.twist.covariance` or `odom.pose.covariance` from the incoming ROS message. Your colleague says "this means AMR can't know how reliable the odometry is." Are they right? Explain what AMR uses instead and why the design choice makes sense.
 
 <details><summary>Answer</summary>
 
-Your colleague is partially right but misunderstands the design intent. OKS *can* assess odom reliability — it just does so differently.
+Your colleague is partially right but misunderstands the design intent. AMR *can* assess odom reliability — it just does so differently.
 
-**What OKS uses instead:**
-1. **Fixed noise parameters** (`k_trans_noise`, `k_rot_noise`, etc.) tuned once during robot calibration. These encode the *expected* reliability of the OKS robot's specific wheel/encoder hardware.
-2. **Staleness detection** on the odom arrival timestamp. If odom hasn't arrived within `2× expected_period`, OKS knows something is wrong with the sensor, regardless of what the covariance field says.
+**What AMR uses instead:**
+1. **Fixed noise parameters** (`k_trans_noise`, `k_rot_noise`, etc.) tuned once during robot calibration. These encode the *expected* reliability of the warehouse robot's specific wheel/encoder hardware.
+2. **Staleness detection** on the odom arrival timestamp. If odom hasn't arrived within `2× expected_period`, AMR knows something is wrong with the sensor, regardless of what the covariance field says.
 3. **Slip detection** in `odometryCallback()` via velocity window comparison — a runtime check that detects actual slip events rather than relying on the publisher's covariance estimate.
 
 **Why this design makes sense:**
@@ -62,7 +62,7 @@ Your colleague is partially right but misunderstands the design intent. OKS *can
 - Fixed parameters are simpler, more auditable, and less susceptible to bugs in the covariance publisher.
 - The noise model parameters can be empirically calibrated from bags, then applied uniformly — no per-message noise injection.
 
-**The trade-off:** OKS cannot adapt to surface-specific reliability (tile vs. concrete) without changing its parameters. Robots on the same floor type have well-matched noise models; robots crossing surface types may see systematic covariance under/over-estimation.
+**The trade-off:** AMR cannot adapt to surface-specific reliability (tile vs. concrete) without changing its parameters. Robots on the same floor type have well-matched noise models; robots crossing surface types may see systematic covariance under/over-estimation.
 
 </details>
 
@@ -89,7 +89,7 @@ heading_error = 0.5% × (2π total turning) = 0.005 × 6.28 = 0.031 rad ≈ 1.8�
 
 </details>
 
-**A5.** The OKS formula for lateral variance includes the term `min(cov_theta, 1e5) × delta_trans²`. After a slip detection event, OKS sets `cov_theta = INF`. Trace through what happens to `lateral_var` for the *next* prediction step, and explain why the `min(..., 1e5)` cap is necessary but also potentially dangerous.
+**A5.** The AMR formula for lateral variance includes the term `min(cov_theta, 1e5) × delta_trans²`. After a slip detection event, AMR sets `cov_theta = INF`. Trace through what happens to `lateral_var` for the *next* prediction step, and explain why the `min(..., 1e5)` cap is necessary but also potentially dangerous.
 
 <details><summary>Answer</summary>
 
@@ -117,31 +117,31 @@ Without the cap, `INF × delta_trans²` = `NaN` in IEEE 754 arithmetic (0 × INF
 
 **Why the cap is potentially dangerous:**
 
-`1e5 m²` (σ ≈ 316 m) is finite but still astronomically large for a warehouse that is at most ~100 m wide. In practice this is fine — the sensorbar will soon correct the position. However, if sensorbar updates are *also* failing (e.g., after a slip onto an unmarked floor section), the robot will be in a state where it has huge but *finite* covariance indefinitely. The navigation stack will not trigger `ESTIMATED_STATE_NOT_FINITE`, so it will keep trying to navigate, but every goal will be executed with massive position uncertainty.
+`1e5 m²` (σ ≈ 316 m) is finite but still astronomically large for a warehouse that is at most ~100 m wide. In practice this is fine — the line-sensor will soon correct the position. However, if line-sensor updates are *also* failing (e.g., after a slip onto an unmarked floor section), the robot will be in a state where it has huge but *finite* covariance indefinitely. The navigation stack will not trigger `ESTIMATED_STATE_NOT_FINITE`, so it will keep trying to navigate, but every goal will be executed with massive position uncertainty.
 
-**When investigating bags:** If you see `cov_lateral` plateau near `1e5` for more than a few seconds without shrinking, the robot slipped AND sensorbar corrections are not working. Check for `is_reliable=False` on sensorbar messages, or that the robot is not over floor markings.
+**When investigating bags:** If you see `cov_lateral` plateau near `1e5` for more than a few seconds without shrinking, the robot slipped AND line-sensor corrections are not working. Check for `is_reliable=False` on line-sensor messages, or that the robot is not over floor markings.
 
 </details>
 
-**A6.** A junior engineer proposes replacing the midpoint heading integration `(θ + Δθ/2)` with a Runge-Kutta 4th-order (RK4) integration for better accuracy. Is this a good idea for OKS? Consider the frequency of prediction steps, the magnitude of `Δθ` per step, and the cost of the improvement.
+**A6.** A junior engineer proposes replacing the midpoint heading integration `(θ + Δθ/2)` with a Runge-Kutta 4th-order (RK4) integration for better accuracy. Is this a good idea for the robot? Consider the frequency of prediction steps, the magnitude of `Δθ` per step, and the cost of the improvement.
 
 <details><summary>Answer</summary>
 
-**Almost certainly not a good idea** for OKS's specific use case, for the following reasons:
+**Almost certainly not a good idea** for the robot's specific use case, for the following reasons:
 
-**1. Magnitude of Δθ per step is small.** OKS receives odom at 50 Hz. At the robot's maximum angular velocity (typically ~1 rad/s), each step gives:
+**1. Magnitude of Δθ per step is small.** AMR receives odom at 50 Hz. At the robot's maximum angular velocity (typically ~1 rad/s), each step gives:
 ```
 Δθ = 1 rad/s × 0.02 s = 0.02 rad per step
 ```
-The midpoint rule error is O(Δθ³) = O(8×10⁻⁶) radians per step. Over 50 steps (1 second), accumulated midpoint error is ~0.0004 rad (0.02°). RK4 reduces this by another order of magnitude — from 0.02° to 0.002° per second. This is well below sensorbar measurement noise.
+The midpoint rule error is O(Δθ³) = O(8×10⁻⁶) radians per step. Over 50 steps (1 second), accumulated midpoint error is ~0.0004 rad (0.02°). RK4 reduces this by another order of magnitude — from 0.02° to 0.002° per second. This is well below line-sensor measurement noise.
 
-**2. Sensorbar corrections dominate.** OKS corrects position every ~5–10 cm of travel. The dead-reckoning accumulates for at most 0.1 s before being corrected. The dead-reckoning accuracy between sensorbar updates is not the limiting factor.
+**2. Line-Sensor corrections dominate.** AMR corrects position every ~5–10 cm of travel. The dead-reckoning accumulates for at most 0.1 s before being corrected. The dead-reckoning accuracy between line-sensor updates is not the limiting factor.
 
 **3. RK4 requires intermediate evaluations.** RK4 needs 4 function evaluations per step (k₁ through k₄). For odom at 50 Hz with a simple unicycle model, this quadruples computation with no measurable benefit.
 
 **4. The real errors are not integration errors.** Wheel slip, baseline calibration, and floor height variation contribute far more than numerical integration error. Improving integration accuracy does not address these.
 
-**Valid use case for higher-order integration:** A robot dead-reckoning for long stretches without corrections (e.g., GPS-denied navigation over tens of metres) would benefit from RK4. But OKS's sensorbar update frequency makes midpoint rule entirely adequate.
+**Valid use case for higher-order integration:** A robot dead-reckoning for long stretches without corrections (e.g., GPS-denied navigation over tens of metres) would benefit from RK4. But AMR's line-sensor update frequency makes midpoint rule entirely adequate.
 
 </details>
 
@@ -211,7 +211,7 @@ y' = 2.0 + 0.34306 × sin(0.53437)
 
 </details>
 
-**B2.** A robot navigates a 50 m straight path in an OKS warehouse. Its right wheel has a true radius of `r_R = 0.0503 m` but the software uses `r_R_nominal = 0.0500 m`. Left wheel is correct. Baseline B = 0.30 m. The robot drives at a constant velocity with equal encoder ticks on both wheels.
+**B2.** A robot navigates a 50 m straight path in an warehouse. Its right wheel has a true radius of `r_R = 0.0503 m` but the software uses `r_R_nominal = 0.0500 m`. Left wheel is correct. Baseline B = 0.30 m. The robot drives at a constant velocity with equal encoder ticks on both wheels.
 
 (a) Compute the heading drift rate in rad/m of path.
 (b) How far along the path before lateral error exceeds 5 cm?
@@ -281,18 +281,18 @@ lateral_error = 50 × sin(1.0) = 50 × 0.8415 = 42.1 m
 
 This is physically impossible in a warehouse — the robot would have hit a wall long before 50 m. What actually happens: the robot spirals, turning ~57° over 50 m. The effective lateral displacement is less than 42 m because the robot's heading has changed direction, but the robot is clearly far off its intended straight path.
 
-**Lesson:** A 0.6% wheel radius error (0.3 mm on a 50 mm wheel) causes navigation failure after ~1.5 m without sensorbar corrections. This illustrates why sensorbar corrections every 10–20 cm are essential.
+**Lesson:** A 0.6% wheel radius error (0.3 mm on a 50 mm wheel) causes navigation failure after ~1.5 m without line-sensor corrections. This illustrates why line-sensor corrections every 10–20 cm are essential.
 
 </details>
 
-**B3.** You are analysing an OKS bag. The robot's `cov_theta` is 0.04 rad² at time T. Over the next 0.5 seconds, the robot drives straight (no turning) at 0.3 m/s. The OKS noise parameters are:
+**B3.** You are analysing a robot bag. The robot's `cov_theta` is 0.04 rad² at time T. Over the next 0.5 seconds, the robot drives straight (no turning) at 0.3 m/s. The AMR noise parameters are:
 - `k_trans_noise = 0.002` (m²/m)
 - `k_trans_lat_noise = 0.001` (m²/m)
 - `k_rot_noise = 0.05` (rad²/rad)
 - `k_time_pos_noise = 0.0001` (m²/s)
 - `k_time_rot_noise = 0.0005` (rad²/s)
 
-There are 25 prediction steps (50 Hz), `delta_t = 0.02 s` each. No sensorbar updates occur.
+There are 25 prediction steps (50 Hz), `delta_t = 0.02 s` each. No line-sensor updates occur.
 
 Compute the total `trans_var`, `theta_var`, and `lateral_var` accumulated over this 0.5 s window.
 
@@ -364,7 +364,7 @@ Cov_theta term (sum over steps k=0..24):
 σ_lateral = 1.36 cm  (cross-track uncertainty)
 ```
 
-These are realistic values for an OKS robot between sensorbar updates. The lateral uncertainty is almost as large as the along-track uncertainty, reflecting the `cov_theta × delta_trans²` coupling.
+These are realistic values for an warehouse robot between line-sensor updates. The lateral uncertainty is almost as large as the along-track uncertainty, reflecting the `cov_theta × delta_trans²` coupling.
 
 </details>
 
@@ -430,7 +430,7 @@ Wrong: `trans_var = 0.002 × 20.09 = 0.04018 m²`
 
 This is **1100×** the normal variance, producing σ_trans ≈ 0.20 m from a single bad tick. Depending on `k_trans_lat_noise` and current `cov_theta`, lateral variance would also spike.
 
-More critically, a `delta_trans = 20 m` would pass through to the state update, teleporting the estimated position by ~20 metres. The next sensorbar update would either:
+More critically, a `delta_trans = 20 m` would pass through to the state update, teleporting the estimated position by ~20 metres. The next line-sensor update would either:
 1. Reject it (Mahalanobis distance >> 2σ), leaving the state in the wrong place.
 2. Or the position would be so far out of range that the robot stops navigating entirely.
 
@@ -440,12 +440,12 @@ More critically, a `delta_trans = 20 m` would pass through to the state update, 
 
 ---
 
-## Section C — Connect to OKS
+## Section C — Connect to robot
 
-**C1.** You are debugging bag-XXXXX. The bag shows the robot's `cov_xx` and `cov_yy` growing steadily for 8 seconds without any shrink events (no sensorbar updates), then suddenly both spike to approximately `1e5 m²`, then remain there. No velocity commands were issued during this period. Describe:
+**C1.** You are debugging bag-XXXXX. The bag shows the robot's `cov_xx` and `cov_yy` growing steadily for 8 seconds without any shrink events (no line-sensor updates), then suddenly both spike to approximately `1e5 m²`, then remain there. No velocity commands were issued during this period. Describe:
 
 (a) What sequence of events most likely produced this pattern?
-(b) Which OKS code path(s) were responsible for each phase?
+(b) Which robot code path(s) were responsible for each phase?
 (c) What would you check in the bag to confirm your hypothesis?
 (d) Why did the covariance stop at `1e5` rather than continuing to grow or going to INF?
 
@@ -453,13 +453,13 @@ More critically, a `delta_trans = 20 m` would pass through to the state update, 
 
 **(a) Most likely sequence of events:**
 
-1. **Phase 1 (0–8 s, gradual growth):** Robot was moving (odom arriving normally). `predict()` ran every 20 ms, adding `k_trans_noise × delta_trans + ... + k_time_pos_noise × delta_t` to `cov_xx`/`cov_yy` on each step. No sensorbar corrections occurred (robot either passed no lines, or sensorbar was unreliable on that floor section).
+1. **Phase 1 (0–8 s, gradual growth):** Robot was moving (odom arriving normally). `predict()` ran every 20 ms, adding `k_trans_noise × delta_trans + ... + k_time_pos_noise × delta_t` to `cov_xx`/`cov_yy` on each step. No line-sensor corrections occurred (robot either passed no lines, or line-sensor was unreliable on that floor section).
 
 2. **Phase 2 (sudden spike to 1e5):** A **slip event** was detected. `odometryCallback()` in `` computed that current velocity dropped faster than `max_velocity_decrease` allowed, given the recent velocity window in `_max_odom_vel_tracker`. Result: covariance was set to INF for X, Y, and Theta.
 
 3. **Phase 3 (plateau at 1e5):** After slip, `cov_theta = INF`. On the next prediction step, `lateral_var` used `min(INF, 1e5) = 1e5`, capping lateral covariance. Translational variance also settled due to the staleness scaling with no new motion.
 
-**(b) OKS code paths:**
+**(b) robot code paths:**
 
 - Phase 1: ` predict()` lines ~396+, the linear noise model additions.
 - Phase 2: ` odometryCallback()` lines ~285-310, slip detection block: `if (current_vel + max_velocity_decrease < max_vel) { set covariance INF }`.
@@ -469,7 +469,7 @@ More critically, a `delta_trans = 20 m` would pass through to the state update, 
 
 1. `/odom` topic: Look for `twist.linear.x` drop at the moment of the spike. If velocity was ~0.3 m/s and dropped to 0 in a single tick, that's the slip event.
 2. `_max_odom_vel_tracker` window: Check if `cmd_vel` had a recent non-zero command before the velocity drop — slip detection only fires if there was a recent velocity command.
-3. `/sensorbar` topic: Check `is_reliable` field on all messages in the 8-second window. If `is_reliable=True` but updates are not appearing in the estimator, there may be a different gating issue.
+3. `/line-sensor` topic: Check `is_reliable` field on all messages in the 8-second window. If `is_reliable=True` but updates are not appearing in the estimator, there may be a different gating issue.
 4. `estimated_state.status`: Should transition from `STATUS_OK` (0) to `STATUS_SLIP` (4) at the spike moment.
 
 **(d) Why covariance stopped at 1e5 rather than growing further or going INF:**
@@ -485,7 +485,7 @@ So after the robot stops, `lateral_var` stops growing (the cov_theta term is `×
 
 </details>
 
-**C2.** The OKS noise parameter `k_trans_noise = 0.002` was tuned on a smooth concrete floor. The robot is now deployed on a new site with polished tile floors where wheel slip is 3× more common. You want to re-tune the parameters to reflect the new surface without access to the source code recompilation cycle — you'll update the YAML config file only.
+**C2.** The AMR noise parameter `k_trans_noise = 0.002` was tuned on a smooth concrete floor. The robot is now deployed on a new site with polished tile floors where wheel slip is 3× more common. You want to re-tune the parameters to reflect the new surface without access to the source code recompilation cycle — you'll update the YAML config file only.
 
 (a) Which parameters should you increase, by roughly how much, and why?
 (b) What is the risk of increasing them too much?
@@ -502,14 +502,14 @@ So after the robot stops, `lateral_var` stops growing (the cov_theta term is `×
 
 - **`k_rot_noise`**: Rotational slip (spinning in place due to high wheel friction differential) is more likely on tile. Increase by 2–3×.
 
-The effect: The estimator becomes less confident between sensorbar updates, which is appropriate. The covariance will grow faster, so sensorbar measurements will have relatively more weight (smaller innovation variance relative to measurement noise).
+The effect: The estimator becomes less confident between line-sensor updates, which is appropriate. The covariance will grow faster, so line-sensor measurements will have relatively more weight (smaller innovation variance relative to measurement noise).
 
 **(b) Risk of increasing too much:**
 
 If variance parameters are too high, the estimator becomes **over-conservative**. This causes:
-1. **Sensorbar updates accepted too readily**: The Mahalanobis gating rejects measurements if innovation > 2σ of prediction. If σ_prediction is inflated 10×, almost every measurement is within 2σ, including *bad* sensorbar readings (wrong line identification, ghost lines). The filter becomes susceptible to sensorbar false positives.
-2. **Covariance blows up during long stretches without lines**: A 5 m stretch without sensorbar updates with 10× inflated noise parameters will result in covariance that is effectively infinite before the next correction.
-3. **Navigation rejection**: If `cov_xx` or `cov_yy` exceed a navigation threshold before the next sensorbar update, the robot may refuse to navigate.
+1. **Line-Sensor updates accepted too readily**: The Mahalanobis gating rejects measurements if innovation > 2σ of prediction. If σ_prediction is inflated 10×, almost every measurement is within 2σ, including *bad* line-sensor readings (wrong line identification, ghost lines). The filter becomes susceptible to line-sensor false positives.
+2. **Covariance blows up during long stretches without lines**: A 5 m stretch without line-sensor updates with 10× inflated noise parameters will result in covariance that is effectively infinite before the next correction.
+3. **Navigation rejection**: If `cov_xx` or `cov_yy` exceed a navigation threshold before the next line-sensor update, the robot may refuse to navigate.
 
 **(c) Parameter you should NOT increase:**
 
@@ -528,7 +528,7 @@ Increasing `k_rot_noise` makes `theta_var` grow faster per step, which increases
 
 The problem with this approach:
 1. **Wrong physical model**: Lateral slip on tile is not caused by heading uncertainty — it's a direct lateral motion that should be modelled in `k_trans_lat_noise`, not mediated through `cov_theta`.
-2. **Coupled side effects**: Inflating `k_rot_noise` also inflates heading variance, which affects sensorbar theta update gating independently of lateral position. You may start rejecting valid heading corrections.
+2. **Coupled side effects**: Inflating `k_rot_noise` also inflates heading variance, which affects line-sensor theta update gating independently of lateral position. You may start rejecting valid heading corrections.
 3. **Non-linear coupling**: The cov_theta → lateral effect is quadratic in `delta_trans`. This means the lateral variance only spikes at high speeds; at low speeds the effect is negligible. Direct slip is approximately linear in `delta_trans`.
 
 **Correct approach**: Increase `k_trans_lat_noise` (direct lateral slip per metre) rather than hoping `cov_theta` inflation trickles down to lateral variance.

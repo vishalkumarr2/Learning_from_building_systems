@@ -1,4 +1,4 @@
-# Python / OKS Scripting — Learning Plan
+# Python / Robot Scripting — Learning Plan
 ### For: Engineer writing daily RCA scripts who wants them testable, typed, and maintainable
 ### Goal: Write analysis scripts that future-you can understand in 6 months
 
@@ -6,7 +6,7 @@
 
 ## Why This Track Exists
 
-You write Python daily: `kb_search.py`, `rca_session.py`, `kb_builder.py`, log analysis scripts.
+You write Python daily: `knowledge_search.py`, `session_tracker.py`, `knowledge_builder.py`, log analysis scripts.
 But they lack:
 - Type annotations (hard to refactor safely)
 - Tests (regressions silently break things)
@@ -24,14 +24,14 @@ uses dataclasses/Pydantic for data boundaries.
 - `@dataclass` vs `NamedTuple` vs `Pydantic BaseModel` — when to use each
 - Validating config files (`.env` → Pydantic settings)
 
-**Exercise:** Refactor `rca_session.py` session state into a typed Pydantic model
+**Exercise:** Refactor `session_tracker.py` session state into a typed Pydantic model
 
 ### Week 2: Testing CLI Scripts with pytest (2 hrs)
 - `pytest` fixtures, `tmp_path`, `monkeypatch`
 - Mocking ADO API calls with `pytest-mock`
 - Testing scripts that read from `.env`
 
-**Exercise:** Write tests for `kb_search.py` — test the scoring logic without hitting ADO
+**Exercise:** Write tests for `knowledge_search.py` — test the scoring logic without hitting ADO
 
 ### Week 3: Time-Series Log Analysis with polars (3 hrs)
 - polars vs pandas: why polars is faster for large bag CSVs

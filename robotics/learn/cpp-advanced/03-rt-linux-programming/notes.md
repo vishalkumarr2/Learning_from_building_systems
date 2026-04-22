@@ -36,12 +36,12 @@ catastrophic as one that never arrives.
 **Examples:**
 - **High-frequency trading** — a stale quote is worthless. Late order = missed profit, not death.
 - **Radar tracking** — a late return is discarded. The target has moved.
-- **OKS AMR control loop** — a late cmd_vel is useless; the robot is now 10mm further along.
+- **warehouse AMR control loop** — a late cmd_vel is useless; the robot is now 10mm further along.
 
-**Key insight for our work:** The OKS robot estimator + controller runs at ~100Hz (10ms).
-That makes it firm-RT. The sensorbar must deliver fresh data every 10ms. When it delivers
+**Key insight for our work:** The warehouse robot estimator + controller runs at ~100Hz (10ms).
+That makes it firm-RT. The line-sensor must deliver fresh data every 10ms. When it delivers
 duplicated data (stale), the estimator diverges — exactly the failure mode we've been
-investigating in tickets #98301, #99185, #98838.
+investigating in Cases G, Case-H, Case-I.
 
 ---
 
@@ -439,7 +439,7 @@ RT Application Startup Sequence:
 
 ## Connection to Our Work
 
-The OKS robot runs ROS1 on Linux. The navigation estimator and controller
+The warehouse robot runs ROS1 on Linux. The navigation estimator and controller
 run as ROS nodes at ~100Hz. They are **not** configured for hard RT:
 - No `SCHED_FIFO`
 - No `mlockall`
@@ -448,7 +448,7 @@ run as ROS nodes at ~100Hz. They are **not** configured for hard RT:
 
 This explains why the system is vulnerable to latency spikes: when the kernel
 is busy (disk flush, network burst, RCU grace period), the estimator loop
-gets delayed, stale sensorbar data accumulates, and the robot diverges.
+gets delayed, stale line-sensor data accumulates, and the robot diverges.
 
 Understanding RT programming helps us:
 1. **Diagnose** why certain failures only happen under load
@@ -483,4 +483,4 @@ Understanding RT programming helps us:
 - "Is Parallel Programming Hard?" — Paul McKenney, Ch. 7-8 on RT
 - "Linux Device Drivers, 3rd Ed." — Ch. 7 (Time, Delays, Deferred Work)
 - cyclictest tool — the standard RT latency benchmark
-- OKS firmware: `oks_navigation_estimator` runs a cyclic pattern at 100Hz
+- robot firmware: `navigation_estimator` runs a cyclic pattern at 100Hz

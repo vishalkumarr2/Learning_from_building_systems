@@ -40,7 +40,7 @@ same target work both when building in-tree and after `make install`.
 
 ### Why This Matters for Embedded/Safety-Critical
 
-In an OKS-style project with `rt_core`, `navigation`, `serial_datalink`, etc., each library
+In a robot-style project with `rt_core`, `navigation`, `serial_datalink`, etc., each library
 declares its own requirements. When you `target_link_libraries(navigation PUBLIC rt_core)`,
 CMake automatically propagates rt_core's PUBLIC include paths and compile flags to navigation
 and anything that depends on navigation. No manual tracking.

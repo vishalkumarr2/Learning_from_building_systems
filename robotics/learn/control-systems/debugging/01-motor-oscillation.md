@@ -8,9 +8,9 @@
 
 ## The Scenario
 
-**Field report from OKS warehouse (Hamamatsu site):**
+**Field report from warehouse (Site-A site):**
 
-> Robot oksbot-scl-hamamatsu08 exhibits a loud buzzing sound from the right wheel at constant speed. The wheel visibly oscillates at ~30 Hz. The left wheel is fine. The robot was working normally yesterday. No firmware or software changes were deployed.
+> Robot amr-warehouse-08 exhibits a loud buzzing sound from the right wheel at constant speed. The wheel visibly oscillates at ~30 Hz. The left wheel is fine. The robot was working normally yesterday. No firmware or software changes were deployed.
 
 **What you have:**
 - Speed PID runs at 1 kHz on the MCU

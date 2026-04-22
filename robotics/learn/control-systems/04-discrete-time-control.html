@@ -62,7 +62,7 @@
 <p><strong>Prerequisite:</strong> <code>03-pid-controller.md</code> (continuous PID, tuning)
 <strong>Unlocks:</strong> <code>05-mcu-motor-control.md</code> (hardware that executes the discrete PID)</p>
 <hr />
-<h2 id="why-should-i-care-oks-context">Why Should I Care? (OKS Context)</h2>
+<h2 id="why-should-i-care-practical-context">Why Should I Care? (Practical Context)</h2>
 <p>The PID equations in Lesson 03 are <em>continuous-time</em> — they assume infinitely fast computation with infinitely precise math. Real controllers run on a microcontroller that:</p>
 <ol>
 <li>Samples the encoder at <strong>discrete intervals</strong> (every 100 µs = 10 kHz)</li>
@@ -73,7 +73,7 @@
 - <strong>Aliasing:</strong> Sample too slowly and fast disturbances appear as slow ones
 - <strong>Quantization:</strong> Encoder resolution limits the minimum detectable speed
 - <strong>Integration method:</strong> Forward Euler vs. Tustin bilinear transform changes the stability boundary</p>
-<p><strong>OKS example:</strong> The STM32 motor control runs at 10 kHz. At this rate, the electrical time constant (0.5 ms = 2 kHz bandwidth) is adequately sampled. But if someone reduces the rate to 1 kHz (100 µs → 1 ms) &ldquo;to save CPU,&rdquo; the current loop becomes unstable because the electrical dynamics aren&rsquo;t sampled fast enough.</p>
+<p><strong>AMR example:</strong> The STM32 motor control runs at 10 kHz. At this rate, the electrical time constant (0.5 ms = 2 kHz bandwidth) is adequately sampled. But if someone reduces the rate to 1 kHz (100 µs → 1 ms) &ldquo;to save CPU,&rdquo; the current loop becomes unstable because the electrical dynamics aren&rsquo;t sampled fast enough.</p>
 <hr />
 <h1 id="part-1-sampling-and-aliasing">PART 1 — SAMPLING AND ALIASING</h1>
 <h2 id="11-the-sampling-theorem-shannonnyquist">1.1 The Sampling Theorem (Shannon/Nyquist)</h2>
@@ -84,14 +84,14 @@
 - Shannon says 2× is the <em>minimum</em> to avoid aliasing
 - But a controller needs to <em>react</em> to the signal, not just record it
 - 10× gives enough samples per cycle for the controller to effectively act</p>
-<p><strong>OKS motor control sampling rates:</strong></p>
+<p><strong>robot motor control sampling rates:</strong></p>
 <table>
 <thead>
 <tr>
 <th>Loop</th>
 <th>Bandwidth</th>
 <th>Min sample rate (10×)</th>
-<th>Actual OKS rate</th>
+<th>Actual AMR rate</th>
 <th>Margin</th>
 </tr>
 </thead>
@@ -128,7 +128,7 @@
 </table>
 <h2 id="12-what-aliasing-looks-like-in-control">1.2 What Aliasing Looks Like in Control</h2>
 <p>If you sample a 300 Hz vibration at 500 Hz, it appears as a 200 Hz signal (500 - 300 = 200). The controller &ldquo;sees&rdquo; a phantom 200 Hz disturbance and tries to reject it — making things worse.</p>
-<p><strong>OKS example:</strong> Motor cogging at 200 Hz + speed loop at 10 kHz = no problem (10000 &gt;&gt; 2×200). But if the SPI bus delays speed feedback to an effective 300 Hz rate, the cogging can alias into the controller&rsquo;s useful bandwidth.</p>
+<p><strong>AMR example:</strong> Motor cogging at 200 Hz + speed loop at 10 kHz = no problem (10000 &gt;&gt; 2×200). But if the SPI bus delays speed feedback to an effective 300 Hz rate, the cogging can alias into the controller&rsquo;s useful bandwidth.</p>
 <p><strong>Solution:</strong> Anti-alias filter before sampling. A simple first-order low-pass filter:</p>
 <p>$$H(s) = \frac{1}{\tau_f s + 1}, \quad \tau_f = \frac{1}{2\pi f_{cutoff}}$$</p>
 <p>Set $f_{cutoff} = f_s / 4$ to prevent aliasing while preserving useful bandwidth.</p>
@@ -196,7 +196,7 @@
 <span class="p">}</span>
 </code></pre></div>
 
-<p><strong>OKS firmware uses Tustin for the speed loop</strong> because it&rsquo;s the best accuracy-to-cost ratio. The current loop uses Forward Euler because at 20 kHz, even Forward Euler is accurate enough (the electrical time constant is only ~1 ms = 20 samples).</p>
+<p><strong>robot firmware uses Tustin for the speed loop</strong> because it&rsquo;s the best accuracy-to-cost ratio. The current loop uses Forward Euler because at 20 kHz, even Forward Euler is accurate enough (the electrical time constant is only ~1 ms = 20 samples).</p>
 <h2 id="25-comparison-of-methods">2.5 Comparison of Methods</h2>
 <table>
 <thead>
@@ -253,7 +253,7 @@
 <li><strong>Bumpless transfer:</strong> Switching to manual mode just means stopping the $\Delta u$ updates. No accumulated integral to manage.</li>
 <li><strong>Simpler anti-windup:</strong> Just clamp $u[n]$ to $[u_{min}, u_{max}]$ after each step.</li>
 </ol>
-<p><strong>OKS firmware velocity-form PID:</strong></p>
+<p><strong>robot firmware velocity-form PID:</strong></p>
 <div class="highlight"><pre><span></span><code><span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">Kp</span><span class="p">,</span><span class="w"> </span><span class="n">Ki</span><span class="p">,</span><span class="w"> </span><span class="n">Kd</span><span class="p">;</span>
 <span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">Ts</span><span class="p">;</span><span class="w">              </span><span class="c1">// Sample period</span>
@@ -290,9 +290,9 @@
 <p>$$\omega[n] = \frac{\theta[n] - \theta[n-1]}{T_s} = \frac{\Delta\theta \cdot \text{count_diff}}{T_s}$$</p>
 <p><strong>Minimum detectable speed:</strong></p>
 <p>$$\omega_{min} = \frac{2\pi}{4N \cdot T_s}$$</p>
-<p><strong>OKS encoder:</strong> $N = 512$ counts/rev, 4× decoding = 2048 edges/rev, $f_s = 10$ kHz:</p>
+<p><strong>AMR encoder:</strong> $N = 512$ counts/rev, 4× decoding = 2048 edges/rev, $f_s = 10$ kHz:</p>
 <p>$$\omega_{min} = \frac{2\pi}{2048 \times 0.0001} = 30.7 \text{ rad/s} = 293 \text{ RPM}$$</p>
-<p>That&rsquo;s a terrible resolution for low-speed control! At the wheel (after 50:1 gearbox), the minimum detectable speed is 30.7/50 = 0.61 rad/s. For the OKS wheel (radius ~0.065 m), that&rsquo;s 0.04 m/s.</p>
+<p>That&rsquo;s a terrible resolution for low-speed control! At the wheel (after 50:1 gearbox), the minimum detectable speed is 30.7/50 = 0.61 rad/s. For the robot wheel (radius ~0.065 m), that&rsquo;s 0.04 m/s.</p>
 <h2 id="42-improving-speed-resolution">4.2 Improving Speed Resolution</h2>
 <h3 id="method-1-reduce-sample-rate-for-speed-calculation">Method 1: Reduce sample rate for speed calculation</h3>
 <p>Instead of computing speed every 100 µs (10 kHz), compute it every 1 ms (1 kHz) but still run the PID at 10 kHz with the most recent speed estimate.</p>
@@ -305,11 +305,11 @@
 <p>This is a FIR low-pass filter. $M = 10$ gives 10× better resolution with only $M \cdot T_s / 2 = 0.5$ ms group delay.</p>
 <h3 id="method-3-period-measurement">Method 3: Period measurement</h3>
 <p>Instead of counting edges per time, measure time per edge. At low speed, this gives much better resolution. At high speed, revert to counting.</p>
-<p><strong>OKS firmware uses a hybrid:</strong> Edge counting at high speed (&gt;100 RPM) and period measurement at low speed (&lt;100 RPM), with crossover blending.</p>
+<p><strong>robot firmware uses a hybrid:</strong> Edge counting at high speed (&gt;100 RPM) and period measurement at low speed (&lt;100 RPM), with crossover blending.</p>
 <h2 id="43-adc-quantization-current-sensing">4.3 ADC Quantization (Current Sensing)</h2>
 <p>The current sensor&rsquo;s ADC has $n$-bit resolution:</p>
 <p>$$\Delta I_{min} = \frac{I_{range}}{2^n}$$</p>
-<p>For OKS: 12-bit ADC, ±10A range → $\Delta I = 20/4096 = 4.9$ mA per LSB. This is adequate for current control.</p>
+<p>For AMR: 12-bit ADC, ±10A range → $\Delta I = 20/4096 = 4.9$ mA per LSB. This is adequate for current control.</p>
 <hr />
 <h1 id="part-5-sample-rate-selection-guide">PART 5 — SAMPLE RATE SELECTION GUIDE</h1>
 <h2 id="51-the-trade-off">5.1 The Trade-off</h2>
@@ -345,7 +345,7 @@
 </table>
 <h2 id="52-decision-framework">5.2 Decision Framework</h2>
 <div class="highlight"><pre><span></span><code>1. Determine the fastest dynamic you need to control
-   → OKS: electrical time constant = 0.5 ms → f_elec = 2 kHz
+   → AMR: electrical time constant = 0.5 ms → f_elec = 2 kHz
 
 2. Multiply by 10-20× for the minimum sample rate
    → f_s_min = 20 kHz for current loop

@@ -7,7 +7,7 @@
 
 ## Problem 1: Bandwidth Planning
 
-You're designing a cascade controller for an OKS wheel drive:
+You're designing a cascade controller for a robot wheel drive:
 - Motor electrical time constant: $\tau_e = 1.5$ ms
 - Motor mechanical time constant: $\tau_m = 40$ ms
 - Position loop required bandwidth: 5 Hz

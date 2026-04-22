@@ -7,7 +7,7 @@
 
 ## Problem 1: Differential Drive Kinematics
 
-An OKS robot has wheel separation $L = 0.4$ m and wheel radius $r = 0.075$ m.
+An warehouse robot has wheel separation $L = 0.4$ m and wheel radius $r = 0.075$ m.
 
 a) The commanded linear velocity is $v = 0.5$ m/s and angular velocity is $\omega = 0.3$ rad/s. Calculate the left and right wheel speeds ($\omega_L$, $\omega_R$) in rad/s.
 

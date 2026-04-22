@@ -42,7 +42,7 @@ Product family: Orin Nano, Orin NX, AGX Orin. Different power/performance levels
 | AGX Orin 32GB | 12-core A78AE | 2048 | 2× DLA | 32GB | 15-60W | Highest perf |
 | AGX Orin 64GB | 12-core A78AE | 2048 | 2× DLA | 64GB | 15-60W | Research/industrial |
 
-For mobile warehouse AMR (like OKS): typically **Orin NX 16GB** or **AGX Orin 32GB**.
+For mobile warehouse AMR (like AMR): typically **Orin NX 16GB** or **AGX Orin 32GB**.
 
 ---
 
@@ -226,7 +226,7 @@ libc.sched_setscheduler(0, SCHED_FIFO, ctypes.byref(param))
 | ROS2 support | ★★★★★ | ★★★★ | ★★★★★ |
 | Camera input | ★★★★★ (MIPI CSI-2 ×6) | ★★★ (MIPI CSI-2 ×2) | ★★★ (USB only) |
 | Cost | $$$$ | $ | $$$ |
-| Use in OKS robot | ✅ (current choice) | ✗ too slow | ✗ no GPIO, power hungry |
+| Use in warehouse robot | ✅ (current choice) | ✗ too slow | ✗ no GPIO, power hungry |
 
 ---
 

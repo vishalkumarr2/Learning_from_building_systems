@@ -29,7 +29,7 @@ pytest finds tests automatically based on naming conventions:
 ```
 tests/
     conftest.py           # shared fixtures — auto-discovered by pytest
-    test_kb_search.py     # any file matching test_*.py or *_test.py
+    test_knowledge_search.py     # any file matching test_*.py or *_test.py
     unit/
         test_scorer.py
     integration/
@@ -260,7 +260,7 @@ def loaded_kb():
 def settings():
     """Settings object shared across all tests."""
     import os
-    os.environ["ADO_PAT"] = "test-token"
+    os.environ["API_TOKEN"] = "test-token"
     return load_settings()
 ```
 
@@ -310,7 +310,7 @@ def running_server():
 def base_settings(tmp_path):
     """A minimal .env file for testing."""
     env_file = tmp_path / ".env"
-    env_file.write_text("ADO_PAT=test-token-123\nKB_MIN_CONFIDENCE=0.8\n")
+    env_file.write_text("API_TOKEN=test-token-123\nKB_MIN_CONFIDENCE=0.8\n")
     return env_file
 
 
@@ -380,7 +380,7 @@ import json
 
 
 def test_save_and_load_session(tmp_path):
-    from scripts.rca_session import save_session, load_session, SessionState
+    from scripts.session_tracker import save_session, load_session, SessionState
 
     state = SessionState(
         session_id="test-001",
@@ -472,24 +472,24 @@ def shared_temp_dir(tmp_path_factory):
 ## 4.1 Environment Variables
 
 ```python
-def test_loads_ado_pat(monkeypatch):
-    monkeypatch.setenv("ADO_PAT", "fake-token-for-test")
+def test_loads_api_token(monkeypatch):
+    monkeypatch.setenv("API_TOKEN", "fake-token-for-test")
     monkeypatch.setenv("KB_MIN_CONFIDENCE", "0.9")
 
     settings = load_settings()
-    assert settings.ado_pat == "fake-token-for-test"
+    assert settings.api_token == "fake-token-for-test"
     assert settings.kb_min_confidence == 0.9
 
 
 def test_fails_without_required_env(monkeypatch):
-    monkeypatch.delenv("ADO_PAT", raising=False)   # remove if present
+    monkeypatch.delenv("API_TOKEN", raising=False)   # remove if present
 
     with pytest.raises(SystemExit):   # load_settings() calls sys.exit on failure
         load_settings()
 
 
 def test_default_used_when_optional_absent(monkeypatch):
-    monkeypatch.setenv("ADO_PAT", "fake-token")
+    monkeypatch.setenv("API_TOKEN", "fake-token")
     monkeypatch.delenv("KB_MIN_CONFIDENCE", raising=False)
 
     settings = load_settings()
@@ -510,7 +510,7 @@ def test_search_uses_correct_query(monkeypatch):
         calls.append({"query": query, "limit": limit})
         return [{"match": "pattern A", "score": 0.9}]
 
-    monkeypatch.setattr("scripts.kb_search.run_query", fake_search)
+    monkeypatch.setattr("scripts.knowledge_search.run_query", fake_search)
 
     results = search_and_format("motor stall", limit=5)
 
@@ -528,12 +528,12 @@ def test_search_uses_correct_query(monkeypatch):
 def test_script_finds_env_file(monkeypatch, tmp_path):
     """Script reads .env from the current working directory."""
     env_file = tmp_path / ".env"
-    env_file.write_text("ADO_PAT=test-token\n")
+    env_file.write_text("API_TOKEN=test-token\n")
 
     monkeypatch.chdir(tmp_path)   # change cwd to tmp_path
 
     settings = load_settings()   # will find .env in tmp_path
-    assert settings.ado_pat == "test-token"
+    assert settings.api_token == "test-token"
 ```
 
 ---
@@ -545,7 +545,7 @@ def test_script_finds_env_file(monkeypatch, tmp_path):
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    ado_pat: str
+    api_token: str
     kb_min_confidence: float = 0.7
     model_config = SettingsConfigDict(env_file=".env")
 
@@ -563,29 +563,29 @@ from scripts.config import load_settings
 
 class TestLoadSettings:
     def test_loads_required_fields(self, monkeypatch):
-        monkeypatch.setenv("ADO_PAT", "my-pat-token")
+        monkeypatch.setenv("API_TOKEN", "my-pat-token")
         s = load_settings()
-        assert s.ado_pat == "my-pat-token"
+        assert s.api_token == "my-pat-token"
 
     def test_default_confidence(self, monkeypatch):
-        monkeypatch.setenv("ADO_PAT", "any-token")
+        monkeypatch.setenv("API_TOKEN", "any-token")
         monkeypatch.delenv("KB_MIN_CONFIDENCE", raising=False)
         s = load_settings()
         assert s.kb_min_confidence == 0.7
 
     def test_env_overrides_default(self, monkeypatch):
-        monkeypatch.setenv("ADO_PAT", "any-token")
+        monkeypatch.setenv("API_TOKEN", "any-token")
         monkeypatch.setenv("KB_MIN_CONFIDENCE", "0.95")
         s = load_settings()
         assert s.kb_min_confidence == 0.95
 
     def test_missing_required_exits(self, monkeypatch):
-        monkeypatch.delenv("ADO_PAT", raising=False)
+        monkeypatch.delenv("API_TOKEN", raising=False)
         with pytest.raises(SystemExit):
             load_settings()
 
     def test_float_coercion(self, monkeypatch):
-        monkeypatch.setenv("ADO_PAT", "token")
+        monkeypatch.setenv("API_TOKEN", "token")
         monkeypatch.setenv("KB_MIN_CONFIDENCE", "0.85")   # string in env
         s = load_settings()
         assert isinstance(s.kb_min_confidence, float)     # coerced to float
@@ -715,7 +715,7 @@ def test_posts_comment_with_correct_content(mocker):
 ## 5.5 Worked Example: Testing a Search Function with HTTP
 
 ```python
-# scripts/kb_search.py
+# scripts/knowledge_search.py
 import requests
 
 def search_kb(query: str, min_confidence: float = 0.5) -> list[dict]:
@@ -729,14 +729,14 @@ def search_kb(query: str, min_confidence: float = 0.5) -> list[dict]:
     return response.json()["results"]
 
 
-# tests/test_kb_search.py
+# tests/test_knowledge_search.py
 import pytest
-from scripts.kb_search import search_kb
+from scripts.knowledge_search import search_kb
 
 
 class TestSearchKb:
     def test_returns_results(self, mocker):
-        mock_get = mocker.patch("scripts.kb_search.requests.get")
+        mock_get = mocker.patch("scripts.knowledge_search.requests.get")
         mock_get.return_value.json.return_value = {
             "results": [
                 {"match": "motor stall pattern", "confidence": 0.91},
@@ -750,7 +750,7 @@ class TestSearchKb:
         assert results[0]["confidence"] == 0.91
 
     def test_passes_min_confidence(self, mocker):
-        mock_get = mocker.patch("scripts.kb_search.requests.get")
+        mock_get = mocker.patch("scripts.knowledge_search.requests.get")
         mock_get.return_value.json.return_value = {"results": []}
         mock_get.return_value.raise_for_status = lambda: None
 
@@ -761,14 +761,14 @@ class TestSearchKb:
 
     def test_raises_on_http_error(self, mocker):
         import requests as req
-        mock_get = mocker.patch("scripts.kb_search.requests.get")
+        mock_get = mocker.patch("scripts.knowledge_search.requests.get")
         mock_get.return_value.raise_for_status.side_effect = req.HTTPError("404")
 
         with pytest.raises(req.HTTPError):
             search_kb("query")
 
     def test_returns_empty_on_no_results(self, mocker):
-        mock_get = mocker.patch("scripts.kb_search.requests.get")
+        mock_get = mocker.patch("scripts.knowledge_search.requests.get")
         mock_get.return_value.json.return_value = {"results": []}
         mock_get.return_value.raise_for_status = lambda: None
 
@@ -794,11 +794,11 @@ import json
 
 def test_search_cli_returns_results():
     result = subprocess.run(
-        [sys.executable, "scripts/kb_search.py", "search", "motor stall"],
+        [sys.executable, "scripts/knowledge_search.py", "search", "motor stall"],
         capture_output=True,
         text=True,
         cwd="/path/to/project",
-        env={"PATH": "/usr/bin", "ADO_PAT": "test-token"},
+        env={"PATH": "/usr/bin", "API_TOKEN": "test-token"},
     )
     assert result.returncode == 0
     assert "confidence" in result.stdout
@@ -806,7 +806,7 @@ def test_search_cli_returns_results():
 
 def test_search_cli_json_output():
     result = subprocess.run(
-        [sys.executable, "scripts/kb_search.py", "search", "--format=json", "slip"],
+        [sys.executable, "scripts/knowledge_search.py", "search", "--format=json", "slip"],
         capture_output=True,
         text=True,
     )
@@ -817,7 +817,7 @@ def test_search_cli_json_output():
 
 def test_missing_required_arg_fails():
     result = subprocess.run(
-        [sys.executable, "scripts/kb_search.py", "search"],  # no query
+        [sys.executable, "scripts/knowledge_search.py", "search"],  # no query
         capture_output=True,
         text=True,
     )
@@ -833,7 +833,7 @@ Better for testing specific logic without the overhead of subprocess:
 
 ```python
 # Directly import and test the logic
-from scripts.kb_search import compute_score, format_results, parse_args
+from scripts.knowledge_search import compute_score, format_results, parse_args
 
 
 def test_compute_score_perfect_match():
@@ -921,8 +921,8 @@ Example output:
 ```
 Name                    Stmts   Miss  Cover   Missing
 -----------------------------------------------------
-scripts/kb_search.py       45      7    84%   23, 47-51, 89
-scripts/rca_session.py     62     15    76%   34-38, 71-82
+scripts/knowledge_search.py       45      7    84%   23, 47-51, 89
+scripts/session_tracker.py     62     15    76%   34-38, 71-82
 scripts/scorer.py          28      2    93%   45, 67
 -----------------------------------------------------
 TOTAL                     135     24    82%

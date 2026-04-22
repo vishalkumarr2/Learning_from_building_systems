@@ -1,30 +1,30 @@
 # 03 — Measurement Models & Mahalanobis Gating
-### Why OKS sometimes rejects sensorbar updates
+### Why AMR sometimes rejects line-sensor updates
 
 **Prerequisite:** `02-kalman-filter.md` (EKF predict/update equations, covariance growth)
 **Unlocks:** `04-imu-fusion.md` (theta update, gyro bias), `05-failure-modes.md` (diagnosing silent rejections)
 
 ---
 
-## Why Should I Care? (OKS Project Context)
+## Why Should I Care? (AMR Project Context)
 
 You are staring at a bag where the robot drifts 0.3m off a lane line over 8 seconds, yet the
-sensorbar is firing. The estimator logs show nothing — no explicit rejection messages, no errors.
-The sensorbar is silently ignored. This happens every day on the SCL floor.
+line-sensor is firing. The estimator logs show nothing — no explicit rejection messages, no errors.
+The line-sensor is silently ignored. This happens every day on the SCL floor.
 
 Understanding measurement models tells you exactly why:
-- **Mahalanobis gating** can reject a perfectly good sensorbar reading if the state covariance
+- **Mahalanobis gating** can reject a perfectly good line-sensor reading if the state covariance
   is too tight (P too small) — the measurement looks like an outlier even when the robot is
   close to the line.
-- **OKS does not use a standard Kalman gain** for XY updates. It clamps the state to a range
+- **AMR does not use a standard Kalman gain** for XY updates. It clamps the state to a range
   and sets covariance to the variance of a uniform distribution. Knowing this lets you compute
-  the exact threshold at which a sensorbar range "wins" over the current covariance.
-- **`is_reliable=True` does not mean the reading is accurate.** Sensorbar duplicates (11–30%
+  the exact threshold at which a line-sensor range "wins" over the current covariance.
+- **`is_reliable=True` does not mean the reading is accurate.** Line-Sensor duplicates (11–30%
   of frames in SCL bags) pass the reliability gate but carry identical stale offsets. They look
   like valid measurements to the estimator.
 
 By the end of this chapter you will be able to:
-1. Compute whether a given sensorbar reading will be accepted or rejected without running code.
+1. Compute whether a given line-sensor reading will be accepted or rejected without running code.
 2. Explain why the clamp update is mathematically equivalent to a uniform-likelihood measurement.
 3. Identify in a bag trace the difference between "measurement rejected by Mahalanobis gate"
    and "measurement accepted but wrong (duplicate)".
@@ -72,9 +72,9 @@ of H like `[0, 1, 0]` means "the sensor only sees y; x and θ are invisible to i
 
 ---
 
-## 1.2 The Sensorbar as a Line Constraint
+## 1.2 The Line-Sensor as a Line Constraint
 
-The OKS sensorbar is an array of IR emitter-detector pairs mounted under the robot chassis.
+The floor sensor is an array of IR emitter-detector pairs mounted under the robot chassis.
 When the robot passes over a floor line, the detectors that cross the line return a different
 reflectance signal. By finding the centroid of activated sensors, the firmware computes the
 **lateral offset** of the robot from the line.
@@ -114,7 +114,7 @@ the two measurement types.
           │
           │         Floor line                   ════════════════════
     ══════╪════════════════════                        │
-          │ ←── sensorbar fires here              sensorbar fires
+          │ ←── line-sensor fires here              line-sensor fires
           │      measures LATERAL                 measures AHEAD/BEHIND
           │      offset from line                 offset from line
 
@@ -132,16 +132,16 @@ two intersecting lines or a landmark for that.
 
 **ELI15 — the train on tracks:** A train on a straight track knows exactly how far it is from
 the track (0m — it's constrained). But the track itself tells nothing about how far along the
-route the train has travelled. The sensorbar is the track: it constrains lateral position perfectly
+route the train has travelled. The line-sensor is the track: it constrains lateral position perfectly
 but reveals nothing about longitudinal progress.
 
 ---
 
-# PART 2 — THE SENSORBAR AS A LINE CONSTRAINT
+# PART 2 — THE LINE-SENSOR AS A LINE CONSTRAINT
 
 ---
 
-## 2.1 The OKS Floor Map
+## 2.1 The AMR Floor Map
 
 The SCL warehouse floor has a grid of guidance lines:
 
@@ -163,7 +163,7 @@ The SCL warehouse floor has a grid of guidance lines:
     X=1.0  X=2.5  X=4.0  X=5.5
 ```
 
-When the robot crosses a horizontal line (E-W), the sensorbar fires a measurement that
+When the robot crosses a horizontal line (E-W), the line-sensor fires a measurement that
 constrains **Y**. When it crosses a vertical line (N-S), the measurement constrains **X**.
 This is why in ``, the line type (horizontal/vertical) determines which state
 component gets updated.
@@ -172,10 +172,10 @@ component gets updated.
 
 ## 2.2 The Measurement Range (Not a Point!)
 
-Unlike a GPS fix that gives a precise coordinate, the sensorbar gives a **range**:
+Unlike a GPS fix that gives a precise coordinate, the line-sensor gives a **range**:
 
 ```
-    Sensorbar has N sensors, each 6mm apart.
+    Line-Sensor has N sensors, each 6mm apart.
     If 3 sensors are activated:
 
     ─── Sensor 1 (6mm spacing) ─── Sensor 2 ─── Sensor 3 ───
@@ -188,7 +188,7 @@ Unlike a GPS fix that gives a precise coordinate, the sensorbar gives a **range*
                                     ↑ 3cm total width ↑
 ```
 
-This is why OKS uses a **clamping update** rather than a Kalman gain — the measurement is
+This is why AMR uses a **clamping update** rather than a Kalman gain — the measurement is
 honestly a range, not a point. The uniform distribution is the right model for "the robot is
 somewhere in this 3cm band, with equal probability anywhere in the band."
 
@@ -252,7 +252,7 @@ the sensor is." Together they define the expected spread of the innovation.
 
 ---
 
-## 3.3 The 2-Sigma Gate (OKS)
+## 3.3 The 2-Sigma Gate (robot)
 
 ```
     Innovation space (2D example):
@@ -299,8 +299,8 @@ the sensor is." Together they define the expected spread of the innovation.
 ```
     State estimate:      x̂⁻(x) = 2.05m   (dead-reckoning puts us 5cm east of line)
     State covariance:    P⁻(x,x) = 0.010 m²
-    Measurement:         z = 2.00m         (sensorbar reports line at exactly this X)
-    Measurement noise:   R = 0.005 m²      (sensorbar has ~7cm std dev)
+    Measurement:         z = 2.00m         (line-sensor reports line at exactly this X)
+    Measurement noise:   R = 0.005 m²      (line-sensor has ~7cm std dev)
 ```
 
 **Step 1: Compute innovation**
@@ -348,7 +348,7 @@ the sensor is." Together they define the expected spread of the innovation.
 ```
 **Decision: REJECTED** (d = 3.28 > 2.0) ✗ — the measurement is 3.3σ away from prediction.
 
-This is the "silent rejection" scenario. The sensorbar fired, the measurement was valid,
+This is the "silent rejection" scenario. The line-sensor fired, the measurement was valid,
 but the filter rejected it because dead-reckoning had drifted so far that the correct
 position appeared to be an outlier.
 
@@ -359,7 +359,7 @@ position appeared to be an outlier.
 **Counter-intuitive:** A tighter covariance P can cause MORE rejections, not fewer.
 
 ```
-    Scenario: Robot has been on a long straight with many sensorbar updates.
+    Scenario: Robot has been on a long straight with many line-sensor updates.
     P⁻(x,x) is driven very low, say 0.0001 m².
 
     Next measurement has a genuine 8cm offset (real drift, not outlier):
@@ -377,17 +377,17 @@ position appeared to be an outlier.
 ```
 
 **Key insight:** After a slip event, P gets inflated to infinity (estimator detects slip and
-sets P → ∞). This WIDENS the acceptance gate, allowing the next sensorbar update to be
+sets P → ∞). This WIDENS the acceptance gate, allowing the next line-sensor update to be
 accepted even with a large innovation — which is exactly correct behavior. The filter recovers
 by accepting a measurement it would have rejected pre-slip.
 
 ---
 
-# PART 4 — OKS CLAMP UPDATE (NON-STANDARD KALMAN)
+# PART 4 — AMR CLAMP UPDATE (NON-STANDARD KALMAN)
 
 ---
 
-## 4.1 Standard Kalman Update vs OKS Clamp Update
+## 4.1 Standard Kalman Update vs AMR Clamp Update
 
 **Standard Kalman filter** computes a gain K and updates the state:
 
@@ -402,30 +402,30 @@ by accepting a measurement it would have rejected pre-slip.
       K → 1: sensor is much more accurate than state → jump to sensor reading
 ```
 
-**OKS XY update** (from ``):
+**AMR XY update** (from ``):
 
 ```
-    OKS clamp update:
+    AMR clamp update:
     x̂⁺(x) = clamp(x̂⁻(x), meas.x_min, meas.x_max)
     P⁺(x,x) = min(P⁻(x,x), (meas.x_range)² / 12)
 
     where meas.x_range = meas.x_max - meas.x_min
 ```
 
-These are NOT the same operation. Why does OKS use clamp instead of Kalman gain?
+These are NOT the same operation. Why does AMR use clamp instead of Kalman gain?
 
 ---
 
-## 4.2 Why Clamp Is Correct for Sensorbar
+## 4.2 Why Clamp Is Correct for Line-Sensor
 
-The sensorbar gives a **range** measurement: "the line is somewhere between X=1.985m and
+The line-sensor gives a **range** measurement: "the line is somewhere between X=1.985m and
 X=2.015m." A Gaussian model is wrong here — there is no single "best guess" within the range;
 the true position is equally likely anywhere in the 3cm band. The right model is **uniform**.
 
 ```
     Probability density over X:
 
-    Gaussian state estimate:                Uniform sensorbar measurement:
+    Gaussian state estimate:                Uniform line-sensor measurement:
          ▲ p(x)                                  ▲ p(z|x)
          │    ╭───╮                               │
          │   ╱     ╲                             ─┤─────────────────┤─
@@ -465,7 +465,7 @@ For a uniform distribution over `[a, b]`:
              = (b-a)² / 12    ✓
 ```
 
-**OKS sensorbar range example:**
+**floor sensor range example:**
 ```
     Range = 0.06m (6cm span, ±3cm from line)
     a = 1.970m, b = 2.030m
@@ -475,8 +475,8 @@ For a uniform distribution over `[a, b]`:
 ```
 
 The covariance update rule `P⁺ = min(P⁻, σ²_uniform)` says:
-- If the state was already more certain than the sensorbar → keep the current covariance.
-- If the state was less certain (larger P) → tighten it to the sensorbar's uniform variance.
+- If the state was already more certain than the line-sensor → keep the current covariance.
+- If the state was less certain (larger P) → tighten it to the line-sensor's uniform variance.
 
 ---
 
@@ -501,8 +501,8 @@ The covariance update rule `P⁺ = min(P⁻, σ²_uniform)` says:
 ```
 
 **Key insight:** The covariance update is asymmetric — it can only DECREASE (tighten).
-It never increases P based on a sensorbar measurement. Only `predict()` increases P
-(via process noise Q). This means a single bad sensorbar reading that passes the Mahalanobis
+It never increases P based on a line-sensor measurement. Only `predict()` increases P
+(via process noise Q). This means a single bad line-sensor reading that passes the Mahalanobis
 gate can drive P very low, making subsequent measurements harder to accept.
 
 ---
@@ -524,11 +524,11 @@ gate can drive P very low, making subsequent measurements harder to accept.
 
     Robot is at Y = 2.980m (near line B, small offset = 0.020m from B)
 
-    But ALSO: Y = 1.520m would give the SAME sensorbar offset from line C!
+    But ALSO: Y = 1.520m would give the SAME line-sensor offset from line C!
     (robot at +0.020m above line C looks identical to robot at -0.020m below line B)
 ```
 
-A single sensorbar crossing is ambiguous between:
+A single line-sensor crossing is ambiguous between:
 - The robot is near the **intended** line at the predicted position, or
 - The robot is near the **adjacent** line (robot has drifted by ±1 line_spacing)
 
@@ -536,7 +536,7 @@ A single sensorbar crossing is ambiguous between:
 
 ## 5.2 Probability Ratio Gate
 
-OKS resolves the ambiguity with a likelihood ratio test:
+AMR resolves the ambiguity with a likelihood ratio test:
 
 ```
     Hypothesis H0: robot is at the primary line (consistent with state estimate)
@@ -560,7 +560,7 @@ H1 becomes plausible, and the measurement may be rejected.
 ## 5.3 Full Update Decision Sequence
 
 ```
-    Sensorbar fires a measurement z at time t
+    Line-Sensor fires a measurement z at time t
                     │
                     ▼
     ┌───────────────────────────────┐
@@ -594,13 +594,13 @@ H1 becomes plausible, and the measurement may be rejected.
 
 ---
 
-# PART 6 — OKS CODE CONNECTION
+# PART 6 — AMR CODE CONNECTION
 
 ---
 
 ## 6.1 Full Math-to-Code Mapping
 
-| Math concept | OKS source location | Notes |
+| Math concept | AMR source location | Notes |
 |---|---|---|
 | Innovation `ν = z - H x̂⁻` | ` update()` ~L1950 | Computed as `(meas.value - state_at_t.x)` |
 | Innovation covariance S | `update()` ~L1960 | `P_xx + R` for scalar case |
@@ -621,7 +621,7 @@ H1 becomes plausible, and the measurement may be rejected.
 ## 6.2 The `is_reliable` Trap — Why Duplicates Are Invisible
 
 ```
-    Timeline of sensorbar messages at 50Hz (20ms intervals):
+    Timeline of line-sensor messages at 50Hz (20ms intervals):
 
     t=0ms    msg: {offset=-0.015m, is_reliable=True}   ← fresh reading
     t=20ms   msg: {offset=-0.015m, is_reliable=True}   ← DUPLICATE (SPI retry)
@@ -653,10 +653,10 @@ concept of "stale data from a previous read cycle."
 
 ## 6.3 Theta Update Is Different (Standard Kalman)
 
-For heading θ, OKS uses the standard Kalman update with gyro bias correction:
+For heading θ, AMR uses the standard Kalman update with gyro bias correction:
 
 ```
-    z_θ = measured heading from sensorbar (line direction gives θ constraint)
+    z_θ = measured heading from line-sensor (line direction gives θ constraint)
     bias = estimated gyro bias (states b_x, b_y, b_z)
 
     H_θ = [0, 0, 1, 0, 0, 0, ...]   ← only sees θ, not XY
@@ -667,7 +667,7 @@ For heading θ, OKS uses the standard Kalman update with gyro bias correction:
 ```
 
 The reason theta uses a proper Kalman gain while XY uses clamp:
-- θ measurement from the sensorbar line direction IS a precise point measurement (the line
+- θ measurement from the line-sensor line direction IS a precise point measurement (the line
   has a known orientation, and the robot either aligns or doesn't) — Gaussian noise is honest.
 - XY measurement is a range (the robot is somewhere within the IR span) — uniform is honest.
 
@@ -679,7 +679,7 @@ The reason theta uses a proper Kalman gain while XY uses clamp:
 
 ## 7.1 Reading Covariance Traces to Diagnose Rejection Causes
 
-When investigating a bag where the robot drifts off path despite sensorbar activity:
+When investigating a bag where the robot drifts off path despite line-sensor activity:
 
 ```
     Covariance P_xx trace:
@@ -687,7 +687,7 @@ When investigating a bag where the robot drifts off path despite sensorbar activ
     P_xx  │
     0.010 │──╮
           │  │  (growing during prediction)
-    0.001 │  ╰──┐  (sensorbar update — P drops)
+    0.001 │  ╰──┐  (line-sensor update — P drops)
           │     │
     0.0003│     ╰────┐  (multiple updates — very tight)
           │          │
@@ -696,7 +696,7 @@ When investigating a bag where the robot drifts off path despite sensorbar activ
           └──────────────────────────────────── time
 
     When P stays flat at ~0.0003 for many seconds, the robot is receiving
-    sensorbar updates (P is being "refreshed") but not fresh independent ones.
+    line-sensor updates (P is being "refreshed") but not fresh independent ones.
     Duplicates keep confirming the same position → P never grows.
 
     A genuine fresh update that differs even slightly now has d > 2:
@@ -708,16 +708,16 @@ When investigating a bag where the robot drifts off path despite sensorbar activ
 
 ## 7.2 Summary — What to Remember
 
-| Concept | Formula / Rule | OKS Code | Diagnostic signal in bag |
+| Concept | Formula / Rule | AMR Code | Diagnostic signal in bag |
 |---|---|---|---|
 | Innovation | `ν = z - H x̂⁻` | `update()` L1950 | Large ν with small P → silent rejection |
 | Mahalanobis gate | `d = ν / sqrt(P + R) < 2` | `update()` L1964 | P very tight after duplicate flood → gate tightens |
 | Clamp update | `x̂⁺ = clamp(x̂⁻, min, max)` | `update()` L1985 | State jumps to range boundary if outside |
 | Uniform variance | `σ² = (range)² / 12` | `update()` L1990 | Sets floor on P after update |
-| P update | `P⁺ = min(P⁻, σ²_unif)` | `update()` L1992 | P can only decrease from sensorbar |
+| P update | `P⁺ = min(P⁻, σ²_unif)` | `update()` L1992 | P can only decrease from line-sensor |
 | Ambiguity check | Likelihood ratio < threshold | `update()` L1970 | Triggered when P is large and two lanes plausible |
 | Reliability gate | `if (!is_reliable) return` | L876, L1027 | Only catches hardware-level SPI fails |
-| Duplicate blind spot | `is_reliable=True` on stale data | L876 (no timestamp check) | 11–30% of sensorbar messages; over-tightens P |
+| Duplicate blind spot | `is_reliable=True` on stale data | L876 (no timestamp check) | 11–30% of line-sensor messages; over-tightens P |
 | Theta uses KF gain | `K = P Hᵀ / (H P Hᵀ + R)` | `update()` L2050 | Theta covariance decreases smoothly |
 
 ---

@@ -20,7 +20,7 @@ read a Nav2 behaviour tree without looking anything up.
 ### Week 1: Core ROS2 Patterns (3 hrs)
 - Nodes, publishers, subscribers, timers
 - Services (sync) vs Actions (async with feedback)
-- Lifecycle nodes — why OKS uses them
+- Lifecycle nodes — why AMR uses them
 - QoS profiles: reliability, durability, history — when BEST_EFFORT drops frames
 
 **Exercises:** `exercises/01-pub-sub-timer.md`, `exercises/03-action-server.md`
@@ -36,7 +36,7 @@ read a Nav2 behaviour tree without looking anything up.
 ### Week 3: Nav2 Architecture (4 hrs)
 - BehaviourTree XML: Navigate, ComputePath, FollowPath, Recovery
 - Costmaps: global vs local, inflation radius, lethal obstacles
-- Controller plugins: DWB, RPP — what parameters map to OKS tuning
+- Controller plugins: DWB, RPP — what parameters map to robot tuning
 - How `robot_localization` feeds `odom` to Nav2
 
 **Exercises:** `exercises/04-nav2-custom-plugin.md`

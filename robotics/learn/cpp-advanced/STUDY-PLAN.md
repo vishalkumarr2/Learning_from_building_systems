@@ -679,7 +679,7 @@ public:
 - Shuhao Wu: "Real-time programming with Linux, part 1"
 - Hard RT: aircraft control (deadline miss = crash)
 - Soft RT: audio (deadline miss = pop/click)
-- Your OKS robots: ~100Hz control loop = 10ms period
+- Your warehouse robots: ~100Hz control loop = 10ms period
 
 **Code (50 min):**
 ```cpp
@@ -869,7 +869,7 @@ public:
 
 **🤖 ROS tie-in:**
 - This is exactly what `ros_control`'s `controller_manager` does
-- Your OKS robot's base controller runs a cyclic executive
+- Your warehouse robot's base controller runs a cyclic executive
 
 **Checkpoint:**
 - [ ] Can implement a cyclic executive with overrun detection
@@ -1069,7 +1069,7 @@ constexpr T sat_add(T a, T b) {
 ```
 
 **🤖 ROS tie-in:**
-- Your OKS estimator crash (#98301): `est_vy` went non-finite
+- Your navigation estimator crash (Case-G): `est_vy` went non-finite
 - A `check_invariant()` after every prediction step would have caught it immediately
 - Rule: assert `std::isfinite()` on every state variable after every computation
 
@@ -1180,7 +1180,7 @@ double safe_atan2(double y, double x) {
 ```
 
 **🤖 ROS tie-in:**
-- Your OKS robot heartbeat analysis (#batch_heartbeat_analysis.py)
+- Your warehouse robot heartbeat analysis (#batch_heartbeat_analysis.py)
 - Watchdog on the base controller — if navigation stops publishing, emergency stop
 
 **Checkpoint:**
@@ -1638,7 +1638,7 @@ public:
 ```
 
 **🤖 ROS tie-in:**
-- Flight data recorder pattern = exactly what your OKS rosbag recording does
+- Flight data recorder pattern = exactly what your robot rosbag recording does
 - If the ring buffer was dumped on crash, you'd always have the last N events
 
 ---
@@ -2499,7 +2499,7 @@ FileHandle f(fopen("/tmp/test", "w"));
 ```cpp
 // ROS1 is C++03 with Boost everywhere. ROS2 is modern C++ under the hood,
 // but the C middleware (rmw_fastrtps, rmw_cyclonedds) uses plain C APIs.
-// Your OKS robot's base controller talks to hardware via C APIs.
+// Your warehouse robot's base controller talks to hardware via C APIs.
 // This pattern is exactly how ros_control wraps hardware interfaces.
 ```
 
@@ -2895,7 +2895,7 @@ Internal RC:        ±1% accuracy      (10,000 ppm!)
 20 ppm = 20 μs error per second = 1.73 seconds drift per day
 1%     = 10 ms error per second = 14.4 MINUTES drift per day
 
-If your OKS robot uses the internal RC for timestamps,
+If your warehouse robot uses the internal RC for timestamps,
 two robots' clocks can drift 29 minutes/day relative to each other.
 That's why GPS/NTP/PTP time sync exists.
 ```
@@ -2950,7 +2950,7 @@ void measure_drift() {
 
 **Exercise 3 — Timer hardware on STM32 (read along, code on your Jetson):**
 ```cpp
-// On STM32 (your OKS robot's MCU), hardware timers are the backbone:
+// On STM32 (your warehouse robot's MCU), hardware timers are the backbone:
 //
 // TIM1-TIM14: each is a 16/32-bit counter driven by the clock tree
 // Each timer has:
@@ -2965,8 +2965,8 @@ void measure_drift() {
 //   ARR = 999   → 1 MHz / 1000 = 1 kHz interrupt
 //
 // YOUR SPI bus runs on a timer-derived clock.
-// If PSC is wrong, SPI runs at wrong speed → sensorbar communication fails.
-// This is how your sensorbar duplicate data issue (#99185) is clock-adjacent.
+// If PSC is wrong, SPI runs at wrong speed → line-sensor communication fails.
+// This is how your line-sensor duplicate data issue (Case-H) is clock-adjacent.
 
 // On Linux/Jetson — use hrtimer for high-resolution periodic wakeup:
 // (This is what clock_nanosleep uses underneath)
@@ -2997,7 +2997,7 @@ A: 1000 Hz × 30 ppm = 0.03 Hz error. Expected: 999.97–1000.03 Hz.
 **🤖 ROS tie-in:**
 - `ros::Time::now()` uses `CLOCK_REALTIME` — can JUMP when NTP corrects
 - `ros::SteadyTime::now()` uses `CLOCK_MONOTONIC` — never jumps, only drifts
-- Your OKS robot timestamps: if two sensor boards use different crystals,
+- Your warehouse robot timestamps: if two sensor boards use different crystals,
   their timestamps drift. The estimator must handle this!
 - PTP (Precision Time Protocol) sync on the SPI bus would fix inter-board drift
 
@@ -3088,9 +3088,9 @@ gpiod_line_request(line, &config, 0);
 
 **Exercise 2 — SPI signal integrity:**
 ```
-Your OKS sensorbar SPI bus:
+Your floor sensor SPI bus:
 
-MOSI ─────────────────── Sensorbar MCU
+MOSI ─────────────────── Line-Sensor MCU
 MISO ◄──────────────────
 SCLK ─────────────────────
 CS   ─────────────────────
@@ -3151,7 +3151,7 @@ double adc_to_battery_voltage(int raw_adc) {
     double v_bat = v_adc * (R1 + R2) / R2;
     return v_bat;
 }
-// Exercise: calculate R1, R2 for a 48V battery system (your OKS robot!)
+// Exercise: calculate R1, R2 for a 48V battery system (your warehouse robot!)
 // Constraint: R2 current < 1mA (for low power), V_adc < 3.0V (margin)
 ```
 
@@ -3177,8 +3177,8 @@ Senior fix: Use a hardware I2C bus recovery circuit:
 ```
 
 **🤖 ROS tie-in:**
-- Your OKS sensorbar's SPI issues: series resistors on SCLK reduce ringing
-- The `is_reliable` flag in sensorbar firmware — it checks SPI CRC, not data freshness
+- Your floor sensor's SPI issues: series resistors on SCLK reduce ringing
+- The `is_reliable` flag in line-sensor firmware — it checks SPI CRC, not data freshness
 - Battery monitoring through voltage divider → Published on `/battery_state` topic
 
 **Checkpoint:**
@@ -3192,7 +3192,7 @@ Senior fix: Use a hardware I2C bus recovery circuit:
 *Insert during Week 3 or 6*
 
 **Why this matters:**
-Every sensor read on your OKS robot uses DMA (Direct Memory Access).
+Every sensor read on your warehouse robot uses DMA (Direct Memory Access).
 Understanding DMA is the difference between your SPI running at 100%
 efficiency with zero CPU cost vs burning 40% of your CPU on data copies.
 
@@ -3239,7 +3239,7 @@ This is the ISR → SPSC queue → main_loop pattern from Week 2+3!
 // 3. This tells you: hardware interrupt → kernel ISR → wake userspace → your code
 
 // Expected: 5–50 μs on vanilla Linux, 1–10 μs on PREEMPT_RT
-// Your OKS robot needs < 5 μs to not miss SPI frames at 1 MHz clock
+// Your warehouse robot needs < 5 μs to not miss SPI frames at 1 MHz clock
 
 // On bare metal (STM32):
 // Interrupt latency = 12 cycles (Cortex-M4) = 71 ns at 168 MHz
@@ -3306,10 +3306,10 @@ void* buf = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
 
 **Exercise 3 — Implement a zero-copy SPI reader (conceptual + Linux):**
 ```cpp
-// For your OKS sensorbar: DMA-based SPI read pattern
+// For your floor sensor: DMA-based SPI read pattern
 //
 // Hardware setup:
-//   SPI DMA reads 128 bytes every 1ms (sensorbar data frame)
+//   SPI DMA reads 128 bytes every 1ms (line-sensor data frame)
 //   Double buffer: DMA fills buffer A while CPU processes buffer B
 //
 //   ┌──────────┐      ┌──────────┐
@@ -3357,8 +3357,8 @@ A: Cache coherency bug. The CPU read the buffer BEFORE the DMA finished
 ```
 
 **🤖 ROS tie-in:**
-- Your sensorbar SPI reads 128 bytes per frame at 1 kHz via DMA
-- The duplicate data bug (#99185): if DMA doesn't complete before next frame,
+- Your line-sensor SPI reads 128 bytes per frame at 1 kHz via DMA
+- The duplicate data bug (Case-H): if DMA doesn't complete before next frame,
   the CPU reads the old buffer → duplicate! Double-buffering prevents this.
 - `ros_control` hardware_interface: the `read()` function should only
   copy the latest DMA buffer, not trigger a new SPI transfer.
@@ -4004,7 +4004,7 @@ At sea level: ~1 bit flip per GB of RAM per month
 At aircraft altitude (35,000 ft): ~100x more (cosmic ray flux)
 In space (LEO): ~1000x more
 
-Your OKS robot in a warehouse: SEU risk is LOW but non-zero.
+Your warehouse robot in a warehouse: SEU risk is LOW but non-zero.
 The Toyota unintended acceleration: blamed on SEU in unprotected RAM.
 
 Protection patterns:
@@ -4175,7 +4175,7 @@ exceeds it, the proof holds but the rocket explodes.
 
 **🤖 ROS tie-in:**
 ```
-Your OKS robot already does some of these:
+Your warehouse robot already does some of these:
 - Heartbeat monitoring (Day 25 exercise)
 - State machine (INIT → NOMINAL → ERROR)
 - Watchdog timer
@@ -4188,7 +4188,7 @@ What it's probably NOT doing:
 - Stack canary checking
 
 Adding these to your base controller would catch the class of bugs
-where sensorbar data corruption propagates to the estimator (#98301).
+where line-sensor data corruption propagates to the estimator (Case-G).
 ```
 
 **Checkpoint:**
@@ -4451,7 +4451,7 @@ Not life-critical but instructive:
   - 4 million trades in 45 minutes, all losing money
   - Company went bankrupt within a week
 
-Lessons (applicable to your OKS robot deployments):
+Lessons (applicable to your warehouse robot deployments):
   - AUTOMATE deployment (no manual "copy file to 8 servers")
   - Dead code removal: delete old feature flag code, don't repurpose
   - Canary deployment: roll out to 1 server, verify, then the rest

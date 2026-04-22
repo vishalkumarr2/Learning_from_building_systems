@@ -58,12 +58,12 @@
         <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
             <div class="md-content">
 <h1 id="02-the-kalman-filter-ekf">02 — The Kalman Filter &amp; EKF</h1>
-<h3 id="why-oks-covariance-grows-during-motion-and-shrinks-on-measurement">Why OKS covariance grows during motion and shrinks on measurement</h3>
+<h3 id="why-amr-covariance-grows-during-motion-and-shrinks-on-measurement">Why AMR covariance grows during motion and shrinks on measurement</h3>
 <p><strong>Prerequisite:</strong> <code>01-dead-reckoning.md</code> — unicycle motion model, arc integration, dead-reckoning drift
-<strong>Unlocks:</strong> <code>03-measurement-models.md</code> — sensorbar line constraints, Mahalanobis gating, innovation residuals</p>
+<strong>Unlocks:</strong> <code>03-measurement-models.md</code> — line-sensor line constraints, Mahalanobis gating, innovation residuals</p>
 <hr />
-<h2 id="why-should-i-care-oks-project-context">Why Should I Care? (OKS Project Context)</h2>
-<p>Every <code>ERROR_INVALID_STATE</code> ticket you investigate is, at its core, a Kalman filter
+<h2 id="why-should-i-care-amr-project-context">Why Should I Care? (AMR Project Context)</h2>
+<p>Every <code>ERROR_STATE_INVALID</code> ticket you investigate is, at its core, a Kalman filter
 story: something caused <code>P</code> (the covariance matrix) to blow up to ∞. Before you can read a
 covariance trace from a bag file and say <em>&ldquo;this was a slip event, not a delocalization&rdquo;</em> you
 need to understand <strong>what P represents</strong>, <strong>how it grows</strong>, and <strong>under what conditions it is
@@ -71,15 +71,15 @@ forced to ∞</strong>.</p>
 <p>Concretely, the the navigation estimator is an Extended Kalman Filter running at the odometry rate (~25 Hz).
 The pattern you will see in every failing bag:</p>
 <div class="highlight"><pre><span></span><code>[OK]   P(x,x) ~0.01   →  robot moving, P grows slowly to ~0.05
-[OK]   P(x,x) ~0.05   →  sensorbar update, P drops back to ~0.01
+[OK]   P(x,x) ~0.05   →  line-sensor update, P drops back to ~0.01
 [FAIL] P(x,x) = inf   →  slip_detection OR collision_detection forced P→∞
-[FAIL] isFinite(P) = false →  fires ERROR_INVALID_STATE
+[FAIL] isFinite(P) = false →  fires ERROR_STATE_INVALID
 </code></pre></div>
 
 <p>After this module you will be able to:
 1. Predict, by inspection, whether a covariance trace is &ldquo;normal dead-reckoning drift&rdquo; or &ldquo;anomaly&rdquo;
 2. Identify which code path set P to ∞ from the covariance value alone
-3. Explain why the OKS shortcut <code>min(cov_theta, 1e5) * delta_trans²</code> is a valid approximation
+3. Explain why the robot shortcut <code>min(cov_theta, 1e5) * delta_trans²</code> is a valid approximation
    to the full EKF Jacobian term</p>
 <hr />
 <h1 id="part-1-the-kalman-filter-intuition">PART 1 — THE KALMAN FILTER INTUITION</h1>
@@ -115,7 +115,7 @@ is a <em>belief</em> — a probability distribution over all possible poses. The
 </code></pre></div>
 
 <p><strong>The shading represents probability mass.</strong> 68% of the area falls within ±σ = ±0.3 m of the
-mean. In OKS terms: <code>P(x,x) = 0.09</code> means <code>σ = 0.30 m</code>, so the robot is within ±0.30 m of
+mean. In AMR terms: <code>P(x,x) = 0.09</code> means <code>σ = 0.30 m</code>, so the robot is within ±0.30 m of
 the estimated position with 68% probability.</p>
 <h2 id="12-two-sources-of-information">1.2 Two Sources of Information</h2>
 <p>The filter combines two independent sources of information about the robot&rsquo;s pose:</p>
@@ -135,7 +135,7 @@ the estimated position with 68% probability.</p>
 </tr>
 <tr>
 <td><strong>Sensor measurement</strong> (update)</td>
-<td>Compare prediction to sensorbar line</td>
+<td>Compare prediction to line-sensor line</td>
 <td>NO — resets uncertainty each time</td>
 </tr>
 </tbody>
@@ -149,7 +149,7 @@ certain than either alone.</strong></p>
 <p>Suppose you have two estimates of the same quantity x:</p>
 <ul>
 <li>Estimate A: mean = 4.0, variance = 1.0  (dead-reckoning, vague)</li>
-<li>Estimate B: mean = 5.0, variance = 0.25 (sensorbar, sharper)</li>
+<li>Estimate B: mean = 5.0, variance = 0.25 (line-sensor, sharper)</li>
 </ul>
 <div class="highlight"><pre><span></span><code>           A: N(4.0, 1.0)           B: N(5.0, 0.25)
          (wide, from odometry)    (narrow, from sensor)
@@ -246,7 +246,7 @@ uncertainty ellipse (small)          uncertainty ellipse (larger)
 </code></pre></div>
 
 <blockquote>
-<p>OKS note: <code>predict()</code> computes <code>P⁻ = F P Fᵀ + Q</code> where Q is built from
+<p>AMR note: <code>predict()</code> computes <code>P⁻ = F P Fᵀ + Q</code> where Q is built from
 <code>k_trans_noise</code>, <code>k_trans_rot_noise</code>, <code>k_rot_trans_noise</code>,
 <code>k_rot_rot_noise</code>, and a time-based noise <code>k_time_trans_noise</code>.
 The staleness scaling: if odom is late by &gt;2× its period, all Q terms are multiplied by
@@ -434,9 +434,9 @@ along the x-axis) expands approximately as:</p>
                    when heading uncertainty is large
 </code></pre></div>
 
-<h2 id="35-the-oks-shortcut">3.5 The OKS Shortcut</h2>
-<p><strong>OKS does NOT compute the Jacobian.</strong> Instead, <code>predict()</code> uses a fixed noise model:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">// From OKS  (simplified)</span>
+<h2 id="35-the-amr-shortcut">3.5 The AMR Shortcut</h2>
+<p><strong>AMR does NOT compute the Jacobian.</strong> Instead, <code>predict()</code> uses a fixed noise model:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// From AMR  (simplified)</span>
 <span class="n">lateral_var</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k_trans_lat_noise</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">delta_trans</span>
 <span class="w">            </span><span class="o">+</span><span class="w"> </span><span class="n">k_rot_lat_noise</span><span class="w">   </span><span class="o">*</span><span class="w"> </span><span class="n">delta_rot</span>
 <span class="w">            </span><span class="o">+</span><span class="w"> </span><span class="n">min</span><span class="p">(</span><span class="n">cov_theta</span><span class="p">,</span><span class="w"> </span><span class="mf">1e5</span><span class="p">)</span><span class="w">        </span><span class="o">*</span><span class="w"> </span><span class="n">delta_trans</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">delta_trans</span>
@@ -469,7 +469,7 @@ Visualization:
     └──────────────────── x                    └──────────────── x
 </code></pre></div>
 
-<p>In OKS, this situation is pre-empted: if <code>P_θθ</code> grows large enough to be capped by the
+<p>In AMR, this situation is pre-empted: if <code>P_θθ</code> grows large enough to be capped by the
 <code>min(..., 1e5)</code> guard, or slip detection fires, the state is flagged as unreliable before
 the approximation breaks catastrophically.</p>
 <hr />
@@ -477,26 +477,26 @@ the approximation breaks catastrophically.</p>
 <h2 id="41-interpreting-covariance-values">4.1 Interpreting Covariance Values</h2>
 <div class="highlight"><pre><span></span><code>P(x,x) value    σ = √P(x,x)    Meaning
 ─────────────   ───────────    ──────────────────────────────────────────────
-0.0001          0.01 m         After sensorbar update — very tight
-0.0025          0.05 m         Typical after recent sensorbar update
+0.0001          0.01 m         After line-sensor update — very tight
+0.0025          0.05 m         Typical after recent line-sensor update
 0.01            0.10 m         Normal during short motion segment
 0.04            0.20 m         Moderate dead-reckoning accumulation (caution)
-0.25            0.50 m         Long travel without sensorbar — borderline
+0.25            0.50 m         Long travel without line-sensor — borderline
 1.0             1.00 m         Bad — need localization ASAP
 ∞ (inf)         ∞              Slip/collision detection fired
 </code></pre></div>
 
-<p><strong>Key insight:</strong> In the OKS planner, obstacles are avoided using the estimated pose. If
+<p><strong>Key insight:</strong> In the robot planner, obstacles are avoided using the estimated pose. If
 <code>P(x,x) = 0.25</code> and the robot is nominally 0.4 m from a shelf, the 2-sigma envelope extends
 to <code>0.4 - 2×0.5 = -0.6 m</code> — inside the shelf. This is why large covariance causes planning
 failures before it causes a physical collision.</p>
 <h2 id="42-what-normal-growth-looks-like">4.2 What Normal Growth Looks Like</h2>
-<p>Between sensorbar updates, covariance grows approximately linearly with distance traveled:</p>
+<p>Between line-sensor updates, covariance grows approximately linearly with distance traveled:</p>
 <div class="highlight"><pre><span></span><code>P(x,x)_new ≈ P(x,x)_old + k_trans_noise × delta_trans
                          + min(P_θθ, 1e5) × delta_trans²
 </code></pre></div>
 
-<p>For typical OKS parameters (<code>k_trans_noise = 0.01</code>) and short moves:
+<p>For typical AMR parameters (<code>k_trans_noise = 0.01</code>) and short moves:
 - Moving 0.1 m: ΔP_xx ≈ 0.01 × 0.1 = 0.001 → negligible
 - Moving 1.0 m: ΔP_xx ≈ 0.01 × 1.0 = 0.010 → noticeable
 - Moving 5.0 m: ΔP_xx ≈ 0.01 × 5.0 = 0.050 → significant</p>
@@ -509,15 +509,15 @@ failures before it causes a physical collision.</p>
 0.20 ─                                          ╭────── slip detection fires
   │                                         ╭───╯
   │                                     ╭───╯   ← covariance growing fast
-0.10 ─          ╭────╮          ╭───────╯         (no sensorbar on this aisle)
+0.10 ─          ╭────╮          ╭───────╯         (no line-sensor on this aisle)
   │             │    │          │
   │      ╭──────╯    ╰──────────╯
-0.02 ─ ──╯                                       ← after sensorbar update
+0.02 ─ ──╯                                       ← after line-sensor update
   │
 0.00 ─────┬──────────┬──────────┬────────────────── time (s)
          t=0        t=5        t=10
           ↑          ↑          ↑
-      robot starts   sensorbar  sensorbar
+      robot starts   line-sensor  line-sensor
       moving         update     missed
                   (P drops)    (P keeps growing)
 
@@ -525,7 +525,7 @@ KEY: ────── = normal    ────↑─ = measurement update   �
 </code></pre></div>
 
 <h2 id="44-sudden-jumps-to-inf">4.4 Sudden Jumps to INF</h2>
-<p>When you see <code>P(x,x) = inf</code> in a bag, there are exactly two OKS code paths that write ∞:</p>
+<p>When you see <code>P(x,x) = inf</code> in a bag, there are exactly two robot code paths that write ∞:</p>
 <p><strong>Path A — Slip detection (velocity window check in <code>odometryCallback()</code>):</strong></p>
 <div class="highlight"><pre><span></span><code>Trigger: |v_window_mean - v_current| &gt; slip_threshold
 Effect:  P(x,x) = INF, P(y,y) = INF, P(θ,θ) = INF
@@ -553,7 +553,7 @@ Why:     Cannot dead-reckon without odometry
 <p>In ``, <strong>before every motion command</strong> (and often in the control loop),
 the estimator checks:</p>
 <div class="highlight"><pre><span></span><code><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">nav_state</span><span class="p">.</span><span class="n">isFinite</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="c1">// fires ERROR_INVALID_STATE</span>
+<span class="w">    </span><span class="c1">// fires ERROR_STATE_INVALID</span>
 <span class="w">    </span><span class="c1">// robot stops, recovery behavior triggered</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -565,13 +565,13 @@ the estimator checks:</p>
 <p><strong>This means:</strong> Even if only <code>P(θ,θ)</code> is ∞ (e.g., from a small heading slip), the ENTIRE
 estimated state is considered invalid and navigation halts. This is conservative by design.</p>
 <hr />
-<h1 id="part-5-oks-code-connection">PART 5 — OKS CODE CONNECTION</h1>
-<h2 id="51-kf-concept-oks-code-mapping">5.1 KF Concept → OKS Code Mapping</h2>
+<h1 id="part-5-amr-code-connection">PART 5 — AMR CODE CONNECTION</h1>
+<h2 id="51-kf-concept-amr-code-mapping">5.1 KF Concept → AMR Code Mapping</h2>
 <table>
 <thead>
 <tr>
 <th>KF Concept</th>
-<th>OKS Code</th>
+<th>AMR Code</th>
 <th>Location</th>
 <th>Notes</th>
 </tr>
@@ -593,7 +593,7 @@ estimated state is considered invalid and navigation halts. This is conservative
 <td>Jacobian <code>F = ∂f/∂x</code></td>
 <td><strong>NOT computed</strong></td>
 <td>—</td>
-<td>OKS uses fixed noise model instead</td>
+<td>AMR uses fixed noise model instead</td>
 </tr>
 <tr>
 <td>Process noise <code>Q</code></td>
@@ -605,23 +605,23 @@ estimated state is considered invalid and navigation halts. This is conservative
 <td>Covariance prediction <code>P⁻ = FPFᵀ + Q</code></td>
 <td><code>noise_model.apply(delta_trans, delta_rot, delta_t)</code></td>
 <td><code>predict()</code></td>
-<td>Q dominant; FPFᵀ approximated via OKS shortcut</td>
+<td>Q dominant; FPFᵀ approximated via AMR shortcut</td>
 </tr>
 <tr>
 <td>Measurement matrix <code>H</code></td>
-<td>Sensorbar line constraint</td>
+<td>Line-Sensor line constraint</td>
 <td><code>update()</code></td>
 <td>Projects state to line offset</td>
 </tr>
 <tr>
 <td>Measurement noise <code>R</code></td>
-<td>Sensorbar uncertainty params</td>
+<td>Line-Sensor uncertainty params</td>
 <td><code>update()</code></td>
 <td>From sensor calibration</td>
 </tr>
 <tr>
 <td>Innovation <code>ν = z - Hx̂⁻</code></td>
-<td>Sensorbar offset residual</td>
+<td>Line-Sensor offset residual</td>
 <td><code>update()</code></td>
 <td>Gated by Mahalanobis distance</td>
 </tr>
@@ -633,13 +633,13 @@ estimated state is considered invalid and navigation halts. This is conservative
 </tr>
 <tr>
 <td>State update <code>x̂ = x̂⁻ + Kν</code></td>
-<td>Pose correction from sensorbar</td>
+<td>Pose correction from line-sensor</td>
 <td><code>update()</code></td>
 <td>Applied to mean</td>
 </tr>
 <tr>
 <td>Covariance update <code>P = (I-KH)P⁻</code></td>
-<td>Covariance shrink after sensorbar</td>
+<td>Covariance shrink after line-sensor</td>
 <td><code>update()</code></td>
 <td>Standard formula</td>
 </tr>
@@ -653,7 +653,7 @@ estimated state is considered invalid and navigation halts. This is conservative
 <td><code>isFinite(P)</code> check</td>
 <td><code>nav_state.isFinite()</code></td>
 <td>``</td>
-<td>Fires <code>ERROR_INVALID_STATE</code></td>
+<td>Fires <code>ERROR_STATE_INVALID</code></td>
 </tr>
 <tr>
 <td>Odom staleness</td>
@@ -663,7 +663,7 @@ estimated state is considered invalid and navigation halts. This is conservative
 </tr>
 </tbody>
 </table>
-<h2 id="52-the-oks-noise-model-vs-the-textbook-ekf">5.2 The OKS Noise Model vs. the Textbook EKF</h2>
+<h2 id="52-the-amr-noise-model-vs-the-textbook-ekf">5.2 The AMR Noise Model vs. the Textbook EKF</h2>
 <p>Textbook EKF:</p>
 <div class="highlight"><pre><span></span><code>P⁻ = F P Fᵀ + Q_odometry
        ↑
@@ -671,7 +671,7 @@ estimated state is considered invalid and navigation halts. This is conservative
    Q_odometry = noise proportional to wheel encoder resolution
 </code></pre></div>
 
-<p>OKS implementation:</p>
+<p>AMR implementation:</p>
 <div class="highlight"><pre><span></span><code>P⁻_xx += k_trans_noise * delta_trans
        +  min(P_θθ, 1e5) * delta_trans²         ← ≈ F P Fᵀ cross-term
        +  k_time_trans_noise * delta_t          ← time-based noise
@@ -680,23 +680,23 @@ P⁻_θθ += k_rot_rot_noise * |delta_rot|
        +  k_trans_rot_noise * delta_trans
 </code></pre></div>
 
-<p><strong>Why this approximation is valid:</strong> For an OKS robot traveling mostly in straight lines along
+<p><strong>Why this approximation is valid:</strong> For an warehouse robot traveling mostly in straight lines along
 aisle corridors, θ ≈ 0 for the majority of motion. Under this condition:
 - <code>cos²(θ) ≈ 1</code> so lateral ≈ y
 - <code>sin²(θ) ≈ 0</code> so longitudinal ≈ x
-- The OKS <code>delta_trans²</code> term correctly captures lateral growth proportional to <code>P_θθ</code></p>
-<p>The approximation degrades during sharp turns, but sensorbar updates on line crossings
+- The AMR <code>delta_trans²</code> term correctly captures lateral growth proportional to <code>P_θθ</code></p>
+<p>The approximation degrades during sharp turns, but line-sensor updates on line crossings
 typically reset the covariance before the approximation error accumulates significantly.</p>
-<h2 id="53-oks-does-not-use-odom-covariance">5.3 OKS Does NOT Use odom Covariance</h2>
-<p>The <code>/odom</code> ROS message has a <code>pose.covariance</code> field (6×6 matrix). OKS <strong>ignores this</strong>.
+<h2 id="53-amr-does-not-use-odom-covariance">5.3 AMR Does NOT Use odom Covariance</h2>
+<p>The <code>/odom</code> ROS message has a <code>pose.covariance</code> field (6×6 matrix). AMR <strong>ignores this</strong>.
 Instead, noise parameters are loaded from the configuration file and treated as constants.</p>
-<div class="highlight"><pre><span></span><code>odom.pose.covariance  ──IGNORED──→  OKS uses fixed yaml params instead:
+<div class="highlight"><pre><span></span><code>odom.pose.covariance  ──IGNORED──→  AMR uses fixed yaml params instead:
                                         k_trans_noise: 0.01
                                         k_rot_rot_noise:     0.05
                                         ...
 </code></pre></div>
 
-<p>This is a deliberate design choice: the wheel encoder publishers on OKS robots do not
+<p>This is a deliberate design choice: the wheel encoder publishers on warehouse robots do not
 provide reliable covariance estimates, so a calibrated fixed model is more trustworthy.</p>
 <hr />
 <h2 id="implementation-connection">Implementation Connection</h2>
@@ -710,7 +710,7 @@ provide reliable covariance estimates, so a calibrated fixed model is more trust
 │   └── Staleness: if dt &gt; 2×period → Q *= scaling_factor
 │
 ├── update()
-│   ├── Takes sensorbar measurement z (line offset + orientation)
+│   ├── Takes line-sensor measurement z (line offset + orientation)
 │   ├── Computes innovation ν = z - H x̂⁻
 │   ├── Computes Kalman gain K = P⁻Hᵀ(HP⁻Hᵀ + R)⁻¹
 │   ├── Applies state update x̂ = x̂⁻ + Kν
@@ -718,7 +718,7 @@ provide reliable covariance estimates, so a calibrated fixed model is more trust
 │
 ├── odometryCallback() slip detection
 │   ├── Velocity window comparison: |mean(v_window) - v_current| &gt; threshold
-│   └── If triggered: P(x,x) = P(y,y) = P(θ,θ) = ∞  ← fires ERROR_INVALID_STATE
+│   └── If triggered: P(x,x) = P(y,y) = P(θ,θ) = ∞  ← fires ERROR_STATE_INVALID
 │
 └── imuCallback() collision detection
     ├── Gyro discontinuity check: |ω_imu - ω_predicted| &gt; threshold
@@ -728,7 +728,7 @@ File:
 └── isFinite()
     ├── Checks all pose elements (x, y, θ, v, ω)
     ├── Checks all diagonal covariance elements (P_xx, P_yy, P_θθ)
-    └── Returns false if ANY is NaN or ±Inf → triggers ERROR_INVALID_STATE
+    └── Returns false if ANY is NaN or ±Inf → triggers ERROR_STATE_INVALID
 </code></pre></div>
 
 <hr />
@@ -738,7 +738,7 @@ File:
 <tr>
 <th>Concept</th>
 <th>Formula</th>
-<th>OKS Meaning</th>
+<th>AMR Meaning</th>
 </tr>
 </thead>
 <tbody>
@@ -755,7 +755,7 @@ File:
 <tr>
 <td>Update shrinks P</td>
 <td>P = (I-KH)P⁻</td>
-<td>Every sensorbar <code>update()</code> decreases covariance</td>
+<td>Every line-sensor <code>update()</code> decreases covariance</td>
 </tr>
 <tr>
 <td>Kalman gain</td>
@@ -770,7 +770,7 @@ File:
 <tr>
 <td>EKF linearization</td>
 <td>F = ∂f/∂x</td>
-<td>OKS approximates this with the <code>min(P_θθ,1e5)×s²</code> term</td>
+<td>AMR approximates this with the <code>min(P_θθ,1e5)×s²</code> term</td>
 </tr>
 <tr>
 <td>Lateral variance growth</td>
@@ -795,7 +795,7 @@ File:
 </tbody>
 </table>
 <h3 id="quick-diagnostic-checklist">Quick Diagnostic Checklist</h3>
-<p>When you see <code>ERROR_INVALID_STATE</code> in a bag:</p>
+<p>When you see <code>ERROR_STATE_INVALID</code> in a bag:</p>
 <div class="highlight"><pre><span></span><code>1. Find the timestamp where P(x,x) first becomes inf
 2. Look back 50-100 ms:
    a. IMU gyro spike?          → collision_detection fired (Path B)
@@ -808,7 +808,7 @@ File:
 </code></pre></div>
 
 <hr />
-<p><em>Next: <code>03-measurement-models.md</code> — Sensorbar line constraints, Mahalanobis gating,
+<p><em>Next: <code>03-measurement-models.md</code> — Line-Sensor line constraints, Mahalanobis gating,
 and how the update() function decides whether to accept or reject a measurement.</em></p>
             </div>
         </div>

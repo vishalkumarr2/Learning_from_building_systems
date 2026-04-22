@@ -6,13 +6,13 @@
 
 ---
 
-## Why Should I Care? (OKS Context)
+## Why Should I Care? (Practical Context)
 
-The MCU cascade (Lessons 05-07) controls individual motors. But the OKS robot has TWO driven wheels (differential drive). The **Jetson** runs ROS2 Nav2, which plans paths and outputs `cmd_vel` — a linear+angular velocity command. Something must translate `cmd_vel` into **left and right wheel speed commands** and ensure the robot follows the planned path accurately.
+The MCU cascade (Lessons 05-07) controls individual motors. But the warehouse robot has TWO driven wheels (differential drive). The **Jetson** runs ROS2 Nav2, which plans paths and outputs `cmd_vel` — a linear+angular velocity command. Something must translate `cmd_vel` into **left and right wheel speed commands** and ensure the robot follows the planned path accurately.
 
 **This is where 80% of "the robot drifts" bugs live:**
 - Pure pursuit lookahead too short → oscillation around the path
-- DWB max_vel_theta too high → aggressive rotation → sensorbar triggers
+- DWB max_vel_theta too high → aggressive rotation → line-sensor triggers
 - No velocity profiling → jerky starts and stops → load shifts
 
 ---
@@ -49,7 +49,7 @@ $$\omega_L = \frac{v - \omega L/2}{r}$$
 
 $$\omega_R = \frac{v + \omega L/2}{r}$$
 
-**OKS parameters:** $r = 0.065$ m, $L = 0.43$ m
+**AMR parameters:** $r = 0.065$ m, $L = 0.43$ m
 
 ```python
 # Inverse kinematics: cmd_vel → wheel speeds
@@ -72,9 +72,9 @@ $$\Delta x = v \cdot \cos(\theta) \cdot \Delta t$$
 $$\Delta y = v \cdot \sin(\theta) \cdot \Delta t$$
 $$\Delta \theta = \omega \cdot \Delta t$$
 
-**OKS odometry runs at 50 Hz on the Jetson**, fusing encoder feedback with IMU data in the navigation estimator.
+**AMR odometry runs at 50 Hz on the Jetson**, fusing encoder feedback with IMU data in the navigation estimator.
 
-**Why odometry drifts:** Wheel slip, wheel radius errors, wheelbase calibration errors. After 100 m of driving, pure odometry can be off by 1-3 m. That's why OKS uses LiDAR AMCL or fusion estimators.
+**Why odometry drifts:** Wheel slip, wheel radius errors, wheelbase calibration errors. After 100 m of driving, pure odometry can be off by 1-3 m. That's why AMR uses LiDAR AMCL or fusion estimators.
 
 ---
 
@@ -133,13 +133,13 @@ def pure_pursuit(robot_x, robot_y, robot_theta, path, lookahead_dist, velocity):
 
 **Tuning $L_d$ (lookahead distance):**
 
-| $L_d$ | Effect | OKS usage |
+| $L_d$ | Effect | AMR usage |
 |-------|--------|-----------|
 | Small (0.2 m) | Tracks path tightly, oscillates at high speed | Docking, precision approach |
 | Medium (0.5 m) | Good balance | Normal corridor driving |
 | Large (1.0 m) | Smooth but cuts corners | High-speed transit |
 
-**OKS uses regulated pure pursuit** (Nav2's RPP plugin), which adaptively adjusts $L_d$ based on curvature and speed.
+**AMR uses regulated pure pursuit** (Nav2's RPP plugin), which adaptively adjusts $L_d$ based on curvature and speed.
 
 ## 2.2 Stanley Controller
 
@@ -175,7 +175,7 @@ Velocity space:
   ★ is selected → becomes cmd_vel
 ```
 
-**Key DWB parameters (OKS tuning):**
+**Key DWB parameters (AMR tuning):**
 
 | Parameter | Value | Effect |
 |-----------|-------|--------|
@@ -187,8 +187,8 @@ Velocity space:
 | `vx_samples` | 10 | Velocity space resolution |
 | `vtheta_samples` | 20 | Angular vel resolution |
 
-**Common OKS DWB bugs:**
-- `max_vel_theta` too high → robot rotates aggressively → triggers sensorbar safety → e-stop
+**Common AMR DWB bugs:**
+- `max_vel_theta` too high → robot rotates aggressively → triggers line-sensor safety → e-stop
 - `sim_time` too short → robot doesn't see obstacles ahead → last-second swerve
 - `max_accel_x` too high → wheels slip on smooth floor → odometry error → position drift
 
@@ -269,7 +269,7 @@ Acceleration
   ▼
 ```
 
-**OKS uses S-curve for docking** (final 0.5 m approach) because precision matters more than speed. For corridor driving, trapezoidal is sufficient.
+**AMR uses S-curve for docking** (final 0.5 m approach) because precision matters more than speed. For corridor driving, trapezoidal is sufficient.
 
 ---
 
@@ -326,7 +326,7 @@ class VelocitySmoother:
 
 At very low speeds, the motor has static friction (stiction). The PID commands a tiny duty, but the motor doesn't move. The position error grows, integral winds up, and eventually the motor lurches forward.
 
-**Solutions used in OKS:**
+**Solutions used in our robot:**
 1. **Minimum speed threshold:** If $|v_{cmd}| < v_{min}$, clamp to 0 (accept position holding, not creeping)
 2. **Feedforward dither:** Add a small oscillating signal to overcome stiction
 3. **Friction compensation:** Measure the static friction torque and add it as feedforward
@@ -335,7 +335,7 @@ At very low speeds, the motor has static friction (stiction). The PID commands a
 
 # PART 5 — COORDINATE FRAMES AND TRANSFORMS
 
-## 5.1 Frames in OKS
+## 5.1 Frames in our robot
 
 ```
 map → odom → base_link → wheel_left, wheel_right
@@ -351,7 +351,7 @@ map → odom → base_link → wheel_left, wheel_right
 
 The path following controller needs to know "where is the robot now?" to compute errors. This requires a TF lookup from `map` → `base_link`. If this transform is **stale** (the TF hasn't been updated recently), the controller uses an outdated position and makes wrong corrections.
 
-**OKS TF staleness budget:**
+**AMR TF staleness budget:**
 - Acceptable: < 50 ms
 - Warning: 50–100 ms → reduced speed mode
 - Critical: > 100 ms → stop and wait
@@ -365,7 +365,7 @@ The path following controller needs to know "where is the robot now?" to compute
 3. Why does DWB sample many (v, ω) pairs instead of just computing the optimal one analytically?
 4. A trapezoidal profile has a total distance of 0.5 m, $v_{max} = 0.5$ m/s, $a_{max} = 0.3$ m/s². Is this trapezoidal or triangular?
 5. The velocity smoother limits acceleration to 0.3 m/s². Nav2 commands an instant jump from 0 to 0.5 m/s. How long does the smoother take to reach 0.5 m/s?
-6. Why does OKS use pure pursuit for docking instead of DWB?
+6. Why does AMR use pure pursuit for docking instead of DWB?
 7. The robot drifts left even though cmd_vel is straight (v=0.5, ω=0). List three possible causes.
 
 ---

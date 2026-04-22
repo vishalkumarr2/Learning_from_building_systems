@@ -894,7 +894,7 @@ sudo trace-cmd report
 
 #### Why ftrace matters for real-time:
 
-In an OKS-style robot system, if your 100Hz control loop occasionally takes
+In a robot-style robot system, if your 100Hz control loop occasionally takes
 15ms instead of 10ms, ftrace can show you:
 - Which kernel thread preempted your RT thread
 - How long the preemption lasted

@@ -1,14 +1,14 @@
 # 01 — Dead-Reckoning & Wheel Odometry
-### The math underneath OKS `predict()`
+### The math underneath AMR `predict()`
 
 **Prerequisite:** None — this is the entry point for the navigation-estimator track.
 **Unlocks:** `02-kalman-filter.md` — you need to know what `delta_trans` and `delta_theta` *mean* before you can understand how their variances propagate.
 
 ---
 
-## Why Should I Care? (OKS Project Context)
+## Why Should I Care? (AMR Project Context)
 
-Every OKS robot navigation failure starts with `predict()`. When you open a bag from an incident like a bag from a recent incident and see the robot's estimated position drifting off a tile before the sensorbar could correct it, you're watching dead-reckoning accumulate error in real time.
+Every warehouse robot navigation failure starts with `predict()`. When you open a bag from an incident like a bag from a recent incident and see the robot's estimated position drifting off a tile before the line-sensor could correct it, you're watching dead-reckoning accumulate error in real time.
 
 Understanding this material lets you answer questions you currently have to guess at:
 
@@ -25,7 +25,7 @@ The the navigation estimator is deliberately simple: no full Jacobian, no odom m
 
 ## 1.1 Physical Setup
 
-An OKS AMR (and most small robots) uses **differential drive**: two driven wheels on a common axle, no steering mechanism. Turning is achieved by driving the wheels at different speeds. A castor wheel provides balance but contributes no drive.
+An warehouse AMR (and most small robots) uses **differential drive**: two driven wheels on a common axle, no steering mechanism. Turning is achieved by driving the wheels at different speeds. A castor wheel provides balance but contributes no drive.
 
 **ELI15 analogy:** Imagine two people holding opposite ends of a stick. If both walk forward equally fast, the stick moves straight. If the left person walks faster, the stick rotates clockwise (from above). The stick's centre traces an arc. Differential drive is exactly this.
 
@@ -312,12 +312,12 @@ A 1° heading miscalibration produces **17 cm of sideways drift per 10 metres**.
 
 **Why systematic errors are worse:** They accumulate *monotonically*. Random errors partially cancel over time. Systematic errors never cancel — they compound.
 
-## 3.3 Why OKS Uses Sensorbar Corrections
+## 3.3 Why AMR Uses Line-Sensor Corrections
 
 Without external corrections, the table below shows what happens:
 
 ```
-    DEAD-RECKONING DRIFT IN AN OKS WAREHOUSE
+    DEAD-RECKONING DRIFT IN AN AMR WAREHOUSE
     ==========================================
 
     Assumptions:
@@ -347,7 +347,7 @@ Without external corrections, the table below shows what happens:
                 ─────── 50 m (off path by 2 m)
 ```
 
-The OKS sensorbar provides a measurement every time the robot crosses a floor line. This corrects the accumulated heading and position error back toward ground truth. Without sensorbar updates, a 100 m warehouse run is not navigable with wheel odometry alone.
+The floor sensor provides a measurement every time the robot crosses a floor line. This corrects the accumulated heading and position error back toward ground truth. Without line-sensor updates, a 100 m warehouse run is not navigable with wheel odometry alone.
 
 ## 3.4 The Encoder Wrap-Around Trap
 
@@ -371,20 +371,20 @@ A single wrap-around event produces a `delta_trans` spike of ~(65535/N) × 2πr 
 
 ---
 
-# PART 4 — OKS CODE CONNECTION
+# PART 4 — AMR CODE CONNECTION
 
-## 4.1 How OKS `predict()` Uses This Math
+## 4.1 How AMR `predict()` Uses This Math
 
-OKS's `predict()` function (, ) receives the *already-computed* `delta_trans` and `delta_theta` from the odom message comparison. It does **not** re-derive them from encoder ticks — the ROS nav_msgs/Odometry message already integrates wheel odometry (via the robot's base driver). The estimator receives the *state change* directly.
+AMR's `predict()` function (, ) receives the *already-computed* `delta_trans` and `delta_theta` from the odom message comparison. It does **not** re-derive them from encoder ticks — the ROS nav_msgs/Odometry message already integrates wheel odometry (via the robot's base driver). The estimator receives the *state change* directly.
 
 The prediction step does two things:
 
 1. **State propagation** — applies the unicycle equations to advance `(x, y, θ)`.
 2. **Covariance propagation** — grows the covariance matrix using a linear noise model.
 
-## 4.2 The OKS Linear Noise Model
+## 4.2 The AMR Linear Noise Model
 
-OKS uses a **simplified** noise model that is NOT the standard EKF Jacobian-based propagation. Instead:
+AMR uses a **simplified** noise model that is NOT the standard EKF Jacobian-based propagation. Instead:
 
 ```cpp
 // From  predict() ~
@@ -408,11 +408,11 @@ Each line is a **linear combination of the motion inputs** with fixed scaling co
     STANDARD EKF COVARIANCE UPDATE:
         P' = F × P × Fᵀ + Q
 
-    OKS SIMPLIFICATION:
+    AMR SIMPLIFICATION:
         ΔP = k₁ × |delta_trans| + k₂ × |delta_theta| + k₃ × delta_t
 ```
 
-Why? The full Jacobian requires computing partial derivatives of the unicycle model and multiplying two 3×3 matrices per prediction step. For OKS's use case (sensorbar corrections every ~10 cm), the simplified model is accurate enough — the measurement update dominates.
+Why? The full Jacobian requires computing partial derivatives of the unicycle model and multiplying two 3×3 matrices per prediction step. For AMR's use case (line-sensor corrections every ~10 cm), the simplified model is accurate enough — the measurement update dominates.
 
 ## 4.3 Why `min(cov_theta, 1e5) × delta_trans²` in `lateral_var`
 
@@ -447,7 +447,7 @@ The `min(cov_theta, 1e5)` cap prevents numerical overflow when heading variance 
 
 ## 4.4 Complete Concept-to-Code Mapping
 
-| Concept (this document) | OKS Code Location | Variable Name |
+| Concept (this document) | AMR Code Location | Variable Name |
 |-------------------------|-------------------|---------------|
 | Arc length from encoders | Robot base driver (not estimator) | Published in `odom.pose.pose` |
 | `s = (s_R + s_L) / 2` | `predict()` input | `delta_trans` |
@@ -459,12 +459,12 @@ The `min(cov_theta, 1e5)` cap prevents numerical overflow when heading variance 
 | Odom message staleness | `predict()` scaling | `scaling_factor` (if `Δt > 2×expected_period`) |
 | Midpoint heading `θ + Δθ/2` | State propagation in `predict()` | Implicit in `cos/sin` decomposition |
 
-## 4.5 What OKS Does NOT Do
+## 4.5 What AMR Does NOT Do
 
 Understanding the omissions prevents wrong mental models:
 
 ```
-    OKS DOES NOT:
+    AMR DOES NOT:
     ─────────────
     ✗ Read odom.twist.covariance or odom.pose.covariance
       (these fields are set by the base driver but estimator ignores them)
@@ -504,7 +504,7 @@ Understanding the omissions prevents wrong mental models:
 
 **When it happens:** Robot runs continuously for a long time; encoders count past 65535. The base driver wraps the counter but does not sign-extend correctly.
 
-**How to spot in a bag:** Single-tick `delta_trans` spike of ~20 m at a precise time in the `/odom` topic. This causes a `trans_var` spike that may or may not clear depending on the next sensorbar update.
+**How to spot in a bag:** Single-tick `delta_trans` spike of ~20 m at a precise time in the `/odom` topic. This causes a `trans_var` spike that may or may not clear depending on the next line-sensor update.
 
 **The correct C++ cast:**
 ```cpp
@@ -512,13 +512,13 @@ int16_t delta = static_cast<int16_t>(current_encoder - prev_encoder);
 //              ↑ explicit int16 cast: wraps correctly at ±32768
 ```
 
-## 5.3 Why OKS Computes Variance from Delta, Not Cumulative State
+## 5.3 Why AMR Computes Variance from Delta, Not Cumulative State
 
-In a naive dead-reckoning system you might track total path length and compute total variance. OKS does NOT do this — it adds variance *incrementally* based on each new `delta_trans` and `delta_theta`.
+In a naive dead-reckoning system you might track total path length and compute total variance. AMR does NOT do this — it adds variance *incrementally* based on each new `delta_trans` and `delta_theta`.
 
 **Why this is correct:** Variance is *additive* for independent increments. Each odom step is assumed independent (no correlation between wheel slips at step 5 and step 6). This is the Markov property: the state covariance at time `t+1` only depends on the state covariance at time `t` and the new measurement, not on all previous measurements.
 
-**What would go wrong with cumulative:** Cumulative variance would be wrong after a sensorbar measurement *decreases* covariance. You'd be summing over the whole history rather than propagating from the post-measurement state.
+**What would go wrong with cumulative:** Cumulative variance would be wrong after a line-sensor measurement *decreases* covariance. You'd be summing over the whole history rather than propagating from the post-measurement state.
 
 ## 5.4 How to Spot Dead-Reckoning Failure in a Bag
 
@@ -528,7 +528,7 @@ In a naive dead-reckoning system you might track total path length and compute t
 
     1. Compare /odom and /estimated_state position tracks
        │ If they diverge SLOWLY over many seconds → dead-reckoning drift
-       │ If they jump SUDDENLY → sensorbar rejected update or slip event
+       │ If they jump SUDDENLY → line-sensor rejected update or slip event
 
     2. Check delta_trans magnitude in odom deltas
        │ Normal: ≤ 0.01 m per 50 Hz odom step (≤ 0.5 m/s)
@@ -540,8 +540,8 @@ In a naive dead-reckoning system you might track total path length and compute t
        │ (not dead-reckoning failure, but a different kind)
 
     4. Plot cov_xx and cov_yy over time:
-       │ Gradual growth between sensorbar updates → normal prediction
-       │ Growth without any measurement shrinks → sensorbar not triggering
+       │ Gradual growth between line-sensor updates → normal prediction
+       │ Growth without any measurement shrinks → line-sensor not triggering
        │ Sudden jump to 1e5 → hit cov_theta cap in lateral_var formula
        │ Jump to INF → slip detection triggered
 
@@ -552,7 +552,7 @@ In a naive dead-reckoning system you might track total path length and compute t
 
 ## 5.5 The Staleness Scaling Mechanism
 
-OKS's `predict()` checks how long ago odom was received. If the gap exceeds `2 × expected_period`:
+AMR's `predict()` checks how long ago odom was received. If the gap exceeds `2 × expected_period`:
 
 ```
     scaling_factor = (actual_gap / expected_period)²
@@ -604,15 +604,15 @@ INF covariance → ESTIMATED_STATE_NOT_FINITE
 
 ## Summary — What to Remember
 
-| Concept | Formula | OKS Parameter | What Goes Wrong If Wrong |
+| Concept | Formula | AMR Parameter | What Goes Wrong If Wrong |
 |---------|---------|---------------|--------------------------|
 | Arc length from encoder | `s = (n/N) × 2π × r` | Inputs to base driver | Wrong `r` → systematic scale drift |
 | Heading change | `Δθ = (s_R − s_L) / B` | `delta_theta` input | Wrong `B` → systematic heading drift |
 | Forward distance | `s = (s_R + s_L) / 2` | `delta_trans` input | Wrong `r` asymmetry → scale error |
 | Position update | `x' = x + s·cos(θ + Δθ/2)` | State propagation | — (derived from above) |
 | Midpoint heading | `θ_mid = θ + Δθ/2` | Implicit in cos/sin | Using old θ → systematic undershoot on arcs |
-| Along-track variance | `k₁ × delta_trans` | `k_trans_noise` | Too low → overconfident → Mahalanobis rejection of valid sensorbar |
-| Heading variance | `k₂ × delta_theta` | `k_rot_noise` | Too high → sensorbar rejected prematurely |
+| Along-track variance | `k₁ × delta_trans` | `k_trans_noise` | Too low → overconfident → Mahalanobis rejection of valid line-sensor |
+| Heading variance | `k₂ × delta_theta` | `k_rot_noise` | Too high → line-sensor rejected prematurely |
 | Lateral variance | `min(cov_θ, 1e5) × delta_trans²` | `cov_theta` at time of prediction | Uncapped → overflow after slip; over-capped → underestimates lateral uncertainty |
 | Staleness scaling | `(gap / period)²` × variance | `scaling_factor` | Missing → overconfident during odom dropout |
 | Encoder wrap | `(int16_t)(new − old)` | Base driver, not estimator | Phantom 20 m spike → covariance spike → possible ESTIMATED_STATE_NOT_FINITE |
@@ -622,4 +622,4 @@ INF covariance → ESTIMATED_STATE_NOT_FINITE
 
 $$\boxed{\Delta\theta = \frac{s_R - s_L}{B}}$$
 
-This drives everything else. Heading error accumulates; position error follows from heading error. Every OKS navigation failure investigation should start by asking: *is the heading estimate correct?*
+This drives everything else. Heading error accumulates; position error follows from heading error. Every AMR navigation failure investigation should start by asking: *is the heading estimate correct?*

@@ -58,27 +58,27 @@
         <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
             <div class="md-content">
 <h1 id="exercises-measurement-models-mahalanobis-gating">Exercises: Measurement Models &amp; Mahalanobis Gating</h1>
-<h3 id="chapter-03-line-constraints-innovation-gating-and-the-oks-clamp-update">Chapter 03: Line constraints, innovation gating, and the OKS clamp update</h3>
+<h3 id="chapter-03-line-constraints-innovation-gating-and-the-amr-clamp-update">Chapter 03: Line constraints, innovation gating, and the robot clamp update</h3>
 <p><strong>Self-assessment guide:</strong> Work each section in order. Write your answer before expanding the
 details block. This chapter is the core of daily bag diagnosis — spend extra time on Section B
 (numerical). If you can compute d by hand in under 2 minutes, you can diagnose silent rejections
 in the field without a script.</p>
-<p><strong>OKS context:</strong> Every time you see a robot drift off a lane line while the sensorbar is active,
+<p><strong>AMR context:</strong> Every time you see a robot drift off a lane line while the line-sensor is active,
 one of the gates in <code>update()</code> is silently dropping measurements. This exercise set
 builds the muscle to compute which gate, and why.</p>
 <hr />
 <h2 id="section-a-conceptual-questions">Section A — Conceptual Questions</h2>
-<p><strong>A1.</strong> Explain the difference between an <em>orthogonal</em> and a <em>parallel</em> sensorbar measurement
+<p><strong>A1.</strong> Explain the difference between an <em>orthogonal</em> and a <em>parallel</em> line-sensor measurement
 in the the navigation estimator. Which component of the state vector does each update? Why can a single
 line crossing only update one state component, not two?</p>
 <details><summary>Answer</summary>
 
 **Orthogonal measurement:** The robot crosses a floor line approximately perpendicularly.
-The sensorbar fires across the line, measuring the lateral offset. If the line runs N-S
+The line-sensor fires across the line, measuring the lateral offset. If the line runs N-S
 (vertical), the perpendicular direction is E-W, so the measurement updates **X**. If the
 line runs E-W (horizontal), it updates **Y**.
 
-**Parallel measurement:** The robot travels along a line. The sensorbar detects the line
+**Parallel measurement:** The robot travels along a line. The line-sensor detects the line
 running parallel to travel. The perpendicular offset from the robot's path to the line updates
 the **opposite lateral axis** from travel direction.
 
@@ -104,15 +104,15 @@ The denominator is `sqrt(P + R)`. When P is small (tight covariance), the denomi
 so the same innovation ν produces a larger d.
 
 **Concrete scenario:**
-1. Robot travels a long straight corridor, receiving many sensorbar updates.
-2. Due to duplicate sensorbar messages (11–30% of SCL frames), P is repeatedly confirmed
+1. Robot travels a long straight corridor, receiving many line-sensor updates.
+2. Due to duplicate line-sensor messages (11–30% of SCL frames), P is repeatedly confirmed
    without genuine new information. P shrinks to near the uniform-variance floor (~0.0003 m²).
 3. A wheelspin event causes the robot to drift 12cm laterally. The estimator does NOT detect
    this (P is tight, so slip detection threshold may not trigger).
-4. The next genuine sensorbar update has innovation ν = 0.12m.
+4. The next genuine line-sensor update has innovation ν = 0.12m.
    `d = 0.12 / sqrt(0.0003 + 0.005) = 0.12 / 0.072 = 1.67` ← still accepted (barely)
 5. But if ν = 0.15m: `d = 0.15 / 0.072 = 2.08` ← REJECTED.
-6. The state is now stuck at the wrong position, and every subsequent sensorbar update
+6. The state is now stuck at the wrong position, and every subsequent line-sensor update
    (which correctly reports the line location) appears as an outlier to the over-confident filter.
 
 **Root cause:** Duplicate measurements made P artificially tight. A genuine recovery measurement
@@ -120,12 +120,12 @@ was rejected because the filter "knew" too confidently where it was.
 </details>
 
 <hr />
-<p><strong>A3.</strong> OKS uses a clamp update (<code>x̂⁺ = clamp(x̂⁻, min, max)</code>) instead of the standard
+<p><strong>A3.</strong> AMR uses a clamp update (<code>x̂⁺ = clamp(x̂⁻, min, max)</code>) instead of the standard
 Kalman gain update (<code>x̂⁺ = x̂⁻ + K ν</code>). For what physical reason is the clamp model more
-honest for sensorbar XY measurements? What probability distribution does the clamp represent?</p>
+honest for line-sensor XY measurements? What probability distribution does the clamp represent?</p>
 <details><summary>Answer</summary>
 
-**Physical reason:** The sensorbar reports a *range*, not a point. The robot is somewhere
+**Physical reason:** The line-sensor reports a *range*, not a point. The robot is somewhere
 within the span of activated IR sensors — approximately ±3cm around the line centroid. There
 is no "most likely position" within this band; the robot could genuinely be anywhere in it.
 
@@ -146,25 +146,25 @@ over width w is `w²/12`. Setting P to this value means the filter honestly repr
 
 <hr />
 <p><strong>A4.</strong> What is the purpose of the offset ambiguity check in <code>update()</code>?
-Describe the scenario where it would reject an otherwise valid sensorbar measurement.
+Describe the scenario where it would reject an otherwise valid line-sensor measurement.
 Under what state-covariance condition is the ambiguity check most likely to trigger?</p>
 <details><summary>Answer</summary>
 
 **Purpose:** The floor has many parallel lines with known spacing (e.g. 1.5m apart). A single
-sensorbar crossing is geometrically identical whether the robot is near line A or near the
+line-sensor crossing is geometrically identical whether the robot is near line A or near the
 adjacent line B (the offset from the line looks the same; only the absolute position differs).
 The ambiguity check uses a likelihood ratio to determine which hypothesis (near A or near B)
 is better supported by the current state estimate.
 
 **Rejection scenario:** The robot is at Y = 3.02m (near line B at Y = 3.0m). But after a
-slip event, the state estimates Y = 4.48m (near line A at Y = 4.5m). The sensorbar fires
+slip event, the state estimates Y = 4.48m (near line A at Y = 4.5m). The line-sensor fires
 and reports offset = +0.02m. This is consistent with both:
 - Robot near line B: predicted Y = 3.0 + 0.02 = 3.02m (correct)
 - Robot near line A: predicted Y = 4.5 - 0.02 = 4.48m (the wrong hypothesis that matches
   the drifted state estimate)
 
 The probability ratio `p(H1) / p(H0)` is high → measurement rejected as ambiguous → the
-robot cannot self-correct with this sensorbar reading.
+robot cannot self-correct with this line-sensor reading.
 
 **When most likely to trigger:** When P is **large** (after a slip, after long dead-reckoning
 without updates). Large P means the state distribution is spread over multiple line spacings,
@@ -173,7 +173,7 @@ and the secondary hypothesis is strongly penalised.
 </details>
 
 <hr />
-<p><strong>A5.</strong> The <code>is_reliable</code> flag in sensorbar messages is checked at lines 876 and 1027 in
+<p><strong>A5.</strong> The <code>is_reliable</code> flag in line-sensor messages is checked at lines 876 and 1027 in
 <code>`. Explain what</code>is_reliable=False` indicates and why it only catches ~1% of
 problematic messages. What type of problem does it miss entirely?</p>
 <details><summary>Answer</summary>
@@ -181,19 +181,19 @@ problematic messages. What type of problem does it miss entirely?</p>
 **`is_reliable=False` indicates:**
 - An SPI frame miss (the STM32 firmware did not deliver a fresh sensor reading to the Jetson
   in time — the ring buffer contained stale data)
-- All-zero sensor readings (the sensorbar reported all sensors as identical, which indicates
+- All-zero sensor readings (the line-sensor reported all sensors as identical, which indicates
   a hardware-level fault — broken sensor, blocked IR emitters, or power issue)
 
-**Why only ~1% of messages:** These are hardware-level failures. The sensorbar firmware sets
+**Why only ~1% of messages:** These are hardware-level failures. The line-sensor firmware sets
 `is_reliable=False` only when it *knows* the reading is invalid (CRC error, timeout, all-zero).
 In normal operation, 99% of messages have well-formed data that passes hardware checks.
 
 **What it misses entirely:** SPI *retry duplicates* — when the Jetson re-requests the last
-sensorbar frame and receives an identical copy of a previous valid reading. This data is
+line-sensor frame and receives an identical copy of a previous valid reading. This data is
 hardware-valid (correct CRC, non-zero, properly formatted) so `is_reliable=True` is set.
 But the *timestamp* is stale and the *content* is identical to the previous message.
 
-In SCL bags, 11–30% of sensorbar messages are such duplicates. All of them have `is_reliable=True`.
+In SCL bags, 11–30% of line-sensor messages are such duplicates. All of them have `is_reliable=True`.
 The filter has no way to distinguish them from genuine updates without explicit duplicate
 detection (checking if the content and/or timestamp matches the previous message).
 
@@ -212,7 +212,7 @@ is <strong>ACCEPTED</strong> (d ≤ 2) or <strong>REJECTED</strong> (d &gt; 2).<
 <p><strong>B1. Scenario: Normal operation (should be accepted)</strong></p>
 <div class="highlight"><pre><span></span><code>    State estimate:      x̂⁻(x) = 1.520m
     State covariance:    P⁻(x,x) = 0.008 m²
-    Sensorbar reading:   z = 1.500m   (line at X = 1.5m)
+    Line-Sensor reading:   z = 1.500m   (line at X = 1.5m)
 </code></pre></div>
 
 <details><summary>Solution</summary>
@@ -239,7 +239,7 @@ this is well within the acceptance ellipse. The clamp update will snap the state
 <p><strong>B2. Scenario: Borderline case — robot drifted after long corridor (accepted, just)</strong></p>
 <div class="highlight"><pre><span></span><code>    State estimate:      x̂⁻(x) = 1.270m
     State covariance:    P⁻(x,x) = 0.025 m²   (large — long dead-reckoning stretch)
-    Sensorbar reading:   z = 1.500m   (line at X = 1.5m, robot drifted ~23cm)
+    Line-Sensor reading:   z = 1.500m   (line at X = 1.5m, robot drifted ~23cm)
 </code></pre></div>
 
 <details><summary>Solution</summary>
@@ -270,7 +270,7 @@ measurement would have been silently dropped.
 <p><strong>B3. Scenario: Rejection — genuine outlier (wrong lane or sensor fault)</strong></p>
 <div class="highlight"><pre><span></span><code>    State estimate:      x̂⁻(x) = 1.490m
     State covariance:    P⁻(x,x) = 0.010 m²
-    Sensorbar reading:   z = 3.000m   (robot at X=1.5m seeing X=3.0m line — wrong lane)
+    Line-Sensor reading:   z = 3.000m   (robot at X=1.5m seeing X=3.0m line — wrong lane)
 </code></pre></div>
 
 <details><summary>Solution</summary>
@@ -299,8 +299,8 @@ ratio would flag this as belonging to a different line entirely.
 <hr />
 <h2 id="section-c-python-implementation">Section C — Python Implementation</h2>
 <p><strong>Task:</strong> Implement the standard Kalman filter update step as a Python function.
-This is the <em>standard</em> update (not the OKS clamp variant) — it forms the mathematical
-foundation for understanding why OKS deviated from it.</p>
+This is the <em>standard</em> update (not the robot clamp variant) — it forms the mathematical
+foundation for understanding why AMR deviated from it.</p>
 <p><strong>Function signature:</strong></p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 
@@ -413,16 +413,16 @@ All tests passed.
 
 
 
-**Key observation for OKS:** Notice how `x_post[0] = 2.0167`, *not* 2.0 (the measurement).
+**Key observation for the robot:** Notice how `x_post[0] = 2.0167`, *not* 2.0 (the measurement).
 The Kalman gain K = 0.667 here, so the state moves 2/3 of the way toward the measurement.
-In OKS's clamp update, the state would instead be forced inside `[meas.min, meas.max]`
+In AMR's clamp update, the state would instead be forced inside `[meas.min, meas.max]`
 regardless of K — a fundamentally different (and for range measurements, more honest) update.
 </details>
 
 <hr />
-<h2 id="section-d-oks-specific-uniform-variance-gate-analysis">Section D — OKS-Specific: Uniform Variance Gate Analysis</h2>
+<h2 id="section-d-amr-specific-uniform-variance-gate-analysis">Section D — AMR-Specific: Uniform Variance Gate Analysis</h2>
 <p><strong>Problem:</strong></p>
-<p>A sensorbar measurement has a range of <strong>0.06m</strong> (the IR array span covers 6cm — 3cm either
+<p>A line-sensor measurement has a range of <strong>0.06m</strong> (the IR array span covers 6cm — 3cm either
 side of the detected line centroid):
 - <code>meas.min = 2.470m</code>
 - <code>meas.max = 2.530m</code>
@@ -432,7 +432,7 @@ side of the detected line centroid):
 - Two cases: <code>P⁻(x,x) = 0.010 m²</code> and <code>P⁻(x,x) = 0.0001 m²</code></p>
 <p>Answer these questions:</p>
 <ol>
-<li>What variance <code>σ²_uniform</code> does OKS assign to this measurement range?</li>
+<li>What variance <code>σ²_uniform</code> does AMR assign to this measurement range?</li>
 <li>In each P case, what does the covariance update rule <code>P⁺ = min(P⁻, σ²_uniform)</code> produce?</li>
 <li>What does the clamp update do to the state (x̂⁺) in both cases?</li>
 <li>Suppose <code>x̂⁻(x) = 2.450m</code> (state is OUTSIDE the range). What happens?</li>
@@ -456,13 +456,13 @@ side of the detected line centroid):
 
 <div class="highlight"><pre><span></span><code>    Case A: P⁻ = 0.010 m²  (large — 10x bigger than σ²_uniform)
         P⁺ = min(0.010, 0.0003) = 0.0003 m²
-        → Covariance tightened to the sensorbar range variance
-        → After this update the filter is &quot;as confident as the sensorbar allows&quot;
+        → Covariance tightened to the line-sensor range variance
+        → After this update the filter is &quot;as confident as the line-sensor allows&quot;
 
     Case B: P⁻ = 0.0001 m²  (very tight — 3x smaller than σ²_uniform)
         P⁺ = min(0.0001, 0.0003) = 0.0001 m²
         → Covariance UNCHANGED — the state is already MORE precise than the measurement
-        → The sensorbar cannot improve on what the filter already &quot;knows&quot;
+        → The line-sensor cannot improve on what the filter already &quot;knows&quot;
 </code></pre></div>
 
 
@@ -509,10 +509,10 @@ side of the detected line centroid):
 | State inside range, tight P | 2.510m | 0.0001 m² | 2.510m (unchanged) | 0.0001 m² | Accepted |
 | State outside range, large P | 2.450m | 0.010 m² | 2.470m (snapped) | 0.0003 m² | Accepted (d=0.49) |
 
-**Key takeaway:** A 6cm sensorbar range sets the covariance floor at `0.0003 m²` (σ = 1.73cm).
-This is larger than the tight case `P = 0.0001 m²`. So in Case B, repeated valid sensorbar
+**Key takeaway:** A 6cm line-sensor range sets the covariance floor at `0.0003 m²` (σ = 1.73cm).
+This is larger than the tight case `P = 0.0001 m²`. So in Case B, repeated valid line-sensor
 updates cannot tighten P below 0.0003 m² — the floor is set by the physical measurement range.
-However, **duplicate** sensorbar messages (with stale identical content) will keep executing the
+However, **duplicate** line-sensor messages (with stale identical content) will keep executing the
 clamp update and confirming `P⁺ = min(P, 0.0003)` — the covariance is correctly bounded but
 the position is stale. A future fresh measurement then has a very tight P = 0.0003 m², and if
 the genuine line position disagrees by more than `2 × sqrt(0.0003 + 0.005) ≈ 14.5cm`, it will
@@ -529,10 +529,10 @@ by duplicates.
 <p>&hellip;and the flat region spans 3+ seconds, that is the duplicate flood signature. The covariance
 has reached the <code>σ²_uniform</code> floor and is being confirmed there by stale readings. The robot&rsquo;s
 position belief is locked at one value while the physical robot may have moved. The next
-fresh sensorbar reading that reports a different position will be evaluated against
+fresh line-sensor reading that reports a different position will be evaluated against
 <code>d = ν / sqrt(0.0003 + 0.005) = ν / 0.0724</code>. Any drift above <code>2 × 0.0724 = 14.5cm</code>
 causes silent rejection — and the robot continues drifting.</p>
-<p>This is why sensorbar duplicate detection upstream of the estimator (sequence numbers, content
+<p>This is why line-sensor duplicate detection upstream of the estimator (sequence numbers, content
 hashing, or timestamp monotonicity checks) would fix the silent-rejection failure class without
 changing any estimator math.
 </details></p>

@@ -2,9 +2,9 @@
 
 ### Chapter 07: From differential signaling to arbitration, error handling, and SocketCAN
 
-**Self-assessment guide:** Write your answer before expanding the details block. CAN is the backbone of automotive and industrial robot communication — understanding its error handling and arbitration mechanisms is essential for debugging motor controllers, BMS, and safety systems on OKS robots.
+**Self-assessment guide:** Write your answer before expanding the details block. CAN is the backbone of automotive and industrial robot communication — understanding its error handling and arbitration mechanisms is essential for debugging motor controllers, BMS, and safety systems on warehouse robots.
 
-**Project context:** OKS AMR robots may use CAN for motor controllers, battery management (BMS), and sensor modules. Unlike I2C/SPI (board-level), CAN is a fieldbus designed for harsh environments: factory floors, long cable runs, and electrical noise. Your STM32H7 has an FDCAN peripheral, and the Jetson runs SocketCAN for ROS integration.
+**Project context:** warehouse AMR robots may use CAN for motor controllers, battery management (BMS), and sensor modules. Unlike I2C/SPI (board-level), CAN is a fieldbus designed for harsh environments: factory floors, long cable runs, and electrical noise. Your STM32H7 has an FDCAN peripheral, and the Jetson runs SocketCAN for ROS integration.
 
 ---
 
@@ -712,7 +712,7 @@ Two stuff bits are inserted in just the first 3 bytes. The long run of zeros in 
 
 ## Section E — Deeper Thinking
 
-**E1.** Your OKS robot uses SPI for the IMU bridge (STM32↔Jetson, short distance, high speed) and CAN for motor controllers (longer cables, harsh environment). Both protocols need error detection, but they handle it completely differently. Compare the error handling philosophies of SPI (no built-in detection) vs CAN (5 hardware error mechanisms + automatic retransmission). Why is each approach appropriate for its use case?
+**E1.** Your warehouse robot uses SPI for the IMU bridge (STM32↔Jetson, short distance, high speed) and CAN for motor controllers (longer cables, harsh environment). Both protocols need error detection, but they handle it completely differently. Compare the error handling philosophies of SPI (no built-in detection) vs CAN (5 hardware error mechanisms + automatic retransmission). Why is each approach appropriate for its use case?
 
 <details><summary>Answer</summary>
 

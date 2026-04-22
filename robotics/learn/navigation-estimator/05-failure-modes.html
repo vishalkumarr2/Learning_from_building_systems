@@ -59,17 +59,17 @@
             <div class="md-content">
 <h1 id="05-failure-mode-diagnosis">05 — Failure Mode Diagnosis</h1>
 <h3 id="reading-bags-like-an-estimator-detective">Reading bags like an estimator detective</h3>
-<p><strong>Prerequisite:</strong> <code>01-dead-reckoning.md</code>, <code>02-kalman-filter.md</code>, <code>03-measurement-models.md</code>, <code>04-sensorbar-fusion.md</code> — you need to understand covariance, what makes it grow, and how sensorbar resets it before you can diagnose why it went wrong.
+<p><strong>Prerequisite:</strong> <code>01-dead-reckoning.md</code>, <code>02-kalman-filter.md</code>, <code>03-measurement-models.md</code>, <code>04-line-sensor-fusion.md</code> — you need to understand covariance, what makes it grow, and how line-sensor resets it before you can diagnose why it went wrong.
 <strong>Unlocks:</strong> The end-to-end RCA workflow. Once you can diagnose any failure mode from a bag alone, you are ready to write post-mortems without guessing.</p>
 <hr />
-<h2 id="why-should-i-care-oks-project-context">Why Should I Care? (OKS Project Context)</h2>
-<p>Every day, robots at Hamamatsu, Sagamihara, and other sites produce incident bags. They all share a common anatomy: the robot was fine, then something changed, then the estimator status transitioned to something non-OK, then the robot stopped. The <code>ERROR_INVALID_STATE</code> error message appears in the ticket and someone has to find out why.</p>
+<h2 id="why-should-i-care-amr-project-context">Why Should I Care? (AMR Project Context)</h2>
+<p>Every day, robots at Site-A, Site-B, and other sites produce incident bags. They all share a common anatomy: the robot was fine, then something changed, then the estimator status transitioned to something non-OK, then the robot stopped. The <code>ERROR_STATE_INVALID</code> error message appears in the ticket and someone has to find out why.</p>
 <p>Without this material, the investigation stalls at the symptom. You see <code>status=SLIPPED</code> and you write &ldquo;the robot slipped&rdquo; — but <em>why</em> did it slip? Wet floor? Motor driver fault? Bad odom message? Each of those has a completely different fix.</p>
 <p>This note gives you the <strong>causal chain vocabulary</strong> to go from the error code all the way back to the physical event.</p>
 <p>Specifically, after this note you can answer:
-- <strong>&ldquo;a bag incident shows ERROR_INVALID_STATE at 03:29. What actually happened?&rdquo;</strong> → Look for the cov_xx jump 50-100 ms before the stop. If it&rsquo;s sudden → SLIP. If it&rsquo;s gradual → DELOCALIZED. The error message is the same either way.
+- <strong>&ldquo;a bag incident shows ERROR_STATE_INVALID at 03:29. What actually happened?&rdquo;</strong> → Look for the cov_xx jump 50-100 ms before the stop. If it&rsquo;s sudden → SLIP. If it&rsquo;s gradual → DELOCALIZED. The error message is the same either way.
 - <strong>&ldquo;The robot stopped but there was no collision. Why is status=5?&rdquo;</strong> → EMI on IMU or power supply glitch causes a false gyro spike. Check the omega_z time series.
-- <strong>&ldquo;Sensorbar topic is healthy but status=MISSED_LINE_UPDATES. How is that possible?&rdquo;</strong> → Every measurement is failing the 2-sigma gate. Or every sample has the same timestamp. Topic alive ≠ updates accepted.
+- <strong>&ldquo;Line-Sensor topic is healthy but status=MISSED_LINE_UPDATES. How is that possible?&rdquo;</strong> → Every measurement is failing the 2-sigma gate. Or every sample has the same timestamp. Topic alive ≠ updates accepted.
 - <strong>&ldquo;Is status=DELOCALIZED dangerous?&rdquo;</strong> → No, the robot continues. Only COLLISION is truly terminal. Everything else either recovers or waits.</p>
 <p>The the navigation estimator is deliberately transparent about its failures. The status codes are a gift. Most RCA failures are not &ldquo;the code is wrong&rdquo; — they are &ldquo;the sensor gave a bad signal&rdquo; or &ldquo;the floor is different from what was assumed.&rdquo;</p>
 <hr />
@@ -83,7 +83,7 @@
               (Sensor fault? Environment? Software? Configuration?)
 </code></pre></div>
 
-<p>Every other thing you observe — velocity profiles, sensorbar rates, log messages — is evidence for answering Question 2. The status code answers Question 1 automatically.</p>
+<p>Every other thing you observe — velocity profiles, line-sensor rates, log messages — is evidence for answering Question 2. The status code answers Question 1 automatically.</p>
 <blockquote>
 <p><strong>Key insight:</strong> The status code is an <strong>effect</strong>, not a cause. Writing &ldquo;root cause: SLIPPED&rdquo; in a post-mortem is like writing &ldquo;root cause: the patient&rsquo;s blood pressure dropped.&rdquo; It describes the mechanism, not the trigger. The cause is the wet floor, or the motor driver fault, or the floor wax on Wednesday.</p>
 </blockquote>
@@ -131,7 +131,7 @@
           ─────────────────────────────────────────
           a) Velocity:     did cmd_vel or odom/twist/linear.x spike or drop?
           b) Covariance:   did cov_xx / cov_yy jump suddenly or rise slowly?
-          c) Sensorbar:    did the topic rate drop? did is_reliable flip?
+          c) Line-Sensor:    did the topic rate drop? did is_reliable flip?
           d) Odom rate:    are messages still arriving at expected frequency?
 
   STEP 4: Identify the triggering event
@@ -139,7 +139,7 @@
           Sudden velocity drop   → SLIP candidate
           Gyro omega_z spike     → COLLISION candidate
           Covariance slow rise   → DELOCALIZED / dead-reckoning too long
-          Sensorbar rate drops   → NO_LINE or MISSED_LINE_UPDATES
+          Line-Sensor rate drops   → NO_LINE or MISSED_LINE_UPDATES
           Odom messages stop     → MISSING_ODOM
 
   STEP 5: Find the ROOT CAUSE (sensor, environment, software)
@@ -208,7 +208,7 @@
     cov_theta → INF  (heading completely unknown)
 </code></pre></div>
 
-<p>This is correct: after a slip event, the estimator has no idea where the robot is. The dead-reckoning from the slip point forward is entirely invalid. The only way to recover is to cross a sensorbar line and get an absolute measurement.</p>
+<p>This is correct: after a slip event, the estimator has no idea where the robot is. The dead-reckoning from the slip point forward is entirely invalid. The only way to recover is to cross a line-sensor line and get an absolute measurement.</p>
 <h2 id="24-bag-signature-what-you-see">2.4 Bag Signature: What You See</h2>
 <div class="highlight"><pre><span></span><code>    TIME (s)    VELOCITY (m/s)    cov_xx    status
     ────────    ──────────────    ──────    ──────
@@ -220,7 +220,7 @@
     10.10       0.00              INF       4
     10.12       0.00              INF       4
           ...robot stopped via isFinite() check...
-    10.14       ERROR_INVALID_STATE error logged
+    10.14       ERROR_STATE_INVALID error logged
 
     WHAT TO LOOK FOR:
     • Velocity spike THEN sudden drop within 50-100ms
@@ -232,7 +232,7 @@
 <h2 id="25-recovery-path">2.5 Recovery Path</h2>
 <p>SLIPPED is <strong>not terminal</strong>. The robot recovers automatically when:</p>
 <ol>
-<li>Robot crosses a sensorbar line with good measurement quality</li>
+<li>Robot crosses a line-sensor line with good measurement quality</li>
 <li>The line measurement provides an absolute position fix</li>
 <li>Covariance is reset to the post-measurement value</li>
 <li>Status returns to OK</li>
@@ -306,14 +306,14 @@
 
     Status       Terminal?   Recovery mechanism
     ────────     ─────────   ──────────────────
-    1 DELOCAL.   No          Covariance decreases via sensorbar updates
+    1 DELOCAL.   No          Covariance decreases via line-sensor updates
     2 UNINIT.    No          Initial pose received from localization
     3 NO_LINE    No          Robot moves onto a line
-    4 SLIPPED    No          Crosses sensorbar line with good measurement
+    4 SLIPPED    No          Crosses line-sensor line with good measurement
     5 COLLISION  YES ★       Operator restart / supervised reset only
     6 INIT.ING   No          Initialization completes
     7 MISS.ODOM  No          Odom messages resume
-    8 MISS.UPDS  No          Valid sensorbar measurements resume
+    8 MISS.UPDS  No          Valid line-sensor measurements resume
 </code></pre></div>
 
 <p>The reason COLLISION is terminal: the estimator cannot know the robot&rsquo;s state after an impact. The robot may have been knocked off its path. The floor may have changed. An autonomous recovery attempt without human verification would be dangerous.</p>
@@ -333,10 +333,10 @@
     • status = 5 appears simultaneously with or within 1 sample of spike
     • cmd_vel goes to zero and stays zero
     • No covariance spike (collision doesn&#39;t set cov to INF)
-    • ERROR_INVALID_STATE does NOT fire (different stop path)
+    • ERROR_STATE_INVALID does NOT fire (different stop path)
 </code></pre></div>
 
-<h2 id="34-collision-vs-error_invalid_state">3.4 Collision vs ERROR_INVALID_STATE</h2>
+<h2 id="34-collision-vs-error_invalid_state">3.4 Collision vs ERROR_STATE_INVALID</h2>
 <p>This is a common confusion point:</p>
 <div class="highlight"><pre><span></span><code>    COLLISION STOP PATH:
     ─────────────────────
@@ -368,7 +368,7 @@
     isFinite() check fails (cov_xx = INF)
            │
            ▼
-    ERROR_INVALID_STATE logged
+    ERROR_STATE_INVALID logged
            │
            ▼
     Robot stops safely
@@ -421,7 +421,7 @@
 </code></pre></div>
 
 <h2 id="42-trigger-slow-covariance-growth">4.2 Trigger: Slow Covariance Growth</h2>
-<p>Unlike SLIPPED (sudden), DELOCALIZED is <strong>gradual</strong>. Covariance grows continuously during dead-reckoning (between sensorbar line crossings) because:</p>
+<p>Unlike SLIPPED (sudden), DELOCALIZED is <strong>gradual</strong>. Covariance grows continuously during dead-reckoning (between line-sensor line crossings) because:</p>
 <div class="highlight"><pre><span></span><code>    PREDICTION STEP (each odom sample):
     ─────────────────────────────────────
 
@@ -430,7 +430,7 @@
                                    ↑
                     This term adds noise every step.
                     It never subtracts.
-                    Without sensorbar corrections, cov grows monotonically.
+                    Without line-sensor corrections, cov grows monotonically.
 
     TIME BETWEEN LINE CROSSINGS vs COVARIANCE:
     ═══════════════════════════════════════════
@@ -450,7 +450,7 @@
       0    2    4    6    8   10   12   14   16
 
     Each × = one odom sample adding motion noise.
-    Sensorbar crossing would RESET cov back to small value.
+    Line-Sensor crossing would RESET cov back to small value.
     Long gap between line crossings → monotonic growth → DELOCALIZED.
 </code></pre></div>
 
@@ -466,7 +466,7 @@
     Duration before  Many seconds (5-30s      Microseconds: velocity
     status change    typical)                 event → immediate status change
 
-    Recovery         Automatic: any sensorbar Same: needs sensorbar
+    Recovery         Automatic: any line-sensor Same: needs line-sensor
                      crossing fixes it        crossing
 
     Operation        Robot continues, reduced Robot stops via isFinite()
@@ -492,10 +492,10 @@
                                  Did line get removed from map? Was it
                                  never in the map?
 
-    Sensorbar offline            is_reliable = False during the period.
-    (temporary failure)          Check sensorbar topic rate.
+    Line-Sensor offline            is_reliable = False during the period.
+    (temporary failure)          Check line-sensor topic rate.
 
-    Lines not reflective         Sensorbar detects nothing despite lines
+    Lines not reflective         Line-Sensor detects nothing despite lines
     enough (dirty floor)         being present. is_reliable=True but
                                  no measurements arrive. → leads to
                                  MISSED_LINE_UPDATES first, then DELOCALIZED.
@@ -508,7 +508,7 @@
 <hr />
 <h1 id="part-5-no_line-status-3-and-missed_line_updates-status-8">PART 5 — NO_LINE (STATUS = 3) AND MISSED_LINE_UPDATES (STATUS = 8)</h1>
 <h2 id="51-no_line-robot-cannot-see-any-lines">5.1 No_Line: Robot Cannot See Any Lines</h2>
-<p>NO_LINE means the sensorbar is functioning but reporting that no floor lines are visible. This typically means:</p>
+<p>NO_LINE means the line-sensor is functioning but reporting that no floor lines are visible. This typically means:</p>
 <div class="highlight"><pre><span></span><code>    NO_LINE CAUSES AND GEOMETRIES
     ══════════════════════════════
 
@@ -523,7 +523,7 @@
 
                             ● ← robot is HERE (off path)
 
-    The sensorbar correctly reports no lines — there are none under it.
+    The line-sensor correctly reports no lines — there are none under it.
     This is NOT a sensor failure. It is a navigation failure upstream
     (robot drove off path, map was wrong, path planning error).
 
@@ -533,9 +533,9 @@
     Line map doesn&#39;t cover this area. If the robot is supposed
     to be here, the map needs to be updated.
 
-    CAUSE 3: Sensorbar height wrong / floor gap
+    CAUSE 3: Line-Sensor height wrong / floor gap
     ──────────────────────────────────────────────────────────────
-    Floor dip or sensorbar mounting issue puts sensor too far
+    Floor dip or line-sensor mounting issue puts sensor too far
     from floor. Works normally except at this one location.
 </code></pre></div>
 
@@ -544,12 +544,12 @@
 <div class="highlight"><pre><span></span><code>    MISSED_LINE_UPDATES — WHAT MAKES IT HARD TO DIAGNOSE
     ══════════════════════════════════════════════════════
 
-    Symptom surface:  ERROR_INVALID_STATE (same as SLIPPED)
+    Symptom surface:  ERROR_STATE_INVALID (same as SLIPPED)
                       Covariance growing (same as DELOCALIZED)
 
     What&#39;s different:
     ┌──────────────────────────────────────────────────────────────┐
-    │  Topic: /sensorbar/detections                                │
+    │  Topic: /line-sensor/detections                                │
     │  Rate: 100 Hz (looks completely healthy)                     │
     │  is_reliable: True                                           │
     │                                                              │
@@ -568,7 +568,7 @@
 <div class="highlight"><pre><span></span><code>    INNOVATION GATE CHECK
     ══════════════════════
 
-    For each sensorbar measurement z:
+    For each line-sensor measurement z:
         innovation = z - H × x_predicted
 
         Mahalanobis distance:
@@ -584,7 +584,7 @@
        - After slip, position is off by large amount
        - Every real measurement looks like an outlier
 
-    2. Sensorbar reports wrong line positions:
+    2. Line-Sensor reports wrong line positions:
        - SPI conflict producing corrupted measurements
        - Line coordinates systematically shifted
 
@@ -601,7 +601,7 @@
                 Start: status=8 or cov growing despite topic alive?
                               │
                               ▼
-              Is /sensorbar/detections publishing at normal rate?
+              Is /line-sensor/detections publishing at normal rate?
               ┌───────────────────────────────────────────────────┐
               │ YES (rate OK)                  NO (rate dropped)   │
               └───────────────────────────────────────────────────┘
@@ -609,19 +609,19 @@
                      ▼                                   ▼
          Is is_reliable = True?                  Status = NO_LINE (3)
               │                                  Physical: off path or
-              ▼                                  sensorbar mounting
+              ▼                                  line-sensor mounting
           YES → MISSED_LINE_UPDATES (8)
                 Check: SPI error logs?
                 Check: measurement timestamps duplicated?
                 Check: estimator position vs map (is it plausible?)
 
-          NO  → Sensorbar temporarily offline
+          NO  → Line-Sensor temporarily offline
                 Check: SPI bus conflict, cable, power
                 This leads to DELOCALIZED as cov grows
 </code></pre></div>
 
 <blockquote>
-<p><strong>Key insight:</strong> The topic being alive (rate=100Hz, is_reliable=True) is <strong>necessary but not sufficient</strong> for updates to be accepted. You must also verify that measurements are passing the innovation gate. This requires looking at the estimator&rsquo;s internal logging, not just the sensorbar topic.</p>
+<p><strong>Key insight:</strong> The topic being alive (rate=100Hz, is_reliable=True) is <strong>necessary but not sufficient</strong> for updates to be accepted. You must also verify that measurements are passing the innovation gate. This requires looking at the estimator&rsquo;s internal logging, not just the line-sensor topic.</p>
 </blockquote>
 <hr />
 <h1 id="part-6-missing_odom-status-7-and-uninitialized-status-2">PART 6 — MISSING_ODOM (STATUS = 7) AND UNINITIALIZED (STATUS = 2)</h1>
@@ -696,11 +696,11 @@
 </code></pre></div>
 
 <hr />
-<h1 id="part-7-error_invalid_state">PART 7 — ERROR_INVALID_STATE</h1>
+<h1 id="part-7-error_invalid_state">PART 7 — ERROR_STATE_INVALID</h1>
 <h2 id="71-where-it-comes-from-not-the-estimator">7.1 Where It Comes From: Not the Estimator</h2>
 <p>This is the most important architectural fact in this entire document:</p>
 <div class="highlight"><pre><span></span><code>    ╔══════════════════════════════════════════════════════════╗
-    ║  ERROR_INVALID_STATE                          ║
+    ║  ERROR_STATE_INVALID                          ║
     ║  is logged by                          ║
     ║  NOT by                                     ║
     ║                                                          ║
@@ -726,7 +726,7 @@
 <span class="w">                       </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">isFinite</span><span class="p">(</span><span class="n">estimated_state</span><span class="p">.</span><span class="n">cov_theta</span><span class="p">);</span>
 
 <span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">state_is_valid</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">        </span><span class="n">log_error</span><span class="p">(</span><span class="s">&quot;ERROR_INVALID_STATE&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="n">log_error</span><span class="p">(</span><span class="s">&quot;ERROR_STATE_INVALID&quot;</span><span class="p">);</span>
 <span class="w">        </span><span class="c1">// stop robot, do not proceed</span>
 <span class="w">        </span><span class="k">return</span><span class="p">;</span>
 <span class="w">    </span><span class="p">}</span>
@@ -747,12 +747,12 @@
     cov_yy          YES ★             When SLIPPED → set to INF explicitly
     cov_theta       YES ★             When SLIPPED → set to INF explicitly
 
-    The most common cause of ERROR_INVALID_STATE
+    The most common cause of ERROR_STATE_INVALID
     is SLIPPED + robot attempting next motion command.
 </code></pre></div>
 
 <h2 id="74-the-causal-chain-for-the-most-common-case">7.4 The Causal Chain for the Most Common Case</h2>
-<div class="highlight"><pre><span></span><code>    MOST COMMON SEQUENCE LEADING TO ERROR_INVALID_STATE
+<div class="highlight"><pre><span></span><code>    MOST COMMON SEQUENCE LEADING TO ERROR_STATE_INVALID
     ════════════════════════════════════════════════════════════════
 
     T=0.00s   Robot driving normally, cov_xx=0.001
@@ -765,12 +765,12 @@
     T=0.10s   Planner sends next motion goal
     T=0.10s    calls executePoseGoal()
     T=0.10s   isFinite(cov_xx) returns FALSE      (INF fails isFinite)
-    T=0.10s   ERROR_INVALID_STATE logged
+    T=0.10s   ERROR_STATE_INVALID logged
     T=0.10s   Robot stops safely
 
     ROOT CAUSE: wet floor
     MECHANISM: slip → cov→INF → isFinite fails
-    ERROR MESSAGE: ERROR_INVALID_STATE
+    ERROR MESSAGE: ERROR_STATE_INVALID
     VISIBLE SYMPTOM: robot stopped
 </code></pre></div>
 
@@ -799,7 +799,7 @@
 </code></pre></div>
 
 <blockquote>
-<p><strong>Key insight:</strong> <code>ERROR_INVALID_STATE</code> is not a bug. It is the correct safety response to a corrupted estimator state. <strong>The bug is what caused the state to become corrupted.</strong> Your RCA must go one level deeper.</p>
+<p><strong>Key insight:</strong> <code>ERROR_STATE_INVALID</code> is not a bug. It is the correct safety response to a corrupted estimator state. <strong>The bug is what caused the state to become corrupted.</strong> Your RCA must go one level deeper.</p>
 </blockquote>
 <hr />
 <h1 id="part-8-systematic-bag-investigation-workflow">PART 8 — SYSTEMATIC BAG INVESTIGATION WORKFLOW</h1>
@@ -809,7 +809,7 @@
 
     □ 1. List all topics in the bag
          rosbag info &lt;bagfile&gt;
-         Look for: /estimated_state, /odom, /sensorbar/detections,
+         Look for: /estimated_state, /odom, /line-sensor/detections,
                    /cmd_vel, /imu/data, /rosout
 
     □ 2. Get time bounds
@@ -817,7 +817,7 @@
          What is the delta?
 
     □ 3. Check topic rates (are any missing or slow?)
-         rostopic hz /sensorbar/detections  (expect ~100Hz)
+         rostopic hz /line-sensor/detections  (expect ~100Hz)
          rostopic hz /odom                  (expect ~50Hz)
          rostopic hz /imu/data              (expect ~100Hz)
 
@@ -848,7 +848,7 @@
                               │ NO                        rate fast? → might be 8
                               ▼
               ┌───────────────────────────────┐
-              │  status = 3 (NO_LINE)?        │──YES──► Check sensorbar rate
+              │  status = 3 (NO_LINE)?        │──YES──► Check line-sensor rate
               └───────────────────────────────┘          rate=0? → off path
                               │ NO                        rate&gt;0 with 0 detections
                               ▼                           → blank floor section
@@ -914,7 +914,7 @@
 </code></pre></div>
 
 <hr />
-<h1 id="part-9-oks-code-connection">PART 9 — OKS CODE CONNECTION</h1>
+<h1 id="part-9-amr-code-connection">PART 9 — AMR CODE CONNECTION</h1>
 <h2 id="91-full-causal-chain-table">9.1 Full Causal Chain Table</h2>
 <table>
 <thead>
@@ -950,8 +950,8 @@
 </tr>
 <tr>
 <td>NO_LINE (3)</td>
-<td>``<br>Sensorbar callback</td>
-<td>Sensorbar reports 0 line detections</td>
+<td>``<br>Line-Sensor callback</td>
+<td>Line-Sensor reports 0 line detections</td>
 <td><code>status = 3</code></td>
 <td>No stop; continues dead-reckoning</td>
 </tr>
@@ -984,12 +984,12 @@
 <span class="w">        </span><span class="n">OK</span><span class="w">                   </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">   </span><span class="c1">// All systems normal</span>
 <span class="w">        </span><span class="n">DELOCALIZED</span><span class="w">          </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w">   </span><span class="c1">// Covariance exceeded threshold</span>
 <span class="w">        </span><span class="n">UNINITIALIZED</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w">   </span><span class="c1">// No initial pose received</span>
-<span class="w">        </span><span class="n">NO_LINE</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w">   </span><span class="c1">// Sensorbar sees no lines</span>
+<span class="w">        </span><span class="n">NO_LINE</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w">   </span><span class="c1">// Line-Sensor sees no lines</span>
 <span class="w">        </span><span class="n">SLIPPED</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w">   </span><span class="c1">// Velocity window check failed → cov→INF</span>
 <span class="w">        </span><span class="n">COLLISION</span><span class="w">            </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w">   </span><span class="c1">// IMU gyro spike detected (TERMINAL)</span>
 <span class="w">        </span><span class="n">INITIALIZING</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span><span class="w">   </span><span class="c1">// Startup state, receiving first pose</span>
 <span class="w">        </span><span class="n">MISSING_ODOM</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="mi">7</span><span class="p">,</span><span class="w">   </span><span class="c1">// Odom topic silent &gt; timeout</span>
-<span class="w">        </span><span class="n">MISSED_LINE_UPDATES</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">8</span><span class="w">    </span><span class="c1">// Sensorbar alive but updates rejected</span>
+<span class="w">        </span><span class="n">MISSED_LINE_UPDATES</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">8</span><span class="w">    </span><span class="c1">// Line-Sensor alive but updates rejected</span>
 <span class="w">    </span><span class="p">};</span>
 </code></pre></div>
 
@@ -1007,7 +1007,7 @@
 <span class="w">            </span><span class="o">!</span><span class="n">std</span><span class="o">::</span><span class="n">isfinite</span><span class="p">(</span><span class="n">state</span><span class="p">.</span><span class="n">cov_xx</span><span class="p">)</span><span class="w">  </span><span class="o">||</span>
 <span class="w">            </span><span class="o">!</span><span class="n">std</span><span class="o">::</span><span class="n">isfinite</span><span class="p">(</span><span class="n">state</span><span class="p">.</span><span class="n">cov_yy</span><span class="p">)</span><span class="w">  </span><span class="o">||</span>
 <span class="w">            </span><span class="o">!</span><span class="n">std</span><span class="o">::</span><span class="n">isfinite</span><span class="p">(</span><span class="n">state</span><span class="p">.</span><span class="n">cov_theta</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
-<span class="w">            </span><span class="n">ROS_ERROR</span><span class="p">(</span><span class="s">&quot;ERROR_INVALID_STATE&quot;</span><span class="p">);</span>
+<span class="w">            </span><span class="n">ROS_ERROR</span><span class="p">(</span><span class="s">&quot;ERROR_STATE_INVALID&quot;</span><span class="p">);</span>
 <span class="w">            </span><span class="n">stopRobot</span><span class="p">();</span><span class="w">        </span><span class="c1">// safe stop</span>
 <span class="w">            </span><span class="k">return</span><span class="p">;</span><span class="w">             </span><span class="c1">// do NOT issue velocity command</span>
 <span class="w">        </span><span class="p">}</span>
@@ -1038,12 +1038,12 @@
     T=0.10s: executePoseGoal() called
     ────────────────────────────
     isFinite(P[0,0]) = isFinite(∞) = FALSE
-    → ERROR_INVALID_STATE
+    → ERROR_STATE_INVALID
     → robot stops
 
-    T=later: Robot crosses a sensorbar line
+    T=later: Robot crosses a line-sensor line
     ────────────────────────────────────────
-    Sensorbar provides: z = measured_lateral_offset
+    Line-Sensor provides: z = measured_lateral_offset
     EKF update: P_new = (I - K×H) × P_old + measurement_noise_term
     With P_old = INF: K is computed differently (large gain)
     After update: P_new = R (measurement covariance only)
@@ -1079,7 +1079,7 @@
 <td>Slow rise to threshold</td>
 <td>No</td>
 <td>Next line crossing</td>
-<td>Long gap between lines; sensorbar offline</td>
+<td>Long gap between lines; line-sensor offline</td>
 </tr>
 <tr>
 <td>2</td>
@@ -1095,7 +1095,7 @@
 <td>Slow rise</td>
 <td>No</td>
 <td>Robot onto a line</td>
-<td>Off-path; blank floor; sensorbar height</td>
+<td>Off-path; blank floor; line-sensor height</td>
 </tr>
 <tr>
 <td>4</td>
@@ -1140,7 +1140,7 @@
 </tbody>
 </table>
 <p><strong>The diagnostic mantra:</strong></p>
-<div class="highlight"><pre><span></span><code>    ERROR_INVALID_STATE is never the root cause.
+<div class="highlight"><pre><span></span><code>    ERROR_STATE_INVALID is never the root cause.
     SLIPPED is rarely the root cause.
     The root cause is physical: floor, sensor, power, network.
     Work backwards: error → mechanism → physics.
@@ -1149,7 +1149,7 @@
 <p><strong>The covariance scale key:</strong></p>
 <div class="highlight"><pre><span></span><code>    cov_xx value    Meaning
     ────────────    ────────────────────────────────────────
-    &lt; 0.001         Well-localized (recent sensorbar update)
+    &lt; 0.001         Well-localized (recent line-sensor update)
     0.001 – 0.01    Normal dead-reckoning drift
     0.01 – 0.05     Elevated, approaching DELOCALIZED threshold
     &gt; 0.05          DELOCALIZED (threshold dependent on config)

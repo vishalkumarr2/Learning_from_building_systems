@@ -14,7 +14,7 @@ EXISTING                            MISSING
 ────────────────────────────────    ────────────────────────────────────────
 electronics/    (hardware theory)   navigation-estimator/  ← HIGHEST PRIORITY
 zephyr/         (firmware)          ros2-handson/           ← HIGH
-cpp-advanced/   (C++ depth)         python-oks/             ← MEDIUM
+cpp-advanced/   (C++ depth)         python-scripting/             ← MEDIUM
                                     zephyr/deep-dive/       ← MEDIUM (stub only)
                                     linux-rt/               ← LOW (cpp-advanced/03 partial)
 ```
@@ -23,8 +23,8 @@ cpp-advanced/   (C++ depth)         python-oks/             ← MEDIUM
 
 ## Track 1: Navigation & State Estimation
 **Priority: HIGHEST**
-**Why now:** You investigate `NAV_ESTIMATED_STATE_NOT_FINITE`, slip detection, sensorbar covariance
-blow-up, and EKF divergence tickets daily. You know the OKS code deeply (repo memory) but
+**Why now:** You investigate `ESTIMATOR_STATE_INVALID`, slip detection, line-sensor covariance
+blow-up, and EKF divergence tickets daily. You know the robot code deeply (repo memory) but
 lack the mathematical theory to immediately see *why* a covariance grows / explodes / converges.
 
 **Goal:** Be able to look at any estimator log and reason from first principles about whether
@@ -35,12 +35,12 @@ the observed covariance trajectory is expected or anomalous.
 **Status:** 🔴 Not started
 **Folder:** `learn/navigation-estimator/`
 
-| Week | Topic | OKS Relevance |
+| Week | Topic | Practical Relevance |
 |------|-------|---------------|
-| 1 | Dead-reckoning & wheel odometry math | `doPrediction()` noise model |
+| 1 | Dead-reckoning & wheel odometry math | `predict()` noise model |
 | 2 | EKF theory: prediction step, covariance propagation | Covariance INF = slipped/collision |
-| 3 | EKF measurement update: Mahalanobis, innovation gating | Sensorbar update in `update()` |
-| 4 | IMU fusion, gyro bias, sensorbar as line-constraint measurement | Theta update + gyro correction |
+| 3 | EKF measurement update: Mahalanobis, innovation gating | Line-Sensor update in `update()` |
+| 4 | IMU fusion, gyro bias, line-sensor as line-constraint measurement | Theta update + gyro correction |
 | 5 | Diagnosing estimator failures from logs/bags | Apply to real tickets |
 
 **Files to create:**
@@ -50,14 +50,14 @@ navigation-estimator/
 ├── 01-dead-reckoning.md       ← odometry math, unicycle model, arc integration
 ├── 02-kalman-filter.md        ← KF → EKF derivation, predict/update equations
 ├── 03-measurement-models.md   ← line sensors as constraints, Mahalanobis gating
-├── 04-imu-fusion.md           ← gyro integration, bias estimation, sensorbar theta
+├── 04-imu-fusion.md           ← gyro integration, bias estimation, line-sensor theta
 ├── 05-failure-modes.md        ← covariance blow-up patterns, slip vs collision vs delocalize
 └── exercises/
     ├── 01-odometry-math.md
     ├── 02-kalman-1d.md        ← build a 1D Kalman filter by hand
     ├── 03-ekf-unicycle.md     ← implement EKF for a unicycle robot in Python
     ├── 04-log-diagnosis.md    ← given a covariance trajectory, identify the failure
-    └── 05-oks-specific.md     ← OKS estimator parameter tuning exercises
+    └── 05-robot-specific.md     ← navigation estimator parameter tuning exercises
 ```
 
 ---
@@ -75,9 +75,9 @@ well enough to explain frame drop bugs.
 **Status:** 🔴 Not started
 **Folder:** `learn/ros2-handson/`
 
-| Week | Topic | OKS Relevance |
+| Week | Topic | Practical Relevance |
 |------|-------|---------------|
-| 1 | Nodes, topics, services, actions, lifecycle | OKS node architecture |
+| 1 | Nodes, topics, services, actions, lifecycle | AMR node architecture |
 | 2 | tf2 transforms, time sync, QoS profiles | TF lookup failures in nav logs |
 | 3 | Nav2 BT architecture, costmaps, planner/controller | RCS navigation stack |
 
@@ -97,7 +97,7 @@ ros2-handson/
 
 ---
 
-## Track 3: Python / OKS Scripting
+## Track 3: Python / Robot Scripting
 **Priority: MEDIUM**
 **Why:** You write Python scripts daily (RCA analysis, KB tools, log parsing) but there's no
 structured skill-building. Gaps: async patterns, dataclass typing, pandas/polars for log analysis,
@@ -109,17 +109,17 @@ test coverage for scripts.
 **Timeline:** 3 weeks · 2–3 hrs/week
 
 **Status:** 🔴 Not started
-**Folder:** `learn/python-oks/`
+**Folder:** `learn/python-scripting/`
 
-| Week | Topic | OKS Relevance |
+| Week | Topic | Practical Relevance |
 |------|-------|---------------|
-| 1 | Type hints, dataclasses, Pydantic for config validation | `rca_session.py`, `kb_search.py` |
+| 1 | Type hints, dataclasses, Pydantic for config validation | `session_tracker.py`, `knowledge_search.py` |
 | 2 | pytest, fixtures, mocking for CLI scripts | Script tests in `tests/` |
 | 3 | pandas/polars for time-series log analysis | Bag CSV analysis patterns |
 
 **Files to create:**
 ```
-python-oks/
+python-scripting/
 ├── 00-learning-plan.md
 ├── 01-types-dataclasses.md
 ├── 02-testing-cli-scripts.md
@@ -186,7 +186,7 @@ NOW
 IN 6–8 WEEKS
 │
 ├── ros2-handson/           ← after navigation-estimator (builds on the theory)
-├── python-oks/             ← can start in parallel with navigation-estimator
+├── python-scripting/             ← can start in parallel with navigation-estimator
 │
 WHEN HARDWARE ARRIVES
 │
@@ -202,4 +202,4 @@ Start here → [navigation-estimator/00-learning-plan.md](navigation-estimator/0
 **Day 1 goal (2 hrs):** Read `01-dead-reckoning.md` and be able to derive
 `(x', y', θ')` from two encoder counts for a differential-drive robot.
 
-This directly ties to `doPrediction()` in OKS estimator — you'll recognize every variable.
+This directly ties to `predict()` in navigation estimator — you'll recognize every variable.

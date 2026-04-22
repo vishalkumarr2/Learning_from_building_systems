@@ -531,7 +531,7 @@ Layer 3: Sequence number — count dropped frames
   Handles: Performance monitoring, helps distinguish "Jetson missing frames" from "STM32 not sending"
 ```
 
-**The sequence number is critical for OKS debugging.** When the Jetson's navigation stack misbehaves, you want to know: "Is the IMU data arriving intact?" A seq counter lets you answer "we dropped 0 frames" or "we dropped 3 frames per second" — immediately distinguishing SPI transport problems from nav algorithm problems.
+**The sequence number is critical for the robot debugging.** When the Jetson's navigation stack misbehaves, you want to know: "Is the IMU data arriving intact?" A seq counter lets you answer "we dropped 0 frames" or "we dropped 3 frames per second" — immediately distinguishing SPI transport problems from nav algorithm problems.
 
 ---
 

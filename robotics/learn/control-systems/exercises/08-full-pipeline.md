@@ -7,7 +7,7 @@
 
 ## The Challenge
 
-Build an end-to-end motor control pipeline in simulation. You start with a DC motor model and end with a differential-drive robot tracking waypoints. This is the full stack — exactly what OKS does, simplified.
+Build an end-to-end motor control pipeline in simulation. You start with a DC motor model and end with a differential-drive robot tracking waypoints. This is the full stack — exactly what AMR does, simplified.
 
 **Time estimate:** 4–8 hours
 

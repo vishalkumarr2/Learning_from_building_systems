@@ -20,7 +20,7 @@ A MEMS gyroscope uses a vibrating proof mass. The Coriolis force deflects the ma
 - **Stress on the die:** PCB flex or component mounting stress can deflect the proof mass slightly.
 - **Quadrature error:** Drive vibration leaks into the sense channel due to imperfect geometry.
 
-**OKS consequence:** If `omega_z = 0.008 rad/s` is uncompensated and the robot drives for 60 seconds:
+**AMR consequence:** If `omega_z = 0.008 rad/s` is uncompensated and the robot drives for 60 seconds:
 ```
 θ_error = 0.008 × 60 = 0.480 rad ≈ 27.5°
 ```
@@ -32,14 +32,14 @@ The EMA bias estimator in `imuCallback()` is designed to measure and subtract ex
 
 ---
 
-**A2.** OKS uses a **full Kalman gain** for the theta correction in `imuCallback()`, but uses a **clamp** for the XY correction in `onSensorbar()`. Explain the engineering rationale for this asymmetry. Why would using a clamp for theta (like XY) be incorrect?
+**A2.** AMR uses a **full Kalman gain** for the theta correction in `imuCallback()`, but uses a **clamp** for the XY correction in `onLine-Sensor()`. Explain the engineering rationale for this asymmetry. Why would using a clamp for theta (like XY) be incorrect?
 
 <details><summary>Answer</summary>
 
 The asymmetry reflects fundamentally different properties of the two measurements:
 
-**Sensorbar (XY correction) — clamp is correct:**
-- The sensorbar measures lateral offset from a physical line feature.
+**Line-Sensor (XY correction) — clamp is correct:**
+- The line-sensor measures lateral offset from a physical line feature.
 - Bar detection can return outliers: bar misidentified, noise in the detection pipeline, multiple candidate bars nearby.
 - An outlier can produce an innovation of several metres — a full Kalman update would teleport the robot's estimated position by metres.
 - Clamping limits the correction per step to a physically plausible maximum (e.g., 5 cm), rejecting outliers gracefully while still converging over multiple passes.
@@ -73,7 +73,7 @@ This is **catastrophically wrong** — the true bias is ~0.008 rad/s but the est
 When the robot stops, `omega_z_measured ≈ 0.008 rad/s` (true bias). Now the EMA will slowly pull the estimate back toward the true bias. With α = 0.001, recovery time τ ≈ 3000 steps = 30 seconds. However, during the recovery period the bias overcorrection causes theta updates to be subtracted by the wrong amount — theta will drift in the opposite direction.
 
 **Practical consequence for bag analysis:**
-If an incident happened immediately after a long rotational manoeuvre (robot just finished a 180° turn sequence), the bias estimate may be temporarily wrong. You would see theta drift in a specific direction right after the turns, correcting slowly. This is distinct from a sensorbar failure.
+If an incident happened immediately after a long rotational manoeuvre (robot just finished a 180° turn sequence), the bias estimate may be temporarily wrong. You would see theta drift in a specific direction right after the turns, correcting slowly. This is distinct from a line-sensor failure.
 
 **Fix:** For robots that do calibration spins, the bias estimate should be re-initialised from a stationary period after the spin, not carried over.
 
@@ -81,11 +81,11 @@ If an incident happened immediately after a long rotational manoeuvre (robot jus
 
 ---
 
-**A4.** The OKS collision detector checks `|omega_z_current - omega_z_previous| > collision_threshold`. A colleague suggests changing this to check `|omega_z| > collision_threshold` instead (absolute angular velocity, not the delta). Which approach is better for collision detection, and why?
+**A4.** The AMR collision detector checks `|omega_z_current - omega_z_previous| > collision_threshold`. A colleague suggests changing this to check `|omega_z| > collision_threshold` instead (absolute angular velocity, not the delta). Which approach is better for collision detection, and why?
 
 <details><summary>Answer</summary>
 
-The **delta approach (current OKS)** is better for collision detection. Here's why:
+The **delta approach (current AMR)** is better for collision detection. Here's why:
 
 **Problem with absolute threshold (`|omega_z| > threshold`):**
 A robot making a normal tight turn can reach angular velocities of 1–2 rad/s. If `threshold = 2.0 rad/s`, sharp turns would trigger false COLLISION events. If the threshold is raised to avoid this, real collisions that produce moderate (but sudden) angular velocity changes would be missed.
@@ -254,7 +254,7 @@ This confirms the importance of bias correction over longer timescales.
 
 ## Section C — Log Diagnosis
 
-**C1.** Given the following log snippet from an OKS incident bag, identify the failure mode, explain the progression, and state what you would check in the next investigation step.
+**C1.** Given the following log snippet from a robot incident bag, identify the failure mode, explain the progression, and state what you would check in the next investigation step.
 
 ```
   T=0.000s: theta_encoder=0.000, omega_z=0.008, theta_imu=0.000
@@ -305,9 +305,9 @@ This confirms the importance of bias correction over longer timescales.
 
 ---
 
-## Section D — OKS-Specific Calculation
+## Section D — AMR-Specific Calculation
 
-**D1.** The OKS collision detector checks whether consecutive gyro readings differ by more than `collision_threshold`. Based on the codebase note in `04-imu-fusion.md`, the threshold is compared against the raw Δω_z (angular velocity change per sample, not divided by Δt).
+**D1.** The AMR collision detector checks whether consecutive gyro readings differ by more than `collision_threshold`. Based on the codebase note in `04-imu-fusion.md`, the threshold is compared against the raw Δω_z (angular velocity change per sample, not divided by Δt).
 
 Scenario: A robot drives at `v = 0.3 m/s` and goes over a **2 cm floor step** (e.g., a raised tile edge). The robot's wheelbase is `L = 0.30 m` (distance from front wheel to rear axle).
 
@@ -348,7 +348,7 @@ For a more tractable model: treat the bump as causing the robot chassis to rotat
     ω_z_peak ≈ 2 × 0.995 ≈ 1.99 rad/s
 ```
 
-Note: This is the *pitch* angular velocity mapped to the chassis frame. For a perfectly head-on bump, this is omega_x (pitch), not omega_z (yaw). The OKS collision detector uses omega_z. If the robot hits the step perfectly symmetrically, omega_z ≈ 0. The worst case for omega_z is when the robot hits the step edge at a corner — one front wheel hits first, twisting the chassis.
+Note: This is the *pitch* angular velocity mapped to the chassis frame. For a perfectly head-on bump, this is omega_x (pitch), not omega_z (yaw). The AMR collision detector uses omega_z. If the robot hits the step perfectly symmetrically, omega_z ≈ 0. The worst case for omega_z is when the robot hits the step edge at a corner — one front wheel hits first, twisting the chassis.
 
 **For the corner-hit case (one wheel):**
 The torsional jerk is approximately the same magnitude but now in the z-axis (yaw). So `ω_z_peak ≈ 1.99 rad/s` is a reasonable upper estimate for the z-axis component.
@@ -440,11 +440,11 @@ This analysis supports the recommendation to always check map tile coordinates w
 
 Before moving to `05-slip-detection.md`, you should be able to:
 
-- [ ] State three types of gyro error and which the OKS bias estimator targets
+- [ ] State three types of gyro error and which the robot bias estimator targets
 - [ ] Compute bias-induced heading error: `θ_err = b × t`
 - [ ] Explain why the EMA learning rate α must be small
 - [ ] Walk through a single Kalman update for theta with numbers
 - [ ] Explain why a floor bump can trigger collision detection even at low speeds
-- [ ] Identify bias drift vs. collision vs. slip vs. sensorbar-failure in a log snippet
+- [ ] Identify bias drift vs. collision vs. slip vs. line-sensor-failure in a log snippet
 
 If you missed Section D, that's fine — it requires geometric reasoning that is more advanced. But you should be comfortable with Sections A, B, and C.

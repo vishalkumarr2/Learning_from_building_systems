@@ -101,7 +101,7 @@ Desync:
 
 3. **Crystal oscillator on MCU:** Replace RC with 8 MHz crystal. Drift drops to ±20 ppm = 0.02 ms per second. Acceptable for most control applications.
 
-**OKS approach:** Option 3 (crystal on MCU) + option 1 (periodic sync) as validation. The sync pulse also serves as a heartbeat — if the MCU doesn't see it, the Jetson is in trouble.
+**AMR approach:** Option 3 (crystal on MCU) + option 1 (periodic sync) as validation. The sync pulse also serves as a heartbeat — if the MCU doesn't see it, the Jetson is in trouble.
 
 ---
 
@@ -236,11 +236,11 @@ OperatingMode compute_mode(SystemHealth h) {
 
 ## Question 7: When PID Isn't Enough
 
-> "Give me three real scenarios on an OKS robot where PID fails and you need something else."
+> "Give me three real scenarios on an warehouse robot where PID fails and you need something else."
 
 **Expected weak answer:** Generic examples from textbooks.
 
-**Deep answer — OKS-specific:**
+**Deep answer — robot-specific:**
 
 **Scenario 1: Loaded vs unloaded robot**
 - Empty robot: $J = 0.5$ kg·m². Loaded: $J = 5.0$ kg·m² (10× heavier).
@@ -262,7 +262,7 @@ OperatingMode compute_mode(SystemHealth h) {
 
 ## Question 8: SPI vs CAN vs UART
 
-> "Why does OKS use SPI for Jetson↔MCU? Why not CAN or UART?"
+> "Why does AMR use SPI for Jetson↔MCU? Why not CAN or UART?"
 
 **Expected weak answer:** "SPI is faster."
 
@@ -279,7 +279,7 @@ OperatingMode compute_mode(SystemHealth h) {
 | Full duplex | Yes | No | Yes |
 | CPU overhead | Medium (DMA helps) | Low (hardware CRC) | Medium |
 
-**Why SPI for OKS:**
+**Why SPI for the robot:**
 - Jetson and MCU are on the same PCB → short distance (SPI weakness irrelevant)
 - Need **bidirectional data** every 1 ms: command down + status up (full duplex advantage)
 - Need **low latency** for tight control loops (SPI < 50 µs vs CAN 0.1-1 ms)
@@ -328,7 +328,7 @@ if (mcu_rx_time - last_good_rx > STALENESS_THRESHOLD) {
 // - Detecting Jetson time jumps (NTP corrections, sim time glitches)
 ```
 
-**OKS rule: The MCU clock is king for safety decisions.** The Jetson timestamp is informational metadata.
+**AMR rule: The MCU clock is king for safety decisions.** The Jetson timestamp is informational metadata.
 
 ---
 

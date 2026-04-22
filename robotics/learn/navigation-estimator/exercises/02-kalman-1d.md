@@ -2,7 +2,7 @@
 ### Companion exercises for `02-kalman-filter.md`
 
 **Work through these sequentially.** Section A tests conceptual understanding, Section B builds
-a complete 1D filter from scratch, and Section C ties everything back to OKS code parameters.
+a complete 1D filter from scratch, and Section C ties everything back to robot code parameters.
 
 ---
 
@@ -44,9 +44,9 @@ x̂ = x̂⁻ + 1 × (z - x̂⁻) = z
 Again we fully trust the measurement. This makes sense — if we know nothing
 about position, the first measurement should be taken at face value.
 
-**OKS relevance:** When slip detection sets P → ∞, the next sensorbar `update()` will have K → 1,
-meaning the sensorbar measurement fully overrides the (now-unknown) predicted pose. This is the
-recovery mechanism: one good sensorbar hit re-localizes the robot.
+**AMR relevance:** When slip detection sets P → ∞, the next line-sensor `update()` will have K → 1,
+meaning the line-sensor measurement fully overrides the (now-unknown) predicted pose. This is the
+recovery mechanism: one good line-sensor hit re-localizes the robot.
 </details>
 
 ---
@@ -101,15 +101,15 @@ threshold: `νᵀ S⁻¹ ν > χ²_threshold`.
 This means: "the measurement is so far from our prediction that, given our known uncertainty,
 the probability of this occurring by random noise alone is below the acceptance threshold."
 
-**OKS relevance:** `update()` in `` computes the Mahalanobis distance for the
-sensorbar line offset. If the robot is far off a line (perhaps because it drove into the
-wrong aisle), the sensorbar reading will be rejected as an outlier rather than
+**AMR relevance:** `update()` in `` computes the Mahalanobis distance for the
+line-sensor line offset. If the robot is far off a line (perhaps because it drove into the
+wrong aisle), the line-sensor reading will be rejected as an outlier rather than
 catastrophically corrupting the pose estimate.
 </details>
 
 ---
 
-**A4.** The OKS shortcut adds the term `min(cov_theta, 1e5) * delta_trans²` to the lateral
+**A4.** The AMR shortcut adds the term `min(cov_theta, 1e5) * delta_trans²` to the lateral
 variance at each prediction step. Under what robot motion scenario does this term become the
 dominant contributor to lateral uncertainty growth?
 
@@ -117,25 +117,25 @@ dominant contributor to lateral uncertainty growth?
 <summary>Answer A4</summary>
 
 This term dominates when:
-1. `cov_theta` (heading variance) is large — e.g., after several missed sensorbar updates
+1. `cov_theta` (heading variance) is large — e.g., after several missed line-sensor updates
    that would normally constrain heading, or after a partial slip event that inflated θ
    uncertainty without hitting the full-slip threshold.
 2. `delta_trans` is large — the robot is traveling a long distance in a straight line.
 
-The combination is exactly: **long aisle travel without sensorbar hits, after heading has
-already drifted.** This is the classic OKS failure mode where the robot "wanders" laterally
+The combination is exactly: **long aisle travel without line-sensor hits, after heading has
+already drifted.** This is the classic AMR failure mode where the robot "wanders" laterally
 in an aisle with sparse painted lines, until covariance grows large enough to trigger a
-planning failure or a `ERROR_INVALID_STATE`.
+planning failure or a `ERROR_STATE_INVALID`.
 
 Numerically: if `cov_theta = 0.01 rad²` (σ_θ ≈ 5.7°) and the robot travels 3 m without a
-sensorbar update, the additional lateral variance is `0.01 × 9 = 0.09 m²` (σ ≈ 0.30 m).
+line-sensor update, the additional lateral variance is `0.01 × 9 = 0.09 m²` (σ ≈ 0.30 m).
 The fixed `k_trans_lat_noise × delta_trans` term contributes only `0.001 × 3 = 0.003 m²`
 by comparison — 30× smaller.
 </details>
 
 ---
 
-**A5.** OKS does not read the `pose.covariance` field from the `/odom` ROS message. Why is
+**A5.** AMR does not read the `pose.covariance` field from the `/odom` ROS message. Why is
 this a deliberate and reasonable engineering choice, rather than a bug?
 
 <details>
@@ -151,13 +151,13 @@ The `pose.covariance` field in a ROS odometry message is populated by the odomet
    motion data (e.g., by driving a robot over a known path and measuring actual position error)
    gives more accurate covariance than trusting the publisher.
 
-3. **Consistency:** OKS operates across multiple robot generations. Using a fixed noise model
+3. **Consistency:** AMR operates across multiple robot generations. Using a fixed noise model
    in the config YAML means the estimator behavior is predictable and version-controlled,
    rather than dependent on whatever the firmware team decided to publish.
 
 **The downside:** If the actual wheel slip characteristics change (e.g., floor material changes,
 wheel wear), the fixed model will be wrong until someone re-tunes the parameters.
-This is why floor-specific tuning files exist in the OKS site configuration.
+This is why floor-specific tuning files exist in the robot site configuration.
 </details>
 
 ---
@@ -363,16 +363,16 @@ balance between Q (process noise inflating P) and R/P ratio (measurement shrinki
 
 ---
 
-## Section C — OKS-Specific Calculation Questions
+## Section C — AMR-Specific Calculation Questions
 
 ### C1 — Prediction step with the estimator noise model
 
 **Given:**
-- Current `P(x,x) = 0.0025 m²`  (σ_x = 0.05 m, a tight estimate after a sensorbar hit)
+- Current `P(x,x) = 0.0025 m²`  (σ_x = 0.05 m, a tight estimate after a line-sensor hit)
 - `P(θ,θ) = 0.0010 rad²`  (σ_θ ≈ 1.8°, well-constrained heading)
 - Robot moves forward `delta_trans = 0.5 m` in this time step
 - `delta_rot = 0.0 rad`  (straight-line motion)
-- OKS noise parameters:
+- AMR noise parameters:
   - `k_trans_noise = 0.01`
   - `k_trans_lat_noise = 0.005`
   - `k_time_trans_noise = 0.0`  (ignore time component)
@@ -428,7 +428,7 @@ dominant source of error.
 what is the minimum ratio `P⁻ / R` such that the Kalman gain `K > 0.5`?
 
 Derive algebraically and verify with a numerical example using `R = 0.04 m²` (σ = 0.2 m,
-typical sensorbar uncertainty).
+typical line-sensor uncertainty).
 
 <details>
 <summary>Answer C2</summary>
@@ -464,14 +464,14 @@ P⁻ = 0.05 m²  (> R):  K = 0.05 / 0.09 = 0.556 > 0.5                        �
 P⁻ = 0.10 m²  (> R):  K = 0.10 / 0.14 = 0.714 > 0.5                        ✓
 ```
 
-**OKS interpretation:**
-- `R = 0.04 m²` is typical for a well-calibrated sensorbar (σ ≈ 0.2 m lateral accuracy)
+**AMR interpretation:**
+- `R = 0.04 m²` is typical for a well-calibrated line-sensor (σ ≈ 0.2 m lateral accuracy)
 - `P(x,x) = 0.04 m²` means the robot has accumulated uncertainty equivalent to the sensor noise
-- For `P(x,x) > 0.04 m²`, the filter trusts the sensorbar more than its dead-reckoning prediction
+- For `P(x,x) > 0.04 m²`, the filter trusts the line-sensor more than its dead-reckoning prediction
 
-In practice, after a robot travels ~4 m without a sensorbar update
+In practice, after a robot travels ~4 m without a line-sensor update
 (ΔP_xx ≈ 0.01 × 4 = 0.04 m² from `k_trans_noise`), the transition point K = 0.5
-is reached. This is consistent with OKS site layout requirements: sensorbar lines should be
+is reached. This is consistent with robot site layout requirements: line-sensor lines should be
 placed no more than ~4 m apart on heavily-traveled aisles for reliable localization.
 </details>
 

@@ -6,11 +6,11 @@
 
 ---
 
-## Why Should I Care? (OKS Context)
+## Why Should I Care? (Practical Context)
 
 The PID controller computes a number. But the motor needs *current* flowing through *copper*. Between the PID output and actual motor torque, there's an H-bridge, a current sensor, a PWM generator, and an encoder. When any of these misbehaves, the PID is flying blind.
 
-**Real OKS failures traced to hardware:**
+**Real AMR failures traced to hardware:**
 - Encoder connector vibration → intermittent count loss → speed estimate spikes → PID overreacts → oscillation
 - Current sensor offset drift with temperature → steady-state current error → motor runs hot
 - PWM dead-time too short → H-bridge shoot-through → FET damage
@@ -41,13 +41,13 @@ PWM at 50% duty cycle:
 
 ## 1.2 PWM Frequency Selection
 
-| Frequency | Motor effect | Audio | OKS choice |
+| Frequency | Motor effect | Audio | AMR choice |
 |-----------|-------------|-------|------------|
 | 1–4 kHz | High current ripple, inefficient | Audible whine | ❌ |
 | 10–20 kHz | Moderate ripple, good efficiency | Barely audible | ✅ 20 kHz |
 | 50–100 kHz | Low ripple, switching losses increase | Silent | ❌ (FET losses) |
 
-**OKS uses 20 kHz** — just above human hearing, low enough for efficient FET switching.
+**AMR uses 20 kHz** — just above human hearing, low enough for efficient FET switching.
 
 **Current ripple** at PWM frequency $f_{pwm}$:
 
@@ -139,7 +139,7 @@ Q2:      └─┐   ┌─┘
             ├───┤ ← dead time (both OFF)
 ```
 
-**OKS STM32 dead time:** 1 µs, configured in TIM1's BDTR register:
+**AMR STM32 dead time:** 1 µs, configured in TIM1's BDTR register:
 
 ```c
 TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig;
@@ -170,13 +170,13 @@ if (fabsf(duty) > 0.01f) {
 
 ## 3.2 Sensing Methods
 
-| Method | Principle | OKS usage | Pros/Cons |
+| Method | Principle | AMR usage | Pros/Cons |
 |--------|-----------|-----------|-----------|
 | **Shunt resistor** | Low-R in series, measure voltage | ✅ Low-side | Cheap, fast; power loss = $I^2 R$ |
 | **Hall effect** | Magnetic field sensing | ❌ | No power loss; expensive, slow |
 | **Inline (high-side)** | Shunt on V+ side | Some models | Sees all current; needs differential amp |
 
-**OKS low-side shunt sensing:**
+**AMR low-side shunt sensing:**
 
 ```
         V+
@@ -197,7 +197,7 @@ $R_{shunt}$ = 10–50 mΩ. At 3A: $V_{sense} = 3 \times 0.02 = 60$ mV. This need
 **Current sense amplifier:**
 
 ```c
-// OKS current sense: 20 mΩ shunt, 50× gain amplifier
+// AMR current sense: 20 mΩ shunt, 50× gain amplifier
 // ADC: 12-bit, 3.3V reference
 // I = (ADC_value / 4096 * 3.3 - offset) / (R_shunt * gain)
 
@@ -314,12 +314,12 @@ float compute_speed_rad_per_sec(float dt) {
 
 ## 4.3 Common Encoder Failure Modes
 
-| Failure | Symptom | OKS ticket |
+| Failure | Symptom | AMR ticket |
 |---------|---------|------------|
-| **Loose connector** | Intermittent zero-speed spikes | #98367 |
-| **Electrical noise** | Random count jumps (1000+ counts in one sample) | #99835 |
+| **Loose connector** | Intermittent zero-speed spikes | Incident-A |
+| **Electrical noise** | Random count jumps (1000+ counts in one sample) | Case-E |
 | **Index pulse loss** | Cumulative position drift | Commissioning issue |
-| **One channel dead** | Speed always positive (can't detect direction) | #97229 |
+| **One channel dead** | Speed always positive (can't detect direction) | Case-F |
 
 **Noise filter:** The STM32 encoder mode has a configurable digital filter (IC1Filter, IC2Filter). Set to 0x05 (8 clock cycles) → ignores glitches shorter than 48 ns at 168 MHz.
 
@@ -370,7 +370,7 @@ The remaining 97.5% is available for SPI communication, diagnostics, watchdog, a
 
 ## Checkpoint Questions
 
-1. Why does OKS use 20 kHz PWM instead of 5 kHz or 100 kHz?
+1. Why does AMR use 20 kHz PWM instead of 5 kHz or 100 kHz?
 2. What is dead time and why is it necessary? What happens without it?
 3. Why sample the ADC at the center of the PWM period instead of at the edge?
 4. An encoder has 512 CPR. With 4× decoding, how many counts per revolution?

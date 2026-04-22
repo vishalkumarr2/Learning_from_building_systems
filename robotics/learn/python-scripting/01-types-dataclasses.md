@@ -14,7 +14,7 @@ Analysis scripts that process large log files or call external APIs contain doze
 
 Without type annotations, every one of those assumptions is invisible until the script crashes at 2 AM on real data. With type annotations + mypy:
 - A mismatched function argument is a **red underline in the editor**, not a runtime traceback
-- Pydantic turns your `.env` file into a validated, typed Python object — missing `ADO_PAT`? Crash at startup with a clear error, not 40 lines into processing
+- Pydantic turns your `.env` file into a validated, typed Python object — missing `API_TOKEN`? Crash at startup with a clear error, not 40 lines into processing
 - `NewType` makes `ticket_id` and `robot_id` incompatible types — the compiler prevents passing one where the other is expected
 
 This chapter is a force multiplier for every script in this repo.
@@ -803,10 +803,10 @@ from pydantic import Field
 
 class Settings(BaseSettings):
     # Required — will raise ValidationError if not set in env or .env
-    ado_pat: str
+    api_token: str
 
     # Optional — have defaults
-    slack_token: str | None = None
+    chat_token: str | None = None
     grafana_url: str = "http://localhost:3000"
     kb_min_confidence: float = 0.7
     max_search_results: int = 20
@@ -818,7 +818,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=False,      # ADO_PAT and ado_pat both work
+        case_sensitive=False,      # API_TOKEN and api_token both work
         extra="ignore",            # ignore unknown env vars
     )
 
@@ -826,7 +826,7 @@ class Settings(BaseSettings):
 # Usage — typically at module level or in main()
 def get_settings() -> Settings:
     """Singleton-style settings loader."""
-    return Settings()   # raises ValidationError if ADO_PAT is missing
+    return Settings()   # raises ValidationError if API_TOKEN is missing
 ```
 
 ---
@@ -834,20 +834,20 @@ def get_settings() -> Settings:
 ## 5.2 How it reads values
 
 Priority order (highest wins):
-1. Direct constructor argument: `Settings(ado_pat="override")`
-2. Environment variable: `export ADO_PAT=abc123`
-3. `.env` file: `ADO_PAT=abc123`
+1. Direct constructor argument: `Settings(api_token="override")`
+2. Environment variable: `export API_TOKEN=abc123`
+3. `.env` file: `API_TOKEN=abc123`
 4. Field default
 
 ```python
 # .env file
-# ADO_PAT=abc123
-# SLACK_TOKEN=xoxb-...
+# API_TOKEN=abc123
+# CHAT_TOKEN=xoxb-...
 # KB_MIN_CONFIDENCE=0.8
 # DEBUG=true            ← "true" is coerced to True
 
 settings = Settings()
-print(settings.ado_pat)              # "abc123"
+print(settings.api_token)              # "abc123"
 print(settings.kb_min_confidence)    # 0.8 (float, not string)
 print(settings.debug)                # True (bool, not string)
 ```
@@ -867,12 +867,12 @@ class AnalysisSettings(BaseSettings):
     """Settings for the incident analysis toolkit."""
 
     # Auth tokens
-    ado_pat: str = Field(description="Azure DevOps Personal Access Token")
-    slack_token: str | None = Field(default=None)
+    api_token: str = Field(description="Azure DevOps Personal Access Token")
+    chat_token: str | None = Field(default=None)
 
     # Service URLs
     grafana_url: str = "http://localhost:3000"
-    grafana_token: str | None = None
+    monitoring_token: str | None = None
     ado_org: str = "my-org"
     ado_project: str = "my-project"
 
@@ -934,16 +934,16 @@ from unittest.mock import patch
 
 
 def test_settings_loads_from_env(monkeypatch):
-    monkeypatch.setenv("ADO_PAT", "test-token-123")
+    monkeypatch.setenv("API_TOKEN", "test-token-123")
     monkeypatch.setenv("KB_MIN_CONFIDENCE", "0.9")
 
     settings = AnalysisSettings()
-    assert settings.ado_pat == "test-token-123"
+    assert settings.api_token == "test-token-123"
     assert settings.kb_min_confidence == 0.9
 
 
-def test_settings_fails_without_ado_pat(monkeypatch):
-    monkeypatch.delenv("ADO_PAT", raising=False)
+def test_settings_fails_without_api_token(monkeypatch):
+    monkeypatch.delenv("API_TOKEN", raising=False)
     with pytest.raises(Exception):   # ValidationError
         AnalysisSettings()
 ```
@@ -961,10 +961,10 @@ def test_settings_fails_without_ado_pat(monkeypatch):
 pip install mypy
 
 # Check a single file
-mypy scripts/kb_search.py
+mypy scripts/knowledge_search.py
 
 # Strict mode — catches more (recommended for new files)
-mypy --strict scripts/kb_search.py
+mypy --strict scripts/knowledge_search.py
 
 # Check all scripts
 mypy scripts/ --ignore-missing-imports
@@ -975,9 +975,9 @@ mypy .
 
 Example output:
 ```
-scripts/kb_search.py:42: error: Argument 1 to "fetch_ticket" has incompatible
+scripts/knowledge_search.py:42: error: Argument 1 to "fetch_ticket" has incompatible
     type "str"; expected "TicketId"  [arg-type]
-scripts/kb_search.py:67: error: Item "None" of "str | None" has no attribute
+scripts/knowledge_search.py:67: error: Item "None" of "str | None" has no attribute
     "split"  [union-attr]
 ```
 
