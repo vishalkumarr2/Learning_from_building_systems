@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exercises: ZBus+nanopb Bridge, Jetson RT Setup, and EKF Integration - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="exercises-zbusnanopb-bridge-jetson-rt-setup-and-ekf-integration">Exercises: ZBus+nanopb Bridge, Jetson RT Setup, and EKF Integration</h1>
+<h3 id="covers-projects-79-nanopb-framing-jetson-rt-tuning-ekf-covariance-tf2">Covers: Projects 7–9 — nanopb framing, Jetson RT tuning, EKF covariance, TF2</h3>
+<p><strong>These exercises assume you have read <code>09-zbus-nanopb-bridge.md</code>, <code>10-jetson-rt-setup.md</code>, and <code>11-ekf-integration.md</code>.</strong></p>
+<hr />
+<h2 id="section-a-zbus-nanopb-framing-questions">Section A — ZBus + nanopb Framing Questions</h2>
+<hr />
+<p><strong>A1.</strong> Your <code>.proto</code> file defines a message with one <code>float velocity = 1;</code> field. You serialize
+a <code>velocity = 0.0f</code> message with nanopb. The encoded output is <strong>0 bytes</strong>. Explain:
+- Why does proto3 produce zero bytes for <code>0.0f</code>?
+- Why does this break your length-prefix framing protocol?
+- Give the exact C code change that prevents this (without changing the protocol buffer format).</p>
+<hr />
+<p><strong>A2.</strong> You use a 4-byte little-endian length prefix before each serialized protobuf message.
+The receiver reads the 4-byte prefix first, allocates a buffer, then reads exactly that many
+bytes. Your test sends a 23-byte payload and a 47-byte payload back-to-back over SPI.</p>
+<p>Describe exactly what the receiver&rsquo;s state machine should look like. What are the states?
+What data is stored between state transitions? What happens if the FIFO drains mid-payload
+(bytes 1–20 arrive, then 10ms silence, then bytes 21–23 arrive)?</p>
+<hr />
+<p><strong>A3.</strong> nanopb uses fixed-size arrays. Your <code>.proto</code> defines <code>repeated float readings = 2;</code>
+and you set the nanopb option to <code>max_count: 12</code>. Your proto message in C has this struct:</p>
+<div class="highlight"><pre><span></span><code><span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">pb_size_t</span><span class="w"> </span><span class="n">readings_count</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">readings</span><span class="p">[</span><span class="mi">12</span><span class="p">];</span>
+<span class="p">}</span><span class="w"> </span><span class="n">SensorData</span><span class="p">;</span>
+</code></pre></div>
+
+<p>You receive a message where the Jetson sent 15 readings. What happens in nanopb during
+<code>pb_decode()</code>? Does it crash, truncate, return an error, or produce undefined behavior?
+How would you detect this case?</p>
+<hr />
+<p><strong>A4.</strong> Explain the difference between:
+- <code>ZBUS_CHAN_DEFINE</code> with a <code>.validator = NULL</code> 
+- <code>ZBUS_CHAN_DEFINE</code> with a validator function</p>
+<p>When would you add a validator? Give a concrete example for an IMU channel (what invalid
+data would it reject?).</p>
+<hr />
+<p><strong>A5.</strong> You have three ZBus channels: <code>imu_chan</code> (100Hz), <code>odom_chan</code> (50Hz), <code>gps_chan</code> (1Hz).
+Your packer thread subscribes to <code>imu_chan</code>. On each new IMU message, it checks the other
+two channels for their latest values using a non-blocking peek.</p>
+<p>Write the correct Zephyr API calls to:
+1. Subscribe packer thread to <code>imu_chan</code> using a message queue (not semaphore)
+2. Read latest value from <code>odom_chan</code> without waiting
+3. Safely copy the current GPS value even though it might be stale</p>
+<hr />
+<h2 id="section-b-jetson-rt-kernel-questions">Section B — Jetson RT Kernel Questions</h2>
+<hr />
+<p><strong>B1.</strong> You configure <code>isolcpus=3</code> in the kernel boot parameters. Explain:
+- What does this prevent?
+- What does this NOT prevent?
+- How do you actually assign your RT thread to CPU 3?
+- Write the exact <code>taskset</code> command to pin a running process by PID to CPU 3</p>
+<hr />
+<p><strong>B2.</strong> You run <code>cyclictest -l 10000 -p 99 -i 1000 -a 3</code> on your Jetson Orin NX. Interpret this
+output:</p>
+<div class="highlight"><pre><span></span><code>T: 0 ( 1234) P:99 I:1000 C:10000 Min:   4 Act:   8 Avg:  11 Max:  427
+</code></pre></div>
+
+<ul>
+<li>What does each field mean?</li>
+<li>Is a 427µs maximum latency acceptable for a 100Hz SPI loop (10ms period)?</li>
+<li>What would you investigate to reduce the maximum latency below 100µs?</li>
+</ul>
+<hr />
+<p><strong>B3.</strong> Explain the difference between:
+- <code>SCHED_FIFO</code> with priority 99
+- <code>SCHED_RR</code> with priority 99
+- Default <code>SCHED_OTHER</code></p>
+<p>Which should you use for your SPI polling thread, and why? What happens if two <code>SCHED_FIFO</code>
+priority-99 threads both try to run on CPU 3 simultaneously?</p>
+<hr />
+<p><strong>B4.</strong> You run <code>sudo nvpmodel -m 0 &amp;&amp; sudo jetson_clocks</code> before benchmarking. Why? What does
+<code>MAXN</code> mode change compared to mode 1 or 2? What thermal risk does this introduce, and what
+should you add to your test procedure?</p>
+<hr />
+<p><strong>B5.</strong> <code>irqbalance</code> is running by default on your Jetson. Explain what it does and why you
+disable it before RT testing. After disabling it, what must you do to ensure your RT CPU is
+not handling any hardware IRQs?</p>
+<hr />
+<p><strong>B6.</strong> You measure ioctl latency using <code>clock_gettime(CLOCK_MONOTONIC_RAW, ...)</code> before and
+after <code>ioctl(fd, SPI_IOC_MESSAGE(1), &amp;xfer)</code>. You see:</p>
+<div class="highlight"><pre><span></span><code>min: 52µs  mean: 61µs  max: 3847µs  p99: 98µs
+</code></pre></div>
+
+<p>The max is 63× the mean. Is this acceptable? What is causing the outlier? Write the
+<code>cyclictest</code> command you would run in parallel to confirm the hypothesis.</p>
+<hr />
+<h2 id="section-c-ekf-integration-questions">Section C — EKF Integration Questions</h2>
+<hr />
+<p><strong>C1.</strong> Your <code>robot_localization</code> EKF node produces this <code>odom</code> output:</p>
+<div class="highlight"><pre><span></span><code>pose:
+  covariance: [0, 0, 0, 0, 0, 0, ...]  # all zeros
+</code></pre></div>
+
+<p>What does a zero covariance mean mathematically? What will happen to subsequent sensor fusion
+steps that try to use this covariance? What field in your <code>ekf.yaml</code> causes this?</p>
+<hr />
+<p><strong>C2.</strong> The <code>imu0_config</code> boolean vector in <code>ekf.yaml</code> has 15 elements. List what each group
+of elements controls:
+- Elements 0–2:
+- Elements 3–5:
+- Elements 6–8:
+- Elements 9–11:
+- Elements 12–14:</p>
+<p>For a 6-DOF IMU (accelerometer + gyroscope, no magnetometer), which elements should be <code>true</code>?
+Write the complete <code>imu0_config</code> line.</p>
+<blockquote>
+<p><strong>Hint for AMR context:</strong> Enabling accelerometer fusion on a flat-floor AMR is a known
+footgun. Explain why a Z-axis accelerometer reading from a robot crossing a tile gap can
+trigger <code>COLLISION_DETECTED</code>, and whether this means accel fusion should be enabled or
+disabled in <code>imu0_config</code> for a ground robot.</p>
+</blockquote>
+<hr />
+<p><strong>C3.</strong> Your EKF outputs NaN in <code>pose.position.x</code> after 30 seconds of operation. List three
+causes of EKF divergence that produce NaN specifically (as opposed to just poor accuracy).
+For each, describe the diagnostic check.</p>
+<hr />
+<p><strong>C4.</strong> The TF2 tree for your robot is: <code>map → odom → base_link → imu_link</code>.</p>
+<p>For each frame pair, answer:
+1. Which node publishes this transform?
+2. Is it static or dynamic?
+3. What happens to the EKF if this link is missing?</p>
+<hr />
+<p><strong>C5.</strong> Explain the difference between setting <code>differential: true</code> vs <code>false</code> in <code>robot_localization</code>
+for your wheel odometry. You have a differential drive robot with no absolute position source.
+Should <code>odom0_config</code> include position XY as <code>true</code> or <code>false</code>? Why?</p>
+<hr />
+<p><strong>C6.</strong> You are tuning the <code>imu0_noise</code> covariance in <code>ekf.yaml</code>. You increase the linear
+acceleration noise value from <code>0.01</code> to <code>1.0</code>. Describe what changes in the EKF behavior:
+- Does the filter trust the IMU more or less?
+- Does the filter output become smoother or more reactive?
+- In which direction does this change the &ldquo;lag&rdquo; in the position estimate?</p>
+<hr />
+<h2 id="section-d-cross-project-integration">Section D — Cross-Project Integration</h2>
+<hr />
+<p><strong>D1.</strong> Your SPI bridge runs at 100Hz. The EKF runs at 30Hz. The GPS runs at 1Hz. Draw the
+data flow from raw sensor to <code>robot_localization</code> output. At each step, identify:
+- The transport mechanism (ZBus channel, ROS2 topic, etc.)
+- The frequency
+- What happens to the data in between (decimation, buffering, none?)</p>
+<hr />
+<p><strong>D2.</strong> Your Jetson detects a 200ms dropout in SPI frames (STM32 crashed and rebooted).
+During the dropout:
+- What does <code>robot_localization</code> output?
+- What does rviz2 show?
+- What should your system do to handle graceful recovery?</p>
+<hr />
+<p><strong>D3.</strong> You have <code>use_control: true</code> in <code>ekf.yaml</code> and your system publishes <code>cmd_vel</code>. Explain:
+- What does this add to the state vector?
+- What is the risk if <code>cmd_vel</code> has significant latency (e.g., from WiFi control)?
+- In which application scenario would enabling this improve accuracy?</p>
+<hr />
+<h2 id="section-e-debugging-drills">Section E — Debugging Drills</h2>
+<hr />
+<p><strong>E1.</strong> Your EKF node starts but <code>/odom</code> topic has no messages. Write the exact sequence of
+ROS2 commands to diagnose this without reading source code.</p>
+<hr />
+<p><strong>E2.</strong> The EKF runs but the robot drifts 0.5m after a 360° rotation that should return to the
+origin. This is a known EKF limitation. Explain:
+- What causes accumulated yaw error?
+- What sensor would eliminate this error?
+- At what frequency must it be fused?</p>
+<hr />
+<p><strong>E3.</strong> You set <code>rviz2</code>&rsquo;s <code>Fixed Frame</code> to <code>map</code> but the robot marker is not visible.
+You change it to <code>odom</code> and the robot appears. Explain what this tells you about your
+TF2 tree and how to fix it.</p>
+<hr />
+<h2 id="answers">Answers</h2>
+<details>
+<summary>A1</summary>
+
+In proto3, default values (0, 0.0, false, empty string) are never encoded on the wire —
+this is the "implicit field presence" rule that differs from proto2. A `velocity = 0.0f`
+message encodes to a zero-length buffer. With length-prefix framing, a 4-byte prefix of
+`0x00000000` followed by zero payload bytes is valid, but many receivers interpret a 0-byte
+payload as "end of stream" or a bug. Fix: use `google.protobuf.FloatValue` wrapper (which
+always encodes), or add a sequence number / message ID field that is never 0, or switch to
+proto2 `optional float` with `has_field` tracking.
+
+</details>
+
+<details>
+<summary>A5</summary>
+
+
+<div class="highlight"><pre><span></span><code><span class="c1">// 1. Subscribe with message queue</span>
+<span class="n">ZBUS_MSG_SUBSCRIBER_DEFINE</span><span class="p">(</span><span class="n">packer_sub</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">);</span>
+<span class="n">zbus_chan_add_obs</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">packer_sub</span><span class="p">,</span><span class="w"> </span><span class="n">K_FOREVER</span><span class="p">);</span>
+
+<span class="c1">// 2. Non-blocking peek of latest odom value</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">OdometryMsg</span><span class="w"> </span><span class="n">odom</span><span class="p">;</span>
+<span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">odom_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">odom</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span><span class="w">  </span><span class="c1">// returns -EAGAIN if no data</span>
+
+<span class="c1">// 3. Read latest GPS value (may be stale - that&#39;s OK)</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">GpsMsg</span><span class="w"> </span><span class="n">gps</span><span class="p">;</span>
+<span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">gps_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">gps</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+</code></pre></div>
+
+
+
+`zbus_chan_read` with `K_NO_WAIT` returns the last published value without waiting. It
+returns `-EAGAIN` if the channel has never been published to, which you should handle.
+
+</details>
+
+<details>
+<summary>B2</summary>
+
+- `T:0` — thread 0
+- `(1234)` — PID
+- `P:99` — SCHED_FIFO priority
+- `I:1000` — interval 1000µs (1ms)
+- `C:10000` — 10,000 iterations completed
+- `Min:4` — best latency: 4µs
+- `Act:8` — most recent: 8µs
+- `Avg:11` — average: 11µs
+- `Max:427` — worst-case: 427µs
+
+For a 10ms SPI loop, 427µs is ~4% of the period — technically fine but tight.
+For a 1ms IMU read, it would be unacceptable.
+Investigate: system IRQs not redirected away from CPU 3, frequency scaling enabled,
+`irqbalance` still running, GPU driver interrupts.
+
+</details>
+
+<details>
+<summary>C1</summary>
+
+Zero covariance means infinite certainty — the filter claims to know the position with
+zero uncertainty. This is mathematically incorrect and will cause the Kalman gain for
+any subsequent sensor update to collapse toward zero (the filter stops accepting new
+measurements). The culprit in `ekf.yaml` is likely the initial `process_noise_covariance`
+or `initial_estimate_covariance` having zero diagonal elements, or publishing an `Odometry`
+message with a zero-filled covariance matrix from your driver code.
+
+</details>
+
+<details>
+<summary>C2</summary>
+
+The 15-element `imu0_config` vector controls:
+- [0–2]: x, y, z position (rarely used for IMU)
+- [3–5]: roll, pitch, yaw (orientation)
+- [6–8]: vx, vy, vz (linear velocity)
+- [9–11]: vroll, vpitch, vyaw (angular velocity — from gyro)
+- [12–14]: ax, ay, az (linear acceleration — from accelerometer)
+
+For a 6-DOF IMU: `[false, false, false, true, true, true, false, false, false, true, true, true, true, true, false]`
+(orientation from fused estimation, angular velocity from gyro, linear accel from accelerometer,
+not yaw accel which would require magnetometer).
+
+</details>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

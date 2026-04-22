@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 — ROS 2 IMU Publisher - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="06-ros-2-imu-publisher">06 — ROS 2 IMU Publisher</h1>
+<h3 id="jetson-orin-nx-rclpy-sensor_msgsimu-100hz">Jetson Orin NX · rclpy · sensor_msgs/Imu · 100Hz</h3>
+<p><strong>Status:</strong> 🟡 HARDWARE-GATED — fill this in after <code>05</code> milestone<br />
+<strong>Prerequisite:</strong> Session <code>05</code> milestone: valid SPI frames arriving at Jetson<br />
+<strong>Hardware required:</strong> Same as <code>05</code> + Jetson running ROS 2 Humble<br />
+<strong>Unlocks:</strong> <code>07-estimator-replay.md</code><br />
+<strong>Time budget:</strong> ~3 hours</p>
+<hr />
+<h2 id="goal-of-this-session">Goal of This Session</h2>
+<p>Turn the raw SPI frames from <code>05</code> into proper <code>sensor_msgs/Imu</code> messages published
+to <code>/imu/raw</code> at 100Hz. Verify with <code>ros2 topic hz</code> and <code>ros2 topic echo</code>.</p>
+<p><strong>Milestone</strong>: <code>ros2 topic hz /imu/raw</code> prints <code>average rate: 100.000</code>, <code>rviz2</code> shows
+IMU arrow updating visually when you tilt the board.</p>
+<hr />
+<h2 id="theory-sensor_msgsimu-fields">theory: sensor_msgs/Imu Fields</h2>
+<div class="highlight"><pre><span></span><code>sensor_msgs/Imu:
+    Header header               # frame_id, timestamp
+    geometry_msgs/Quaternion orientation       # leave ZERO if unknown
+    float64[9] orientation_covariance          # [0,0,0,...] = unknown
+    geometry_msgs/Vector3 angular_velocity     # rad/s (gyro)
+    float64[9] angular_velocity_covariance     # from datasheet noise density
+    geometry_msgs/Vector3 linear_acceleration  # m/s² (accel, WITHOUT gravity removal)
+    float64[9] linear_acceleration_covariance  # from datasheet noise density
+</code></pre></div>
+
+<p><strong>Important</strong>: <code>linear_acceleration</code> includes gravity. Do NOT subtract gravity here — let
+the estimator (robot_localization, etc.) handle that. Subtracted gravity in the raw topic
+causes double-subtraction bugs downstream.</p>
+<p><strong>Covariance values</strong> from ICM-42688-P datasheet:
+- Accel noise density: 70 µg/√Hz → in ±2g mode at 200Hz: σ² ≈ (70e-6 × 9.81)² × 200
+- Gyro noise density:  0.0028 °/s/√Hz → σ² ≈ (0.0028 × π/180)² × 200</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Covariance diagonal values (simplified; tune after Allan variance analysis)</span>
+<span class="n">ACCEL_NOISE_DENSITY</span> <span class="o">=</span> <span class="mf">70e-6</span> <span class="o">*</span> <span class="mf">9.81</span>    <span class="c1"># m/s²/√Hz</span>
+<span class="n">GYRO_NOISE_DENSITY</span>  <span class="o">=</span> <span class="mf">0.0028</span> <span class="o">*</span> <span class="mf">3.14159</span> <span class="o">/</span> <span class="mi">180</span>  <span class="c1"># rad/s/√Hz</span>
+<span class="n">ODR</span> <span class="o">=</span> <span class="mf">200.0</span>  <span class="c1"># Hz</span>
+
+<span class="n">ACCEL_COV</span> <span class="o">=</span> <span class="n">ACCEL_NOISE_DENSITY</span><span class="o">**</span><span class="mi">2</span> <span class="o">*</span> <span class="n">ODR</span>
+<span class="n">GYRO_COV</span>  <span class="o">=</span> <span class="n">GYRO_NOISE_DENSITY</span><span class="o">**</span><span class="mi">2</span> <span class="o">*</span> <span class="n">ODR</span>
+
+<span class="n">ACCEL_COVARIANCE</span> <span class="o">=</span> <span class="p">[</span><span class="n">ACCEL_COV</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span>  <span class="mi">0</span><span class="p">,</span> <span class="n">ACCEL_COV</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span>  <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">ACCEL_COV</span><span class="p">]</span>
+<span class="n">GYRO_COVARIANCE</span>  <span class="o">=</span> <span class="p">[</span><span class="n">GYRO_COV</span><span class="p">,</span>  <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span>  <span class="mi">0</span><span class="p">,</span> <span class="n">GYRO_COV</span><span class="p">,</span>  <span class="mi">0</span><span class="p">,</span>  <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">GYRO_COV</span> <span class="p">]</span>
+</code></pre></div>
+
+<hr />
+<h2 id="ros-2-node-imu_bridge_nodepy">ROS 2 Node: imu_bridge_node.py</h2>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env python3</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">imu_bridge_node.py — reads SPI frames from STM32 and publishes sensor_msgs/Imu</span>
+
+<span class="sd">Run with:</span>
+<span class="sd">  ros2 run my_imu_pkg imu_bridge_node</span>
+<span class="sd">or directly:</span>
+<span class="sd">  python3 imu_bridge_node.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.qos</span><span class="w"> </span><span class="kn">import</span> <span class="n">QoSProfile</span><span class="p">,</span> <span class="n">ReliabilityPolicy</span><span class="p">,</span> <span class="n">HistoryPolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sensor_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Imu</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">spidev</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">struct</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+
+<span class="n">FRAME_FMT</span>    <span class="o">=</span> <span class="s1">&#39;&lt;BBHhhhhhhIB5xH&#39;</span>
+<span class="n">FRAME_FIELDS</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;magic&#39;</span><span class="p">,</span> <span class="s1">&#39;version&#39;</span><span class="p">,</span> <span class="s1">&#39;seq&#39;</span><span class="p">,</span> <span class="s1">&#39;ax&#39;</span><span class="p">,</span> <span class="s1">&#39;ay&#39;</span><span class="p">,</span> <span class="s1">&#39;az&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;gx&#39;</span><span class="p">,</span> <span class="s1">&#39;gy&#39;</span><span class="p">,</span> <span class="s1">&#39;gz&#39;</span><span class="p">,</span> <span class="s1">&#39;timestamp_us&#39;</span><span class="p">,</span> <span class="s1">&#39;status&#39;</span><span class="p">,</span> <span class="s1">&#39;crc&#39;</span><span class="p">)</span>
+<span class="n">SPI_FRAME_SIZE</span> <span class="o">=</span> <span class="mi">32</span>
+<span class="n">MAGIC</span>    <span class="o">=</span> <span class="mh">0xA5</span>
+<span class="n">VERSION</span>  <span class="o">=</span> <span class="mh">0x01</span>
+
+<span class="n">ACCEL_SCALE</span> <span class="o">=</span> <span class="mf">9.81</span> <span class="o">/</span> <span class="mf">16384.0</span>
+<span class="n">GYRO_SCALE</span>  <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="p">(</span><span class="mf">0.0028</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">180.0</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">/</span> <span class="p">(</span><span class="mf">200.0</span> <span class="o">/</span> <span class="mf">65.5</span><span class="p">)))</span>
+<span class="c1"># Simpler: ICM-42688 ±500dps → 65.5 LSB/(°/s)</span>
+<span class="n">GYRO_LSB_PER_DPS</span> <span class="o">=</span> <span class="mf">65.5</span>
+<span class="n">GYRO_SCALE</span> <span class="o">=</span> <span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mf">180.0</span><span class="p">)</span> <span class="o">/</span> <span class="n">GYRO_LSB_PER_DPS</span>   <span class="c1"># rad/s per LSB</span>
+
+<span class="n">ACCEL_COV</span> <span class="o">=</span> <span class="p">(</span><span class="mf">70e-6</span> <span class="o">*</span> <span class="mf">9.81</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span> <span class="o">*</span> <span class="mi">200</span>
+<span class="n">GYRO_COV</span>  <span class="o">=</span> <span class="p">(</span><span class="mf">0.0028</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">180</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span> <span class="o">*</span> <span class="mi">200</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">crc16_ccitt</span><span class="p">(</span><span class="n">data</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">crc</span> <span class="o">=</span> <span class="mh">0xFFFF</span>
+    <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">crc</span> <span class="o">^=</span> <span class="n">b</span> <span class="o">&lt;&lt;</span> <span class="mi">8</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">8</span><span class="p">):</span>
+            <span class="n">crc</span> <span class="o">=</span> <span class="p">(</span><span class="n">crc</span> <span class="o">&lt;&lt;</span> <span class="mi">1</span><span class="p">)</span> <span class="o">^</span> <span class="mh">0x1021</span> <span class="k">if</span> <span class="n">crc</span> <span class="o">&amp;</span> <span class="mh">0x8000</span> <span class="k">else</span> <span class="n">crc</span> <span class="o">&lt;&lt;</span> <span class="mi">1</span>
+        <span class="n">crc</span> <span class="o">&amp;=</span> <span class="mh">0xFFFF</span>
+    <span class="k">return</span> <span class="n">crc</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">ImuBridgeNode</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;imu_bridge&#39;</span><span class="p">)</span>
+
+        <span class="c1"># Parameters</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">declare_parameter</span><span class="p">(</span><span class="s1">&#39;frame_id&#39;</span><span class="p">,</span> <span class="s1">&#39;imu_link&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">declare_parameter</span><span class="p">(</span><span class="s1">&#39;spi_bus&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">declare_parameter</span><span class="p">(</span><span class="s1">&#39;spi_device&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">declare_parameter</span><span class="p">(</span><span class="s1">&#39;spi_speed_hz&#39;</span><span class="p">,</span> <span class="mi">4_000_000</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">declare_parameter</span><span class="p">(</span><span class="s1">&#39;rate_hz&#39;</span><span class="p">,</span> <span class="mf">100.0</span><span class="p">)</span>
+
+        <span class="n">frame_id</span>      <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_parameter</span><span class="p">(</span><span class="s1">&#39;frame_id&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+        <span class="n">spi_bus</span>       <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_parameter</span><span class="p">(</span><span class="s1">&#39;spi_bus&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+        <span class="n">spi_device</span>    <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_parameter</span><span class="p">(</span><span class="s1">&#39;spi_device&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+        <span class="n">spi_speed_hz</span>  <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_parameter</span><span class="p">(</span><span class="s1">&#39;spi_speed_hz&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+        <span class="n">rate_hz</span>       <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_parameter</span><span class="p">(</span><span class="s1">&#39;rate_hz&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+
+        <span class="c1"># SPI</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span> <span class="o">=</span> <span class="n">spidev</span><span class="o">.</span><span class="n">SpiDev</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">spi_bus</span><span class="p">,</span> <span class="n">spi_device</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">max_speed_hz</span> <span class="o">=</span> <span class="n">spi_speed_hz</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">mode</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dummy_tx</span> <span class="o">=</span> <span class="p">[</span><span class="mh">0x00</span><span class="p">]</span> <span class="o">*</span> <span class="n">SPI_FRAME_SIZE</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;SPI </span><span class="si">{</span><span class="n">spi_bus</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">spi_device</span><span class="si">}</span><span class="s2"> @ </span><span class="si">{</span><span class="n">spi_speed_hz</span><span class="o">/</span><span class="mf">1e6</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">MHz&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Publisher — SENSOR_DATA QoS: best-effort, keep-last 10</span>
+        <span class="n">qos</span> <span class="o">=</span> <span class="n">QoSProfile</span><span class="p">(</span>
+            <span class="n">reliability</span><span class="o">=</span><span class="n">ReliabilityPolicy</span><span class="o">.</span><span class="n">BEST_EFFORT</span><span class="p">,</span>
+            <span class="n">history</span><span class="o">=</span><span class="n">HistoryPolicy</span><span class="o">.</span><span class="n">KEEP_LAST</span><span class="p">,</span>
+            <span class="n">depth</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">Imu</span><span class="p">,</span> <span class="s1">&#39;imu/raw&#39;</span><span class="p">,</span> <span class="n">qos</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">frame_id</span> <span class="o">=</span> <span class="n">frame_id</span>
+
+        <span class="c1"># State</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">last_seq</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">crc_errors</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dropped_frames</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">total_frames</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="c1"># 100Hz timer</span>
+        <span class="n">period</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="n">rate_hz</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">timer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_timer</span><span class="p">(</span><span class="n">period</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">timer_cb</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;IMU bridge started at </span><span class="si">{</span><span class="n">rate_hz</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">Hz&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">timer_cb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">raw</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dummy_tx</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">total_frames</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="n">frame</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">FRAME_FIELDS</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">FRAME_FMT</span><span class="p">,</span> <span class="n">raw</span><span class="p">)))</span>
+
+        <span class="c1"># Validate magic/version</span>
+        <span class="k">if</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;magic&#39;</span><span class="p">]</span> <span class="o">!=</span> <span class="n">MAGIC</span> <span class="ow">or</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;version&#39;</span><span class="p">]</span> <span class="o">!=</span> <span class="n">VERSION</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Bad frame header: magic=0x</span><span class="si">{</span><span class="n">frame</span><span class="p">[</span><span class="s1">&#39;magic&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">02x</span><span class="si">}</span><span class="s2"> ver=</span><span class="si">{</span><span class="n">frame</span><span class="p">[</span><span class="s1">&#39;version&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+                <span class="n">throttle_duration_sec</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="c1"># Validate CRC</span>
+        <span class="n">expected_crc</span> <span class="o">=</span> <span class="n">crc16_ccitt</span><span class="p">(</span><span class="n">raw</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;crc&#39;</span><span class="p">]</span> <span class="o">!=</span> <span class="n">expected_crc</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">crc_errors</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;CRC error #</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">crc_errors</span><span class="si">}</span><span class="s2">: got 0x</span><span class="si">{</span><span class="n">frame</span><span class="p">[</span><span class="s1">&#39;crc&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">04x</span><span class="si">}</span><span class="s2"> &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;expected 0x</span><span class="si">{</span><span class="n">expected_crc</span><span class="si">:</span><span class="s2">04x</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+                <span class="n">throttle_duration_sec</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="c1"># Check for dropped frames</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">last_seq</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">expected_seq</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">last_seq</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0xFFFF</span>
+            <span class="k">if</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;seq&#39;</span><span class="p">]</span> <span class="o">!=</span> <span class="n">expected_seq</span><span class="p">:</span>
+                <span class="n">dropped</span> <span class="o">=</span> <span class="p">(</span><span class="n">frame</span><span class="p">[</span><span class="s1">&#39;seq&#39;</span><span class="p">]</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">last_seq</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0xFFFF</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">dropped_frames</span> <span class="o">+=</span> <span class="n">dropped</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Dropped </span><span class="si">{</span><span class="n">dropped</span><span class="si">}</span><span class="s2"> frames (seq </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">last_seq</span><span class="si">}</span><span class="s2">→</span><span class="si">{</span><span class="n">frame</span><span class="p">[</span><span class="s1">&#39;seq&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+                    <span class="n">throttle_duration_sec</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">last_seq</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;seq&#39;</span><span class="p">]</span>
+
+        <span class="c1"># Build Imu message</span>
+        <span class="n">msg</span> <span class="o">=</span> <span class="n">Imu</span><span class="p">()</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span>    <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_clock</span><span class="p">()</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">to_msg</span><span class="p">()</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">frame_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame_id</span>
+
+        <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;ax&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">ACCEL_SCALE</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;ay&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">ACCEL_SCALE</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration</span><span class="o">.</span><span class="n">z</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;az&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">ACCEL_SCALE</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration_covariance</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">ACCEL_COV</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span> <span class="n">ACCEL_COV</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">ACCEL_COV</span><span class="p">,</span>
+        <span class="p">]</span>
+
+        <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;gx&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">GYRO_SCALE</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;gy&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">GYRO_SCALE</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity</span><span class="o">.</span><span class="n">z</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;gz&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">GYRO_SCALE</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity_covariance</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">GYRO_COV</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span> <span class="n">GYRO_COV</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">GYRO_COV</span><span class="p">,</span>
+        <span class="p">]</span>
+
+        <span class="c1"># Orientation unknown — set covariance[0]=-1 to signal this</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">orientation_covariance</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="mf">1.0</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">destroy_node</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Shutting down. Frames: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">total_frames</span><span class="si">}</span><span class="s2">, &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;CRC errors: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">crc_errors</span><span class="si">}</span><span class="s2">, Dropped: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">dropped_frames</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">destroy_node</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">rclpy</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">args</span><span class="o">=</span><span class="n">args</span><span class="p">)</span>
+    <span class="n">node</span> <span class="o">=</span> <span class="n">ImuBridgeNode</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">rclpy</span><span class="o">.</span><span class="n">spin</span><span class="p">(</span><span class="n">node</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+        <span class="k">pass</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">node</span><span class="o">.</span><span class="n">destroy_node</span><span class="p">()</span>
+        <span class="n">rclpy</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h2 id="verification-commands">Verification Commands</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># In terminal 1: run the node</span>
+python3<span class="w"> </span>imu_bridge_node.py
+
+<span class="c1"># In terminal 2: verify rate</span>
+ros2<span class="w"> </span>topic<span class="w"> </span>hz<span class="w"> </span>/imu/raw
+<span class="c1"># Expected: average rate: 100.000</span>
+
+<span class="c1"># In terminal 3: echo a few messages</span>
+ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/imu/raw<span class="w"> </span>--once
+<span class="c1"># Check: linear_acceleration.z ≈ 9.81 when flat</span>
+
+<span class="c1"># Check topic info (verify BEST_EFFORT QoS)</span>
+ros2<span class="w"> </span>topic<span class="w"> </span>info<span class="w"> </span>/imu/raw<span class="w"> </span>--verbose
+
+<span class="c1"># Record a 10-second bag for offline analysis</span>
+ros2<span class="w"> </span>bag<span class="w"> </span>record<span class="w"> </span>/imu/raw<span class="w"> </span>-d<span class="w"> </span><span class="m">10</span><span class="w"> </span>-o<span class="w"> </span>imu_test_<span class="k">$(</span>date<span class="w"> </span>+%Y%m%d_%H%M%S<span class="k">)</span>
+
+<span class="c1"># Play back and check</span>
+ros2<span class="w"> </span>bag<span class="w"> </span>info<span class="w"> </span>&lt;bag_dir&gt;
+ros2<span class="w"> </span>bag<span class="w"> </span>play<span class="w"> </span>&lt;bag_dir&gt;
+ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/imu/raw
+</code></pre></div>
+
+<hr />
+<h2 id="rviz2-imu-visualization">RViz2 IMU Visualization</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Launch RViz2</span>
+rviz2
+
+<span class="c1"># In RViz2:</span>
+<span class="c1"># 1. Fixed Frame: &quot;imu_link&quot; (or &quot;map&quot; if you have a TF tree)</span>
+<span class="c1"># 2. Add → Imu (from sensor_msgs)</span>
+<span class="c1"># 3. Topic: /imu/raw</span>
+<span class="c1"># 4. Arrow Scale: 0.5</span>
+</code></pre></div>
+
+<p>You should see the arrow pointing &ldquo;up&rdquo; (in the direction of gravity) and rotating
+when you physically rotate the board.</p>
+<hr />
+<h2 id="milestone-checklist">Milestone Checklist</h2>
+<ul>
+<li>[ ] <code>ros2 topic hz /imu/raw</code> shows <code>100.000 ± 2.0</code></li>
+<li>[ ] <code>ros2 topic echo /imu/raw --once</code> shows <code>linear_acceleration.z ≈ 9.81</code></li>
+<li>[ ] <code>orientation_covariance[0] = -1.0</code> (orientation unknown)</li>
+<li>[ ] RViz2 IMU arrow responds to board rotation</li>
+<li>[ ] CRC and dropped frame counters at 0 after 60-second run</li>
+<li>[ ] <code>ros2 bag record</code> bag file playable and parseable</li>
+</ul>
+<hr />
+<h2 id="pre-read-for-session-7">Pre-Read for Session 7</h2>
+<p>Before <code>07-estimator-replay.md</code>:
+1. Review the STUDY-PLAN notes on AMR estimator architecture
+2. Read <code>knowledge/systems/amr-estimator.md</code> (if it exists)
+3. Look at <code>scripts/analysis/</code> — what estimator analysis scripts exist?
+4. Review any past RCA in <code>docs/rca/</code> mentioning <code>ESTIMATOR_STATE_INVALID</code></p>
+<hr />
+<h2 id="session-notes-template">Session Notes Template</h2>
+<div class="highlight"><pre><span></span><code><span class="gu">## Session Notes — [DATE]</span>
+
+<span class="gu">### ROS 2 Setup</span>
+<span class="k">-</span><span class="w"> </span>ROS 2 version: ___
+<span class="k">-</span><span class="w"> </span>Python spidev version: ___
+
+<span class="gu">### Rate Measurement</span>
+<span class="k">-</span><span class="w"> </span><span class="sb">`ros2 topic hz`</span> result: ___Hz
+<span class="k">-</span><span class="w"> </span>Variance: ±___Hz
+
+<span class="gu">### Message Validation</span>
+<span class="k">-</span><span class="w"> </span>Stationary accel_z: ___ m/s²
+<span class="k">-</span><span class="w"> </span>Gyro bias (stationary): x=___ y=___ z=___ rad/s
+
+<span class="gu">### Issues</span>
+<span class="k">-</span><span class="w"> </span>...
+
+<span class="gu">### Bag File</span>
+<span class="k">-</span><span class="w"> </span>Filename: ...
+<span class="k">-</span><span class="w"> </span>Duration: ___s
+<span class="k">-</span><span class="w"> </span>Frames: ___
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

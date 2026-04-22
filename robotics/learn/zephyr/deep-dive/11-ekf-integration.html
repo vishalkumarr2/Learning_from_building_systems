@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>11 — EKF Integration + Pipeline Validation - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="11-ekf-integration-pipeline-validation">11 — EKF Integration + Pipeline Validation</h1>
+<h3 id="jetson-orin-nx-robot_localization-ros-2-humblejazzy-tf2">Jetson Orin NX · robot_localization · ROS 2 Humble/Jazzy · TF2</h3>
+<p><strong>Status:</strong> 🟡 HARDWARE-GATED<br />
+<strong>Prerequisite:</strong> Session <code>10</code> milestone complete; <code>06-ros2-publisher.md</code> publishing <code>/imu/raw</code> at 100Hz<br />
+<strong>Hardware required:</strong> Full pipeline active: STM32 → SPI → Jetson → ROS 2<br />
+<strong>Unlocks:</strong> Full end-to-end pipeline complete<br />
+<strong>Time budget:</strong> ~12 hours<br />
+<strong>Mastery plan:</strong> Project 11</p>
+<hr />
+<h2 id="goal-of-this-session">Goal of This Session</h2>
+<p>Feed IMU + Odometry data into <code>robot_localization</code>&rsquo;s EKF node to produce fused <code>odometry/filtered</code> at 100Hz. Visualize in rviz2. Verify the complete <code>map → odom → base_link</code> TF tree.</p>
+<p><strong>Milestone</strong>: <code>ros2 topic hz /odometry/filtered</code> shows ~100Hz. In rviz2 with <code>Fixed Frame = base_link</code>, the <code>odometry/filtered</code> arrow updates smoothly when you physically move the STM32 board. <code>ros2 run tf2_tools view_frames</code> shows the complete frame tree without disconnected nodes.</p>
+<hr />
+<h2 id="architecture-what-robot_localization-does">Architecture: What robot_localization Does</h2>
+<div class="highlight"><pre><span></span><code>/imu/raw   (sensor_msgs/Imu, 100Hz)  ─┐
+/odom/raw  (nav_msgs/Odometry, 100Hz) ─┤─► ekf_node ──► /odometry/filtered
+/gps/fix   (sensor_msgs/NavSatFix, 1Hz) ┘    (robot_localization)
+                                              └──► TF: odom → base_link (100Hz)
+</code></pre></div>
+
+<p>The EKF fuses all sensors into a single consistent state estimate. It handles:
+- Sensor delays (using message timestamps, not receive time)
+- Different update rates (IMU at 100Hz, GPS at 1Hz)
+- Sensor noise (via covariance matrices in each message)</p>
+<hr />
+<h2 id="step-1-install-robot_localization">Step 1: Install robot_localization</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># ROS 2 Humble</span>
+sudo<span class="w"> </span>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>ros-humble-robot-localization
+
+<span class="c1"># ROS 2 Jazzy</span>
+sudo<span class="w"> </span>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>ros-jazzy-robot-localization
+
+<span class="c1"># Verify</span>
+ros2<span class="w"> </span>pkg<span class="w"> </span>list<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>robot_localization
+</code></pre></div>
+
+<hr />
+<h2 id="step-2-publish-odometry-topic">Step 2: Publish Odometry Topic</h2>
+<p>If you have CAN encoder data from session 07, add an <code>OdomPublisherNode</code> to your bridge:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Add to imu_bridge_node.py from session 06, or create a new file</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">nav_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Odometry</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">OdomPublisherNode</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;odom_publisher&#39;</span><span class="p">)</span>
+        <span class="n">qos</span> <span class="o">=</span> <span class="n">QoSProfile</span><span class="p">(</span>
+            <span class="n">reliability</span><span class="o">=</span><span class="n">QoSReliabilityPolicy</span><span class="o">.</span><span class="n">BEST_EFFORT</span><span class="p">,</span>
+            <span class="n">history</span><span class="o">=</span><span class="n">QoSHistoryPolicy</span><span class="o">.</span><span class="n">KEEP_LAST</span><span class="p">,</span>
+            <span class="n">depth</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_publisher</span><span class="p">(</span><span class="n">Odometry</span><span class="p">,</span> <span class="s1">&#39;/odom/raw&#39;</span><span class="p">,</span> <span class="n">qos</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">publish</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">left_vel_mms</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">right_vel_mms</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+                <span class="n">timestamp_ns</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">msg</span> <span class="o">=</span> <span class="n">Odometry</span><span class="p">()</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_clock</span><span class="p">()</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">to_msg</span><span class="p">()</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">frame_id</span> <span class="o">=</span> <span class="s1">&#39;odom&#39;</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">child_frame_id</span> <span class="o">=</span> <span class="s1">&#39;base_link&#39;</span>
+
+        <span class="c1"># Convert mm/s to m/s; differential drive forward velocity</span>
+        <span class="n">fwd_vel</span> <span class="o">=</span> <span class="p">(</span><span class="n">left_vel_mms</span> <span class="o">+</span> <span class="n">right_vel_mms</span><span class="p">)</span> <span class="o">/</span> <span class="mf">2.0</span> <span class="o">/</span> <span class="mf">1000.0</span>
+
+        <span class="n">msg</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">linear</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="n">fwd_vel</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">linear</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">angular</span><span class="o">.</span><span class="n">z</span> <span class="o">=</span> <span class="mf">0.0</span>   <span class="c1"># add yaw rate if you have it</span>
+
+        <span class="c1"># Covariance: diagonal elements</span>
+        <span class="c1"># For a simple encoder: velocity uncertainty ≈ 5mm/s (0.005 m/s)</span>
+        <span class="c1"># Index [0] = linear.x variance, [35] = angular.z variance</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">covariance</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>  <span class="o">=</span> <span class="mf">0.005</span> <span class="o">**</span> <span class="mi">2</span>   <span class="c1"># linear.x</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">covariance</span><span class="p">[</span><span class="mi">7</span><span class="p">]</span>  <span class="o">=</span> <span class="mf">0.005</span> <span class="o">**</span> <span class="mi">2</span>   <span class="c1"># linear.y</span>
+        <span class="n">msg</span><span class="o">.</span><span class="n">twist</span><span class="o">.</span><span class="n">covariance</span><span class="p">[</span><span class="mi">35</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.01</span>  <span class="o">**</span> <span class="mi">2</span>   <span class="c1"># angular.z</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">pub</span><span class="o">.</span><span class="n">publish</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+</code></pre></div>
+
+<p>If you don&rsquo;t have CAN data yet, publish a static zero-velocity odometry for testing:</p>
+<div class="highlight"><pre><span></span><code>ros2<span class="w"> </span>topic<span class="w"> </span>pub<span class="w"> </span>/odom/raw<span class="w"> </span>nav_msgs/Odometry<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s1">&#39;{header: {frame_id: odom}, child_frame_id: base_link,</span>
+<span class="s1">    twist: {covariance: [0.0025,0,0,0,0,0, 0,0.0025,0,0,0,0, 0,0,999999,0,0,0,</span>
+<span class="s1">                         0,0,0,999999,0,0, 0,0,0,0,999999,0, 0,0,0,0,0,0.0001]}}&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-r<span class="w"> </span><span class="m">100</span>
+</code></pre></div>
+
+<hr />
+<h2 id="step-3-tf2-static-transforms">Step 3: TF2 Static Transforms</h2>
+<p>robot_localization needs to know where the IMU is relative to the robot base frame.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Create a launch file to publish static TF transforms</span>
+<span class="c1"># File: launch/static_tf.launch.py</span>
+
+from<span class="w"> </span>launch<span class="w"> </span>import<span class="w"> </span>LaunchDescription
+from<span class="w"> </span>launch_ros.actions<span class="w"> </span>import<span class="w"> </span>Node
+
+def<span class="w"> </span>generate_launch_description<span class="o">()</span>:
+<span class="w">    </span><span class="k">return</span><span class="w"> </span>LaunchDescription<span class="o">([</span>
+<span class="w">        </span><span class="c1"># imu_link is at the origin of base_link (same position, no rotation)</span>
+<span class="w">        </span><span class="c1"># Adjust x,y,z,yaw,pitch,roll if the IMU is offset on your robot</span>
+<span class="w">        </span>Node<span class="o">(</span>
+<span class="w">            </span><span class="nv">package</span><span class="o">=</span><span class="s1">&#39;tf2_ros&#39;</span>,
+<span class="w">            </span><span class="nv">executable</span><span class="o">=</span><span class="s1">&#39;static_transform_publisher&#39;</span>,
+<span class="w">            </span><span class="nv">name</span><span class="o">=</span><span class="s1">&#39;imu_tf&#39;</span>,
+<span class="w">            </span><span class="nv">arguments</span><span class="o">=[</span><span class="s1">&#39;0&#39;</span>,<span class="w"> </span><span class="s1">&#39;0&#39;</span>,<span class="w"> </span><span class="s1">&#39;0&#39;</span>,<span class="w"> </span><span class="s1">&#39;0&#39;</span>,<span class="w"> </span><span class="s1">&#39;0&#39;</span>,<span class="w"> </span><span class="s1">&#39;0&#39;</span>,<span class="w"> </span><span class="s1">&#39;base_link&#39;</span>,<span class="w"> </span><span class="s1">&#39;imu_link&#39;</span><span class="o">]</span>,
+<span class="w">        </span><span class="o">)</span>,
+<span class="w">        </span><span class="c1"># base_link is at the origin of odom (EKF will override this dynamically)</span>
+<span class="w">        </span>Node<span class="o">(</span>
+<span class="w">            </span><span class="nv">package</span><span class="o">=</span><span class="s1">&#39;tf2_ros&#39;</span>,
+<span class="w">            </span><span class="nv">executable</span><span class="o">=</span><span class="s1">&#39;static_transform_publisher&#39;</span>,
+<span class="w">            </span><span class="nv">name</span><span class="o">=</span><span class="s1">&#39;odom_base_tf&#39;</span>,
+<span class="w">            </span><span class="nv">arguments</span><span class="o">=[</span><span class="s1">&#39;0&#39;</span>,<span class="w"> </span><span class="s1">&#39;0&#39;</span>,<span class="w"> </span><span class="s1">&#39;0&#39;</span>,<span class="w"> </span><span class="s1">&#39;0&#39;</span>,<span class="w"> </span><span class="s1">&#39;0&#39;</span>,<span class="w"> </span><span class="s1">&#39;0&#39;</span>,<span class="w"> </span><span class="s1">&#39;odom&#39;</span>,<span class="w"> </span><span class="s1">&#39;base_link&#39;</span><span class="o">]</span>,
+<span class="w">        </span><span class="o">)</span>,
+<span class="w">    </span><span class="o">])</span>
+</code></pre></div>
+
+<hr />
+<h2 id="step-4-robot_localization-ekf-config">Step 4: robot_localization EKF Config</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># config/ekf.yaml</span>
+<span class="nt">ekf_filter_node</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">ros__parameters</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">frequency</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100.0</span><span class="w">           </span><span class="c1"># output rate, Hz</span>
+<span class="w">    </span><span class="nt">sensor_timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span><span class="w">        </span><span class="c1"># seconds before sensor considered stale</span>
+<span class="w">    </span><span class="nt">two_d_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">           </span><span class="c1"># constrain to 2D (no roll/pitch estimation)</span>
+<span class="w">    </span><span class="nt">publish_tf</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">           </span><span class="c1"># publish odom → base_link TF</span>
+<span class="w">    </span><span class="nt">map_frame</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">map</span>
+<span class="w">    </span><span class="nt">odom_frame</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">odom</span>
+<span class="w">    </span><span class="nt">base_link_frame</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">base_link</span>
+<span class="w">    </span><span class="nt">world_frame</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">odom</span><span class="w">          </span><span class="c1"># use odom as the world frame (no GPS fusion for now)</span>
+
+<span class="w">    </span><span class="c1"># IMU: topic, config vector, relative, queue_size, nodelay, threshold</span>
+<span class="w">    </span><span class="c1"># Config vector: [roll, pitch, yaw, vroll, vpitch, vyaw, ax, ay, az]</span>
+<span class="w">    </span><span class="c1">#                14 booleans — which fields to USE from this sensor</span>
+<span class="w">    </span><span class="nt">imu0</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/imu/raw</span>
+<span class="w">    </span><span class="nt">imu0_config</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w">   </span><span class="c1"># x,  y,  z  position  — IMU doesn&#39;t provide absolute position</span>
+<span class="w">                  </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="c1"># roll, pitch, yaw orientation — use yaw from integrated gyro</span>
+<span class="w">                  </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w">   </span><span class="c1"># vx, vy, vz velocity  — don&#39;t use IMU velocity</span>
+<span class="w">                  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="c1"># vroll, vpitch, vyaw angular velocity — USE</span>
+<span class="w">                  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">false</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># ax, ay, az linear accel — USE x and y (not z — gravity)</span>
+<span class="w">    </span><span class="nt">imu0_remove_gravitational_acceleration</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">imu0_queue_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+<span class="w">    </span><span class="nt">imu0_nodelay</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+
+<span class="w">    </span><span class="nt">odom0</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/odom/raw</span>
+<span class="w">    </span><span class="nt">odom0_config</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w">   </span><span class="c1"># position — odometry doesn&#39;t give absolute position</span>
+<span class="w">                   </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w">   </span><span class="c1"># orientation</span>
+<span class="w">                   </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">  </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w">   </span><span class="c1"># vx — USE forward velocity</span>
+<span class="w">                   </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="w">    </span><span class="c1"># vyaw — USE yaw rate if available</span>
+<span class="w">                   </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">false</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">odom0_queue_size</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+<span class="w">    </span><span class="nt">odom0_nodelay</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</code></pre></div>
+
+<p><strong>Launch file:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1"># launch/ekf.launch.py</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">launch</span><span class="w"> </span><span class="kn">import</span> <span class="n">LaunchDescription</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">launch_ros.actions</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ament_index_python.packages</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_package_share_directory</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">generate_launch_description</span><span class="p">():</span>
+    <span class="n">config</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">get_package_share_directory</span><span class="p">(</span><span class="s1">&#39;your_package&#39;</span><span class="p">),</span>
+        <span class="s1">&#39;config&#39;</span><span class="p">,</span> <span class="s1">&#39;ekf.yaml&#39;</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">LaunchDescription</span><span class="p">([</span>
+        <span class="n">Node</span><span class="p">(</span>
+            <span class="n">package</span><span class="o">=</span><span class="s1">&#39;robot_localization&#39;</span><span class="p">,</span>
+            <span class="n">executable</span><span class="o">=</span><span class="s1">&#39;ekf_node&#39;</span><span class="p">,</span>
+            <span class="n">name</span><span class="o">=</span><span class="s1">&#39;ekf_filter_node&#39;</span><span class="p">,</span>
+            <span class="n">output</span><span class="o">=</span><span class="s1">&#39;screen&#39;</span><span class="p">,</span>
+            <span class="n">parameters</span><span class="o">=</span><span class="p">[</span><span class="n">config</span><span class="p">],</span>
+        <span class="p">),</span>
+    <span class="p">])</span>
+</code></pre></div>
+
+<hr />
+<h2 id="step-5-verify-the-tf-tree">Step 5: Verify the TF Tree</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># In a new terminal:</span>
+ros2<span class="w"> </span>run<span class="w"> </span>tf2_tools<span class="w"> </span>view_frames
+
+<span class="c1"># Opens frames.pdf in current directory.</span>
+<span class="c1"># You need to see:</span>
+<span class="c1">#   map (if using GPS) or odom as root</span>
+<span class="c1">#   └── base_link (published by ekf_node at 100Hz)</span>
+<span class="c1">#       └── imu_link (static TF from launch file)</span>
+
+<span class="c1"># If any frame is missing: check static_transform_publisher is running</span>
+ros2<span class="w"> </span>run<span class="w"> </span>tf2_ros<span class="w"> </span>tf2_echo<span class="w"> </span>odom<span class="w"> </span>base_link
+<span class="c1"># Should print transform at 100Hz. If silent: EKF not running or no input data.</span>
+</code></pre></div>
+
+<hr />
+<h2 id="the-three-failure-points-from-mastery-plan-project-11">The Three Failure Points (from Mastery Plan, Project 11)</h2>
+<h3 id="failure-point-1-zero-covariance-diagonal-nan-propagation">Failure Point 1: Zero covariance diagonal → NaN propagation</h3>
+<p>EKF ignores sensors with <code>0.0</code> on the covariance diagonal — it interprets &ldquo;variance=0&rdquo; as &ldquo;infinitely precise&rdquo; and triggers NaN propagation in the Kalman gain matrix.</p>
+<p><strong>Symptom</strong>: <code>/odometry/filtered</code> publishes NaN in position fields. <code>ros2 topic echo /odometry/filtered | grep nan</code> shows results.</p>
+<p><strong>Fix</strong>: every diagonal element of every covariance matrix must be small but non-zero:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># In ImuBridgeNode (session 06):</span>
+<span class="c1"># Check these specifically:</span>
+<span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration_covariance</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span>   <span class="c1"># must not be 0</span>
+<span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration_covariance</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span>
+<span class="n">msg</span><span class="o">.</span><span class="n">linear_acceleration_covariance</span><span class="p">[</span><span class="mi">8</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span>
+<span class="n">msg</span><span class="o">.</span><span class="n">angular_velocity_covariance</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span>
+<span class="c1"># etc.</span>
+</code></pre></div>
+
+<h3 id="failure-point-2-timestamp-lag-ekf-velocity-drift">Failure Point 2: Timestamp lag → EKF velocity drift</h3>
+<p><code>get_clock().now()</code> called <em>after</em> <code>spi.xfer2()</code> completes introduces 1–3ms lag per sample. At 100Hz with angular velocity from the gyro, 3ms lag accumulates to detectable yaw drift.</p>
+<p><strong>Fix</strong>: capture the timestamp immediately after ioctl, before any Python processing:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># WRONG:</span>
+<span class="n">rx</span> <span class="o">=</span> <span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">([</span><span class="mi">0</span><span class="p">]</span><span class="o">*</span><span class="mi">130</span><span class="p">)</span>
+<span class="c1"># ... 2ms of Python processing ...</span>
+<span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_clock</span><span class="p">()</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">to_msg</span><span class="p">()</span>  <span class="c1"># 2ms late</span>
+
+<span class="c1"># CORRECT:</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span><span class="o">,</span><span class="w"> </span><span class="nn">ctypes.util</span>
+
+<span class="n">CLOCK_MONOTONIC_RAW</span> <span class="o">=</span> <span class="mi">4</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">timespec</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">Structure</span><span class="p">):</span>
+    <span class="n">_fields_</span> <span class="o">=</span> <span class="p">[(</span><span class="s1">&#39;tv_sec&#39;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_long</span><span class="p">),</span> <span class="p">(</span><span class="s1">&#39;tv_nsec&#39;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_long</span><span class="p">)]</span>
+
+<span class="n">librt</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">CDLL</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">find_library</span><span class="p">(</span><span class="s1">&#39;rt&#39;</span><span class="p">))</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">get_monotonic_raw_ns</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ts</span> <span class="o">=</span> <span class="n">timespec</span><span class="p">()</span>
+    <span class="n">librt</span><span class="o">.</span><span class="n">clock_gettime</span><span class="p">(</span><span class="n">CLOCK_MONOTONIC_RAW</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">byref</span><span class="p">(</span><span class="n">ts</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">ts</span><span class="o">.</span><span class="n">tv_sec</span> <span class="o">*</span> <span class="mi">1_000_000_000</span> <span class="o">+</span> <span class="n">ts</span><span class="o">.</span><span class="n">tv_nsec</span>
+
+<span class="n">rx</span> <span class="o">=</span> <span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">([</span><span class="mi">0</span><span class="p">]</span><span class="o">*</span><span class="mi">130</span><span class="p">)</span>
+<span class="n">stamp_ns</span> <span class="o">=</span> <span class="n">get_monotonic_raw_ns</span><span class="p">()</span>   <span class="c1"># immediately after ioctl</span>
+<span class="c1"># Convert to ROS 2 time:</span>
+<span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span><span class="o">.</span><span class="n">sec</span>     <span class="o">=</span> <span class="n">stamp_ns</span> <span class="o">//</span> <span class="mi">1_000_000_000</span>
+<span class="n">msg</span><span class="o">.</span><span class="n">header</span><span class="o">.</span><span class="n">stamp</span><span class="o">.</span><span class="n">nanosec</span> <span class="o">=</span> <span class="n">stamp_ns</span> <span class="o">%</span>  <span class="mi">1_000_000_000</span>
+</code></pre></div>
+
+<h3 id="failure-point-3-rviz2-shows-nothing">Failure Point 3: rviz2 shows nothing</h3>
+<p><strong>Symptom</strong>: rviz2 opens, add display <code>Odometry</code> for <code>/odometry/filtered</code>, nothing appears.</p>
+<p><strong>Cause</strong>: <code>Fixed Frame</code> set to <code>map</code> but no <code>map → base_link</code> TF exists (EKF uses <code>odom</code> as world frame if GPS is disabled).</p>
+<p><strong>Fix</strong>: set <code>Fixed Frame = odom</code> in rviz2 Global Options. Only use <code>Fixed Frame = map</code> after adding GPS fusion with a separate <code>navsat_transform_node</code>.</p>
+<hr />
+<h2 id="validation-sequence">Validation Sequence</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Terminal 1: Start STM32 bridge (session 06)</span>
+ros2<span class="w"> </span>run<span class="w"> </span>your_package<span class="w"> </span>imu_bridge_node
+
+<span class="c1"># Terminal 2: Start static TF</span>
+ros2<span class="w"> </span>launch<span class="w"> </span>your_package<span class="w"> </span>static_tf.launch.py
+
+<span class="c1"># Terminal 3: Start EKF</span>
+ros2<span class="w"> </span>launch<span class="w"> </span>your_package<span class="w"> </span>ekf.launch.py
+
+<span class="c1"># Terminal 4: Verify topics</span>
+ros2<span class="w"> </span>topic<span class="w"> </span>hz<span class="w"> </span>/imu/raw<span class="w">              </span><span class="c1"># target: ~100Hz</span>
+ros2<span class="w"> </span>topic<span class="w"> </span>hz<span class="w"> </span>/odom/raw<span class="w">             </span><span class="c1"># target: ~100Hz</span>
+ros2<span class="w"> </span>topic<span class="w"> </span>hz<span class="w"> </span>/odometry/filtered<span class="w">    </span><span class="c1"># target: ~100Hz</span>
+
+<span class="c1"># Terminal 5: Check EKF output</span>
+ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/odometry/filtered<span class="w"> </span>--once
+
+<span class="c1"># Terminal 6: Check TF</span>
+ros2<span class="w"> </span>run<span class="w"> </span>tf2_ros<span class="w"> </span>tf2_echo<span class="w"> </span>odom<span class="w"> </span>base_link
+
+<span class="c1"># Terminal 7: rqt_graph for pipeline view</span>
+ros2<span class="w"> </span>run<span class="w"> </span>rqt_graph<span class="w"> </span>rqt_graph
+</code></pre></div>
+
+<hr />
+<h2 id="rviz2-setup-for-imu-visualization">rviz2 Setup for IMU Visualization</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Open rviz2</span>
+rviz2
+
+<span class="c1"># In rviz2:</span>
+<span class="c1"># 1. Global Options → Fixed Frame: set to &quot;odom&quot;</span>
+<span class="c1"># 2. Add → By topic → /imu/raw → Imu display</span>
+<span class="c1">#    Set &quot;Topic&quot; to /imu/raw</span>
+<span class="c1">#    Set &quot;Fixed Frame&quot; to imu_link  (if IMU display shows nothing)</span>
+<span class="c1"># 3. Add → By topic → /odometry/filtered → Odometry display</span>
+<span class="c1">#    Uncheck &quot;Show Covariance&quot; initially (clutters view)</span>
+<span class="c1"># 4. Move/tilt the STM32 board → rviz2 arrow should update</span>
+
+<span class="c1"># If IMU arrow doesn&#39;t move:</span>
+<span class="c1">#   ros2 topic echo /imu/raw | grep angular_velocity</span>
+<span class="c1">#   Confirm non-zero values when moving the board</span>
+</code></pre></div>
+
+<hr />
+<h2 id="pipeline-validation-checklist">Pipeline Validation Checklist</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Full pipeline validation script</span>
+<span class="c1">#!/bin/bash</span>
+
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;=== Pipeline Validation ===&quot;</span>
+
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;1. IMU topic rate:&quot;</span>
+timeout<span class="w"> </span><span class="m">5</span><span class="w"> </span>ros2<span class="w"> </span>topic<span class="w"> </span>hz<span class="w"> </span>/imu/raw<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-3
+
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;2. EKF output rate:&quot;</span>
+timeout<span class="w"> </span><span class="m">5</span><span class="w"> </span>ros2<span class="w"> </span>topic<span class="w"> </span>hz<span class="w"> </span>/odometry/filtered<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-3
+
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;3. TF chain:&quot;</span>
+timeout<span class="w"> </span><span class="m">3</span><span class="w"> </span>ros2<span class="w"> </span>run<span class="w"> </span>tf2_ros<span class="w"> </span>tf2_echo<span class="w"> </span>odom<span class="w"> </span>base_link<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-10
+
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;4. NaN check in EKF output:&quot;</span>
+timeout<span class="w"> </span><span class="m">3</span><span class="w"> </span>ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/odometry/filtered<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span><span class="s2">&quot;nan&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;  No NaN found&quot;</span>
+
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;5. IMU covariance diagonals:&quot;</span>
+ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/imu/raw<span class="w"> </span>--once<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-A5<span class="w"> </span><span class="s2">&quot;linear_acceleration_covariance&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="milestone-checklist">Milestone Checklist</h2>
+<ul>
+<li>[ ] <code>ros2 topic hz /odometry/filtered</code> shows ~100Hz</li>
+<li>[ ] <code>view_frames</code> shows <code>odom → base_link → imu_link</code> connected</li>
+<li>[ ] No NaN in <code>/odometry/filtered</code> during 5-minute run</li>
+<li>[ ] rviz2 <code>Odometry</code> display updates when STM32 board is tilted</li>
+<li>[ ] Timestamp lag fix applied: stamp captured immediately after ioctl</li>
+<li>[ ] IMU covariance diagonals all non-zero (verified with <code>ros2 topic echo</code>)</li>
+<li>[ ] <code>rqt_graph</code> shows complete pipeline: bridge → EKF → rviz2</li>
+</ul>
+<hr />
+<h2 id="session-notes-template">Session Notes Template</h2>
+<div class="highlight"><pre><span></span><code><span class="gu">## Session Notes — [DATE]</span>
+
+<span class="gu">### Setup</span>
+<span class="k">-</span><span class="w"> </span>robot_localization version: ___
+<span class="k">-</span><span class="w"> </span>ROS 2 distro: humble / jazzy
+
+<span class="gu">### EKF</span>
+<span class="k">-</span><span class="w"> </span>First NaN-free run: yes/no (if no: which covariance was zero?)
+<span class="k">-</span><span class="w"> </span>First rviz2 display: working at yes/no (if no: Fixed Frame issue?)
+<span class="k">-</span><span class="w"> </span>EKF output rate (hz): ___Hz
+
+<span class="gu">### TF Tree</span>
+<span class="k">-</span><span class="w"> </span>view_frames shows complete tree: yes/no
+<span class="k">-</span><span class="w"> </span>Missing frames (if any): ___
+
+<span class="gu">### Timestamp</span>
+<span class="k">-</span><span class="w"> </span>Lag fix applied: yes/no
+<span class="k">-</span><span class="w"> </span>Measured lag without fix: ___ms
+<span class="k">-</span><span class="w"> </span>Measured lag with fix: ___µs
+
+<span class="gu">### Issues</span>
+<span class="k">-</span><span class="w"> </span>...
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>03 — DMA + D-Cache Gotchas - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="03-dma-d-cache-gotchas">03 — DMA + D-Cache Gotchas</h1>
+<h3 id="stm32h743zi2-cortex-m7-d-cache-spi-dma-at-400hz">STM32H743ZI2 · Cortex-M7 D-cache · SPI DMA at 400Hz</h3>
+<p><strong>Status:</strong> 🟡 HARDWARE-GATED — fill this in after <code>02</code> is working<br />
+<strong>Prerequisite:</strong> <code>02-spi-slave-first-frame.md</code> milestone checklist complete<br />
+<strong>Hardware required:</strong> Same as <code>02</code> + Saleae Logic 8<br />
+<strong>Unlocks:</strong> <code>04-imu-i2c-reads.md</code><br />
+<strong>Time budget:</strong> ~5 hours</p>
+<hr />
+<h2 id="goal-of-this-session">Goal of This Session</h2>
+<p>Deliberately reproduce the D-cache coherency bug, confirm it on the logic analyzer, then
+fix it. You&rsquo;ll never forget the fix once you&rsquo;ve seen it bite in hardware.</p>
+<p><strong>Milestone</strong>: SPI slave running at 100Hz with DMA, zero corrupted frames over a 10-second run.</p>
+<hr />
+<h2 id="why-this-session-exists">Why This Session Exists</h2>
+<p>The STM32H743 has a <strong>32KB D-cache</strong> enabled by default in the Zephyr Nucleo H743 board config.
+DMA bypasses the cache and writes directly to SRAM. The CPU (and your code) reads from cache,
+which may still hold stale data from before the DMA write.</p>
+<p>This is invisible in the basic <code>spi_transceive</code> approach because <code>spi_transceive</code> is blocking
+and synchronous — Zephyr&rsquo;s SPI driver handles the cache flushing internally.</p>
+<p>Once you add <strong>DMA double-buffering</strong> for 100Hz operation, <em>you</em> are responsible for the cache.</p>
+<hr />
+<h2 id="theory-d-cache-coherency-in-5-minutes">Theory: D-Cache Coherency in 5 Minutes</h2>
+<div class="highlight"><pre><span></span><code>Memory layout:
+┌───────────────────────────────────────────────┐
+│  DTCM (0x2000_0000)   ← Tightly Coupled, no cache, DMA-accessible  │
+│  AXI SRAM (0x2400_0000) ← Behind D-cache, DMA-accessible          │
+│  SRAM1 (0x3000_0000)  ← Behind D-cache, DMA-accessible            │
+└───────────────────────────────────────────────┘
+
+D-cache sits between CPU and all SRAM except DTCM.
+DMA controller has its own bus master — bypasses cache entirely.
+
+WRITE path (CPU → DMA):
+  CPU writes tx_buf[0] = 0xAA → goes into cache (dirty line)
+  DMA starts SPI TX — reads tx_buf[0] from SRAM directly (0x00 if cache not flushed)
+  Result: Jetson receives 0x00 instead of 0xAA
+
+READ path (DMA → CPU):
+  DMA writes received byte into rx_buf[0] = 0x11 → SRAM directly
+  CPU reads rx_buf[0] → gets 0x?? from cache (whatever was there before)
+  Result: CPU sees stale data, DMA wrote the correct value but cache hides it
+</code></pre></div>
+
+<p><strong>Fix: cache maintenance before DMA</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Before DMA TX (flush CPU writes to SRAM):</span>
+<span class="n">SCB_CleanDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="o">*</span><span class="p">)</span><span class="n">tx_buf</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">tx_buf</span><span class="p">));</span>
+
+<span class="c1">// After DMA RX completes (invalidate stale cache):</span>
+<span class="n">SCB_InvalidateDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="o">*</span><span class="p">)</span><span class="n">rx_buf</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">rx_buf</span><span class="p">));</span>
+</code></pre></div>
+
+<p><strong>Alternative: put buffers in DTCM</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Place buffers in DTCM (no cache, no maintenance needed):</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">[</span><span class="mi">64</span><span class="p">]</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">section</span><span class="p">(</span><span class="s">&quot;.dtcm_data&quot;</span><span class="p">)));</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">[</span><span class="mi">64</span><span class="p">]</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">section</span><span class="p">(</span><span class="s">&quot;.dtcm_data&quot;</span><span class="p">)));</span>
+</code></pre></div>
+
+<p>DTCM is zero-latency for the CPU, 32-bit wide, but limited to 128KB. Use it for
+time-critical DMA buffers; leave SRAM for larger allocations.</p>
+<hr />
+<h2 id="experiment-1-reproduce-the-bug">Experiment 1: Reproduce the Bug</h2>
+<h3 id="setup">Setup</h3>
+<p>Build the double-buffered SPI slave from session <code>02</code> but <strong>without</strong> cache maintenance:</p>
+<div class="highlight"><pre><span></span><code><span class="cm">/* INTENTIONALLY BUGGY — no cache maintenance */</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">tx_buf_a</span><span class="p">[</span><span class="mi">8</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="mh">0xAA</span><span class="p">,</span><span class="w"> </span><span class="mh">0xBB</span><span class="p">,</span><span class="w"> </span><span class="mh">0xCC</span><span class="p">,</span><span class="w"> </span><span class="mh">0xDD</span><span class="p">,</span><span class="w"> </span><span class="mh">0x01</span><span class="p">,</span><span class="w"> </span><span class="mh">0x02</span><span class="p">,</span><span class="w"> </span><span class="mh">0x03</span><span class="p">,</span><span class="w"> </span><span class="mh">0x04</span><span class="w"> </span><span class="p">};</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">tx_buf_b</span><span class="p">[</span><span class="mi">8</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="mh">0x11</span><span class="p">,</span><span class="w"> </span><span class="mh">0x22</span><span class="p">,</span><span class="w"> </span><span class="mh">0x33</span><span class="p">,</span><span class="w"> </span><span class="mh">0x44</span><span class="p">,</span><span class="w"> </span><span class="mh">0x55</span><span class="p">,</span><span class="w"> </span><span class="mh">0x66</span><span class="p">,</span><span class="w"> </span><span class="mh">0x77</span><span class="p">,</span><span class="w"> </span><span class="mh">0x88</span><span class="w"> </span><span class="p">};</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">spi_transfer_complete_cb</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">result</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">user_data</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Swap buffers */</span>
+<span class="w">    </span><span class="n">current_buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">current_buf</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">tx_buf_a</span><span class="p">)</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="n">tx_buf_b</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">tx_buf_a</span><span class="p">;</span>
+<span class="w">    </span><span class="cm">/* ARM NEXT TRANSFER — no cache flush */</span>
+<span class="w">    </span><span class="n">arm_next_spi_transfer</span><span class="p">(</span><span class="n">current_buf</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="what-to-observe">What to Observe</h3>
+<p>Run the Pi master sending 100 transfers:</p>
+<div class="highlight"><pre><span></span><code><span class="n">errors</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">):</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">([</span><span class="n">i</span> <span class="o">&amp;</span> <span class="mh">0xFF</span><span class="p">]</span> <span class="o">*</span> <span class="mi">8</span><span class="p">)</span>
+    <span class="n">expected</span> <span class="o">=</span> <span class="n">KNOWN_PATTERN</span>
+    <span class="k">if</span> <span class="n">result</span> <span class="o">!=</span> <span class="n">expected</span><span class="p">:</span>
+        <span class="n">errors</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Frame </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">: expected </span><span class="si">{</span><span class="n">expected</span><span class="si">}</span><span class="s2">, got </span><span class="si">{</span><span class="n">result</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error rate: </span><span class="si">{</span><span class="n">errors</span><span class="si">}</span><span class="s2">/100&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>Expected with bug</strong>: 0–5% error rate, intermittent, non-deterministic.
+Logic analyzer will show corrupted frames intermittently.</p>
+<p><strong>Key insight</strong>: the bug is intermittent because D-cache uses write-back eviction.
+Sometimes the cache line happens to be evicted before DMA reads it (correct).
+Sometimes it isn&rsquo;t (corrupted). Deterministic in temperature and load, not in general.</p>
+<hr />
+<h2 id="experiment-2-fix-the-bug">Experiment 2: Fix the Bug</h2>
+<h3 id="fix-a-cache-maintenance">Fix A: Cache Maintenance</h3>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">arm_next_spi_transfer</span><span class="p">(</span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">len</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Flush CPU&#39;s dirty cache lines to SRAM before DMA reads them */</span>
+<span class="w">    </span><span class="n">SCB_CleanDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="n">len</span><span class="p">);</span>
+
+<span class="w">    </span><span class="cm">/* Re-arm DMA */</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf</span><span class="w"> </span><span class="n">spi_buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">len</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf_set</span><span class="w"> </span><span class="n">buf_set</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buffers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">spi_buf</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="n">spi_transceive_cb</span><span class="p">(</span><span class="n">spi_dev</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">spi_cfg</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">buf_set</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="n">spi_transfer_complete_cb</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">process_received</span><span class="p">(</span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">len</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Invalidate cache before CPU reads DMA-written data */</span>
+<span class="w">    </span><span class="n">SCB_InvalidateDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="n">len</span><span class="p">);</span>
+
+<span class="w">    </span><span class="cm">/* Now safe to read */</span>
+<span class="w">    </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;RX[0] = 0x%02x&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">buf</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Note on alignment</strong>: <code>SCB_CleanDCache_by_Addr</code> requires address aligned to 32 bytes
+(D-cache line size). Use <code>__aligned(32)</code> attribute on buffers.</p>
+<div class="highlight"><pre><span></span><code><span class="cm">/* Aligned buffer declaration */</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="nf">__aligned</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span><span class="w"> </span><span class="n">tx_buf_a</span><span class="p">[</span><span class="mi">64</span><span class="p">];</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="nf">__aligned</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span><span class="w"> </span><span class="n">tx_buf_b</span><span class="p">[</span><span class="mi">64</span><span class="p">];</span>
+</code></pre></div>
+
+<h3 id="fix-b-dtcm-placement-better-for-hot-paths">Fix B: DTCM Placement (Better for Hot Paths)</h3>
+<div class="highlight"><pre><span></span><code><span class="cm">/* Linker script overlay — add to boards/nucleo_h743zi2.overlay */</span>
+<span class="cm">/*</span>
+<span class="cm">   or use attribute directly:</span>
+<span class="cm">*/</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">tx_buf_a</span><span class="p">[</span><span class="mi">64</span><span class="p">]</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">section</span><span class="p">(</span><span class="s">&quot;.dtcm_data&quot;</span><span class="p">)));</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">tx_buf_b</span><span class="p">[</span><span class="mi">64</span><span class="p">]</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">section</span><span class="p">(</span><span class="s">&quot;.dtcm_data&quot;</span><span class="p">)));</span>
+
+<span class="cm">/* No cache maintenance needed — DTCM bypasses D-cache */</span>
+</code></pre></div>
+
+<p>Check in <code>zephyr/boards/arm/nucleo_h743zi2/nucleo_h743zi2.ld</code> that <code>.dtcm_data</code> section
+is defined pointing to <code>0x2000_0000</code>.</p>
+<hr />
+<h2 id="experiment-3-measure-the-100hz-timing-budget">Experiment 3: Measure the 100Hz Timing Budget</h2>
+<p>At 100Hz, each SPI transaction must complete in under 10ms. Measure actual timing:</p>
+<div class="highlight"><pre><span></span><code><span class="cm">/* Add GPIO toggle around SPI transfer for scope/LA measurement */</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/gpio.h&gt;</span>
+
+<span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_dt_spec</span><span class="w"> </span><span class="n">timing_pin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GPIO_DT_SPEC_GET</span><span class="p">(</span><span class="n">DT_ALIAS</span><span class="p">(</span><span class="n">timing</span><span class="p">),</span><span class="w"> </span><span class="n">gpios</span><span class="p">);</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">arm_next_spi_transfer</span><span class="p">(</span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">len</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">gpio_pin_set_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">timing_pin</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w">   </span><span class="cm">/* GPIO HIGH = SPI transaction active */</span>
+<span class="w">    </span><span class="n">SCB_CleanDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="n">len</span><span class="p">);</span>
+<span class="w">    </span><span class="cm">/* ... arm DMA ... */</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">spi_transfer_complete_cb</span><span class="p">(...)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">gpio_pin_set_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">timing_pin</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w">   </span><span class="cm">/* GPIO LOW = transaction done */</span>
+<span class="w">    </span><span class="n">SCB_InvalidateDCache_by_Addr</span><span class="p">((</span><span class="kt">uint32_t</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">rx_buf</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">rx_buf</span><span class="p">));</span>
+<span class="w">    </span><span class="cm">/* ... process, prepare next buf ... */</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Connect timing pin (e.g., PB0) to Logic 8 Ch4. Measure:
+- Transfer duration (HIGH pulse width)
+- Gap between transfers
+- Jitter over 100 consecutive transfers</p>
+<p><strong>Target numbers:</strong></p>
+<div class="highlight"><pre><span></span><code>8-byte frame @ 4MHz:  duration = 8 × 8 / 4e6 = 16µs
+Cache flush:          ~1µs per 32-byte cache line
+DMA setup overhead:   ~5µs
+Callback overhead:    ~2µs
+Total per frame:      &lt; 50µs (budget is 10ms at 100Hz — plenty of headroom)
+</code></pre></div>
+
+<hr />
+<h2 id="milestone-checklist">Milestone Checklist</h2>
+<ul>
+<li>[ ] Bug reproduced: intermittent corrupted frames visible on logic analyzer</li>
+<li>[ ] Fix A applied: error rate drops to 0/100</li>
+<li>[ ] Fix B applied: DTCM buffers eliminate cache maintenance calls</li>
+<li>[ ] Timing measured: GPIO toggle visible on Ch4, duration &lt; 50µs per frame</li>
+<li>[ ] 10-second run at 100Hz: 0 frame errors, no HardFaults</li>
+<li>[ ] <code>kernel stacks</code> in Zephyr shell: no stack overflows</li>
+</ul>
+<hr />
+<h2 id="pre-read-for-session-4">Pre-Read for Session 4</h2>
+<p>Before <code>04-imu-i2c-reads.md</code>:
+1. Read <code>zephyr/09_i2c.md</code> — specifically the <code>i2c_write_read</code> pattern and stuck bus recovery
+2. ICM-42688-P datasheet: Section 14 (SPI interface), Section 15 (I2C interface), Register Map Appendix
+3. <code>00-mastery-plan.md</code> &ldquo;Stuck I2C Bus After Power Cycle&rdquo;</p>
+<hr />
+<h2 id="session-notes-template">Session Notes Template</h2>
+<div class="highlight"><pre><span></span><code><span class="gu">## Session Notes — [DATE]</span>
+
+<span class="gu">### Bug Reproduction</span>
+<span class="k">-</span><span class="w"> </span>Error rate before fix: ___/100 frames
+<span class="k">-</span><span class="w"> </span>LA screenshot filename: ...
+<span class="k">-</span><span class="w"> </span>What the corrupted bytes looked like: ...
+
+<span class="gu">### Fix Results</span>
+<span class="k">-</span><span class="w"> </span>Fix A (cache maintenance): error rate → ___/100
+<span class="k">-</span><span class="w"> </span>Fix B (DTCM): error rate → ___/100
+
+<span class="gu">### Timing Measurements</span>
+<span class="k">-</span><span class="w"> </span>Transfer duration: ___µs
+<span class="k">-</span><span class="w"> </span>Jitter: ±___µs
+<span class="k">-</span><span class="w"> </span>Overhead budget remaining: ___µs / 10000µs
+
+<span class="gu">### Surprises</span>
+<span class="k">-</span><span class="w"> </span>...
+
+<span class="gu">### Questions for Session 4</span>
+<span class="k">-</span><span class="w"> </span>...
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>02 — SPI Slave: First Frame Capture - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="02-spi-slave-first-frame-capture">02 — SPI Slave: First Frame Capture</h1>
+<h3 id="stm32h743zi2-as-spi-slave-saleae-logic-8-jetson-or-raspberry-pi-as-master">STM32H743ZI2 as SPI slave · Saleae Logic 8 · Jetson (or Raspberry Pi) as master</h3>
+<p><strong>Status:</strong> 🟡 HARDWARE-GATED — fill this in when logic analyzer arrives<br />
+<strong>Prerequisite:</strong> <code>01-first-build-flash-debug.md</code> completed + working GDB<br />
+<strong>Hardware required:</strong> Nucleo-H743ZI2 · Saleae Logic 8 · a SPI master (Raspberry Pi or Jetson)<br />
+<strong>Unlocks:</strong> <code>03-dma-cache-gotchas.md</code><br />
+<strong>Time budget:</strong> ~4 hours</p>
+<hr />
+<h2 id="goal-of-this-session">Goal of This Session</h2>
+<p>Walk away having:
+1. STM32 running as SPI slave, sending a known payload
+2. Saleae Logic 8 capturing that payload with SPI decode
+3. Raspberry Pi / Jetson reading those bytes via <code>spidev</code>
+4. All 3 sides agreeing on the same bytes</p>
+<p>That last point is the milestone. Once you have &ldquo;STM32 sends X → logic analyzer sees X → Jetson reads X,&rdquo; everything else is just adding more bytes and faster clocks.</p>
+<hr />
+<h2 id="theory-review-read-before-wiring">Theory Review (Read Before Wiring)</h2>
+<h3 id="spi-roles-and-timing">SPI Roles and Timing</h3>
+<div class="highlight"><pre><span></span><code>              MOSI ─────────────────────────────────►
+Master ──── CS   ─────┐     ┌──────────────────── Slave (STM32)
+(Jetson)    CLK ──────┼─────┼────────────────────
+              MISO ◄──┴─────┴────────────────────
+</code></pre></div>
+
+<p><strong>Slave constraint</strong>: the slave must have TX buffer ready <em>before</em> CS goes low.
+The clock starts immediately after CS asserts — no time to prepare.</p>
+<p>See: <code>zephyr/05_spi_slave_dma.md</code> — &ldquo;SPI Slave Pre-Arming Race&rdquo; — this is the core bug
+you&rsquo;ll hit if you try to arm the DMA in the CS interrupt callback.</p>
+<h3 id="cpolcpha-modes">CPOL/CPHA Modes</h3>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>CPOL</th>
+<th>CPHA</th>
+<th>Clock idle</th>
+<th>Sample edge</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>Low</td>
+<td>Rising</td>
+</tr>
+<tr>
+<td>1</td>
+<td>0</td>
+<td>1</td>
+<td>Low</td>
+<td>Falling</td>
+</tr>
+<tr>
+<td>2</td>
+<td>1</td>
+<td>0</td>
+<td>High</td>
+<td>Falling</td>
+</tr>
+<tr>
+<td>3</td>
+<td>1</td>
+<td>1</td>
+<td>High</td>
+<td>Rising</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Use Mode 0 (CPOL=0, CPHA=0) for first bringup.</strong> It&rsquo;s the most common and easiest to
+verify on a logic analyzer — the clock idles low, making it visually obvious if a wire is disconnected.</p>
+<hr />
+<h2 id="wiring-diagram">Wiring Diagram</h2>
+<div class="highlight"><pre><span></span><code>STM32 Nucleo-H743ZI2          Raspberry Pi 4 (or Jetson)
+─────────────────────────     ──────────────────────────
+SPI1_SCK  = PA5 (CN7 pin 10)  GPIO11 (SPI0_CLK) = pin 23
+SPI1_MISO = PA6 (CN7 pin 12)  GPIO9  (SPI0_MISO) = pin 21
+SPI1_MOSI = PA7 (CN7 pin 14)  GPIO10 (SPI0_MOSI) = pin 19
+SPI1_NSS  = PA4 (CN7 pin 17)  GPIO8  (SPI0_CE0)  = pin 24
+
+GND (CN6 pin 6)               GND (pin 6)
+
+⚠ Keep wires under 15cm. Run GND alongside CLK.
+⚠ Both boards powered from the same USB hub OR add GND wire between them.
+⚠ Check voltage: Jetson GPIO = 3.3V. Nucleo GPIO = 3.3V. ✓
+</code></pre></div>
+
+<p><strong>Saleae Logic 8 connections:</strong></p>
+<div class="highlight"><pre><span></span><code>Logic 8 Ch0  → SPI1_SCK  (PA5)
+Logic 8 Ch1  → SPI1_CS   (PA4)
+Logic 8 Ch2  → SPI1_MISO (PA6)
+Logic 8 Ch3  → SPI1_MOSI (PA7)
+Logic 8 GND  → STM32 GND (CN6 pin 6) — REQUIRED, not optional
+</code></pre></div>
+
+<hr />
+<h2 id="step-by-step-minimum-working-spi-slave">Step-by-Step: Minimum Working SPI Slave</h2>
+<h3 id="step-1-stm32-spi-slave-application">Step 1: STM32 SPI Slave Application</h3>
+<div class="highlight"><pre><span></span><code><span class="cm">/* zephyr/deep-dive/firmware/01-spi-slave-minimal/src/main.c */</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/kernel.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/spi.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/logging/log.h&gt;</span>
+
+<span class="n">LOG_MODULE_REGISTER</span><span class="p">(</span><span class="n">spi_slave</span><span class="p">,</span><span class="w"> </span><span class="n">LOG_LEVEL_DBG</span><span class="p">);</span>
+
+<span class="cm">/* SPI device from devicetree */</span>
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">spi_dev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">spi1</span><span class="p">));</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_config</span><span class="w"> </span><span class="n">spi_cfg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">frequency</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1000000</span><span class="p">,</span><span class="w">                </span><span class="cm">/* 1 MHz — slow for bringup */</span>
+<span class="w">    </span><span class="p">.</span><span class="n">operation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SPI_WORD_SET</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w">       </span><span class="cm">/* 8-bit words */</span>
+<span class="w">                 </span><span class="n">SPI_TRANSFER_MSB</span><span class="w"> </span><span class="o">|</span><span class="w">      </span><span class="cm">/* MSB first */</span>
+<span class="w">                 </span><span class="n">SPI_OP_MODE_SLAVE</span><span class="p">,</span><span class="w">      </span><span class="cm">/* &lt;-- slave mode */</span>
+<span class="w">    </span><span class="p">.</span><span class="n">slave</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">cs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w">                          </span><span class="cm">/* hardware CS managed by SPI peripheral */</span>
+<span class="p">};</span>
+
+<span class="cm">/* Known payload — easy to verify visually */</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">[]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="mh">0xAA</span><span class="p">,</span><span class="w"> </span><span class="mh">0xBB</span><span class="p">,</span><span class="w"> </span><span class="mh">0xCC</span><span class="p">,</span><span class="w"> </span><span class="mh">0xDD</span><span class="p">,</span><span class="w"> </span><span class="mh">0x01</span><span class="p">,</span><span class="w"> </span><span class="mh">0x02</span><span class="p">,</span><span class="w"> </span><span class="mh">0x03</span><span class="p">,</span><span class="w"> </span><span class="mh">0x04</span><span class="w"> </span><span class="p">};</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">[</span><span class="mi">8</span><span class="p">];</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">device_is_ready</span><span class="p">(</span><span class="n">spi_dev</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;SPI device not ready&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;SPI slave ready&quot;</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf</span><span class="w"> </span><span class="n">tx_spi_buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">tx_buf</span><span class="p">)</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf</span><span class="w"> </span><span class="n">rx_spi_buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">rx_buf</span><span class="p">)</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf_set</span><span class="w"> </span><span class="n">tx_set</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buffers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx_spi_buf</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf_set</span><span class="w"> </span><span class="n">rx_set</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buffers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rx_spi_buf</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;Waiting for SPI master...&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">ret</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">spi_transceive</span><span class="p">(</span><span class="n">spi_dev</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">spi_cfg</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx_set</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rx_set</span><span class="p">);</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ret</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;spi_transceive error: %d&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">ret</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;TX sent; RX received: %02x %02x %02x %02x&quot;</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">rx_buf</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">[</span><span class="mi">3</span><span class="p">]);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Devicetree overlay</strong> (<code>boards/nucleo_h743zi2.overlay</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="o">&amp;</span><span class="na">spi1</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kr">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;okay&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">spi1_sck_pa5</span><span class="w"> </span><span class="o">&amp;</span><span class="na">spi1_miso_pa6</span><span class="w"> </span><span class="o">&amp;</span><span class="na">spi1_mosi_pa7</span><span class="w"> </span><span class="o">&amp;</span><span class="na">spi1_nss_pa4</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;default&quot;</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<h3 id="step-2-raspberry-pi-master-spidev">Step 2: Raspberry Pi Master (spidev)</h3>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># pi-spi-master.py — Send known bytes, print what slave returned</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">spidev</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="n">spi</span> <span class="o">=</span> <span class="n">spidev</span><span class="o">.</span><span class="n">SpiDev</span><span class="p">()</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>             <span class="c1"># bus 0, device 0 (CE0)</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">max_speed_hz</span> <span class="o">=</span> <span class="mi">1000000</span>  <span class="c1"># 1 MHz — match STM32 config</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">mode</span> <span class="o">=</span> <span class="mi">0</span>                <span class="c1"># CPOL=0, CPHA=0</span>
+
+<span class="n">MASTER_TX</span> <span class="o">=</span> <span class="p">[</span><span class="mh">0x11</span><span class="p">,</span> <span class="mh">0x22</span><span class="p">,</span> <span class="mh">0x33</span><span class="p">,</span> <span class="mh">0x44</span><span class="p">,</span> <span class="mh">0x55</span><span class="p">,</span> <span class="mh">0x66</span><span class="p">,</span> <span class="mh">0x77</span><span class="p">,</span> <span class="mh">0x88</span><span class="p">]</span>
+
+<span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">(</span><span class="n">MASTER_TX</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Sent:     </span><span class="si">{</span><span class="p">[</span><span class="nb">hex</span><span class="p">(</span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">MASTER_TX</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Received: </span><span class="si">{</span><span class="p">[</span><span class="nb">hex</span><span class="p">(</span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">result</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Expected: [&#39;0xaa&#39;, &#39;0xbb&#39;, &#39;0xcc&#39;, &#39;0xdd&#39;, &#39;0x1&#39;, &#39;0x2&#39;, &#39;0x3&#39;, &#39;0x4&#39;]&quot;</span><span class="p">)</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>Verify:</strong>
+- Pi prints <code>0xaa 0xbb 0xcc 0xdd 0x01 0x02 0x03 0x04</code> ← matches <code>tx_buf</code> in STM32 code
+- Logic analyzer shows 8 bytes with those values on MISO channel</p>
+<h3 id="step-3-logic-analyzer-setup">Step 3: Logic Analyzer Setup</h3>
+<p>In <strong>Saleae Logic 2</strong>:
+1. Set sample rate: <strong>50 MS/s</strong> (50× the 1MHz SPI clock — minimum is 10×)
+2. Add <strong>SPI Analyzer</strong>: Channels → Ch0=CLK, Ch1=CS, Ch2=MISO, Ch3=MOSI · CPOL=0 · CPHA=0
+3. <strong>Trigger</strong>: Ch1 (CS) falling edge
+4. Click <strong>Start</strong> — Logic 2 arms the trigger
+5. Run the Pi script — trigger fires on CS assert
+6. Stop capture — you should see 8 decoded bytes</p>
+<p><strong>What to look for:</strong></p>
+<div class="highlight"><pre><span></span><code>Decoded SPI transaction:
+CS  ─────┐                              ┌───
+         └──────────────────────────────┘
+CLK ─────┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌┐┌
+MISO  0xAA    0xBB    0xCC    0xDD    0x01 ...
+MOSI  0x11    0x22    0x33    0x44    0x55 ...
+</code></pre></div>
+
+<hr />
+<h2 id="the-first-bug-you-will-hit">The First Bug You Will Hit</h2>
+<p><strong>Symptom</strong>: Pi receives <code>0x00 0x00 0x00 0x00 ...</code> instead of <code>0xAA 0xBB ...</code></p>
+<p><strong>Cause</strong>: <code>spi_transceive</code> in Zephyr slave mode blocks until the master initiates. But you
+called it <em>after</em> starting the loop print, so it isn&rsquo;t armed when CS drops. The hardware
+sends the default 0x00 from the empty shift register.</p>
+<p><strong>Fix</strong>: Arm <code>spi_transceive</code> BEFORE signaling ready. In production, use double-buffering
+and arm on the previous transfer-complete callback. For this exercise, just ensure the
+<code>spi_transceive</code> call is reached before the Pi runs <code>spi.xfer2</code>.</p>
+<p>Add a 200ms delay in the Pi script before the first transfer:</p>
+<div class="highlight"><pre><span></span><code><span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.2</span><span class="p">)</span>   <span class="c1"># give STM32 time to arm before first CS</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">(</span><span class="n">MASTER_TX</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="milestone-checklist">Milestone Checklist</h2>
+<ul>
+<li>[ ] Logic analyzer captures SPI clock at correct frequency</li>
+<li>[ ] Decoded MISO shows <code>AA BB CC DD 01 02 03 04</code></li>
+<li>[ ] Decoded MOSI shows <code>11 22 33 44 55 66 77 88</code></li>
+<li>[ ] Pi Python script prints matching received bytes</li>
+<li>[ ] STM32 LOG shows <code>RX received: 11 22 33 44</code></li>
+<li>[ ] Logic analyzer shows CS held low for entire 8-byte transaction</li>
+<li>[ ] Speed bumped to 4 MHz and all bytes still correct (signal integrity check)</li>
+</ul>
+<hr />
+<h2 id="pre-read-for-session-3">Pre-Read for Session 3</h2>
+<p>Before <code>03-dma-cache-gotchas.md</code>:
+1. Re-read <code>zephyr/06_dma.md</code> — DMA scatter-gather and double-buffering
+2. Re-read <code>00-mastery-plan.md</code> &ldquo;D-Cache Coherency (2 days lost if unknown)&rdquo;
+3. Look up STM32H743 reference manual Section 14 (L1 cache): <code>SCB_CleanDCache_by_Addr</code>, <code>SCB_InvalidateDCache_by_Addr</code></p>
+<hr />
+<h2 id="session-notes-template">Session Notes Template</h2>
+<div class="highlight"><pre><span></span><code><span class="gu">## Session Notes — [DATE]</span>
+
+<span class="gu">### Wiring Notes</span>
+<span class="k">-</span><span class="w"> </span>Wire lengths used: CLK=___cm, CS=___cm, MISO=___cm, MOSI=___cm
+<span class="k">-</span><span class="w"> </span>Common GND: yes/no — problem if no
+
+<span class="gu">### First Capture</span>
+<span class="k">-</span><span class="w"> </span>Time to first valid capture: ___min
+<span class="k">-</span><span class="w"> </span>First bug encountered: ...
+<span class="k">-</span><span class="w"> </span>Fix: ...
+
+<span class="gu">### Logic Analyzer Observations</span>
+<span class="k">-</span><span class="w"> </span>Actual SPI clock frequency measured: ___Hz (should be ~1MHz)
+<span class="k">-</span><span class="w"> </span>Any ringing visible on CLK? (screenshot if yes)
+<span class="k">-</span><span class="w"> </span>CS glitches? (screenshot if yes)
+
+<span class="gu">### Speed Sweep Results</span>
+| Speed | Correct? | Notes |
+|-------|----------|-------|
+| 1 MHz | | |
+| 4 MHz | | |
+| 8 MHz | | |
+
+<span class="gu">### Questions for Next Session</span>
+<span class="k">-</span><span class="w"> </span>...
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

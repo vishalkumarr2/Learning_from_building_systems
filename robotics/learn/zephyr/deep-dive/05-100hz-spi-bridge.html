@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>05 — 100Hz SPI Bridge to Jetson - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="05-100hz-spi-bridge-to-jetson">05 — 100Hz SPI Bridge to Jetson</h1>
+<h3 id="stm32h743zi2-slave-jetson-master-dma-double-buffer-protobuf-frames">STM32H743ZI2 (slave) ↔ Jetson (master) · DMA double-buffer · Protobuf frames</h3>
+<p><strong>Status:</strong> 🟡 HARDWARE-GATED — fill this in after sessions 02–04<br />
+<strong>Prerequisite:</strong> Sessions 01–04 milestones complete<br />
+<strong>Hardware required:</strong> Nucleo-H743ZI2 · ICM-42688-P breakout · Jetson Orin NX · Saleae Logic 8<br />
+<strong>Unlocks:</strong> <code>06-ros2-publisher.md</code><br />
+<strong>Time budget:</strong> ~6 hours</p>
+<hr />
+<h2 id="goal-of-this-session">Goal of This Session</h2>
+<p>Full integrated 100Hz pipeline:</p>
+<div class="highlight"><pre><span></span><code>ICM-42688-P ─(I2C 200Hz)→ STM32H743 ─(SPI slave DMA)→ Jetson Orin NX
+                                ↑
+                     double-buffer with cache maintenance
+</code></pre></div>
+
+<p><strong>Milestone</strong>: <code>rostopic hz /imu/raw</code> shows <strong>100.0 ± 2.0 Hz</strong>, <code>ros2 topic echo</code> shows
+physically plausible IMU data, zero EIO errors over a 60-second run.</p>
+<hr />
+<h2 id="frame-format">Frame Format</h2>
+<p>Design the SPI frame to be:
+1. Fixed size (easier for DMA and for Jetson to know how many bytes to clock)
+2. Versioned (so old Jetson code doesn&rsquo;t misparse new STM32 frames)
+3. Checksum-protected (detect corrupted frames — cache bug will corrupt 1–5% silently)</p>
+<div class="highlight"><pre><span></span><code><span class="cm">/* spi_frame.h — shared between STM32 and Jetson */</span>
+<span class="cp">#pragma once</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;stdint.h&gt;</span>
+
+<span class="cp">#define SPI_FRAME_MAGIC   0xA5</span>
+<span class="cp">#define SPI_FRAME_VERSION 0x01</span>
+<span class="cp">#define SPI_FRAME_SIZE    32    </span><span class="cm">/* bytes — fits in one cache line */</span>
+
+<span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">__attribute__</span><span class="p">((</span><span class="n">packed</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w">  </span><span class="n">magic</span><span class="p">;</span><span class="w">              </span><span class="cm">/* 0xA5 — detect frame alignment */</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w">  </span><span class="n">version</span><span class="p">;</span><span class="w">            </span><span class="cm">/* protocol version */</span>
+<span class="w">    </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">seq</span><span class="p">;</span><span class="w">                </span><span class="cm">/* sequence counter — detect dropped frames */</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w">  </span><span class="n">accel_x_raw</span><span class="p">;</span><span class="w">        </span><span class="cm">/* ICM-42688 raw ADC counts */</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w">  </span><span class="n">accel_y_raw</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w">  </span><span class="n">accel_z_raw</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w">  </span><span class="n">gyro_x_raw</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w">  </span><span class="n">gyro_y_raw</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w">  </span><span class="n">gyro_z_raw</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">timestamp_us</span><span class="p">;</span><span class="w">       </span><span class="cm">/* k_uptime_get_32() in microseconds */</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w">  </span><span class="n">status</span><span class="p">;</span><span class="w">             </span><span class="cm">/* bit 0: IMU valid, bit 1: overrun, bit 2: I2C error */</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w">  </span><span class="n">_reserved</span><span class="p">[</span><span class="mi">5</span><span class="p">];</span><span class="w">      </span><span class="cm">/* pad to 32 bytes */</span>
+<span class="w">    </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">crc</span><span class="p">;</span><span class="w">                </span><span class="cm">/* CRC-16/CCITT of bytes 0..29 */</span>
+<span class="p">}</span><span class="w"> </span><span class="n">spi_frame_t</span><span class="p">;</span>
+
+<span class="k">_Static_assert</span><span class="p">(</span><span class="k">sizeof</span><span class="p">(</span><span class="n">spi_frame_t</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">SPI_FRAME_SIZE</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Frame size mismatch&quot;</span><span class="p">);</span>
+</code></pre></div>
+
+<p><strong>CRC-16 implementation</strong> (STM32 has hardware CRC, but software is portable):</p>
+<div class="highlight"><pre><span></span><code><span class="kt">uint16_t</span><span class="w"> </span><span class="nf">crc16_ccitt</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">len</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">crc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0xFFFF</span><span class="p">;</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">len</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">crc</span><span class="w"> </span><span class="o">^=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint16_t</span><span class="p">)</span><span class="n">data</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">;</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">crc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">crc</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0x8000</span><span class="p">)</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="p">(</span><span class="n">crc</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">^</span><span class="w"> </span><span class="mh">0x1021</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">crc</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">crc</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="stm32-application-architecture">STM32 Application Architecture</h2>
+<div class="highlight"><pre><span></span><code>Main thread (100Hz timer)
+    ├── Read ICM-42688 over I2C
+    ├── Pack into spi_frame_t
+    ├── CRC + clean cache
+    └── Signal SPI thread: new frame ready
+
+SPI thread (blocked on semaphore)
+    ├── Wait for frame-ready semaphore
+    ├── Arm SPI DMA with current TX buffer
+    ├── Wait for DMA complete (or timeout)
+    └── Process RX buffer (Jetson commands)
+
+Double buffers:
+    Buffer A: being sent by DMA
+    Buffer B: being written by IMU thread
+    (swap on every DMA complete)
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="cm">/* main.c — full architecture sketch */</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/kernel.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/spi.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/i2c.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;spi_frame.h&quot;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;icm42688.h&quot;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;crc16.h&quot;</span>
+
+<span class="cm">/* Double buffers in DTCM — DMA-accessible, no cache maintenance */</span>
+<span class="k">static</span><span class="w"> </span><span class="n">spi_frame_t</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">section</span><span class="p">(</span><span class="s">&quot;.dtcm_data&quot;</span><span class="p">)))</span><span class="w"> </span><span class="n">tx_buf_a</span><span class="p">;</span>
+<span class="k">static</span><span class="w"> </span><span class="n">spi_frame_t</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">section</span><span class="p">(</span><span class="s">&quot;.dtcm_data&quot;</span><span class="p">)))</span><span class="w"> </span><span class="n">tx_buf_b</span><span class="p">;</span>
+<span class="k">static</span><span class="w"> </span><span class="n">spi_frame_t</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">section</span><span class="p">(</span><span class="s">&quot;.dtcm_data&quot;</span><span class="p">)))</span><span class="w"> </span><span class="n">rx_buf</span><span class="p">;</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">volatile</span><span class="w"> </span><span class="n">spi_frame_t</span><span class="w"> </span><span class="o">*</span><span class="n">dma_buf</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx_buf_a</span><span class="p">;</span><span class="w">  </span><span class="cm">/* DMA owns this */</span>
+<span class="k">static</span><span class="w"> </span><span class="k">volatile</span><span class="w"> </span><span class="n">spi_frame_t</span><span class="w"> </span><span class="o">*</span><span class="n">cpu_buf</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx_buf_b</span><span class="p">;</span><span class="w">  </span><span class="cm">/* CPU writes this */</span>
+<span class="k">static</span><span class="w"> </span><span class="k">volatile</span><span class="w"> </span><span class="kt">bool</span><span class="w">          </span><span class="n">dma_armed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+
+<span class="n">K_SEM_DEFINE</span><span class="p">(</span><span class="n">frame_ready</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="n">K_SEM_DEFINE</span><span class="p">(</span><span class="n">dma_done</span><span class="p">,</span><span class="w">    </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">seq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="k">static</span><span class="w"> </span><span class="n">imu_data_raw_t</span><span class="w"> </span><span class="n">imu_raw</span><span class="p">;</span>
+
+<span class="cm">/* 100Hz timer fires this */</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">imu_timer_cb</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">k_timer</span><span class="w"> </span><span class="o">*</span><span class="n">timer</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Read IMU (I2C, non-blocking with k_sem timeout) */</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">ret</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">icm42688_read_raw</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_raw</span><span class="p">);</span>
+
+<span class="w">    </span><span class="cm">/* Fill CPU buffer */</span>
+<span class="w">    </span><span class="n">cpu_buf</span><span class="o">-&gt;</span><span class="n">magic</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="n">SPI_FRAME_MAGIC</span><span class="p">;</span>
+<span class="w">    </span><span class="n">cpu_buf</span><span class="o">-&gt;</span><span class="n">version</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="n">SPI_FRAME_VERSION</span><span class="p">;</span>
+<span class="w">    </span><span class="n">cpu_buf</span><span class="o">-&gt;</span><span class="n">seq</span><span class="w">          </span><span class="o">=</span><span class="w"> </span><span class="n">seq</span><span class="o">++</span><span class="p">;</span>
+<span class="w">    </span><span class="n">cpu_buf</span><span class="o">-&gt;</span><span class="n">accel_x_raw</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">imu_raw</span><span class="p">.</span><span class="n">ax</span><span class="p">;</span>
+<span class="w">    </span><span class="n">cpu_buf</span><span class="o">-&gt;</span><span class="n">accel_y_raw</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">imu_raw</span><span class="p">.</span><span class="n">ay</span><span class="p">;</span>
+<span class="w">    </span><span class="n">cpu_buf</span><span class="o">-&gt;</span><span class="n">accel_z_raw</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">imu_raw</span><span class="p">.</span><span class="n">az</span><span class="p">;</span>
+<span class="w">    </span><span class="n">cpu_buf</span><span class="o">-&gt;</span><span class="n">gyro_x_raw</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">imu_raw</span><span class="p">.</span><span class="n">gx</span><span class="p">;</span>
+<span class="w">    </span><span class="n">cpu_buf</span><span class="o">-&gt;</span><span class="n">gyro_y_raw</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">imu_raw</span><span class="p">.</span><span class="n">gy</span><span class="p">;</span>
+<span class="w">    </span><span class="n">cpu_buf</span><span class="o">-&gt;</span><span class="n">gyro_z_raw</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">imu_raw</span><span class="p">.</span><span class="n">gz</span><span class="p">;</span>
+<span class="w">    </span><span class="n">cpu_buf</span><span class="o">-&gt;</span><span class="n">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k_cyc_to_us_floor32</span><span class="p">(</span><span class="n">k_cycle_get_32</span><span class="p">());</span>
+<span class="w">    </span><span class="n">cpu_buf</span><span class="o">-&gt;</span><span class="n">status</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">ret</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="mh">0x01</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mh">0x04</span><span class="p">;</span>
+<span class="w">    </span><span class="n">cpu_buf</span><span class="o">-&gt;</span><span class="n">crc</span><span class="w">          </span><span class="o">=</span><span class="w"> </span><span class="n">crc16_ccitt</span><span class="p">((</span><span class="kt">uint8_t</span><span class="o">*</span><span class="p">)</span><span class="n">cpu_buf</span><span class="p">,</span><span class="w"> </span><span class="n">SPI_FRAME_SIZE</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">2</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">k_sem_give</span><span class="p">(</span><span class="o">&amp;</span><span class="n">frame_ready</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">K_TIMER_DEFINE</span><span class="p">(</span><span class="n">imu_timer</span><span class="p">,</span><span class="w"> </span><span class="n">imu_timer_cb</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">);</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">spi_thread</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf</span><span class="w"> </span><span class="n">spi_tx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="p">)</span><span class="n">dma_buf</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SPI_FRAME_SIZE</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf</span><span class="w"> </span><span class="n">spi_rx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rx_buf</span><span class="p">,</span><span class="w">         </span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SPI_FRAME_SIZE</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf_set</span><span class="w"> </span><span class="n">tx_set</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buffers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">spi_tx</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">spi_buf_set</span><span class="w"> </span><span class="n">rx_set</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">buffers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">spi_rx</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">};</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="cm">/* Wait for new frame from IMU thread */</span>
+<span class="w">        </span><span class="n">k_sem_take</span><span class="p">(</span><span class="o">&amp;</span><span class="n">frame_ready</span><span class="p">,</span><span class="w"> </span><span class="n">K_FOREVER</span><span class="p">);</span>
+
+<span class="w">        </span><span class="cm">/* Swap buffers */</span>
+<span class="w">        </span><span class="k">volatile</span><span class="w"> </span><span class="n">spi_frame_t</span><span class="w"> </span><span class="o">*</span><span class="n">tmp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">dma_buf</span><span class="p">;</span>
+<span class="w">        </span><span class="n">dma_buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cpu_buf</span><span class="p">;</span>
+<span class="w">        </span><span class="n">cpu_buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tmp</span><span class="p">;</span>
+<span class="w">        </span><span class="n">spi_tx</span><span class="p">.</span><span class="n">buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="p">)</span><span class="n">dma_buf</span><span class="p">;</span>
+
+<span class="w">        </span><span class="cm">/* NOTE: using DTCM, no cache flush needed */</span>
+
+<span class="w">        </span><span class="cm">/* Arm DMA and wait for Jetson to clock us */</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">ret</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">spi_transceive</span><span class="p">(</span><span class="n">spi_dev</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">spi_cfg</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">tx_set</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">rx_set</span><span class="p">);</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ret</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;SPI error: %d&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">ret</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="cm">/* Process rx_buf here if Jetson sends commands */</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="n">K_THREAD_DEFINE</span><span class="p">(</span><span class="n">spi_tid</span><span class="p">,</span><span class="w"> </span><span class="mi">2048</span><span class="p">,</span><span class="w"> </span><span class="n">spi_thread</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">verify_imu</span><span class="p">();</span>
+<span class="w">    </span><span class="n">configure_icm42688</span><span class="p">();</span>
+<span class="w">    </span><span class="n">k_timer_start</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_timer</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">10</span><span class="p">),</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">10</span><span class="p">));</span><span class="w">  </span><span class="cm">/* 100Hz */</span>
+<span class="w">    </span><span class="cm">/* threads take over */</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="jetson-master-application">Jetson (Master) Application</h2>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># jetson-spi-master.py — read IMU frames from STM32 at 100Hz</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">spidev</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">struct</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+
+<span class="n">SPI_FRAME_SIZE</span> <span class="o">=</span> <span class="mi">32</span>
+<span class="n">MAGIC</span> <span class="o">=</span> <span class="mh">0xA5</span>
+<span class="n">VERSION</span> <span class="o">=</span> <span class="mh">0x01</span>
+
+<span class="c1"># struct format: magic(B) version(B) seq(H) ax(h) ay(h) az(h) gx(h) gy(h) gz(h)</span>
+<span class="c1">#                timestamp(I) status(B) reserved(5x) crc(H)</span>
+<span class="n">FRAME_FMT</span> <span class="o">=</span> <span class="s1">&#39;&lt;BBHhhhhhhIB5xH&#39;</span>
+<span class="n">FRAME_FIELDS</span> <span class="o">=</span> <span class="p">(</span><span class="s1">&#39;magic&#39;</span><span class="p">,</span> <span class="s1">&#39;version&#39;</span><span class="p">,</span> <span class="s1">&#39;seq&#39;</span><span class="p">,</span> <span class="s1">&#39;ax&#39;</span><span class="p">,</span> <span class="s1">&#39;ay&#39;</span><span class="p">,</span> <span class="s1">&#39;az&#39;</span><span class="p">,</span> <span class="s1">&#39;gx&#39;</span><span class="p">,</span> <span class="s1">&#39;gy&#39;</span><span class="p">,</span> <span class="s1">&#39;gz&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;timestamp_us&#39;</span><span class="p">,</span> <span class="s1">&#39;status&#39;</span><span class="p">,</span> <span class="s1">&#39;crc&#39;</span><span class="p">)</span>
+
+<span class="n">ACCEL_SCALE</span> <span class="o">=</span> <span class="mf">9.81</span> <span class="o">/</span> <span class="mf">16384.0</span>
+<span class="n">GYRO_SCALE</span>  <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="mf">3753.5</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">crc16_ccitt</span><span class="p">(</span><span class="n">data</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">crc</span> <span class="o">=</span> <span class="mh">0xFFFF</span>
+    <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">crc</span> <span class="o">^=</span> <span class="n">b</span> <span class="o">&lt;&lt;</span> <span class="mi">8</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">8</span><span class="p">):</span>
+            <span class="n">crc</span> <span class="o">=</span> <span class="p">(</span><span class="n">crc</span> <span class="o">&lt;&lt;</span> <span class="mi">1</span><span class="p">)</span> <span class="o">^</span> <span class="mh">0x1021</span> <span class="k">if</span> <span class="n">crc</span> <span class="o">&amp;</span> <span class="mh">0x8000</span> <span class="k">else</span> <span class="n">crc</span> <span class="o">&lt;&lt;</span> <span class="mi">1</span>
+        <span class="n">crc</span> <span class="o">&amp;=</span> <span class="mh">0xFFFF</span>
+    <span class="k">return</span> <span class="n">crc</span>
+
+<span class="n">spi</span> <span class="o">=</span> <span class="n">spidev</span><span class="o">.</span><span class="n">SpiDev</span><span class="p">()</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">max_speed_hz</span> <span class="o">=</span> <span class="mi">4_000_000</span>   <span class="c1"># 4 MHz</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">mode</span> <span class="o">=</span> <span class="mi">0</span>
+
+<span class="c1"># Dummy TX payload (STM32 ignores this, but SPI is full-duplex)</span>
+<span class="n">dummy_tx</span> <span class="o">=</span> <span class="p">[</span><span class="mh">0x00</span><span class="p">]</span> <span class="o">*</span> <span class="n">SPI_FRAME_SIZE</span>
+
+<span class="n">last_seq</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="n">errors</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">total</span> <span class="o">=</span> <span class="mi">0</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="n">raw</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">(</span><span class="n">dummy_tx</span><span class="p">))</span>
+        <span class="n">total</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="n">frame</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">FRAME_FIELDS</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">FRAME_FMT</span><span class="p">,</span> <span class="n">raw</span><span class="p">)))</span>
+
+        <span class="c1"># Validate</span>
+        <span class="k">if</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;magic&#39;</span><span class="p">]</span> <span class="o">!=</span> <span class="n">MAGIC</span> <span class="ow">or</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;version&#39;</span><span class="p">]</span> <span class="o">!=</span> <span class="n">VERSION</span><span class="p">:</span>
+            <span class="n">errors</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2">] BAD MAGIC/VERSION: </span><span class="si">{</span><span class="n">raw</span><span class="p">[:</span><span class="mi">4</span><span class="p">]</span><span class="o">.</span><span class="n">hex</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+            <span class="k">continue</span>
+
+        <span class="n">expected_crc</span> <span class="o">=</span> <span class="n">crc16_ccitt</span><span class="p">(</span><span class="n">raw</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;crc&#39;</span><span class="p">]</span> <span class="o">!=</span> <span class="n">expected_crc</span><span class="p">:</span>
+            <span class="n">errors</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2">] CRC ERROR: got </span><span class="si">{</span><span class="n">frame</span><span class="p">[</span><span class="s1">&#39;crc&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">04x</span><span class="si">}</span><span class="s2"> expected </span><span class="si">{</span><span class="n">expected_crc</span><span class="si">:</span><span class="s2">04x</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+                  <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+            <span class="k">continue</span>
+
+        <span class="k">if</span> <span class="n">last_seq</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;seq&#39;</span><span class="p">]</span> <span class="o">!=</span> <span class="p">(</span><span class="n">last_seq</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0xFFFF</span><span class="p">:</span>
+            <span class="n">dropped</span> <span class="o">=</span> <span class="p">(</span><span class="n">frame</span><span class="p">[</span><span class="s1">&#39;seq&#39;</span><span class="p">]</span> <span class="o">-</span> <span class="n">last_seq</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0xFFFF</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2">] DROPPED </span><span class="si">{</span><span class="n">dropped</span><span class="si">}</span><span class="s2"> frames (seq </span><span class="si">{</span><span class="n">last_seq</span><span class="si">}</span><span class="s2">→</span><span class="si">{</span><span class="n">frame</span><span class="p">[</span><span class="s1">&#39;seq&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+                  <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+        <span class="n">last_seq</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;seq&#39;</span><span class="p">]</span>
+
+        <span class="c1"># Scale to physical units</span>
+        <span class="n">ax</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;ax&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">ACCEL_SCALE</span>
+        <span class="n">ay</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;ay&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">ACCEL_SCALE</span>
+        <span class="n">az</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;az&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">ACCEL_SCALE</span>
+        <span class="n">gx</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;gx&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">GYRO_SCALE</span>
+        <span class="n">gy</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;gy&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">GYRO_SCALE</span>
+        <span class="n">gz</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s1">&#39;gz&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">GYRO_SCALE</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;seq=</span><span class="si">{</span><span class="n">frame</span><span class="p">[</span><span class="s1">&#39;seq&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2"> A:(</span><span class="si">{</span><span class="n">ax</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">,</span><span class="si">{</span><span class="n">ay</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">,</span><span class="si">{</span><span class="n">az</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">) &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;G:(</span><span class="si">{</span><span class="n">gx</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">,</span><span class="si">{</span><span class="n">gy</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">,</span><span class="si">{</span><span class="n">gz</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">) errors=</span><span class="si">{</span><span class="n">errors</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.01</span><span class="p">)</span>  <span class="c1"># 100Hz</span>
+
+<span class="k">except</span> <span class="ne">KeyboardInterrupt</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Final error rate: </span><span class="si">{</span><span class="n">errors</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="mi">100</span><span class="o">*</span><span class="n">errors</span><span class="o">/</span><span class="nb">max</span><span class="p">(</span><span class="n">total</span><span class="p">,</span><span class="mi">1</span><span class="p">)</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+    <span class="n">spi</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h2 id="measuring-100hz-accuracy">Measuring 100Hz Accuracy</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Add to Jetson script: measure actual receive rate</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="n">timestamps</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1000</span><span class="p">):</span>
+    <span class="n">t0</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+    <span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">(</span><span class="n">dummy_tx</span><span class="p">)</span>
+    <span class="n">timestamps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span> <span class="o">-</span> <span class="n">t0</span><span class="p">)</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.01</span><span class="p">)</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">statistics</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Mean period: </span><span class="si">{</span><span class="n">statistics</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">timestamps</span><span class="p">)</span><span class="o">*</span><span class="mi">1000</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">ms&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Stdev:       </span><span class="si">{</span><span class="n">statistics</span><span class="o">.</span><span class="n">stdev</span><span class="p">(</span><span class="n">timestamps</span><span class="p">)</span><span class="o">*</span><span class="mi">1000</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">ms&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Max jitter:  </span><span class="si">{</span><span class="nb">max</span><span class="p">(</span><span class="n">timestamps</span><span class="p">)</span><span class="o">*</span><span class="mi">1000</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">ms&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>Target numbers:</strong></p>
+<div class="highlight"><pre><span></span><code>Mean period: 10.000ms ± 0.5ms
+Stdev:       &lt; 0.3ms
+Max jitter:  &lt; 2.0ms  (one-sided)
+</code></pre></div>
+
+<p>If max jitter exceeds 5ms, the Jetson is not driving SPI transactions at the right rate.
+Add a POSIX timer on the Jetson side to fire exactly every 10ms.</p>
+<hr />
+<h2 id="milestone-checklist">Milestone Checklist</h2>
+<ul>
+<li>[ ] STM32 logs: &ldquo;IMU configured, 100Hz timer started&rdquo;</li>
+<li>[ ] Jetson receives frames with correct MAGIC and VERSION</li>
+<li>[ ] CRC error rate: 0% over 6000 frames (1 minute)</li>
+<li>[ ] Dropped frame rate: 0% over 6000 frames</li>
+<li>[ ] Stationary IMU: accel_z ≈ 9.81 m/s² on Jetson side</li>
+<li>[ ] 100Hz measured on Jetson: mean 10.0ms ± 0.5ms</li>
+<li>[ ] Logic analyzer: no CS glitches, no clock gaps within frame</li>
+</ul>
+<hr />
+<h2 id="pre-read-for-session-6">Pre-Read for Session 6</h2>
+<p>Before <code>06-ros2-publisher.md</code>:
+1. Read <code>zephyr/07_jetson_ros2_bridge.md</code> fully — publisher node architecture
+2. Install <code>sensor_msgs/Imu</code> message definition and understand fields
+3. Understand <code>rclpy</code> QoS profiles: <code>SENSOR_DATA</code> vs <code>RELIABLE</code></p>
+<hr />
+<h2 id="session-notes-template">Session Notes Template</h2>
+<div class="highlight"><pre><span></span><code><span class="gu">## Session Notes — [DATE]</span>
+
+<span class="gu">### Integration Notes</span>
+<span class="k">-</span><span class="w"> </span>Time to first valid frame: ___min
+<span class="k">-</span><span class="w"> </span>First error encountered: ...
+
+<span class="gu">### CRC Test</span>
+<span class="k">-</span><span class="w"> </span>Total frames: ___
+<span class="k">-</span><span class="w"> </span>CRC errors: ___
+<span class="k">-</span><span class="w"> </span>Dropped frames: ___
+
+<span class="gu">### Timing</span>
+<span class="k">-</span><span class="w"> </span>Mean period: ___ms
+<span class="k">-</span><span class="w"> </span>Stdev: ___ms
+<span class="k">-</span><span class="w"> </span>Max jitter: ___ms
+
+<span class="gu">### Issues Found</span>
+<span class="k">-</span><span class="w"> </span>...
+
+<span class="gu">### Changes to Protocol</span>
+<span class="k">-</span><span class="w"> </span>(document any changes to spi_frame_t here for posterity)
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

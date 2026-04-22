@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10 — Jetson Orin NX: RT Setup + spidev Baseline - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="10-jetson-orin-nx-rt-setup-spidev-baseline">10 — Jetson Orin NX: RT Setup + spidev Baseline</h1>
+<h3 id="jetson-orin-nx-8gb-jetpack-5x-preempt_rt-spidev-cyclictest">Jetson Orin NX 8GB · JetPack 5.x (PREEMPT_RT) · spidev · cyclictest</h3>
+<p><strong>Status:</strong> 🟡 HARDWARE-GATED<br />
+<strong>Prerequisite:</strong> Session <code>09</code> milestone complete; STM32 transmitting nanopb frames over SPI<br />
+<strong>Hardware required:</strong> Jetson Orin NX fully booted, SPI wiring to STM32 complete<br />
+<strong>Unlocks:</strong> <code>05-100hz-spi-bridge.md</code> Jetson consumer section, then <code>06-ros2-publisher.md</code><br />
+<strong>Time budget:</strong> ~6 hours<br />
+<strong>Mastery plan:</strong> Project 9 prerequisites + &ldquo;RT setup before Project 10&rdquo;</p>
+<hr />
+<h2 id="goal-of-this-session">Goal of This Session</h2>
+<p>Set the Jetson Orin NX for real-time SPI workloads: max performance mode, RT tuning, spidev pinmux, hardware baseline. Verify the raw SPI link at full speed with <code>spidev_test</code> before any Python or ROS 2 code.</p>
+<p><strong>Milestone</strong>: <code>spidev_test -D /dev/spidev0.0 -s 10000000 -p "AABBCCDD" -v</code> shows loopback data received correctly at 10 MHz. <code>cyclictest</code> shows max latency &lt;100µs on isolated CPU core.</p>
+<hr />
+<h2 id="why-this-comes-before-python-spi-code">Why This Comes Before Python SPI Code</h2>
+<p>Every beginner writes Python SPI code on the Jetson before verifying the hardware link. When <code>xfer2()</code> returns wrong data, they debug Python — but the root cause is:
+1. SPI pinmux not configured (no <code>/dev/spidev0.0</code> device)
+2. <code>max_speed_hz</code> left at 500kHz (20× too slow for 100Hz × 128-byte frame = 112kbps needed)
+3. GPIO interrupt on Jetson sees SPI CS and locks up without proper IRQ balancing</p>
+<p>Do the hardware verification in this session. Only then write Python.</p>
+<hr />
+<h2 id="step-1-maximum-performance-mode">Step 1: Maximum Performance Mode</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Set NVPModel to maximum performance (no power capping)</span>
+sudo<span class="w"> </span>nvpmodel<span class="w"> </span>-m<span class="w"> </span><span class="m">0</span>
+sudo<span class="w"> </span>jetson_clocks
+
+<span class="c1"># Verify</span>
+sudo<span class="w"> </span>nvpmodel<span class="w"> </span>-q<span class="w">                 </span><span class="c1"># should show MODE_15W_2CORE or MAXN depending on model</span>
+sudo<span class="w"> </span>jetson_clocks<span class="w"> </span>--show<span class="w">        </span><span class="c1"># all CPU/GPU clocks at maximum</span>
+
+<span class="c1"># Make persistent across reboots</span>
+sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>nvpmodel
+<span class="c1"># nvpmodel sets -m 0 at boot when enabled with the right default in /etc/nvpmodel.conf</span>
+</code></pre></div>
+
+<p><strong>Why this matters</strong>: Without <code>jetson_clocks</code>, CPU cores can throttle to 400MHz during SPI reads. At 10MHz SPI with 128-byte frames at 100Hz, the Jetson CPU has 90ms of spare time per second — but throttled, <code>ioctl()</code> latency can spike to 5–20ms, causing missed frames. With max clocks: <code>ioctl()</code> consistently &lt;500µs.</p>
+<hr />
+<h2 id="step-2-stop-irq-balancing">Step 2: Stop IRQ Balancing</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># irqbalance migrates IRQs between CPU cores for thermal balance.</span>
+<span class="c1"># At 100Hz, the SPI IRQ fires 100 times/second.</span>
+<span class="c1"># Each migration adds ~200µs latency spike and can cause a dropped frame.</span>
+sudo<span class="w"> </span>systemctl<span class="w"> </span>disable<span class="w"> </span>irqbalance
+sudo<span class="w"> </span>systemctl<span class="w"> </span>stop<span class="w"> </span>irqbalance
+
+<span class="c1"># Verify it&#39;s stopped</span>
+systemctl<span class="w"> </span>status<span class="w"> </span>irqbalance<span class="w">   </span><span class="c1"># should show &quot;inactive (dead)&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="step-3-isolate-a-cpu-core-for-spi">Step 3: Isolate a CPU Core for SPI</h2>
+<p>This prevents the kernel scheduler from running other processes on CPU core 3, reducing SPI ioctl jitter.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Add to /boot/extlinux/extlinux.conf — append to APPEND line:</span>
+<span class="c1"># isolcpus=3 nohz_full=3 rcu_nocbs=3</span>
+
+<span class="c1"># Edit the file:</span>
+sudo<span class="w"> </span>nano<span class="w"> </span>/boot/extlinux/extlinux.conf
+<span class="c1"># Find the APPEND line and add at the end:</span>
+<span class="c1">#   isolcpus=3 nohz_full=3 rcu_nocbs=3</span>
+
+<span class="c1"># Example final APPEND line:</span>
+<span class="c1"># APPEND ${cbootargs} root=/dev/mmcblk0p1 rw rootwait ... isolcpus=3 nohz_full=3 rcu_nocbs=3</span>
+
+sudo<span class="w"> </span>reboot
+
+<span class="c1"># After reboot, verify:</span>
+cat<span class="w"> </span>/sys/devices/system/cpu/isolated<span class="w">   </span><span class="c1"># should show &quot;3&quot;</span>
+</code></pre></div>
+
+<hr />
+<h2 id="step-4-measure-rt-latency-baseline">Step 4: Measure RT Latency Baseline</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install cyclictest</span>
+sudo<span class="w"> </span>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>rt-tests
+
+<span class="c1"># Measure on isolated core 3 for 30 seconds</span>
+sudo<span class="w"> </span>taskset<span class="w"> </span>-c<span class="w"> </span><span class="m">3</span><span class="w"> </span>cyclictest<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--mlockall<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--priority<span class="o">=</span><span class="m">99</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--interval<span class="o">=</span><span class="m">1000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--duration<span class="o">=</span><span class="m">30</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--histofall<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--quiet<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-20
+
+<span class="c1"># Target: max latency &lt; 100µs (typical: &lt;30µs on Jetson Orin with PREEMPT_RT)</span>
+<span class="c1"># If max latency &gt;200µs: check irqbalance is stopped, check isolcpus applied</span>
+</code></pre></div>
+
+<p><strong>Record this number.</strong> You will compare it later when debugging dropped SPI frames. If <code>cyclictest</code> shows max 20µs and you still drop frames, the problem is in your application code, not the kernel.</p>
+<hr />
+<h2 id="step-5-configure-spi-pinmux">Step 5: Configure SPI Pinmux</h2>
+<p><strong>Critical</strong>: <code>/dev/spidev0.0</code> does not exist until you configure the SPI pinmux via <code>jetson-io.py</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Identify which SPI bus connects to STM32 (typically SPI1 on 40-pin header)</span>
+<span class="c1"># Jetson Orin NX 40-pin header SPI1:</span>
+<span class="c1">#   Pin 19: MOSI (SPI1_MOSI)</span>
+<span class="c1">#   Pin 21: MISO (SPI1_MISO)</span>
+<span class="c1">#   Pin 23: SCLK (SPI1_CLK)</span>
+<span class="c1">#   Pin 24: CS0  (SPI1_CS0)</span>
+
+<span class="c1"># Configure pinmux</span>
+sudo<span class="w"> </span>/opt/nvidia/jetson-io/jetson-io.py
+<span class="c1"># In the TUI:</span>
+<span class="c1">#   Configure Jetson 40pin Header → SPI1 → Enable → Save</span>
+<span class="c1">#   This writes a device tree overlay and requires reboot</span>
+
+sudo<span class="w"> </span>reboot
+
+<span class="c1"># After reboot:</span>
+ls<span class="w"> </span>-la<span class="w"> </span>/dev/spidev*
+<span class="c1"># Should show: /dev/spidev0.0  /dev/spidev0.1  (or similar)</span>
+
+<span class="c1"># If no spidev devices: check jetson-io config was saved correctly</span>
+<span class="c1"># Check dmesg: sudo dmesg | grep spi</span>
+</code></pre></div>
+
+<hr />
+<h2 id="step-6-hardware-loopback-test">Step 6: Hardware Loopback Test</h2>
+<p><strong>Test with MISO shorted to MOSI (loopback jumper)</strong> before connecting to STM32.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Temporarily short Pin 19 (MOSI) to Pin 21 (MISO) on the 40-pin header</span>
+
+<span class="c1"># Run spidev_test at 1MHz first</span>
+sudo<span class="w"> </span>spidev_test<span class="w"> </span>-D<span class="w"> </span>/dev/spidev0.0<span class="w"> </span>-s<span class="w"> </span><span class="m">1000000</span><span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;AABBCCDD01020304&quot;</span><span class="w"> </span>-v
+<span class="c1"># Expected output: RX bytes match TX bytes exactly</span>
+
+<span class="c1"># Increase to 10MHz</span>
+sudo<span class="w"> </span>spidev_test<span class="w"> </span>-D<span class="w"> </span>/dev/spidev0.0<span class="w"> </span>-s<span class="w"> </span><span class="m">10000000</span><span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;AABBCCDD01020304&quot;</span><span class="w"> </span>-v
+<span class="c1"># Expected: same match</span>
+
+<span class="c1"># Try 16MHz to find the limit</span>
+sudo<span class="w"> </span>spidev_test<span class="w"> </span>-D<span class="w"> </span>/dev/spidev0.0<span class="w"> </span>-s<span class="w"> </span><span class="m">16000000</span><span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;AABBCCDD01020304&quot;</span><span class="w"> </span>-v
+<span class="c1"># If this fails: wiring is too long. Use &lt;6 inch wires for 16MHz.</span>
+
+<span class="c1"># Remove loopback jumper when done</span>
+</code></pre></div>
+
+<p><strong>Failure modes during loopback test:</strong>
+| Symptom | Cause |
+|---------|-------|
+| <code>spidev_test: can't open device /dev/spidev0.0</code> | Pinmux not configured; rerun <code>jetson-io.py</code> |
+| RX bytes all 0x00 | MISO not shorted to MOSI (loopback jumper missing) |
+| RX bytes garbage at high speed | Wire too long; reduce to 16cm max for 10MHz |
+| <code>ioctl error -1</code> | Wrong permissions; use <code>sudo</code> or add user to <code>spidev</code> group |</p>
+<hr />
+<h2 id="step-7-connect-stm32-and-verify-real-frame">Step 7: Connect STM32 and Verify Real Frame</h2>
+<p>After loopback passes, connect STM32:</p>
+<div class="highlight"><pre><span></span><code>Jetson 40-pin Header          STM32 Nucleo-H743ZI2
+────────────────────          ────────────────────
+Pin 19 (MOSI / SPI1_MOSI) ── PA7 (SPI1_MOSI)
+Pin 21 (MISO / SPI1_MISO) ── PA6 (SPI1_MISO)
+Pin 23 (CLK  / SPI1_CLK)  ── PA5 (SPI1_SCK)
+Pin 24 (CS0  / SPI1_CS0)  ── PA4 (SPI1_NSS)
+Pin 6  (GND)              ── GND
+
+Logic levels: both 3.3V — direct connection, no level shifting needed.
+Wire length: &lt;15cm. SMA or similar for 10MHz+.
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1"># With STM32 armed and transmitting frames (from session 05/09):</span>
+sudo<span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;</span>
+<span class="s2">import spidev, time</span>
+<span class="s2">spi = spidev.SpiDev()</span>
+<span class="s2">spi.open(0, 0)</span>
+<span class="s2">spi.max_speed_hz = 10_000_000</span>
+<span class="s2">spi.mode = 0   # CPOL=0, CPHA=0 — match STM32 config</span>
+
+<span class="s2">for i in range(5):</span>
+<span class="s2">    rx = spi.xfer2([0]*130)</span>
+<span class="s2">    length = (rx[0] &lt;&lt; 8) | rx[1]</span>
+<span class="s2">    print(f&#39;Frame {i}: len={length} first_bytes={rx[2:6]}&#39;)</span>
+<span class="s2">    time.sleep(0.01)</span>
+<span class="s2">spi.close()</span>
+<span class="s2">&quot;</span>
+<span class="c1"># Expected: len=47 (or similar), non-zero bytes in payload</span>
+</code></pre></div>
+
+<hr />
+<h2 id="ioctl-timing-measurement">ioctl Timing Measurement</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">spidev</span><span class="o">,</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="n">spi</span> <span class="o">=</span> <span class="n">spidev</span><span class="o">.</span><span class="n">SpiDev</span><span class="p">()</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">max_speed_hz</span> <span class="o">=</span> <span class="mi">10_000_000</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">mode</span> <span class="o">=</span> <span class="mi">0</span>
+
+<span class="n">latencies</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1000</span><span class="p">):</span>
+    <span class="n">t0</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+    <span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">([</span><span class="mi">0</span><span class="p">]</span><span class="o">*</span><span class="mi">130</span><span class="p">)</span>
+    <span class="n">t1</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+    <span class="n">latencies</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">t1</span> <span class="o">-</span> <span class="n">t0</span><span class="p">)</span> <span class="o">*</span> <span class="mf">1e6</span><span class="p">)</span>  <span class="c1"># microseconds</span>
+
+<span class="n">latencies</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;ioctl latency: mean=</span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="n">latencies</span><span class="p">)</span><span class="o">/</span><span class="nb">len</span><span class="p">(</span><span class="n">latencies</span><span class="p">)</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">µs  &quot;</span>
+      <span class="sa">f</span><span class="s2">&quot;p50=</span><span class="si">{</span><span class="n">latencies</span><span class="p">[</span><span class="mi">500</span><span class="p">]</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">µs  &quot;</span>
+      <span class="sa">f</span><span class="s2">&quot;p99=</span><span class="si">{</span><span class="n">latencies</span><span class="p">[</span><span class="mi">990</span><span class="p">]</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">µs  &quot;</span>
+      <span class="sa">f</span><span class="s2">&quot;max=</span><span class="si">{</span><span class="n">latencies</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">µs&quot;</span><span class="p">)</span>
+<span class="n">spi</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+<span class="c1"># Target on isolated core with jetson_clocks:</span>
+<span class="c1">#   mean &lt;500µs, p99 &lt;2ms, max &lt;5ms</span>
+<span class="c1"># If max &gt;10ms: irqbalance not stopped, or core not isolated</span>
+</code></pre></div>
+
+<hr />
+<h2 id="thermal-throttle-guard">Thermal Throttle Guard</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install jetson_stats for monitoring</span>
+sudo<span class="w"> </span>pip3<span class="w"> </span>install<span class="w"> </span>jetson-stats
+
+<span class="c1"># In a separate terminal during SPI testing:</span>
+jtop<span class="w">   </span><span class="c1"># watch CPU temp column; if &gt;65°C, throttling may occur</span>
+
+<span class="c1"># Check throttle state:</span>
+cat<span class="w"> </span>/sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
+<span class="c1"># Compare to max: cat /sys/devices/system/cpu/cpufreq/policy0/cpuinfo_max_freq</span>
+<span class="c1"># If cur &lt; max, throttling is active → improve cooling</span>
+</code></pre></div>
+
+<hr />
+<h2 id="milestone-checklist">Milestone Checklist</h2>
+<ul>
+<li>[ ] <code>nvpmodel -q</code> shows MAX performance mode</li>
+<li>[ ] <code>irqbalance</code> service is stopped and disabled</li>
+<li>[ ] <code>/sys/devices/system/cpu/isolated</code> shows <code>3</code> after reboot</li>
+<li>[ ] <code>cyclictest</code> max latency &lt; 100µs on core 3</li>
+<li>[ ] <code>/dev/spidev0.0</code> exists</li>
+<li>[ ] Loopback test passes at 10MHz (<code>spidev_test</code> RX == TX)</li>
+<li>[ ] Real STM32 frame: <code>len=XX</code> non-zero, non-garbage received</li>
+<li>[ ] ioctl timing: p99 &lt;2ms over 1000 samples</li>
+<li>[ ] Jetson CPU temp &lt;65°C during testing</li>
+</ul>
+<hr />
+<h2 id="pre-read-for-session-11-ekf">Pre-Read for Session 11 (EKF)</h2>
+<p>Before <code>11-ekf-integration.md</code>:
+1. <code>ros2 pkg info robot_localization</code> — understand what it does (EKF fusion node)
+2. TF2 frame tree: <code>map → odom → base_link → imu_link</code> — all 4 frames must exist
+3. <code>ros2 topic echo /imu/raw</code> — confirm your session 06 publisher is live
+4. <code>00-mastery-plan.md</code> Project 11 failure points: zero covariance diagonal, timestamp lag, rviz2 fixed frame</p>
+<hr />
+<h2 id="session-notes-template">Session Notes Template</h2>
+<div class="highlight"><pre><span></span><code><span class="gu">## Session Notes — [DATE]</span>
+
+<span class="gu">### RT Setup</span>
+<span class="k">-</span><span class="w"> </span>nvpmodel mode: ___
+<span class="k">-</span><span class="w"> </span>irqbalance stopped: yes/no
+<span class="k">-</span><span class="w"> </span>isolcpus applied (cat /sys/devices/system/cpu/isolated): ___
+<span class="k">-</span><span class="w"> </span>cyclictest max latency (30s): ___µs
+
+<span class="gu">### SPI Hardware</span>
+<span class="k">-</span><span class="w"> </span>/dev/spidev0.0 found: yes/no
+<span class="k">-</span><span class="w"> </span>Loopback test 10MHz: pass/fail
+<span class="k">-</span><span class="w"> </span>Real STM32 frame len: ___ bytes
+
+<span class="gu">### ioctl Timing (1000 samples)</span>
+<span class="k">-</span><span class="w"> </span>mean: ___µs  p99: ___µs  max: ___µs
+
+<span class="gu">### Issues</span>
+<span class="k">-</span><span class="w"> </span>...
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

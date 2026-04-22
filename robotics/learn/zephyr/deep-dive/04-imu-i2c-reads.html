@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04 — IMU I2C Reads: ICM-42688-P - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="04-imu-i2c-reads-icm-42688-p">04 — IMU I2C Reads: ICM-42688-P</h1>
+<h3 id="stm32h743zi2-zephyr-i2c-api-icm-42688-p-imu">STM32H743ZI2 · Zephyr I2C API · ICM-42688-P IMU</h3>
+<p><strong>Status:</strong> 🟡 HARDWARE-GATED — fill this in when ICM-42688-P breakout arrives<br />
+<strong>Prerequisite:</strong> <code>03-dma-cache-gotchas.md</code> milestone complete<br />
+<strong>Hardware required:</strong> Nucleo-H743ZI2 · ICM-42688-P breakout (SparkFun or Adafruit) · 4× 2.2kΩ resistors<br />
+<strong>Unlocks:</strong> <code>05-100hz-spi-bridge.md</code><br />
+<strong>Time budget:</strong> ~4 hours</p>
+<hr />
+<h2 id="goal-of-this-session">Goal of This Session</h2>
+<p>Read accelerometer and gyroscope data from the ICM-42688-P over I2C at 100Hz.
+Log values to Zephyr shell. Verify against hand-shaking the board (gyro Z should
+spike when you rotate, accel X/Y/Z should show ≈9.81 m/s² when stationary).</p>
+<p><strong>Milestone</strong>: 100Hz I2C reads, no <code>EIO</code> errors, values physically plausible.</p>
+<hr />
+<h2 id="pre-wiring-know-your-breakout-board">Pre-Wiring: Know Your Breakout Board</h2>
+<p>The ICM-42688-P has TWO power pins:
+- <code>VDD</code>: core power (1.71V – 3.6V)
+- <code>VDDIO</code>: I/O interface voltage (1.71V – 3.6V)</p>
+<p>Most breakout boards (SparkFun, Adafruit) have an onboard regulator and level shifter — they
+accept 3.3V on both <code>VDD</code> and <code>VDDIO</code>. <strong>Verify this on your specific breakout schematic.</strong></p>
+<p>If your breakout does NOT have a level shifter and your IMU uses 1.8V VDDIO, driving it
+with 3.3V STM32 signals will damage the IMU slowly (latch-up at elevated temperature).</p>
+<h3 id="checking-your-breakout">Checking Your Breakout</h3>
+<p>Look up the schematic of your specific breakout board (the part number is on the silkscreen).
+Things to confirm:
+- [ ] Input voltage range includes 3.3V
+- [ ] I2C pull-ups present on the breakout (value?)
+- [ ] CS pin pulled high (needed if using I2C mode, since ICM-42688 defaults to SPI if CS=0)</p>
+<hr />
+<h2 id="theory-i2c-register-read-pattern">Theory: I2C Register Read Pattern</h2>
+<p>The ICM-42688 uses a standard I2C register-read sequence:</p>
+<div class="highlight"><pre><span></span><code>START → ADDR+W → REG_ADDR → REPEATED_START → ADDR+R → DATA[0] → ... → DATA[n-1] → STOP
+
+Zephyr API: i2c_write_read(dev, addr, &amp;reg, 1, buf, len)
+                                        ↑                ↑
+                                  register address    receive buffer
+</code></pre></div>
+
+<h3 id="key-registers-i2c-address-0x68-when-ad0gnd-0x69-when-ad0vcc">Key Registers (I2C address 0x68 when AD0=GND, 0x69 when AD0=VCC)</h3>
+<table>
+<thead>
+<tr>
+<th>Register</th>
+<th>Address</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>WHO_AM_I</code></td>
+<td>0x75</td>
+<td>Should return 0x47 — use this to verify connection</td>
+</tr>
+<tr>
+<td><code>ACCEL_DATA_X1</code></td>
+<td>0x1F</td>
+<td>Accel X high byte (16-bit big-endian)</td>
+</tr>
+<tr>
+<td><code>ACCEL_DATA_X0</code></td>
+<td>0x20</td>
+<td>Accel X low byte</td>
+</tr>
+<tr>
+<td><code>GYRO_DATA_X1</code></td>
+<td>0x25</td>
+<td>Gyro X high byte</td>
+</tr>
+<tr>
+<td><code>GYRO_DATA_X0</code></td>
+<td>0x26</td>
+<td>Gyro X low byte</td>
+</tr>
+<tr>
+<td><code>PWR_MGMT0</code></td>
+<td>0x4E</td>
+<td>Power mode — write 0x0F to enable accel+gyro at full power</td>
+</tr>
+<tr>
+<td><code>ACCEL_CONFIG0</code></td>
+<td>0x50</td>
+<td>Accel range: 0x01=±2g (highest sensitivity)</td>
+</tr>
+<tr>
+<td><code>GYRO_CONFIG0</code></td>
+<td>0x4F</td>
+<td>Gyro range: 0x06=±500°/s</td>
+</tr>
+</tbody>
+</table>
+<p>For continuous 100Hz reads, configure the ODR (output data rate) register too:
+- <code>ACCEL_CONFIG0[3:0] = 0b0111</code> = 200Hz ODR (decimate with software to 100Hz)
+- <code>GYRO_CONFIG0[3:0] = 0b0111</code> = 200Hz ODR</p>
+<p>Full register map: ICM-42688-P datasheet, Appendix A.</p>
+<hr />
+<h2 id="step-by-step">Step-by-Step</h2>
+<h3 id="step-1-wiring">Step 1: Wiring</h3>
+<div class="highlight"><pre><span></span><code>ICM-42688 Breakout    STM32 Nucleo-H743ZI2
+────────────────────  ─────────────────────
+VIN / 3V3             3.3V (CN6 pin 4)
+GND                   GND  (CN6 pin 6)
+SDA                   I2C1_SDA = PB9 (CN7 pin 4)
+SCL                   I2C1_SCL = PB8 (CN7 pin 2)
+AD0                   GND  → I2C address 0x68
+CS                    3.3V → select I2C mode (CS=HIGH)
+
+I2C pull-ups:
+If breakout has pull-ups: no extra resistors needed
+If not: add 2.2kΩ from SDA→3.3V and SCL→3.3V
+</code></pre></div>
+
+<p><strong>Saleae Logic 8:</strong></p>
+<div class="highlight"><pre><span></span><code>Ch5 → I2C1_SDA (PB9)
+Ch6 → I2C1_SCL (PB8)
+</code></pre></div>
+
+<p>Add I2C analyzer in Logic 2: address=7-bit, speed=400kHz</p>
+<h3 id="step-2-verify-i2c-bus-with-stuck-bus-recovery">Step 2: Verify I2C Bus with Stuck-Bus Recovery</h3>
+<p>Before writing application code, verify the bus works and add stuck-bus recovery:</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/i2c.h&gt;</span>
+
+<span class="cp">#define ICM42688_ADDR  0x68</span>
+<span class="cp">#define REG_WHO_AM_I   0x75</span>
+<span class="cp">#define EXPECTED_WHOAMI 0x47</span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">i2c_dev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">i2c1</span><span class="p">));</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">verify_imu_connection</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">device_is_ready</span><span class="p">(</span><span class="n">i2c_dev</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;I2C device not ready&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="o">-</span><span class="n">ENODEV</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">who_am_i</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">reg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">REG_WHO_AM_I</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">ret</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i2c_write_read</span><span class="p">(</span><span class="n">i2c_dev</span><span class="p">,</span><span class="w"> </span><span class="n">ICM42688_ADDR</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">reg</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">who_am_i</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ret</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;I2C read failed: %d (is bus stuck? check wiring)&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">ret</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">ret</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">who_am_i</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">EXPECTED_WHOAMI</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;WHO_AM_I = 0x%02x, expected 0x47&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">who_am_i</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="o">-</span><span class="n">EIO</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;ICM-42688-P found, WHO_AM_I = 0x47 ✓&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="step-3-configure-imu-registers">Step 3: Configure IMU Registers</h3>
+<div class="highlight"><pre><span></span><code><span class="k">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="nf">configure_icm42688</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Write helper: reg addr + value in one i2c_write call */</span>
+<span class="w">    </span><span class="cp">#define IMU_WRITE(reg, val) do { \</span>
+<span class="cp">        uint8_t buf[] = { (reg), (val) }; \</span>
+<span class="cp">        int r = i2c_write(i2c_dev, buf, 2, ICM42688_ADDR); \</span>
+<span class="cp">        if (r) return r; \</span>
+<span class="cp">    } while (0)</span>
+
+<span class="w">    </span><span class="cm">/* Enable accel + gyro at low-noise mode */</span>
+<span class="w">    </span><span class="n">IMU_WRITE</span><span class="p">(</span><span class="mh">0x4E</span><span class="p">,</span><span class="w"> </span><span class="mh">0x0F</span><span class="p">);</span><span class="w">      </span><span class="cm">/* PWR_MGMT0: accel+gyro ON, LN mode */</span>
+<span class="w">    </span><span class="n">k_sleep</span><span class="p">(</span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">50</span><span class="p">));</span><span class="w">        </span><span class="cm">/* Startup time: 50ms for LN mode */</span>
+
+<span class="w">    </span><span class="cm">/* Accel: ±2g, 200Hz ODR */</span>
+<span class="w">    </span><span class="n">IMU_WRITE</span><span class="p">(</span><span class="mh">0x50</span><span class="p">,</span><span class="w"> </span><span class="mh">0x17</span><span class="p">);</span><span class="w">      </span><span class="cm">/* ACCEL_CONFIG0: AFS=±2g, AODR=200Hz */</span>
+
+<span class="w">    </span><span class="cm">/* Gyro: ±500°/s, 200Hz ODR */</span>
+<span class="w">    </span><span class="n">IMU_WRITE</span><span class="p">(</span><span class="mh">0x4F</span><span class="p">,</span><span class="w"> </span><span class="mh">0x67</span><span class="p">);</span><span class="w">      </span><span class="cm">/* GYRO_CONFIG0: GFS=±500dps, GODR=200Hz */</span>
+
+<span class="w">    </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;ICM-42688-P configured: ±2g accel, ±500dps gyro, 200Hz ODR&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="step-4-read-sensor-data-at-100hz">Step 4: Read Sensor Data at 100Hz</h3>
+<div class="highlight"><pre><span></span><code><span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">accel_x</span><span class="p">,</span><span class="w"> </span><span class="n">accel_y</span><span class="p">,</span><span class="w"> </span><span class="n">accel_z</span><span class="p">;</span><span class="w">  </span><span class="cm">/* m/s² */</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">gyro_x</span><span class="p">,</span><span class="w"> </span><span class="n">gyro_y</span><span class="p">,</span><span class="w"> </span><span class="n">gyro_z</span><span class="p">;</span><span class="w">     </span><span class="cm">/* rad/s */</span>
+<span class="p">}</span><span class="w"> </span><span class="n">imu_data_t</span><span class="p">;</span>
+
+<span class="cm">/* Sensitivity from ICM-42688 datasheet:</span>
+<span class="cm">   ±2g   → 16384 LSB/g</span>
+<span class="cm">   ±500°/s → 65.5 LSB/(°/s) → 3753.5 LSB/(rad/s) */</span>
+<span class="cp">#define ACCEL_SCALE  (9.81f / 16384.0f)</span>
+<span class="cp">#define GYRO_SCALE   (1.0f / 3753.5f)</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="nf">read_imu</span><span class="p">(</span><span class="n">imu_data_t</span><span class="w"> </span><span class="o">*</span><span class="n">out</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Read 12 bytes starting at ACCEL_DATA_X1 (0x1F):</span>
+<span class="cm">       ACCEL_X_H, ACCEL_X_L, ACCEL_Y_H, ACCEL_Y_L, ACCEL_Z_H, ACCEL_Z_L,</span>
+<span class="cm">       GYRO_X_H,  GYRO_X_L,  GYRO_Y_H,  GYRO_Y_L,  GYRO_Z_H,  GYRO_Z_L  */</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">reg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0x1F</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">12</span><span class="p">];</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">ret</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i2c_write_read</span><span class="p">(</span><span class="n">i2c_dev</span><span class="p">,</span><span class="w"> </span><span class="n">ICM42688_ADDR</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">reg</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">raw</span><span class="p">,</span><span class="w"> </span><span class="mi">12</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ret</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">ret</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">ax</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">1</span><span class="p">]);</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">ay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">3</span><span class="p">]);</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">az</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">5</span><span class="p">]);</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">gx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">6</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">7</span><span class="p">]);</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">gy</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">8</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">9</span><span class="p">]);</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">gz</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)((</span><span class="n">raw</span><span class="p">[</span><span class="mi">10</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">raw</span><span class="p">[</span><span class="mi">11</span><span class="p">]);</span>
+
+<span class="w">    </span><span class="n">out</span><span class="o">-&gt;</span><span class="n">accel_x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ax</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ACCEL_SCALE</span><span class="p">;</span>
+<span class="w">    </span><span class="n">out</span><span class="o">-&gt;</span><span class="n">accel_y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ay</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ACCEL_SCALE</span><span class="p">;</span>
+<span class="w">    </span><span class="n">out</span><span class="o">-&gt;</span><span class="n">accel_z</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">az</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ACCEL_SCALE</span><span class="p">;</span>
+<span class="w">    </span><span class="n">out</span><span class="o">-&gt;</span><span class="n">gyro_x</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">gx</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">GYRO_SCALE</span><span class="p">;</span>
+<span class="w">    </span><span class="n">out</span><span class="o">-&gt;</span><span class="n">gyro_y</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">gy</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">GYRO_SCALE</span><span class="p">;</span>
+<span class="w">    </span><span class="n">out</span><span class="o">-&gt;</span><span class="n">gyro_z</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">gz</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">GYRO_SCALE</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">verify_imu_connection</span><span class="p">();</span>
+<span class="w">    </span><span class="n">configure_icm42688</span><span class="p">();</span>
+
+<span class="w">    </span><span class="n">imu_data_t</span><span class="w"> </span><span class="n">data</span><span class="p">;</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">read_imu</span><span class="p">(</span><span class="o">&amp;</span><span class="n">data</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;A: x=%+.3f y=%+.3f z=%+.3f g; G: x=%+.3f y=%+.3f z=%+.3f r/s&quot;</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">data</span><span class="p">.</span><span class="n">accel_x</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">.</span><span class="n">accel_y</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">.</span><span class="n">accel_z</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">data</span><span class="p">.</span><span class="n">gyro_x</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">.</span><span class="n">gyro_y</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">.</span><span class="n">gyro_z</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">k_sleep</span><span class="p">(</span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">10</span><span class="p">));</span><span class="w">   </span><span class="cm">/* 100Hz */</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="step-5-physical-sanity-check">Step 5: Physical Sanity Check</h3>
+<p>Hold the board flat on a table. Expected readings:</p>
+<div class="highlight"><pre><span></span><code>A: x≈0.00  y≈0.00  z≈9.81 g;   G: x≈0.00  y≈0.00  z≈0.00 r/s
+</code></pre></div>
+
+<p>Rotate the board 90° around X axis. Expected:</p>
+<div class="highlight"><pre><span></span><code>A: x≈0.00  y≈9.81  z≈0.00 g;   G: x≈(spike during rotation)
+</code></pre></div>
+
+<p>Shake the board rapidly:</p>
+<div class="highlight"><pre><span></span><code>A: (varies, large values during shake)
+G: (varies, large values during rotation components)
+</code></pre></div>
+
+<hr />
+<h2 id="stuck-i2c-bus-recovery">Stuck I2C Bus Recovery</h2>
+<p>If you power-cycle while an I2C transaction was in progress, SDA may be held low.
+<code>i2c_write_read</code> will return <code>-EIO</code> forever. Fix at init time:</p>
+<div class="highlight"><pre><span></span><code><span class="cm">/* In devicetree overlay: use GPIO to bit-bang 9 clock pulses */</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">recover_i2c_bus</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_dt_spec</span><span class="w"> </span><span class="n">scl</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GPIO_DT_SPEC_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">i2c1_scl_gpio</span><span class="p">),</span><span class="w"> </span><span class="n">gpios</span><span class="p">);</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">gpio_dt_spec</span><span class="w"> </span><span class="n">sda</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GPIO_DT_SPEC_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">i2c1_sda_gpio</span><span class="p">),</span><span class="w"> </span><span class="n">gpios</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">gpio_pin_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">scl</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_OUTPUT_HIGH</span><span class="p">);</span>
+<span class="w">    </span><span class="n">gpio_pin_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sda</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_INPUT</span><span class="p">);</span>
+
+<span class="w">    </span><span class="cm">/* Clock out up to 9 pulses to release stuck slave */</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">9</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">gpio_pin_get_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sda</span><span class="p">))</span><span class="w"> </span><span class="k">break</span><span class="p">;</span><span class="w">   </span><span class="cm">/* SDA released = slave freed */</span>
+<span class="w">        </span><span class="n">gpio_pin_set_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">scl</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+<span class="w">        </span><span class="n">k_busy_wait</span><span class="p">(</span><span class="mi">5</span><span class="p">);</span><span class="w">                     </span><span class="cm">/* 100kHz half-period */</span>
+<span class="w">        </span><span class="n">gpio_pin_set_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">scl</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="w">        </span><span class="n">k_busy_wait</span><span class="p">(</span><span class="mi">5</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="cm">/* Generate STOP condition */</span>
+<span class="w">    </span><span class="n">gpio_pin_configure_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sda</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_OUTPUT_LOW</span><span class="p">);</span>
+<span class="w">    </span><span class="n">k_busy_wait</span><span class="p">(</span><span class="mi">5</span><span class="p">);</span>
+<span class="w">    </span><span class="n">gpio_pin_set_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">scl</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="w">    </span><span class="n">k_busy_wait</span><span class="p">(</span><span class="mi">5</span><span class="p">);</span>
+<span class="w">    </span><span class="n">gpio_pin_set_dt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sda</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+
+<span class="w">    </span><span class="cm">/* Re-initialize I2C peripheral */</span>
+<span class="w">    </span><span class="n">i2c_recover_bus</span><span class="p">(</span><span class="n">i2c_dev</span><span class="p">);</span><span class="w">   </span><span class="cm">/* Zephyr 3.5+ has this directly */</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="milestone-checklist">Milestone Checklist</h2>
+<ul>
+<li>[ ] <code>WHO_AM_I</code> reads 0x47 — I2C connection confirmed</li>
+<li>[ ] Logic analyzer decodes WHO_AM_I read correctly</li>
+<li>[ ] Stationary: accel_z ≈ 9.81 m/s², accel_x,y ≈ 0</li>
+<li>[ ] Board rotation: accel axis swaps as expected</li>
+<li>[ ] 100Hz read loop runs for 60 seconds without <code>-EIO</code></li>
+<li>[ ] Stuck-bus recovery tested: power-cycle mid-transaction, recovery code restores operation</li>
+</ul>
+<hr />
+<h2 id="pre-read-for-session-5">Pre-Read for Session 5</h2>
+<p>Before <code>05-100hz-spi-bridge.md</code>:
+1. Re-read <code>zephyr/07_jetson_ros2_bridge.md</code> — the full bridge architecture
+2. Re-read <code>zephyr/08_spi_protocol.md</code> — frame format, protobuf encoding
+3. <code>00-mastery-plan.md</code> &ldquo;Wrong Timestamps (3 days lost)&rdquo; — plan for <code>clock_gettime</code> on Jetson side</p>
+<hr />
+<h2 id="session-notes-template">Session Notes Template</h2>
+<div class="highlight"><pre><span></span><code><span class="gu">## Session Notes — [DATE]</span>
+
+<span class="gu">### Breakout Board Used</span>
+<span class="k">-</span><span class="w"> </span>Model: ...
+<span class="k">-</span><span class="w"> </span>Has onboard pull-ups: yes/no (value if yes: ___)
+<span class="k">-</span><span class="w"> </span>Has level shifter: yes/no
+
+<span class="gu">### Connection Verification</span>
+<span class="k">-</span><span class="w"> </span>WHO_AM_I result: 0x___
+
+<span class="gu">### Calibration</span>
+<span class="k">-</span><span class="w"> </span>Stationary accel_z: ___ m/s² (expected ≈9.81)
+<span class="k">-</span><span class="w"> </span>Gyro bias (stationary): gx=___ gy=___ gz=___ rad/s
+
+<span class="gu">### Stuck Bus Test</span>
+<span class="k">-</span><span class="w"> </span>Triggered artificially: yes/no
+<span class="k">-</span><span class="w"> </span>Recovery worked: yes/no
+<span class="k">-</span><span class="w"> </span>Time to recovery: ___ms
+
+<span class="gu">### ODR Measured</span>
+<span class="k">-</span><span class="w"> </span>Expected 200Hz, actual: ___Hz (measure with Logic 2 trigger count / time)
+
+<span class="gu">### Surprises</span>
+<span class="k">-</span><span class="w"> </span>...
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

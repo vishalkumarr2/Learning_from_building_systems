@@ -323,6 +323,16 @@ def build_zephyr():
             convert_md_to_html(md, out, "../index.html", "Back to Zephyr", accent)
             cards.append(card_html(f"study-notes/{md.stem}.html", f"Notes: {title}", "", accent))
 
+    # Deep-dive subdirectory
+    deepdive_dir = section / "deep-dive"
+    if deepdive_dir.exists():
+        for md in sorted(deepdive_dir.glob("*.md")):
+            md_text = md.read_text(encoding="utf-8")
+            title = extract_title(md_text)
+            out = deepdive_dir / (md.stem + ".html")
+            convert_md_to_html(md, out, "../index.html", "Back to Zephyr", accent)
+            cards.append(card_html(f"deep-dive/{md.stem}.html", f"Deep Dive: {title}", "", accent))
+
     idx = index_page(
         "Zephyr RTOS",
         "From basics to production firmware with Zephyr, DMA, SPI, CAN, and ROS2 integration",
@@ -459,6 +469,108 @@ def build_study_plan():
     return False
 
 
+def build_navigation_estimator():
+    """Build Navigation Estimator section pages."""
+    section = LEARN / "navigation-estimator"
+    accent = "sky"
+    cards = []
+
+    # Numbered lessons
+    lessons = sorted([f for f in section.iterdir()
+                      if f.is_file() and f.suffix == ".md"
+                      and re.match(r"\d{2}-", f.name)])
+    for md in lessons:
+        md_text = md.read_text(encoding="utf-8")
+        title = extract_title(md_text)
+        out = section / (md.stem + ".html")
+        convert_md_to_html(md, out, "index.html", "Back to Nav Estimator", accent)
+        cards.append(card_html(md.stem + ".html", title, "", accent))
+
+    # Exercises subdirectory
+    exercises_dir = section / "exercises"
+    if exercises_dir.exists():
+        for md in sorted(exercises_dir.glob("*.md")):
+            md_text = md.read_text(encoding="utf-8")
+            title = extract_title(md_text)
+            out = exercises_dir / (md.stem + ".html")
+            convert_md_to_html(md, out, "../index.html", "Back to Nav Estimator", accent)
+            cards.append(card_html(f"exercises/{md.stem}.html", f"Exercise: {title}", "", accent))
+
+    idx = index_page(
+        "Navigation Estimator",
+        "Dead reckoning, Kalman filters, IMU fusion, failure modes, and Ceres optimization",
+        "\n".join(cards),
+        "../index.html", "Back to Robotics",
+        accent,
+    )
+    (section / "index.html").write_text(idx, encoding="utf-8")
+    return len(cards)
+
+
+def build_ros2_handson():
+    """Build ROS 2 Hands-On section pages."""
+    section = LEARN / "ros2-handson"
+    accent = "violet"
+    cards = []
+
+    lessons = sorted([f for f in section.iterdir()
+                      if f.is_file() and f.suffix == ".md"
+                      and re.match(r"\d{2}-", f.name)])
+    for md in lessons:
+        md_text = md.read_text(encoding="utf-8")
+        title = extract_title(md_text)
+        out = section / (md.stem + ".html")
+        convert_md_to_html(md, out, "index.html", "Back to ROS 2", accent)
+        cards.append(card_html(md.stem + ".html", title, "", accent))
+
+    idx = index_page(
+        "ROS 2 Hands-On",
+        "Nodes, topics, actions, TF2, Nav2, and QoS — practical ROS 2 development",
+        "\n".join(cards),
+        "../index.html", "Back to Robotics",
+        accent,
+    )
+    (section / "index.html").write_text(idx, encoding="utf-8")
+    return len(cards)
+
+
+def build_python_scripting():
+    """Build Python Scripting section pages."""
+    section = LEARN / "python-scripting"
+    accent = "teal"
+    cards = []
+
+    lessons = sorted([f for f in section.iterdir()
+                      if f.is_file() and f.suffix == ".md"
+                      and re.match(r"\d{2}-", f.name)])
+    for md in lessons:
+        md_text = md.read_text(encoding="utf-8")
+        title = extract_title(md_text)
+        out = section / (md.stem + ".html")
+        convert_md_to_html(md, out, "index.html", "Back to Python Scripting", accent)
+        cards.append(card_html(md.stem + ".html", title, "", accent))
+
+    # Exercises subdirectory
+    exercises_dir = section / "exercises"
+    if exercises_dir.exists():
+        for md in sorted(exercises_dir.glob("*.md")):
+            md_text = md.read_text(encoding="utf-8")
+            title = extract_title(md_text)
+            out = exercises_dir / (md.stem + ".html")
+            convert_md_to_html(md, out, "../index.html", "Back to Python Scripting", accent)
+            cards.append(card_html(f"exercises/{md.stem}.html", f"Exercise: {title}", "", accent))
+
+    idx = index_page(
+        "Python Scripting",
+        "Type-safe Python, testing, CLI scripts, and timeseries analysis for robotics",
+        "\n".join(cards),
+        "../index.html", "Back to Robotics",
+        accent,
+    )
+    (section / "index.html").write_text(idx, encoding="utf-8")
+    return len(cards)
+
+
 def build_robotics_index():
     """Build the top-level robotics/index.html landing page."""
     cards = []
@@ -483,6 +595,18 @@ def build_robotics_index():
                            "Control Systems",
                            "PID to advanced control: MCU inner loop to Jetson outer loop — 10 lessons + exercises",
                            "rose"))
+    cards.append(card_html("learn/navigation-estimator/index.html",
+                           "Navigation Estimator",
+                           "Dead reckoning, Kalman filters, IMU fusion, and failure diagnosis",
+                           "sky"))
+    cards.append(card_html("learn/ros2-handson/index.html",
+                           "ROS 2 Hands-On",
+                           "Nodes, topics, TF2, Nav2, QoS — practical ROS 2 development",
+                           "violet"))
+    cards.append(card_html("learn/python-scripting/index.html",
+                           "Python Scripting",
+                           "Type-safe Python, testing, CLI tools, and timeseries analysis",
+                           "teal"))
 
     idx = index_page(
         "Robotics",
@@ -511,13 +635,22 @@ def main():
     n4 = build_control_systems()
     print(f"  Control Sys:  {n4} pages")
 
+    n5 = build_navigation_estimator()
+    print(f"  Nav Estimator: {n5} pages")
+
+    n6 = build_ros2_handson()
+    print(f"  ROS 2:        {n6} pages")
+
+    n7 = build_python_scripting()
+    print(f"  Python:       {n7} pages")
+
     build_study_plan()
     print("  Study Plan:   1 page")
 
     build_robotics_index()
     print("  Robotics index: 1 page")
 
-    total = n1 + n2 + n3 + n4 + 2  # +2 for study plan + robotics index
+    total = n1 + n2 + n3 + n4 + n5 + n6 + n7 + 2  # +2 for study plan + robotics index
     print(f"\nDone! Generated {total} HTML files.")
     print("Next: add Robotics link to index.html sidebar and category grid.")
 

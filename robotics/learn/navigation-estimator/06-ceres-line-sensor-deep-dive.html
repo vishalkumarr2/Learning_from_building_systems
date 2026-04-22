@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 — Ceres Bell-Curve Solver: Internals, Failure Modes &amp; Diagnosis - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-sky-600 hover:text-sky-800 mb-4 inline-block">&larr; Back to Nav Estimator</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="06-ceres-bell-curve-solver-internals-failure-modes-diagnosis">06 — Ceres Bell-Curve Solver: Internals, Failure Modes &amp; Diagnosis</h1>
+<h3 id="reflectance-estimator-deep-dive-source-verified-incident-proven">Reflectance estimator deep-dive — source-verified, incident-proven</h3>
+<p><strong>Prerequisite:</strong> <code>03-measurement-models.md</code> (line constraints), <code>05-failure-modes.md</code> (failure taxonomy)
+<strong>Source files:</strong> <code>estimator_reflectance_bell.cpp</code> (268 lines), <code>ceres_solver.cpp</code> (~200 lines)
+<strong>Unlocks:</strong> Diagnosing cold-start REJECT, geometric parking failures, hardware-vs-algorithmic triage</p>
+<hr />
+<h2 id="why-this-file-exists">Why This File Exists</h2>
+<p>Ticket #104718 (amr-robot-scl-site-a105, 2026-04-22) revealed a failure mode that the existing
+learning material didn&rsquo;t cover: a robot parked at a <strong>tape intersection</strong> caused all 4 line-sensors
+to REJECT simultaneously on cold-start, with no hardware fault whatsoever.</p>
+<p>The investigation required understanding the Ceres solver internals deeply enough to:
+- Explain <em>why</em> 3 sensors crossing tape triggers REJECT even with Cauchy loss active
+- Explain <em>why</em> the robot can never self-recover once it enters this state
+- Distinguish this geometric failure from the stale-data cascade pattern already documented</p>
+<p>This note captures all of that so future investigations can reach the same conclusions in minutes.</p>
+<hr />
+<h2 id="part-1-the-bell-curve-model">Part 1 — The Bell Curve Model</h2>
+<h3 id="formula">Formula</h3>
+<p>The line-sensor estimator fits a bell curve (actually a super-Gaussian trough) to the reflectance profile:</p>
+<div class="highlight"><pre><span></span><code>y(x) = p0 + p1 × exp(-|p2 × (x - p3)|^p4)
+</code></pre></div>
+
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Meaning</th>
+<th>Init value</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>p0</code></td>
+<td>Baseline (floor ADC)</td>
+<td>~960</td>
+<td>High because black floor reflects little IR</td>
+</tr>
+<tr>
+<td><code>p1</code></td>
+<td>Amplitude</td>
+<td>Negative (~-878)</td>
+<td><strong>Negative</strong> — curve is a downward trough, not a peak</td>
+</tr>
+<tr>
+<td><code>p2</code></td>
+<td>Sharpness</td>
+<td>50.0</td>
+<td>Wider init → narrower initial expected tape width</td>
+</tr>
+<tr>
+<td><code>p3</code></td>
+<td>Tape centre (m)</td>
+<td>from previous</td>
+<td>The value we want to extract for pose update</td>
+</tr>
+<tr>
+<td><code>p4</code></td>
+<td>Shape exponent</td>
+<td>2.0</td>
+<td>p4=2 = Gaussian; p4&gt;2 = super-Gaussian (flat-top, steeper sides)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Critical: the curve is a TROUGH (dip), not a peak.</strong>
+- Tape (white) → low IR reflection → transistor saturates → <strong>LOW ADC values (~65–150)</strong>
+- Floor (black) → high IR reflection → transistor barely conducts → <strong>HIGH ADC values (~900–960)</strong></p>
+<p>This is the opposite of what you&rsquo;d intuitively expect. The pull-down circuit in the line-sensor
+hardware inverts the response: more light → lower voltage → lower ADC reading.</p>
+<h3 id="parameter-bounds-from-ceres_solvercpp">Parameter bounds (from <code>ceres_solver.cpp</code>)</h3>
+<div class="highlight"><pre><span></span><code>p1  ≤ 0.7 × initial_p1      (amplitude can&#39;t shrink more than 30%)
+p2  ≤ 100.0                  (sharpness cap)
+p4  ∈ [1.2, 8.0]            (shape bounded between sub-Gaussian and steep super-Gaussian)
+</code></pre></div>
+
+<h3 id="what-good-fit-looks-like">What &ldquo;good fit&rdquo; looks like</h3>
+<p>With a robot crossing a single tape line at moderate speed:
+- p3 converges to the tape centre position in metres
+- p4 gradually increases from 2.0 toward 3–5 as the solver finds a better shape
+- p2 adjusts to match actual tape width
+- Residuals for all 12 sensors are small; 0 sensors disabled</p>
+<hr />
+<h2 id="part-2-the-two-code-paths-critical">Part 2 — The Two Code Paths (CRITICAL)</h2>
+<p>There are <strong>two completely different sensor disablement mechanisms</strong> in <code>estimator_reflectance_bell.cpp</code>.
+Which path runs depends on the YAML config flag <code>reflectance_use_loss_function</code>.</p>
+<h3 id="path-a-loss-function-active-default-in-production">Path A: Loss Function Active (DEFAULT in production)</h3>
+<div class="highlight"><pre><span></span><code><span class="nt">reflectance_use_loss_function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="nt">loss_function_constant</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">40.0</span>
+</code></pre></div>
+
+<p>Disabled-sensor check uses a <strong>hardcoded constant</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">constexpr</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">DISABLED_SENSOR_ERROR_PERCENTAGE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.25</span><span class="p">;</span>
+<span class="c1">// Source: estimator_reflectance_bell.cpp</span>
+</code></pre></div>
+
+<p>A sensor is disabled if:</p>
+<div class="highlight"><pre><span></span><code>|raw_residual| &gt; |p1| × DISABLED_SENSOR_ERROR_PERCENTAGE
+</code></pre></div>
+
+<p>Where <code>raw_residual</code> = <code>y_predicted(xi) - y_measured(xi)</code>, <strong>without</strong> applying the Cauchy loss
+(the <code>apply_loss_function = false</code> flag is set during the disabled-check step).</p>
+<p>With p1 ≈ -878 (amplitude):</p>
+<div class="highlight"><pre><span></span><code>threshold = 878 × 0.25 = 219.5 ADC units
+</code></pre></div>
+
+<p><strong>This is the active path on all production robots.</strong> The <code>reflectance_disabled_sensor_threshold: 0.15</code>
+YAML value is <strong>not used</strong> when <code>reflectance_use_loss_function: true</code>.</p>
+<h3 id="path-b-loss-function-inactive-not-in-production">Path B: Loss Function Inactive (NOT in production)</h3>
+<div class="highlight"><pre><span></span><code><span class="nt">reflectance_use_loss_function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div>
+
+<p>Uses <code>_disabled_sensor_threshold = 0.15</code> from YAML. A sensor is disabled if its reflectance
+value is below <code>max_reflectance × 0.15</code>. This was the original mechanism.</p>
+<h3 id="why-this-matters-for-investigation">Why this matters for investigation</h3>
+<p>If you read the YAML and see <code>reflectance_disabled_sensor_threshold: 0.15</code>, do NOT assume that
+is the active threshold. <strong>In loss-function mode, the threshold is hardcoded at 0.25.</strong></p>
+<p>The effective threshold ratio is 0.25 (not 0.15). This is 67% stricter — sensors are disabled
+only if their raw residual exceeds 25% of the fitted amplitude, not 15% of max reflectance.</p>
+<hr />
+<h2 id="part-3-the-cauchy-loss-function-and-its-trap">Part 3 — The Cauchy Loss Function and Its Trap</h2>
+<h3 id="what-cauchy-loss-does">What Cauchy loss does</h3>
+<p>During optimization, Ceres applies <code>CauchyLoss(c=40.0)</code>:</p>
+<div class="highlight"><pre><span></span><code>ρ(r²) = c² × log(1 + r²/c²)
+</code></pre></div>
+
+<p>The effect on gradient weight:</p>
+<div class="highlight"><pre><span></span><code>Cauchy weight = c² / (c² + r²) = 1 / (1 + (r/c)²)
+</code></pre></div>
+
+<p>At residual <code>r = 254</code> (a sensor 3 sensor-positions off the tape centre):</p>
+<div class="highlight"><pre><span></span><code>weight = 1 / (1 + (254/40)²) = 1 / (1 + 40.3) ≈ 0.024
+</code></pre></div>
+
+<p>That sensor contributes only <strong>2.4% of its normal gradient influence</strong>. The optimizer effectively
+ignores sensors with large residuals.</p>
+<h3 id="how-it-creates-a-trap">How it creates a trap</h3>
+<p>On the initial Gaussian guess (p2=50, p4=2.0) with 3 sensors crossing tape:</p>
+<ol>
+<li>The 3 tape sensors have residuals of ~235–255 ADC (far from the bell prediction of ~60)</li>
+<li>Cauchy weights these at 2.4–2.8% of normal</li>
+<li>The optimizer converges to a solution that fits the <strong>9 floor sensors</strong> well</li>
+<li>The 3 tape sensors remain at large residuals throughout</li>
+<li>The disabled-sensor check fires: <code>|raw_residual| &gt; 219.5</code> → all 3 disabled</li>
+<li><code>disabled_sensors_count = 3 &gt; max_disabled_sensor_count = 2</code> → <strong>REJECT</strong></li>
+</ol>
+<p>The Cauchy loss intended to make the solver robust to outliers is working correctly — but the
+&ldquo;outliers&rdquo; here are the tape sensors, which are physically the most important ones.</p>
+<h3 id="why-it-doesnt-always-trap">Why it doesn&rsquo;t always trap</h3>
+<p>Verification via Python IRLS simulation showed that for a robot <strong>moving</strong> over a single tape line:</p>
+<div class="highlight"><pre><span></span><code>Step  0: p2=50.0  p4=2.00  → 3 disabled → REJECT  (initial Gaussian too narrow)
+Step  1: p2=63.1  p4=2.62  → 0 disabled → VALID    ← ONE step escapes!
+Step 12: p2=72.1  p4=6.72  → 0 disabled → converged to super-Gaussian
+</code></pre></div>
+
+<p>The solver CAN escape in step 1 because after the first Gauss-Newton update, p2 and p4 adjust
+enough that the initial REJECT sensors now fit within the threshold.</p>
+<p><strong>The key difference:</strong> when moving, <code>_previous_solutions</code> has a valid cached solution. When
+cold-starting on a tape intersection, there is no cached solution and the initial guess is
+always the narrow Gaussian.</p>
+<hr />
+<h2 id="part-4-the-self-perpetuating-failure-loop">Part 4 — The Self-Perpetuating Failure Loop</h2>
+<p>This is the core mechanism of the #104718 failure.</p>
+<h3 id="_previous_solutions-cache"><code>_previous_solutions</code> cache</h3>
+<p>In <code>estimator_reflectance_bell.cpp</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">map</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="p">,</span><span class="w"> </span><span class="n">Solution</span><span class="o">&gt;</span><span class="w"> </span><span class="n">_previous_solutions</span><span class="p">;</span>
+<span class="c1">// Maps bar frame_id → last valid solution</span>
+</code></pre></div>
+
+<p><strong>When a solution is VALID:</strong> the solution is stored in <code>_previous_solutions[frame_id]</code>.
+Next call: initialization uses cached <code>p3</code> (tape position). The solver starts close to the
+answer and converges quickly.</p>
+<p><strong>When a solution is REJECT:</strong> the solution is NOT stored. The map entry is NOT updated.
+Next call: if the map has no entry, initialization falls back to the narrow Gaussian default.</p>
+<h3 id="the-loop">The loop</h3>
+<div class="highlight"><pre><span></span><code>[Robot restarts on tape intersection]
+   │
+   ▼
+Call solver → no cached solution → init with narrow Gaussian (p2=50, p4=2)
+   │
+   ▼
+3 tape sensors get large residuals at step 0 → disabled → REJECT
+   │
+   ▼
+REJECT → do NOT store solution → _previous_solutions still empty
+   │
+   └──────────────────────────────────────────────────────────────────► (loop forever)
+</code></pre></div>
+
+<p><strong>The robot can NEVER self-recover from this state.</strong> Every call to the solver starts from the
+same narrow Gaussian and produces the same REJECT. The only exit is:
+- Robot moves (changes sensor geometry)
+- Manual intervention / restart with robot on clean floor</p>
+<h3 id="why-all-4-bars-fail-simultaneously">Why all 4 bars fail simultaneously</h3>
+<p>The tape intersection geometry at tile (28,0,0) places 3 sensors from EACH bar on white tape.
+With <code>max_disabled_sensor_count = 2</code> (designed for one broken sensor), 3 sensors on tape always
+exceeds the limit. All 4 bars → REJECT simultaneously. The system has no fall-back.</p>
+<hr />
+<h2 id="part-5-real-data-from-ticket-104718">Part 5 — Real Data from Ticket #104718</h2>
+<h3 id="sensor-readings-mean-from-recording_001mcap-5-min-at-05210522-utc">Sensor readings (mean from recording_001.mcap, ~5 min at 05:21–05:22 UTC)</h3>
+<table>
+<thead>
+<tr>
+<th>Bar</th>
+<th>S00</th>
+<th>S01</th>
+<th>S02</th>
+<th>S03</th>
+<th>S04</th>
+<th>S05</th>
+<th>S06</th>
+<th>S07</th>
+<th>S08</th>
+<th>S09</th>
+<th>S10</th>
+<th>S11</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>front</td>
+<td>959</td>
+<td>930</td>
+<td>898</td>
+<td>569</td>
+<td><strong>71</strong></td>
+<td><strong>66</strong></td>
+<td><strong>76</strong></td>
+<td>635</td>
+<td>878</td>
+<td>924</td>
+<td>944</td>
+<td>956</td>
+</tr>
+<tr>
+<td>rear</td>
+<td>999</td>
+<td>972</td>
+<td>992</td>
+<td>719</td>
+<td><strong>142</strong></td>
+<td><strong>59</strong></td>
+<td><strong>63</strong></td>
+<td>252</td>
+<td>859</td>
+<td>940</td>
+<td>995</td>
+<td>958</td>
+</tr>
+<tr>
+<td>left</td>
+<td>948</td>
+<td>931</td>
+<td>913</td>
+<td>834</td>
+<td>560</td>
+<td><strong>69</strong></td>
+<td><strong>65</strong></td>
+<td><strong>75</strong></td>
+<td>580</td>
+<td>889</td>
+<td>936</td>
+<td>956</td>
+</tr>
+<tr>
+<td>right</td>
+<td>940</td>
+<td>836</td>
+<td>499</td>
+<td><strong>67</strong></td>
+<td><strong>65</strong></td>
+<td><strong>71</strong></td>
+<td>512</td>
+<td>846</td>
+<td>890</td>
+<td>883</td>
+<td>918</td>
+<td>931</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Bold = on white tape (ADC 59–142, well below 219.5 threshold)</strong></p>
+<p>Each bar has exactly 3 sensors on tape → exceeds <code>max_disabled_sensor_count=2</code> → all 4 REJECT.</p>
+<h3 id="hardware-verdict-from-30-min-rosbag-04100440-utc">Hardware verdict (from 30-min rosbag, 04:10–04:40 UTC)</h3>
+<ul>
+<li><code>is_reliable</code> dropout rate: <strong>0.02%</strong> (175,487 frames/bar) — nominal</li>
+<li>Stuck-high frames: <strong>0%</strong>, stuck-low frames: <strong>0%</strong> — no hardware fault</li>
+<li>Tape sensors (59–143 ADC): correct for white tape</li>
+<li>Floor sensors (836–999 ADC): correct for black floor</li>
+<li>Same 3 sensors/bar on tape for 100% of 30-min window → robot stationary since ≤03:46 UTC</li>
+</ul>
+<p><strong>Conclusion: HARDWARE IS HEALTHY. Failure is entirely geometric + algorithmic.</strong></p>
+<h3 id="event-timeline">Event timeline</h3>
+<table>
+<thead>
+<tr>
+<th>Time (UTC)</th>
+<th>Event</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>≤03:46</td>
+<td>Robot already parked at tile (28,0,0) on tape intersection</td>
+</tr>
+<tr>
+<td>05:21:29</td>
+<td>All nodes kill (roslaunch restart — someone triggered a restart)</td>
+</tr>
+<tr>
+<td>05:21:41</td>
+<td><strong><code>EstimatorReflectanceBell: Curve fitting disabled sensors for line-sensor: 4 (max: 2)</code></strong></td>
+</tr>
+<tr>
+<td>05:21:46</td>
+<td>Line-sensor calibration: 4/4 bars HEALTHY (not the issue)</td>
+</tr>
+<tr>
+<td>05:21:50</td>
+<td>Map loads, tile (28,0,0) already in state=3 (disabled)</td>
+</tr>
+<tr>
+<td>05:22:00</td>
+<td><code>InitializeProcessing::recoverErrors: Recovering error 1 by MCLBC_Navigation</code></td>
+</tr>
+<tr>
+<td><strong>05:22:06.916</strong></td>
+<td><code>RequestManualAssistance</code> — MCLBC_Navigation code 1 ⛔</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="part-6-diagnostic-protocol">Part 6 — Diagnostic Protocol</h2>
+<h3 id="when-to-suspect-this-failure-mode">When to suspect this failure mode</h3>
+<p>Use this checklist when you see <code>MCLBC_Navigation code 1</code> or <code>EstimatorReflectanceBell: Curve fitting disabled sensors for line-sensor: N (max: 2)</code>:</p>
+<div class="highlight"><pre><span></span><code>□ Does /rosout show &quot;Curve fitting disabled sensors&quot; for ALL 4 bars simultaneously?
+  → If yes: suspect tape intersection geometry (not hardware)
+  → If only 1-2 bars: more likely single line-sensor hardware degradation
+
+□ Was there a recent restart/reboot before the failure?
+  → Cold-start required to trigger this pattern (no cached solution)
+
+□ Check the actual sensor values from /robot&lt;N&gt;/line-sensors at failure time
+  → If 3+ sensors have values &lt; 200 per bar → robot is on tape intersection
+  → If random sensors have values &lt; 200 → could be sensor hardware fault
+
+□ Run line-sensor health check (is_reliable dropout, stuck sensors)
+  → If dropout &lt; 1% and no stuck sensors → hardware healthy → geometric failure
+
+□ Check tile position from /robot&lt;N&gt;/localization or RFID
+  → Tile intersections are at map grid cross-points
+  → Compare tile position against warehouse grid map
+</code></pre></div>
+
+<h3 id="distinguishing-from-other-failure-modes">Distinguishing from other failure modes</h3>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Tape Intersection</th>
+<th>Stale Data Cascade</th>
+<th>Hardware Fault</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All 4 bars REJECT</td>
+<td>Yes</td>
+<td>Not usually</td>
+<td>Sometimes</td>
+</tr>
+<tr>
+<td>Failure on cold-start</td>
+<td>Yes</td>
+<td>No (occurs during motion)</td>
+<td>No pattern</td>
+</tr>
+<tr>
+<td>Hardware checks pass</td>
+<td>Yes</td>
+<td>Yes</td>
+<td><strong>No</strong></td>
+</tr>
+<tr>
+<td>Robot was stationary</td>
+<td>Yes</td>
+<td>No (requires motion)</td>
+<td>Either</td>
+</tr>
+<tr>
+<td>Sensor values</td>
+<td>3 sensors ~65–150 ADC</td>
+<td>Normal pattern</td>
+<td>Stuck/noisy</td>
+</tr>
+<tr>
+<td><code>is_reliable</code> dropout</td>
+<td>Normal</td>
+<td>Normal</td>
+<td><strong>Elevated (&gt;5%)</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="fix-for-the-hardware-healthy-tape-intersection-case">Fix for the hardware-healthy tape intersection case</h3>
+<p><strong>Immediate:</strong> Manually reposition robot 20-30cm off the intersection. Clear the tile disable.</p>
+<p><strong>Long-term options:</strong>
+1. Increase <code>reflectance_max_disabled_sensor_count</code> from 2 to 3 (allows 3 sensors on tape)
+2. Add warm-start fallback: if REJECT and no previous solution, try a wider initial p2 (e.g., p2=20)
+3. Add parking-position constraint to prevent robots from stopping at tape intersections
+4. Increase <code>DISABLED_SENSOR_ERROR_PERCENTAGE</code> from 0.25 to allow more sensor variation</p>
+<p><strong>Tradeoff note:</strong> Option 1 and 4 reduce sensitivity to actual broken sensors. The threshold
+was designed for detecting 1 broken sensor (noise floor, not geometry). Changing it affects
+all robots at all sites.</p>
+<hr />
+<h2 id="part-7-configuration-reference">Part 7 — Configuration Reference</h2>
+<p>From <code>config_default.yaml</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">sensor_spacing_x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0069</span><span class="w">           </span><span class="c1"># 6.9mm between adjacent sensors (12 sensors = 82.8mm span)</span>
+<span class="nt">reflectance_use_loss_function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">  </span><span class="c1"># ENABLES PATH A (loss function mode)</span>
+<span class="nt">loss_function_constant</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">40.0</span><span class="w">         </span><span class="c1"># c parameter in CauchyLoss(c)</span>
+<span class="nt">weight_reduction_error_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20.0</span><span class="w">  </span><span class="c1"># Weight reduction starts above this residual (not DISABLED)</span>
+<span class="nt">reflectance_disabled_sensor_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.15</span><span class="w">   </span><span class="c1"># NOT USED when loss_function=true</span>
+<span class="nt">reflectance_max_disabled_sensor_count</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span><span class="w">      </span><span class="c1"># REJECT if more than this many sensors disabled</span>
+</code></pre></div>
+
+<p>Hardcoded in source (NOT configurable via YAML):</p>
+<div class="highlight"><pre><span></span><code><span class="k">constexpr</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">DISABLED_SENSOR_ERROR_PERCENTAGE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.25</span><span class="p">;</span><span class="w">  </span><span class="c1">// estimator_reflectance_bell.cpp</span>
+</code></pre></div>
+
+<hr />
+<h2 id="summary">Summary</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Key fact</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bell curve</td>
+<td>Trough shape; p1 is negative; LOW ADC = white tape</td>
+</tr>
+<tr>
+<td>Active disable threshold</td>
+<td>25% of fitted amplitude (~219 ADC) — NOT the 0.15 YAML value</td>
+</tr>
+<tr>
+<td>Cauchy C=40</td>
+<td>Down-weights sensors with residual &gt;40 ADC; creates trap for tape sensors</td>
+</tr>
+<tr>
+<td>Cold-start failure</td>
+<td>No cached solution → narrow Gaussian → tape sensors at large residual → REJECT</td>
+</tr>
+<tr>
+<td>Self-perpetuating loop</td>
+<td>REJECT doesn&rsquo;t update cache → next call identical → REJECT forever</td>
+</tr>
+<tr>
+<td>Tape intersection</td>
+<td>3 sensors/bar on tape at grid cross-points → always &gt; max_disabled=2</td>
+</tr>
+<tr>
+<td>Hardware check</td>
+<td>0% stuck, 0.02% unreliable → failure is geometric, not hardware</td>
+</tr>
+<tr>
+<td>Fix</td>
+<td>Move robot off intersection OR increase max_disabled OR add warm-start fallback</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

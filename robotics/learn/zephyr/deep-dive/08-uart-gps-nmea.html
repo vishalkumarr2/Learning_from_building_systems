@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>08 — UART GPS: NMEA Parser with Ring Buffer - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="08-uart-gps-nmea-parser-with-ring-buffer">08 — UART GPS: NMEA Parser with Ring Buffer</h1>
+<h3 id="stm32h743zi2-u-blox-neo-m8n-zephyr-uart-irq-nmea-0183">STM32H743ZI2 · u-blox NEO-M8N · Zephyr UART IRQ · NMEA 0183</h3>
+<p><strong>Status:</strong> 🟡 HARDWARE-GATED<br />
+<strong>Prerequisite:</strong> Session <code>07</code> milestone complete<br />
+<strong>Hardware required:</strong> u-blox NEO-M8N GPS module · active antenna (if indoors, use SMA patch)<br />
+<strong>Unlocks:</strong> <code>09-zbus-nanopb-bridge.md</code><br />
+<strong>Time budget:</strong> ~8 hours<br />
+<strong>Mastery plan:</strong> Project 6</p>
+<hr />
+<h2 id="goal-of-this-session">Goal of This Session</h2>
+<p>Receive NMEA sentences from a GPS module via UART, parse <code>$GNGGA</code> for lat/lon/alt/fix-status, and log at 1Hz. Handle split-sentence fragments correctly (the key learning objective). Use loopback injection to verify the parser without GPS sky view.</p>
+<p><strong>Milestone</strong>: <code>lat=35.670000 lon=139.650000 alt=45.2 fix=1</code> at 1Hz, or with loopback injection: injected NMEA sentences parse correctly including those split across UART callbacks.</p>
+<hr />
+<h2 id="theory-nmea-0183-format">Theory: NMEA 0183 Format</h2>
+<div class="highlight"><pre><span></span><code>$GNGGA,123519.00,3567.0000,N,13965.0000,E,1,08,0.9,545.4,M,46.9,M,,*47\r\n
+│       │         │          │  │          │ │  │   │     │                │
+│       │         │          │  │          │ │  │   │     │                checksum (XOR of chars between $ and *)
+│       time      latitude   N  longitude  E fix sats hdop altitude
+│
+GNSS talker (GN=combined, GP=GPS only, GL=GLONASS, GA=Galileo)
+</code></pre></div>
+
+<p><strong>GGA fields (0-indexed from sentence start):</strong>
+| Index | Field | Notes |
+|-------|-------|-------|
+| 0 | <code>$GNGGA</code> | Message ID |
+| 1 | <code>123519.00</code> | UTC time hhmmss.ss |
+| 2 | <code>3567.0000</code> | Latitude ddmm.mmmm |
+| 3 | <code>N</code> | N/S |
+| 4 | <code>13965.0000</code> | Longitude dddmm.mmmm |
+| 5 | <code>E</code> | E/W |
+| 6 | <code>1</code> | Fix quality: 0=none, 1=GPS, 2=DGPS |
+| 7 | <code>08</code> | Satellites in use |
+| 8 | <code>0.9</code> | HDOP |
+| 9 | <code>545.4</code> | Altitude (MSL) |
+| 10 | <code>M</code> | Altitude units |</p>
+<p><strong>Latitude conversion:</strong> <code>ddmm.mmmm</code> → decimal degrees: <code>dd + mm.mmmm/60</code><br />
+Example: <code>3567.0000</code> → <code>35 + 67.0000/60 = 35 + 1.1167 = 36.1167°N</code><br />
+(Note: u-blox outputs <code>ddmm.mmmm</code> where <code>dd</code> is degrees and <code>mm.mmmm</code> is minutes — NOT pure decimal)</p>
+<p><strong>NMEA checksum</strong>: XOR of all ASCII bytes between <code>$</code> and <code>*</code> (exclusive). Verify on every sentence.</p>
+<hr />
+<h2 id="the-key-learning-objective-split-sentences">The Key Learning Objective: Split Sentences</h2>
+<p>UART interrupts fire when the hardware RX FIFO has data — typically 1–64 bytes. A 70-byte NMEA sentence may arrive in 2–4 callbacks:</p>
+<div class="highlight"><pre><span></span><code>Callback 1:  &quot;$GNGGA,123519.00,3567.0000,N,13&quot;
+Callback 2:  &quot;965.0000,E,1,08,0.9,545.4,M,46.9&quot;
+Callback 3:  &quot;,M,,*47\r\n&quot;
+</code></pre></div>
+
+<p><strong>Wrong approach:</strong> parse inside the IRQ callback. You get a garbage partial sentence.<br />
+<strong>Correct approach:</strong> accumulate bytes into a ring buffer. Processing thread drains the ring buffer looking for <code>\n</code> (sentence terminator) before parsing.</p>
+<hr />
+<h2 id="wiring">Wiring</h2>
+<div class="highlight"><pre><span></span><code>STM32 Nucleo-H743ZI2              NEO-M8N Breakout
+────────────────────              ─────────────────
+PA9  (USART1_TX) ──────────────── RXD
+PA10 (USART1_RX) ──────────────── TXD
+3.3V (CN6 pin 4) ──────────────── VCC (3.3V — check module; some require 5V)
+GND  (CN6 pin 6) ──────────────── GND
+                                   PPS → not connected (for now)
+                                   Antenna → SMA active patch (outdoors or near window)
+</code></pre></div>
+
+<p><strong>Decoupling:</strong> 100nF capacitor across VCC/GND on the GPS module breakout, placed close to the module pins.</p>
+<p><strong>Default NEO-M8N baud rate:</strong> 9600. NMEA output at 1Hz by default. You can increase to 115200 via UBX-CFG-PRT, but start at 9600.</p>
+<hr />
+<h2 id="zephyr-uart-irq-application">Zephyr UART IRQ Application</h2>
+<h3 id="devicetree-overlay">Devicetree Overlay</h3>
+<div class="highlight"><pre><span></span><code><span class="cm">/* boards/nucleo_h743zi2.overlay */</span>
+<span class="o">&amp;</span><span class="na">usart1</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kr">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;okay&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&amp;</span><span class="na">usart1_tx_pa9</span><span class="w"> </span><span class="o">&amp;</span><span class="na">usart1_rx_pa10</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pinctrl-names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;default&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">current-speed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="mi">9600</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<h3 id="prjconf">prj.conf</h3>
+<div class="highlight"><pre><span></span><code>CONFIG_UART_INTERRUPT_DRIVEN=y
+CONFIG_RING_BUFFER=y
+CONFIG_LOG=y
+CONFIG_MAIN_STACK_SIZE=4096
+</code></pre></div>
+
+<h3 id="gps-parser-implementation">GPS Parser Implementation</h3>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/kernel.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/drivers/uart.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/sys/ring_buffer.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/logging/log.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;stdlib.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;string.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;stdio.h&gt;</span>
+
+<span class="n">LOG_MODULE_REGISTER</span><span class="p">(</span><span class="n">gps</span><span class="p">,</span><span class="w"> </span><span class="n">LOG_LEVEL_DBG</span><span class="p">);</span>
+
+<span class="cp">#define UART_NODE     DT_NODELABEL(usart1)</span>
+<span class="cp">#define RING_BUF_SIZE 512</span>
+
+<span class="n">RING_BUF_DECLARE</span><span class="p">(</span><span class="n">uart_ring_buf</span><span class="p">,</span><span class="w"> </span><span class="n">RING_BUF_SIZE</span><span class="p">);</span>
+
+<span class="cm">/* ── UART IRQ callback ─────────────────────────────────────────── */</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">uart_cb</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">user_data</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">uart_irq_update</span><span class="p">(</span><span class="n">dev</span><span class="p">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">!</span><span class="n">uart_irq_rx_ready</span><span class="p">(</span><span class="n">dev</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">byte</span><span class="p">;</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">uart_fifo_read</span><span class="p">(</span><span class="n">dev</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">byte</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ring_buf_put</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uart_ring_buf</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">byte</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="cm">/* Ring buffer full — oldest byte dropped */</span>
+<span class="w">            </span><span class="n">LOG_WRN_ONCE</span><span class="p">(</span><span class="s">&quot;UART ring buf overflow&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="cm">/* ── NMEA checksum verifier ────────────────────────────────────── */</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="nf">nmea_checksum_ok</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">sentence</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Sentence: &quot;$GNGGAxxxx...*HH\r\n&quot; */</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sentence</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">   </span><span class="cm">/* skip $ */</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">star</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">strchr</span><span class="p">(</span><span class="n">p</span><span class="p">,</span><span class="w"> </span><span class="sc">&#39;*&#39;</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">star</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">calc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">p</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">star</span><span class="p">)</span><span class="w"> </span><span class="n">calc</span><span class="w"> </span><span class="o">^=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint8_t</span><span class="p">)(</span><span class="o">*</span><span class="n">p</span><span class="o">++</span><span class="p">);</span>
+
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">given</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint8_t</span><span class="p">)</span><span class="n">strtol</span><span class="p">(</span><span class="n">star</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">16</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">calc</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">given</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="cm">/* ── Parse $GNGGA ──────────────────────────────────────────────── */</span>
+<span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">double</span><span class="w">  </span><span class="n">lat_deg</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">double</span><span class="w">  </span><span class="n">lon_deg</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">   </span><span class="n">alt_m</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">fix</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">satellites</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w">    </span><span class="n">valid</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="n">gps_data_t</span><span class="p">;</span>
+
+<span class="k">static</span><span class="w"> </span><span class="n">gps_data_t</span><span class="w"> </span><span class="nf">parse_gngga</span><span class="p">(</span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">sentence</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">gps_data_t</span><span class="w"> </span><span class="n">gps</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">valid</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">false</span><span class="w"> </span><span class="p">};</span>
+
+<span class="w">    </span><span class="cm">/* Verify checksum first */</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">nmea_checksum_ok</span><span class="p">(</span><span class="n">sentence</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_WRN</span><span class="p">(</span><span class="s">&quot;Bad NMEA checksum: %s&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">sentence</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">gps</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="cm">/* Tokenise by comma — modifies sentence in place */</span>
+<span class="w">    </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">fields</span><span class="p">[</span><span class="mi">15</span><span class="p">];</span>
+<span class="w">    </span><span class="kt">int</span><span class="w">   </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">token</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">strtok</span><span class="p">(</span><span class="n">sentence</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;,&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">token</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">15</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">fields</span><span class="p">[</span><span class="n">n</span><span class="o">++</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">token</span><span class="p">;</span>
+<span class="w">        </span><span class="n">token</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">strtok</span><span class="p">(</span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;,&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">10</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">gps</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/* field[6]: fix quality */</span>
+<span class="w">    </span><span class="n">gps</span><span class="p">.</span><span class="n">fix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint8_t</span><span class="p">)</span><span class="n">atoi</span><span class="p">(</span><span class="n">fields</span><span class="p">[</span><span class="mi">6</span><span class="p">]);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">gps</span><span class="p">.</span><span class="n">fix</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">gps</span><span class="p">.</span><span class="n">valid</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span><span class="w">   </span><span class="cm">/* valid parse, no fix */</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">gps</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="cm">/* field[2]: latitude ddmm.mmmm, field[3]: N/S */</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="n">raw_lat</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">atof</span><span class="p">(</span><span class="n">fields</span><span class="p">[</span><span class="mi">2</span><span class="p">]);</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">lat_deg_int</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="p">)(</span><span class="n">raw_lat</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">100</span><span class="p">);</span>
+<span class="w">    </span><span class="n">gps</span><span class="p">.</span><span class="n">lat_deg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">lat_deg_int</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">raw_lat</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">lat_deg_int</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">100</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">60.0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">fields</span><span class="p">[</span><span class="mi">3</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="sc">&#39;S&#39;</span><span class="p">)</span><span class="w"> </span><span class="n">gps</span><span class="p">.</span><span class="n">lat_deg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">-</span><span class="n">gps</span><span class="p">.</span><span class="n">lat_deg</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/* field[4]: longitude dddmm.mmmm, field[5]: E/W */</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="n">raw_lon</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">atof</span><span class="p">(</span><span class="n">fields</span><span class="p">[</span><span class="mi">4</span><span class="p">]);</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">lon_deg_int</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="p">)(</span><span class="n">raw_lon</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">100</span><span class="p">);</span>
+<span class="w">    </span><span class="n">gps</span><span class="p">.</span><span class="n">lon_deg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">lon_deg_int</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">raw_lon</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">lon_deg_int</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">100</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">60.0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">fields</span><span class="p">[</span><span class="mi">5</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="sc">&#39;W&#39;</span><span class="p">)</span><span class="w"> </span><span class="n">gps</span><span class="p">.</span><span class="n">lon_deg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">-</span><span class="n">gps</span><span class="p">.</span><span class="n">lon_deg</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/* field[9]: altitude */</span>
+<span class="w">    </span><span class="n">gps</span><span class="p">.</span><span class="n">alt_m</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">float</span><span class="p">)</span><span class="n">atof</span><span class="p">(</span><span class="n">fields</span><span class="p">[</span><span class="mi">9</span><span class="p">]);</span>
+
+<span class="w">    </span><span class="cm">/* field[7]: satellites */</span>
+<span class="w">    </span><span class="n">gps</span><span class="p">.</span><span class="n">satellites</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint8_t</span><span class="p">)</span><span class="n">atoi</span><span class="p">(</span><span class="n">fields</span><span class="p">[</span><span class="mi">7</span><span class="p">]);</span>
+
+<span class="w">    </span><span class="n">gps</span><span class="p">.</span><span class="n">valid</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">gps</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="cm">/* ── Main processing thread ────────────────────────────────────── */</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="n">line_buf</span><span class="p">[</span><span class="mi">128</span><span class="p">];</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">int</span><span class="w">  </span><span class="n">line_pos</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">uart_dev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">UART_NODE</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">device_is_ready</span><span class="p">(</span><span class="n">uart_dev</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;UART not ready&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">uart_irq_callback_user_data_set</span><span class="p">(</span><span class="n">uart_dev</span><span class="p">,</span><span class="w"> </span><span class="n">uart_cb</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">);</span>
+<span class="w">    </span><span class="n">uart_irq_rx_enable</span><span class="p">(</span><span class="n">uart_dev</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;GPS UART started at 9600 baud, waiting for sentences...&quot;</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">byte</span><span class="p">;</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">got</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ring_buf_get</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uart_ring_buf</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">byte</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">got</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">k_sleep</span><span class="p">(</span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">1</span><span class="p">));</span>
+<span class="w">            </span><span class="k">continue</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="cm">/* Accumulate until &#39;\n&#39; */</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">byte</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="sc">&#39;\r&#39;</span><span class="p">)</span><span class="w"> </span><span class="k">continue</span><span class="p">;</span><span class="w">   </span><span class="cm">/* discard CR */</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">byte</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="sc">&#39;\n&#39;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">line_buf</span><span class="p">[</span><span class="n">line_pos</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="sc">&#39;\0&#39;</span><span class="p">;</span>
+<span class="w">            </span><span class="n">line_pos</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="w">            </span><span class="cm">/* Only process GGA sentences */</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">strncmp</span><span class="p">(</span><span class="n">line_buf</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;$GNGGA&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">6</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="o">||</span>
+<span class="w">                </span><span class="n">strncmp</span><span class="p">(</span><span class="n">line_buf</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;$GPGGA&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">6</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">gps_data_t</span><span class="w"> </span><span class="n">gps</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">parse_gngga</span><span class="p">(</span><span class="n">line_buf</span><span class="p">);</span>
+<span class="w">                </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">gps</span><span class="p">.</span><span class="n">valid</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">gps</span><span class="p">.</span><span class="n">fix</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                        </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;lat=%.6f lon=%.6f alt=%.1f fix=%d sats=%d&quot;</span><span class="p">,</span>
+<span class="w">                                </span><span class="n">gps</span><span class="p">.</span><span class="n">lat_deg</span><span class="p">,</span><span class="w"> </span><span class="n">gps</span><span class="p">.</span><span class="n">lon_deg</span><span class="p">,</span>
+<span class="w">                                </span><span class="n">gps</span><span class="p">.</span><span class="n">alt_m</span><span class="p">,</span><span class="w"> </span><span class="n">gps</span><span class="p">.</span><span class="n">fix</span><span class="p">,</span><span class="w"> </span><span class="n">gps</span><span class="p">.</span><span class="n">satellites</span><span class="p">);</span>
+<span class="w">                    </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                        </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;No fix yet (satellites visible: %d)&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">gps</span><span class="p">.</span><span class="n">satellites</span><span class="p">);</span>
+<span class="w">                    </span><span class="p">}</span>
+<span class="w">                </span><span class="p">}</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="cm">/* Guard against buffer overrun */</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">line_pos</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="p">)(</span><span class="k">sizeof</span><span class="p">(</span><span class="n">line_buf</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">line_buf</span><span class="p">[</span><span class="n">line_pos</span><span class="o">++</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">byte</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">LOG_WRN</span><span class="p">(</span><span class="s">&quot;Line buffer overflow — discarding&quot;</span><span class="p">);</span>
+<span class="w">                </span><span class="n">line_pos</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="testing-without-gps-signal-loopback-injection">Testing Without GPS Signal: Loopback Injection</h2>
+<p>Use the STM32 UART shell to inject static NMEA strings and verify the parser without a sky view:</p>
+<div class="highlight"><pre><span></span><code><span class="cm">/* Add a shell command to inject test sentences */</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/shell/shell.h&gt;</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="nf">cmd_inject_nmea</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">shell</span><span class="w"> </span><span class="o">*</span><span class="n">sh</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">argc</span><span class="p">,</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">**</span><span class="n">argv</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Inject a known-good GGA sentence */</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">test_sentence</span><span class="w"> </span><span class="o">=</span>
+<span class="w">        </span><span class="s">&quot;$GNGGA,123519.00,3540.2000,N,13939.3000,E,1,08,0.9,45.2,M,38.1,M,,*4F</span><span class="se">\r\n</span><span class="s">&quot;</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/* Push bytes into the ring buffer as if they came from UART */</span>
+<span class="w">    </span><span class="n">ring_buf_put</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uart_ring_buf</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">test_sentence</span><span class="p">,</span><span class="w"> </span><span class="n">strlen</span><span class="p">(</span><span class="n">test_sentence</span><span class="p">));</span>
+<span class="w">    </span><span class="n">shell_print</span><span class="p">(</span><span class="n">sh</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Injected: %s&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">test_sentence</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="n">SHELL_CMD_REGISTER</span><span class="p">(</span><span class="n">inject_nmea</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Inject test NMEA sentence&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">cmd_inject_nmea</span><span class="p">);</span>
+</code></pre></div>
+
+<p><strong>Test the split-sentence case:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="k">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="nf">cmd_inject_split</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">shell</span><span class="w"> </span><span class="o">*</span><span class="n">sh</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">argc</span><span class="p">,</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">**</span><span class="n">argv</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Same sentence, but injected as two fragments */</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">part1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;$GNGGA,123519.00,3540.2000,N,139&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">part2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;39.3000,E,1,08,0.9,45.2,M,38.1,M,,*4F</span><span class="se">\r\n</span><span class="s">&quot;</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">ring_buf_put</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uart_ring_buf</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">part1</span><span class="p">,</span><span class="w"> </span><span class="n">strlen</span><span class="p">(</span><span class="n">part1</span><span class="p">));</span>
+<span class="w">    </span><span class="n">k_sleep</span><span class="p">(</span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">5</span><span class="p">));</span><span class="w">   </span><span class="cm">/* simulate gap between UART callbacks */</span>
+<span class="w">    </span><span class="n">ring_buf_put</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uart_ring_buf</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">part2</span><span class="p">,</span><span class="w"> </span><span class="n">strlen</span><span class="p">(</span><span class="n">part2</span><span class="p">));</span>
+
+<span class="w">    </span><span class="n">shell_print</span><span class="p">(</span><span class="n">sh</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Injected split sentence (part1 + 5ms delay + part2)&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="n">SHELL_CMD_REGISTER</span><span class="p">(</span><span class="n">inject_split</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Inject split NMEA sentence&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">cmd_inject_split</span><span class="p">);</span>
+</code></pre></div>
+
+<p>The parser must produce the same result for both <code>inject_nmea</code> and <code>inject_split</code>. If it fails on <code>inject_split</code>, your parser is processing partial callbacks.</p>
+<hr />
+<h2 id="common-failure-modes">Common Failure Modes</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No output, UART ready</td>
+<td>GPS not outputting at 9600 — may be different baud</td>
+<td>Connect GPS to host USB-serial adapter, <code>cat /dev/ttyUSBx</code> to see raw bytes</td>
+</tr>
+<tr>
+<td>Garbage characters</td>
+<td>Wrong baud rate</td>
+<td>Check overlay <code>current-speed</code>, GPS module default</td>
+</tr>
+<tr>
+<td><code>Bad NMEA checksum</code> on every sentence</td>
+<td>CR not discarded before checksum calc</td>
+<td>Verify <code>\r</code> is stripped before XOR</td>
+</tr>
+<tr>
+<td>Parser produces wrong lat/lon</td>
+<td><code>ddmm.mmmm</code> treated as decimal degrees</td>
+<td>Use <code>dd + mm.mmmm/60</code> conversion</td>
+</tr>
+<tr>
+<td>&ldquo;No fix&rdquo; indefinitely indoors</td>
+<td>Active antenna needed, or module cold-start timeout</td>
+<td>Move near window; wait 2–5 min for cold fix</td>
+</tr>
+<tr>
+<td>Ring buffer overflow at 9600</td>
+<td>Processing thread sleeping too long</td>
+<td>Reduce sleep to 1ms or use <code>k_yield()</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="milestone-checklist">Milestone Checklist</h2>
+<ul>
+<li>[ ] <code>inject_nmea</code> shell command: <code>lat=35.670333 lon=139.655000</code> parsed correctly</li>
+<li>[ ] <code>inject_split</code> shell command: same result as <code>inject_nmea</code> (split-sentence handled)</li>
+<li>[ ] Checksum failure injected manually: sentence rejected</li>
+<li>[ ] With real GPS outdoors: <code>fix=1 sats&gt;=4</code> within 5 minutes of cold start</li>
+<li>[ ] 10-minute continuous run: zero ring buffer overflow warnings</li>
+<li>[ ] Latitude conversion verified: <code>3540.2000,N</code> → <code>35.670333°N</code> (not <code>3540.2°</code>)</li>
+</ul>
+<hr />
+<h2 id="pre-read-for-session-9">Pre-Read for Session 9</h2>
+<p>Before <code>09-zbus-nanopb-bridge.md</code>:
+1. Read <code>zephyr/04_nanopb.md</code> — proto3 encoding rules, field omission, <code>max_size</code> options
+2. Read <code>zephyr/08_zbus.md</code> — subscriber vs listener, queue depth, priority inversion
+3. <code>exercises/03-zbus-nanopb.md</code> Q3: proto3 zero-field omission and the variable-length frame problem
+4. <code>00-mastery-plan.md</code> Project 7 failure points: <code>pb_encode()</code> silent false, zero-field omission, ZBus drop at 100Hz</p>
+<hr />
+<h2 id="session-notes-template">Session Notes Template</h2>
+<div class="highlight"><pre><span></span><code><span class="gu">## Session Notes — [DATE]</span>
+
+<span class="gu">### Setup</span>
+<span class="k">-</span><span class="w"> </span>GPS module: NEO-M8N / other: ___
+<span class="k">-</span><span class="w"> </span>Default baud rate confirmed: 9600 / other: ___
+<span class="k">-</span><span class="w"> </span>Raw NMEA visible on host USB-serial: yes/no
+
+<span class="gu">### Parser</span>
+<span class="k">-</span><span class="w"> </span><span class="sb">`inject_nmea`</span> result: lat=___ lon=___
+<span class="k">-</span><span class="w"> </span><span class="sb">`inject_split`</span> result: lat=___ lon=___ (same as above: yes/no)
+<span class="k">-</span><span class="w"> </span>Checksum test: rejected bad sentence: yes/no
+
+<span class="gu">### Real GPS</span>
+<span class="k">-</span><span class="w"> </span>Fix acquired: yes/no
+<span class="k">-</span><span class="w"> </span>Time to first fix: ___min (cold start)
+<span class="k">-</span><span class="w"> </span>Satellites at fix: ___
+
+<span class="gu">### Issues</span>
+<span class="k">-</span><span class="w"> </span>...
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

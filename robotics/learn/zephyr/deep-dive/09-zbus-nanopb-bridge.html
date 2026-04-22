@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>09 — ZBus + nanopb: Multi-Sensor Frame Encoding - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="09-zbus-nanopb-multi-sensor-frame-encoding">09 — ZBus + nanopb: Multi-Sensor Frame Encoding</h1>
+<h3 id="stm32h743zi2-zbus-message-bus-nanopb-protocol-buffers-variable-length-frames">STM32H743ZI2 · ZBus message bus · nanopb Protocol Buffers · Variable-length frames</h3>
+<p><strong>Status:</strong> 🟡 HARDWARE-GATED<br />
+<strong>Prerequisite:</strong> Sessions <code>04</code> (IMU), <code>07</code> (CAN), <code>08</code> (GPS) milestones complete<br />
+<strong>Hardware required:</strong> All prior hardware (IMU + CAN + GPS active)<br />
+<strong>Unlocks:</strong> <code>05-100hz-spi-bridge.md</code> rewrite with nanopb, then <code>10-jetson-rt-setup.md</code><br />
+<strong>Time budget:</strong> ~12 hours<br />
+<strong>Mastery plan:</strong> Project 7</p>
+<hr />
+<h2 id="goal-of-this-session">Goal of This Session</h2>
+<p>Collect IMU + CAN encoder + GPS streams on separate threads. Route all three through ZBus channels. Encode a combined <code>SensorFrame</code> protobuf message at 100Hz using nanopb. Verify with a ZBus subscriber that decodes and round-trips the data.</p>
+<p><strong>Milestone</strong>: Terminal shows <code>encoded=47 bytes</code> (or similar constant-ish size) at 100Hz. A second ZBus subscriber re-decodes and logs <code>imu.acc_z≈9.81 wheel_vel=X.X lat=35.67</code>. Size is identical when all fields are non-zero.</p>
+<hr />
+<h2 id="why-nanopb-not-a-raw-struct">Why nanopb, Not a Raw Struct?</h2>
+<p>The mastery plan uses nanopb for three reasons:</p>
+<ol>
+<li><strong>Forward compatibility</strong>: adding a new field to <code>.proto</code> does not break existing Jetson decoders (old bytes decode fine; new fields are ignored).</li>
+<li><strong>Language neutrality</strong>: the same <code>.proto</code> generates Python stubs for Jetson (via <code>protoc</code>), C stubs for STM32 (via <code>nanopb_generator.py</code>), and can be consumed by ROS 2 via a bridge.</li>
+<li><strong>The zero-field problem forces you to learn framing</strong>: proto3 omits zero-valued fields. This means <code>pb_encode()</code> output size varies. Handling this explicitly teaches the most important DMA framing lesson (see Failure Point 2 below).</li>
+</ol>
+<hr />
+<h2 id="step-1-define-the-proto-schema">Step 1: Define the Proto Schema</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// proto/sensor_frame.proto</span>
+<span class="k">syntax</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;proto3&quot;</span><span class="p">;</span>
+
+<span class="kd">message</span><span class="w"> </span><span class="nc">ImuData</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">acc_x</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">acc_y</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">acc_z</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">gyro_x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">gyro_y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">gyro_z</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">6</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kd">message</span><span class="w"> </span><span class="nc">OdomData</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">left_vel_mms</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">  </span><span class="na">right_vel_mms</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint32</span><span class="w"> </span><span class="na">timestamp_ms</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kd">message</span><span class="w"> </span><span class="nc">GpsData</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">double</span><span class="w">  </span><span class="na">lat_deg</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">double</span><span class="w">  </span><span class="na">lon_deg</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w">   </span><span class="na">alt_m</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">uint32</span><span class="w">  </span><span class="na">satellites</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w">    </span><span class="na">has_fix</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kd">message</span><span class="w"> </span><span class="nc">SensorFrame</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint32</span><span class="w">   </span><span class="na">seq</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">   </span><span class="c1">// frame sequence counter</span>
+<span class="w">    </span><span class="kt">uint32</span><span class="w">   </span><span class="na">ts_ms</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w">   </span><span class="c1">// STM32 uptime when frame was packed</span>
+<span class="w">    </span><span class="n">ImuData</span><span class="w">  </span><span class="na">imu</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">    </span><span class="n">OdomData</span><span class="w"> </span><span class="na">odom</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span>
+<span class="w">    </span><span class="n">GpsData</span><span class="w">  </span><span class="na">gps</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="nanopb-options-file">nanopb Options File</h3>
+<div class="highlight"><pre><span></span><code>// proto/sensor_frame.options
+// Without this, nanopb uses dynamic allocation (not available in Zephyr)
+SensorFrame.seq          max_count:1
+SensorFrame.ts_ms        max_count:1
+ImuData.acc_x            max_count:1
+// All fields are scalars — no string/bytes fields, so no max_size needed
+// But you MUST specify the max encoded size for the DMA buffer:
+SensorFrame              max_size:128
+</code></pre></div>
+
+<h3 id="generate-c-stubs">Generate C Stubs</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># From the project root</span>
+python3<span class="w"> </span>nanopb_generator.py<span class="w"> </span>proto/sensor_frame.proto<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-I<span class="w"> </span>proto/<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-D<span class="w"> </span>src/generated/
+
+<span class="c1"># Produces:</span>
+<span class="c1">#   src/generated/sensor_frame.pb.h</span>
+<span class="c1">#   src/generated/sensor_frame.pb.c</span>
+</code></pre></div>
+
+<p>Add <code>sensor_frame.pb.c</code> to <code>CMakeLists.txt</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">target_sources</span><span class="p">(</span><span class="s">app</span><span class="w"> </span><span class="s">PRIVATE</span>
+<span class="w">    </span><span class="s">src/main.c</span>
+<span class="w">    </span><span class="s">src/generated/sensor_frame.pb.c</span>
+<span class="p">)</span>
+<span class="nb">target_include_directories</span><span class="p">(</span><span class="s">app</span><span class="w"> </span><span class="s">PRIVATE</span><span class="w"> </span><span class="s">src/generated/</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="step-2-zbus-architecture">Step 2: ZBus Architecture</h2>
+<div class="highlight"><pre><span></span><code>                    ┌─────────────────────────────────────────────┐
+                    │              STM32H743 ZBus Channels          │
+                    │                                               │
+   I2C IRQ ──►   imu_thread ──► ZBUS_CHAN: imu_chan (ImuData)      │
+   CAN IRQ ──►   can_thread ──► ZBUS_CHAN: odom_chan (OdomData)     │
+   UART IRQ ──►  gps_thread ──► ZBUS_CHAN: gps_chan (GpsData)       │
+                                                                    │
+                    └──────────────────────┬──────────────────────┘
+                                           │ subscriber
+                              ┌────────────▼────────────┐
+                              │        packer_thread      │
+                              │  reads all 3 channels     │
+                              │  pb_encode() → tx_buf[]   │
+                              │  signals DMA              │
+                              └───────────────────────────┘
+</code></pre></div>
+
+<h3 id="channel-definitions">Channel Definitions</h3>
+<div class="highlight"><pre><span></span><code><span class="cm">/* zbus_channels.h */</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/zbus/zbus.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;sensor_frame.pb.h&quot;</span>
+
+<span class="n">ZBUS_CHAN_DECLARE</span><span class="p">(</span><span class="n">imu_chan</span><span class="p">);</span>
+<span class="n">ZBUS_CHAN_DECLARE</span><span class="p">(</span><span class="n">odom_chan</span><span class="p">);</span>
+<span class="n">ZBUS_CHAN_DECLARE</span><span class="p">(</span><span class="n">gps_chan</span><span class="p">);</span>
+
+<span class="cm">/* zbus_channels.c */</span>
+<span class="n">ZBUS_CHAN_DEFINE</span><span class="p">(</span><span class="n">imu_chan</span><span class="p">,</span><span class="w">  </span><span class="n">ImuData</span><span class="p">,</span><span class="w">  </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="n">ZBUS_OBSERVERS_EMPTY</span><span class="p">,</span><span class="w"> </span><span class="n">ZBUS_MSG_INIT</span><span class="p">(</span><span class="mi">0</span><span class="p">));</span>
+<span class="n">ZBUS_CHAN_DEFINE</span><span class="p">(</span><span class="n">odom_chan</span><span class="p">,</span><span class="w"> </span><span class="n">OdomData</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="n">ZBUS_OBSERVERS_EMPTY</span><span class="p">,</span><span class="w"> </span><span class="n">ZBUS_MSG_INIT</span><span class="p">(</span><span class="mi">0</span><span class="p">));</span>
+<span class="n">ZBUS_CHAN_DEFINE</span><span class="p">(</span><span class="n">gps_chan</span><span class="p">,</span><span class="w">  </span><span class="n">GpsData</span><span class="p">,</span><span class="w">  </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="n">ZBUS_OBSERVERS_EMPTY</span><span class="p">,</span><span class="w"> </span><span class="n">ZBUS_MSG_INIT</span><span class="p">(</span><span class="mi">0</span><span class="p">));</span>
+</code></pre></div>
+
+<hr />
+<h2 id="step-3-sensor-threads-publishing-to-zbus">Step 3: Sensor Threads Publishing to ZBus</h2>
+<div class="highlight"><pre><span></span><code><span class="cm">/* imu_thread.c — abbreviated, see session 04 for full I2C code */</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;zbus_channels.h&quot;</span>
+
+<span class="n">K_THREAD_DEFINE</span><span class="p">(</span><span class="n">imu_tid</span><span class="p">,</span><span class="w"> </span><span class="mi">2048</span><span class="p">,</span><span class="w"> </span><span class="n">imu_thread_fn</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">imu_thread_fn</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">p1</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">p2</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">p3</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">i2c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEVICE_DT_GET</span><span class="p">(</span><span class="n">DT_NODELABEL</span><span class="p">(</span><span class="n">i2c1</span><span class="p">));</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">ImuData</span><span class="w"> </span><span class="n">imu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">read_icm42688</span><span class="p">(</span><span class="n">i2c</span><span class="p">);</span><span class="w">   </span><span class="cm">/* from session 04 */</span>
+
+<span class="w">        </span><span class="n">zbus_chan_pub</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">imu</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+<span class="w">        </span><span class="cm">/* K_NO_WAIT: if packer is slow, we drop rather than block.</span>
+<span class="cm">           Sensor reading is more important than waiting for packer. */</span>
+
+<span class="w">        </span><span class="n">k_sleep</span><span class="p">(</span><span class="n">K_USEC</span><span class="p">(</span><span class="mi">10000</span><span class="p">));</span><span class="w">   </span><span class="cm">/* ~100Hz */</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="step-4-packer-thread">Step 4: Packer Thread</h2>
+<div class="highlight"><pre><span></span><code><span class="cm">/* packer_thread.c */</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/kernel.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;zephyr/zbus/zbus.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;pb_encode.h&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;sensor_frame.pb.h&quot;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;zbus_channels.h&quot;</span>
+
+<span class="n">LOG_MODULE_REGISTER</span><span class="p">(</span><span class="n">packer</span><span class="p">,</span><span class="w"> </span><span class="n">LOG_LEVEL_INF</span><span class="p">);</span>
+
+<span class="cm">/* DMA-safe buffer: 32-byte aligned, in DTCM to avoid D-cache issues.</span>
+<span class="cm">   See session 03 for memory region details. */</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="nf">__aligned</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">[</span><span class="mi">128</span><span class="p">];</span>
+
+<span class="cm">/* Length prefix: 2 bytes before the protobuf payload.</span>
+<span class="cm">   SPI frame = [len_hi][len_lo][pb_bytes...][padding to 128 bytes]</span>
+<span class="cm">   Jetson reads the first 2 bytes to know how many subsequent bytes are valid. */</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="nf">__aligned</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span><span class="w"> </span><span class="n">dma_frame</span><span class="p">[</span><span class="mi">130</span><span class="p">];</span><span class="w">   </span><span class="cm">/* 2-byte header + 128 */</span>
+
+<span class="n">ZBUS_SUBSCRIBER_DEFINE</span><span class="p">(</span><span class="n">packer_sub</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">);</span><span class="w">  </span><span class="cm">/* queue depth 4 */</span>
+
+<span class="n">K_THREAD_DEFINE</span><span class="p">(</span><span class="n">packer_tid</span><span class="p">,</span><span class="w"> </span><span class="mi">4096</span><span class="p">,</span><span class="w"> </span><span class="n">packer_thread_fn</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">seq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">packer_thread_fn</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">p1</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">p2</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">p3</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">zbus_channel</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">;</span>
+<span class="w">    </span><span class="n">ImuData</span><span class="w">  </span><span class="n">imu</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">ImuData_init_zero</span><span class="p">;</span>
+<span class="w">    </span><span class="n">OdomData</span><span class="w"> </span><span class="n">odom</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">OdomData_init_zero</span><span class="p">;</span>
+<span class="w">    </span><span class="n">GpsData</span><span class="w">  </span><span class="n">gps</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">GpsData_init_zero</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="cm">/* Wait for any channel to publish */</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">zbus_sub_wait</span><span class="p">(</span><span class="o">&amp;</span><span class="n">packer_sub</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">chan</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">15</span><span class="p">))</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">LOG_WRN</span><span class="p">(</span><span class="s">&quot;Packer timeout — no sensor data for 15ms&quot;</span><span class="p">);</span>
+<span class="w">            </span><span class="k">continue</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="cm">/* Read whichever channel published */</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">chan</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">)</span><span class="w">  </span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">,</span><span class="w">  </span><span class="o">&amp;</span><span class="n">imu</span><span class="p">,</span><span class="w">  </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">chan</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">&amp;</span><span class="n">odom_chan</span><span class="p">)</span><span class="w"> </span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">odom_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">odom</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">chan</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">&amp;</span><span class="n">gps_chan</span><span class="p">)</span><span class="w">  </span><span class="n">zbus_chan_read</span><span class="p">(</span><span class="o">&amp;</span><span class="n">gps_chan</span><span class="p">,</span><span class="w">  </span><span class="o">&amp;</span><span class="n">gps</span><span class="p">,</span><span class="w">  </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+
+<span class="w">        </span><span class="cm">/* Only encode when the IMU triggers (100Hz pace) */</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">chan</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">imu_chan</span><span class="p">)</span><span class="w"> </span><span class="k">continue</span><span class="p">;</span>
+
+<span class="w">        </span><span class="n">SensorFrame</span><span class="w"> </span><span class="n">frame</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="p">.</span><span class="n">seq</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">seq</span><span class="o">++</span><span class="p">,</span>
+<span class="w">            </span><span class="p">.</span><span class="n">ts_ms</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k_uptime_get_32</span><span class="p">(),</span>
+<span class="w">            </span><span class="p">.</span><span class="n">imu</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">imu</span><span class="p">,</span>
+<span class="w">            </span><span class="p">.</span><span class="n">odom</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">odom</span><span class="p">,</span>
+<span class="w">            </span><span class="p">.</span><span class="n">gps</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">gps</span><span class="p">,</span>
+<span class="w">            </span><span class="p">.</span><span class="n">has_imu</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span>
+<span class="w">            </span><span class="p">.</span><span class="n">has_odom</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span>
+<span class="w">            </span><span class="p">.</span><span class="n">has_gps</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">gps</span><span class="p">.</span><span class="n">has_fix</span><span class="p">,</span><span class="w">  </span><span class="cm">/* only include GPS sub-message if valid */</span>
+<span class="w">        </span><span class="p">};</span>
+
+<span class="w">        </span><span class="cm">/* ── Encode ─────────────────────────────────────── */</span>
+<span class="w">        </span><span class="n">pb_ostream_t</span><span class="w"> </span><span class="n">stream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_ostream_from_buffer</span><span class="p">(</span><span class="n">tx_buf</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">tx_buf</span><span class="p">));</span>
+<span class="w">        </span><span class="kt">bool</span><span class="w"> </span><span class="n">ok</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pb_encode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stream</span><span class="p">,</span><span class="w"> </span><span class="n">SensorFrame_fields</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">frame</span><span class="p">);</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">ok</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;pb_encode failed: %s&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">PB_GET_ERROR</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stream</span><span class="p">));</span>
+<span class="w">            </span><span class="k">continue</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">encoded_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint16_t</span><span class="p">)</span><span class="n">stream</span><span class="p">.</span><span class="n">bytes_written</span><span class="p">;</span>
+
+<span class="w">        </span><span class="cm">/* ── Length-prefix framing ─────────────────────── */</span>
+<span class="w">        </span><span class="cm">/* Store length in first 2 bytes; zero-pad remainder.</span>
+<span class="cm">           This is the fix for &quot;variable-length proto3 output + fixed DMA size&quot;. */</span>
+<span class="w">        </span><span class="n">dma_frame</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">encoded_len</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">        </span><span class="n">dma_frame</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w">  </span><span class="n">encoded_len</span><span class="w">       </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0xFF</span><span class="p">;</span>
+<span class="w">        </span><span class="n">memcpy</span><span class="p">(</span><span class="o">&amp;</span><span class="n">dma_frame</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span><span class="w"> </span><span class="n">tx_buf</span><span class="p">,</span><span class="w"> </span><span class="n">encoded_len</span><span class="p">);</span>
+<span class="w">        </span><span class="n">memset</span><span class="p">(</span><span class="o">&amp;</span><span class="n">dma_frame</span><span class="p">[</span><span class="mi">2</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">encoded_len</span><span class="p">],</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">dma_frame</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">encoded_len</span><span class="p">);</span>
+
+<span class="w">        </span><span class="n">LOG_INF</span><span class="p">(</span><span class="s">&quot;encoded=%u bytes seq=%u&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">encoded_len</span><span class="p">,</span><span class="w"> </span><span class="n">frame</span><span class="p">.</span><span class="n">seq</span><span class="p">);</span>
+
+<span class="w">        </span><span class="cm">/* Signal SPI DMA thread (from session 05) */</span>
+<span class="w">        </span><span class="cm">/* spi_submit_frame(dma_frame, sizeof(dma_frame)); */</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="the-three-failure-points-from-mastery-plan-project-7">The Three Failure Points (from Mastery Plan, Project 7)</h2>
+<h3 id="failure-point-1-pb_encode-returns-false-silently">Failure Point 1: <code>pb_encode()</code> returns <code>false</code> silently</h3>
+<p><code>pb_encode()</code> returns <code>false</code> and sets an error string via <code>PB_GET_ERROR(&amp;stream)</code>. The most common cause is a <code>string</code> or <code>bytes</code> field missing a <code>max_size</code> annotation in the <code>.options</code> file.</p>
+<p><strong>Always check the return value:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">pb_encode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stream</span><span class="p">,</span><span class="w"> </span><span class="n">SensorFrame_fields</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">frame</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">LOG_ERR</span><span class="p">(</span><span class="s">&quot;pb_encode: %s&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">PB_GET_ERROR</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stream</span><span class="p">));</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="failure-point-2-variable-frame-size-stale-bytes-in-dma-buffer">Failure Point 2: Variable frame size → stale bytes in DMA buffer</h3>
+<p>Proto3 omits fields with zero values. When GPS loses fix, <code>gps.lat_deg=0.0</code>, <code>gps.lon_deg=0.0</code>, etc., are all omitted — the encoded size shrinks. If you DMA-transfer a fixed 128 bytes without tracking the actual encoded length, the Jetson reads <code>[valid_bytes][stale_bytes_from_previous_frame]</code>.</p>
+<p><strong>Fix</strong>: length-prefix framing (shown above). The Jetson reads <code>dma_frame[0]&lt;&lt;8 | dma_frame[1]</code> to learn how many bytes of <code>dma_frame[2..]</code> to pass to the protobuf decoder.</p>
+<h3 id="failure-point-3-zbus-drops-at-100hz-if-packer-is-too-slow">Failure Point 3: ZBus drops at 100Hz if packer is too slow</h3>
+<p>If <code>packer_thread_fn</code> takes &gt;10ms per iteration, the ZBus subscriber queue fills (depth=4) and oldest notifications are dropped.</p>
+<p><strong>Fix</strong>: raise packer thread priority (<code>K_THREAD_DEFINE(..., priority=4, ...)</code>) above sensor threads (priority=5), and enable <code>CONFIG_ZBUS_MSG_SUBSCRIBER_NET_BUF_DYNAMIC=y</code> if the queue needs dynamic growth.</p>
+<hr />
+<h2 id="verification-zbus-decoder-subscriber">Verification: ZBus Decoder Subscriber</h2>
+<p>Add a second subscriber that re-decodes and confirms round-trip:</p>
+<div class="highlight"><pre><span></span><code><span class="n">ZBUS_SUBSCRIBER_DEFINE</span><span class="p">(</span><span class="n">verify_sub</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">);</span>
+<span class="n">K_THREAD_DEFINE</span><span class="p">(</span><span class="n">verify_tid</span><span class="p">,</span><span class="w"> </span><span class="mi">2048</span><span class="p">,</span><span class="w"> </span><span class="n">verify_thread_fn</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+
+<span class="cm">/* (Define a ZBus channel for encoded frames) */</span>
+<span class="n">ZBUS_CHAN_DEFINE</span><span class="p">(</span><span class="n">encoded_chan</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">buf</span><span class="p">[</span><span class="mi">130</span><span class="p">];</span><span class="w"> </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">len</span><span class="p">;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">                </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="n">ZBUS_OBSERVERS_EMPTY</span><span class="p">,</span><span class="w"> </span><span class="n">ZBUS_MSG_INIT</span><span class="p">(</span><span class="mi">0</span><span class="p">));</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">verify_thread_fn</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">p1</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">p2</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">p3</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">zbus_channel</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">;</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">zbus_sub_wait</span><span class="p">(</span><span class="o">&amp;</span><span class="n">verify_sub</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">chan</span><span class="p">,</span><span class="w"> </span><span class="n">K_FOREVER</span><span class="p">);</span>
+<span class="w">        </span><span class="cm">/* Read encoded frame, decode, log fields */</span>
+<span class="w">        </span><span class="cm">/* ... pb_decode() → SensorFrame → LOG_INF acc_z, wheel_vel, lat */</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="milestone-checklist">Milestone Checklist</h2>
+<ul>
+<li>[ ] <code>pb_encode()</code> returns <code>true</code> on every call — no error logs</li>
+<li>[ ] <code>encoded=XX bytes</code> printed at 100Hz — stable (varies only when GPS fix state changes)</li>
+<li>[ ] <code>inject_split</code> GPS sentence parsed correctly, encoded into SensorFrame</li>
+<li>[ ] Round-trip: verify subscriber logs <code>imu.acc_z≈9.81</code></li>
+<li>[ ] Deliberate zero-field test: disconnect GPS → encoded size shrinks → Jetson still decodes correctly (zero fields, not garbage)</li>
+<li>[ ] ZBus drop counter: 0 over 5-minute run (<code>CONFIG_ZBUS_CHANNEL_STATISTICS=y</code>)</li>
+</ul>
+<hr />
+<h2 id="pre-read-for-session-10">Pre-Read for Session 10</h2>
+<p>Before <code>10-jetson-rt-setup.md</code>:
+1. <code>man spidev</code> and <code>man 2 ioctl</code> — you will use <code>SPI_IOC_MESSAGE</code>
+2. <code>man cyclictest</code> — RT latency measurement tool
+3. <code>00-mastery-plan.md</code> Project 9 failure points: pinmux, speed, spidev_test
+4. Linux RT kernel vs PREEMPT_RT patch basics (Jetson Orin uses PREEMPT_RT)</p>
+<hr />
+<h2 id="session-notes-template">Session Notes Template</h2>
+<div class="highlight"><pre><span></span><code><span class="gu">## Session Notes — [DATE]</span>
+
+<span class="gu">### nanopb Generation</span>
+<span class="k">-</span><span class="w"> </span>nanopb version: ___
+<span class="k">-</span><span class="w"> </span>Generated files: sensor_frame.pb.h / sensor_frame.pb.c: yes/no
+<span class="k">-</span><span class="w"> </span><span class="sb">`pb_encode()`</span> first success: yes/no
+
+<span class="gu">### Encoding</span>
+<span class="k">-</span><span class="w"> </span>Frame size (all sensors active, GPS fix): ___ bytes
+<span class="k">-</span><span class="w"> </span>Frame size (GPS no fix): ___ bytes
+<span class="k">-</span><span class="w"> </span>Difference (zero-field omission observed): yes/no
+
+<span class="gu">### ZBus</span>
+<span class="k">-</span><span class="w"> </span>Subscriber drop events in 5 min: ___
+<span class="k">-</span><span class="w"> </span>Packer thread priority set to: ___
+
+<span class="gu">### Issues</span>
+<span class="k">-</span><span class="w"> </span>...
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exercises: CAN Bus — Encoder Velocity Frames - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="exercises-can-bus-encoder-velocity-frames">Exercises: CAN Bus — Encoder Velocity Frames</h1>
+<h3 id="covers-deep-dive-session-07-sn65hvd230-wiring-zephyr-can-api-encoder-frames-bus-off-recovery">Covers: Deep-dive session 07 — SN65HVD230 wiring, Zephyr CAN API, encoder frames, bus-off recovery</h3>
+<hr />
+<h2 id="section-a-conceptual-questions">Section A — Conceptual Questions</h2>
+<p><strong>A1.</strong> Before writing a single line of firmware, you want to verify the physical CAN bus is healthy.
+Describe the exact sequence of three checks: one multimeter check (power off), one <code>cansend</code>/<code>candump</code>
+verification (two-terminal test), and what each result tells you.</p>
+<details><summary>Answer</summary>
+
+**1. Multimeter check (power off):**
+Place probes across CANH and CANL. Measure resistance. Expected: ~60Ω (two 120Ω termination
+resistors in parallel). If you read >200Ω, one or both terminators are missing or open. If you
+read <30Ω, there is a short between the lines. The SN65HVD230 is 3.3V-compatible — do NOT use
+TJA1050 (5V only).
+
+**2. candump + cansend (two terminals, host Linux):**
+Terminal 1: `candump can0`
+Terminal 2: `cansend can0 123#DEADBEEF`
+Terminal 1 should echo the frame back (including its own frame as reflected by the bus). If nothing
+appears, the interface is off — run `sudo ip link set can0 up type can bitrate 500000` first.
+
+**3. What each result tells you:**
+- 60Ω + candump echo → physical layer is healthy before any firmware is involved.
+- No echo despite 60Ω → check D/R pin logic level on SN65HVD230 (must be driven low to enable Rx).
+- Frame CRC errors in `dmesg | grep can` → wiring capacitance or missing stub termination.
+
+</details>
+
+<hr />
+<p><strong>A2.</strong> The <code>can_add_rx_filter_msgq()</code> API takes a <code>struct can_filter</code>. Explain the difference between
+setting <code>filter.mask = 0x7FF</code> versus <code>filter.mask = 0x000</code>. Which do you use to receive <strong>only</strong>
+the encoder frame with ID <code>0x101</code>, and why?</p>
+<details><summary>Answer</summary>
+
+`filter.mask` is the bits that **must match** the `filter.id`. A `1` in a mask bit means "this bit
+is checked"; a `0` means "don't care".
+
+- `filter.mask = 0x7FF` → all 11 standard ID bits are checked → only frames with exactly `filter.id`
+  pass through.
+- `filter.mask = 0x000` → no bits are checked → every frame passes through (promiscuous).
+
+To receive only `0x101`:
+
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">can_filter</span><span class="w"> </span><span class="n">enc_filter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">flags</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">id</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mh">0x101</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">mask</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">CAN_STD_ID_MASK</span><span class="w">   </span><span class="cm">/* 0x7FF */</span>
+<span class="p">};</span>
+<span class="n">can_add_rx_filter_msgq</span><span class="p">(</span><span class="n">dev</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">enc_msgq</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">enc_filter</span><span class="p">);</span>
+</code></pre></div>
+
+
+
+Using `0x000` as mask would also deliver encoder frames, but the node would receive every frame
+on the bus (motor commands, battery status, etc.) and the message queue would fill immediately at
+any bus activity.
+
+</details>
+
+<hr />
+<p><strong>A3.</strong> Your CAN bus enters BUS-OFF state. Explain:
+1. What sequence of hardware events caused BUS-OFF (transmit error counter)?
+2. What does the Zephyr <code>can_set_state_change_callback()</code> callback receive?
+3. Why is calling <code>can_recover()</code> directly inside the state-change callback dangerous?</p>
+<details><summary>Answer</summary>
+
+**1. Sequence causing BUS-OFF:**
+The CAN controller maintains a transmit error counter (TEC). Each failed transmission increments TEC
+by 8. When TEC exceeds 255, the controller enters BUS-OFF and disconnects itself from the bus
+(stops both transmitting and receiving) to protect other nodes. Common causes: missing or incorrect
+termination, wrong bitrate, loose wiring, or the STM32 transmitting while the transceiver's RS/S
+pin (SN65HVD230) is in standby mode.
+
+**2. Callback receives:**
+`struct can_bus_err_cnt` with `tx_err_cnt` and `rx_err_cnt`, plus a `state` parameter of type
+`enum can_state` (one of: `CAN_STATE_ERROR_ACTIVE`, `CAN_STATE_ERROR_PASSIVE`,
+`CAN_STATE_BUS_OFF`, `CAN_STATE_STOPPED`).
+
+**3. Danger of calling `can_recover()` in the callback:**
+`can_set_state_change_callback()` fires from **interrupt context**. `can_recover()` is a blocking
+call that initiates a hardware recovery sequence and may sleep. Calling any blocking function from
+interrupt context causes undefined behaviour (often a kernel panic or immediate crash on
+Zephyr/Cortex-M). The fix: use `k_work_submit()` inside the callback to schedule recovery
+in a workqueue thread.
+
+</details>
+
+<hr />
+<p><strong>A4.</strong> You are parsing the encoder velocity frame:</p>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">encoder_frame</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">left_vel</span><span class="p">;</span><span class="w">   </span><span class="cm">/* mm/s */</span>
+<span class="w">    </span><span class="kt">int16_t</span><span class="w"> </span><span class="n">right_vel</span><span class="p">;</span><span class="w">  </span><span class="cm">/* mm/s */</span>
+<span class="w">    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">timestamp_ms</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<p>The frame arrives as 8 CAN bytes. Write the exact <code>memcpy</code> call to unpack it safely from
+<code>can_frame.data[]</code>, and explain why a direct cast (<code>(struct encoder_frame *)&amp;frame.data</code>) is
+incorrect on Cortex-M7.</p>
+<details><summary>Answer</summary>
+
+**Correct:**
+
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">encoder_frame</span><span class="w"> </span><span class="n">enc</span><span class="p">;</span>
+<span class="n">memcpy</span><span class="p">(</span><span class="o">&amp;</span><span class="n">enc</span><span class="p">,</span><span class="w"> </span><span class="n">frame</span><span class="p">.</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">enc</span><span class="p">));</span><span class="w">  </span><span class="cm">/* 8 bytes */</span>
+</code></pre></div>
+
+
+
+**Why cast is wrong:**
+`can_frame.data` is a `uint8_t[]` array which may be aligned to 1 byte. `struct encoder_frame`
+requires at minimum 2-byte alignment for `int16_t` fields (and 4-byte alignment for `uint32_t` on
+Cortex-M7 with strict alignment). Casting the address directly gives a pointer with insufficient
+alignment. Accessing it triggers a **UsageFault** (unaligned access fault) on Cortex-M7 when the
+UNALIGN_TRP bit is set in CCR, or produces silently wrong results otherwise. `memcpy` is always
+safe because it operates byte-by-byte.
+
+</details>
+
+<hr />
+<p><strong>A5.</strong> Your encoder thread calls <code>k_msgq_get(&amp;enc_msgq, &amp;frame, K_FOREVER)</code>. The CAN bus goes silent
+(robot is lifted). What happens to the thread? How would you modify the call to detect CAN silence
+within 500ms and log a warning?</p>
+<details><summary>Answer</summary>
+
+With `K_FOREVER`, the thread **blocks indefinitely** until a message arrives. It consumes no CPU
+(Zephyr puts it into `pend` state) but it also never runs — silent failure with no warning.
+
+To detect 500ms silence:
+
+<div class="highlight"><pre><span></span><code><span class="kt">int</span><span class="w"> </span><span class="n">ret</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k_msgq_get</span><span class="p">(</span><span class="o">&amp;</span><span class="n">enc_msgq</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">frame</span><span class="p">,</span><span class="w"> </span><span class="n">K_MSEC</span><span class="p">(</span><span class="mi">500</span><span class="p">));</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ret</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="o">-</span><span class="n">EAGAIN</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">LOG_WRN</span><span class="p">(</span><span class="s">&quot;CAN encoder: no frame in 500ms — bus silent or robot stopped&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="cm">/* increment a watchdog counter; trigger safe stop if count exceeds threshold */</span>
+<span class="w">    </span><span class="k">continue</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+
+
+In production code you would also publish a "CAN timeout" event to ZBus so the state machine can
+transition to degraded mode rather than continuing to use stale velocity data.
+
+</details>
+
+<hr />
+<h2 id="section-b-practical-debug-scenarios">Section B — Practical / Debug Scenarios</h2>
+<p><strong>B1.</strong> You flash your firmware and run <code>candump can0</code> on the host. You see no frames, but your
+Zephyr code calls <code>can_send()</code> every 100ms and returns 0 (success). The logic analyzer shows
+valid CAN waveform on the CANH/CANL wires. What is the most likely cause?</p>
+<details><summary>Answer</summary>
+
+The host Linux interface `can0` is **down** or configured with the wrong bitrate. `can_send()`
+returning 0 means the STM32 successfully placed the frame on the bus and got an ACK (from the
+SN65HVD230 transceiver's internal ACK or another node). The Jetson is not listening.
+
+Diagnosis:
+
+<div class="highlight"><pre><span></span><code>ip<span class="w"> </span>-details<span class="w"> </span>link<span class="w"> </span>show<span class="w"> </span>can0<span class="w">   </span><span class="c1"># check if state is ERROR-ACTIVE or UP</span>
+sudo<span class="w"> </span>ip<span class="w"> </span>link<span class="w"> </span><span class="nb">set</span><span class="w"> </span>can0<span class="w"> </span>down
+sudo<span class="w"> </span>ip<span class="w"> </span>link<span class="w"> </span><span class="nb">set</span><span class="w"> </span>can0<span class="w"> </span>up<span class="w"> </span><span class="nb">type</span><span class="w"> </span>can<span class="w"> </span>bitrate<span class="w"> </span><span class="m">500000</span>
+candump<span class="w"> </span>can0
+</code></pre></div>
+
+
+
+If after bringing can0 up you immediately see `can0: arbitration lost` or `error frame` in candump
+output, you have a bitrate mismatch between STM32 and host (check your `CONFIG_CAN_DEFAULT_BITRATE`
+in Kconfig vs `500000` in the ip command).
+
+</details>
+
+<hr />
+<p><strong>B2.</strong> Your encoder velocity reading shows intermittent spikes: <code>left_vel</code> suddenly reads +32767 or
+-32768 for one frame, then returns to normal. The logic analyzer shows the CAN frame is arriving
+intact. What is the likely firmware bug?</p>
+<details><summary>Answer</summary>
+
+Endianness mismatch. CAN data bytes default to big-endian (Motorola byte order) in automotive
+standards, but `struct encoder_frame` is being `memcpy`d assuming little-endian (x86/ARM default).
+
+When the high byte and low byte of `left_vel` are swapped, the value `0x0100` (256 mm/s) is read
+as `0x0001` (1 mm/s), and near the int16 boundary values like `0x0080` (128 mm/s) become
+`0x8000` (-32768 mm/s) — a sign-extension artifact of treating the MSB as the high byte.
+
+Fix: either pack the struct in big-endian order on the STM32 transmitter, or swap bytes on the
+receiver:
+
+<div class="highlight"><pre><span></span><code><span class="n">enc</span><span class="p">.</span><span class="n">left_vel</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">__builtin_bswap16</span><span class="p">(</span><span class="n">enc</span><span class="p">.</span><span class="n">left_vel</span><span class="p">);</span>
+<span class="n">enc</span><span class="p">.</span><span class="n">right_vel</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">__builtin_bswap16</span><span class="p">(</span><span class="n">enc</span><span class="p">.</span><span class="n">right_vel</span><span class="p">);</span>
+</code></pre></div>
+
+
+Always document the byte order in the CAN DBC or header file comment.
+
+</details>
+
+<hr />
+<p><strong>B3.</strong> You connect a second STM32 to the same CAN bus for testing. Now your first STM32 enters
+BUS-OFF immediately on power-up. The second STM32 is also in BUS-OFF. What physical condition
+causes this?</p>
+<details><summary>Answer</summary>
+
+**Missing termination.** Without the 120Ω resistors at each end of the bus, every transmitted
+dominant bit (0V differential) reflects back as an error. Both nodes see their own transmission as
+an error, increment their TEC, and rapidly reach BUS-OFF.
+
+Secondary possibility: both nodes are transmitting simultaneously with different data on the same
+frame ID (`0x101`), causing arbitration loss to loop — but this produces `CAN_STATE_ERROR_ACTIVE`
+with incremental TEC, not instant BUS-OFF.
+
+Verify: measure CANH–CANL resistance with both nodes powered off → should be ~60Ω. If you read
+open circuit (>10kΩ), terminators are missing. Add one 120Ω resistor across CANH/CANL at each
+physical end of the cable.
+
+</details>
+
+<hr />
+<h2 id="section-c-code-reading">Section C — Code Reading</h2>
+<p><strong>C1.</strong> This code is supposed to receive encoder frames and publish them to ZBus. Find the bug:</p>
+<div class="highlight"><pre><span></span><code><span class="n">K_MSGQ_DEFINE</span><span class="p">(</span><span class="n">enc_msgq</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">can_frame</span><span class="p">),</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">);</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">can_rx_thread</span><span class="p">(</span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">b</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">c</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">can_frame</span><span class="w"> </span><span class="n">frame</span><span class="p">;</span>
+<span class="w">    </span><span class="k">struct</span><span class="w"> </span><span class="nc">encoder_frame</span><span class="w"> </span><span class="n">enc</span><span class="p">;</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">k_msgq_get</span><span class="p">(</span><span class="o">&amp;</span><span class="n">enc_msgq</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">frame</span><span class="p">,</span><span class="w"> </span><span class="n">K_FOREVER</span><span class="p">);</span>
+<span class="w">        </span><span class="n">memcpy</span><span class="p">(</span><span class="o">&amp;</span><span class="n">enc</span><span class="p">,</span><span class="w"> </span><span class="n">frame</span><span class="p">.</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">enc</span><span class="p">));</span>
+<span class="w">        </span><span class="n">zbus_chan_pub</span><span class="p">(</span><span class="o">&amp;</span><span class="n">encoder_chan</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">enc</span><span class="p">,</span><span class="w"> </span><span class="n">K_NO_WAIT</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="cm">/* In main: */</span>
+<span class="n">can_add_rx_filter_msgq</span><span class="p">(</span><span class="n">can_dev</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">enc_msgq</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">);</span>
+</code></pre></div>
+
+<details><summary>Answer</summary>
+
+**Two bugs:**
+
+1. `can_add_rx_filter_msgq(can_dev, &enc_msgq, NULL)` — passing `NULL` as the filter means the
+   kernel will accept the `NULL` pointer (behaviour is driver-defined, often crashes or matches
+   nothing). A valid `struct can_filter *` must be passed. The promiscuous equivalent is a filter
+   with `mask = 0x000`, not NULL.
+
+2. `memcpy(&enc, frame.data, sizeof(enc))` — `sizeof(struct encoder_frame)` is 8 bytes, but
+   `sizeof(struct can_frame)` is larger than `frame.data` alone (the `can_frame` struct also
+   contains the frame ID, DLC, flags). This specific line is fine as written because `frame.data`
+   is the data array start, but the preceding `k_msgq_get` copies the **entire** `can_frame` struct
+   into `frame`, which is correct. However: there is no DLC check. If a different node sends a
+   4-byte frame on the same ID, `memcpy` reads 8 bytes, silently copying 4 bytes of `frame.flags`
+   into `enc.timestamp_ms`.
+
+Fix:
+
+<div class="highlight"><pre><span></span><code><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">frame</span><span class="p">.</span><span class="n">dlc</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">encoder_frame</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">LOG_WRN</span><span class="p">(</span><span class="s">&quot;Short encoder frame: dlc=%d&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">frame</span><span class="p">.</span><span class="n">dlc</span><span class="p">);</span>
+<span class="w">    </span><span class="k">continue</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+
+
+</details>
+
+<hr />
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

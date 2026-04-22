@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HardFault Decode Guide - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Back to Zephyr</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="hardfault-decode-guide">HardFault Decode Guide</h1>
+<h3 id="from-register-dump-to-faulting-source-line-systematic-arm-cortex-m-fault-analysis">From register dump to faulting source line — systematic ARM Cortex-M fault analysis</h3>
+<hr />
+<h2 id="overview">Overview</h2>
+<p>A HardFault is the ARM Cortex-M catch-all exception for bus faults, memory faults, and
+usage faults that can&rsquo;t be handled by their specific handlers. This guide covers:</p>
+<ol>
+<li>Capturing the register state</li>
+<li>Reading CFSR/HFSR/MMFAR/BFAR</li>
+<li>Mapping the fault PC to source line</li>
+<li>The five most common HardFault causes in Zephyr</li>
+</ol>
+<hr />
+<h2 id="1-the-hardfault-register-set">1. The HardFault Register Set</h2>
+<p>When a fault occurs, the ARM core pushes a stack frame and the fault status registers
+are latched. CFSR and HFSR bits are <strong>sticky</strong> — they remain set until explicitly cleared
+by writing 1 to the bit (W1C). MMFAR and BFAR validity bits (<code>MMARVALID</code> / <code>BFARVALID</code>)
+are automatically cleared when a new fault of the same type fires.</p>
+<h3 id="11-configurable-fault-status-register-cfsr">1.1 Configurable Fault Status Register (CFSR)</h3>
+<p><code>CFSR</code> is at address <code>0xE000ED28</code> (32-bit, read/write to clear).</p>
+<p>It is split into three sub-registers:</p>
+<div class="highlight"><pre><span></span><code>Bits [31:16] = UFSR (UsageFault Status Register)
+Bits [15:8]  = BFSR (BusFault Status Register)
+Bits [7:0]   = MMFSR (MemManage Fault Status Register)
+</code></pre></div>
+
+<h4 id="mmfsr-memmanage-bits-70">MMFSR (MemManage) — bits [7:0]:</h4>
+<table>
+<thead>
+<tr>
+<th>Bit</th>
+<th>Name</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>7</td>
+<td>MMARVALID</td>
+<td>MMFAR holds a valid fault address</td>
+</tr>
+<tr>
+<td>4</td>
+<td>MSTKERR</td>
+<td>Stacking for an exception caused the fault</td>
+</tr>
+<tr>
+<td>3</td>
+<td>MUNSTKERR</td>
+<td>Unstacking after exception caused the fault</td>
+</tr>
+<tr>
+<td>1</td>
+<td>DACCVIOL</td>
+<td>Data access violation (MMFAR is valid)</td>
+</tr>
+<tr>
+<td>0</td>
+<td>IACCVIOL</td>
+<td>Instruction fetch from non-executable region</td>
+</tr>
+</tbody>
+</table>
+<h4 id="bfsr-busfault-bits-158">BFSR (BusFault) — bits [15:8]:</h4>
+<table>
+<thead>
+<tr>
+<th>Bit</th>
+<th>Name</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>15</td>
+<td>BFARVALID</td>
+<td>BFAR holds a valid fault address</td>
+</tr>
+<tr>
+<td>13</td>
+<td>LSPERR</td>
+<td>Lazy FP state push caused a BusFault (Cortex-M4/M7/M33 with FPU enabled)</td>
+</tr>
+<tr>
+<td>12</td>
+<td>STKERR</td>
+<td>Stacking caused the fault</td>
+</tr>
+<tr>
+<td>11</td>
+<td>UNSTKERR</td>
+<td>Unstacking caused the fault</td>
+</tr>
+<tr>
+<td>10</td>
+<td>IMPRECISERR</td>
+<td>Imprecise data bus error (async — BFAR may not be valid)</td>
+</tr>
+<tr>
+<td>9</td>
+<td>PRECISERR</td>
+<td>Precise data bus error (BFAR is valid)</td>
+</tr>
+<tr>
+<td>8</td>
+<td>IBUSERR</td>
+<td>Instruction fetch bus error</td>
+</tr>
+</tbody>
+</table>
+<h4 id="ufsr-usagefault-bits-3116">UFSR (UsageFault) — bits [31:16]:</h4>
+<table>
+<thead>
+<tr>
+<th>Bit</th>
+<th>Name</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>25</td>
+<td>DIVBYZERO</td>
+<td>Integer divide by zero (if enabled in CCR.DIV_0_TRP)</td>
+</tr>
+<tr>
+<td>24</td>
+<td>UNALIGNED</td>
+<td>Unaligned access (if enabled in CCR.UNALIGN_TRP)</td>
+</tr>
+<tr>
+<td>19</td>
+<td>NOCP</td>
+<td>No coprocessor — FPU instruction with FPU disabled</td>
+</tr>
+<tr>
+<td>18</td>
+<td>INVPC</td>
+<td>Invalid PC on exception return (corrupt LR)</td>
+</tr>
+<tr>
+<td>17</td>
+<td>INVSTATE</td>
+<td>Invalid state — EPSR.T bit wrong (Thumb mode error)</td>
+</tr>
+<tr>
+<td>16</td>
+<td>UNDEFINSTR</td>
+<td>Undefined instruction</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="12-mmfar-and-bfar-fault-address-registers">1.2 MMFAR and BFAR — Fault Address Registers</h3>
+<ul>
+<li><strong>MMFAR</strong> (<code>0xE000ED34</code>): The address that caused the MemManage fault. Valid only if <code>MMARVALID=1</code>.</li>
+<li><strong>BFAR</strong> (<code>0xE000ED38</code>): The address that caused the BusFault. Valid only if <code>BFARVALID=1</code>.</li>
+</ul>
+<p>These are the addresses that were accessed — not the PC of the faulting instruction.
+To find the faulting instruction, use the stacked PC (see Section 2).</p>
+<h3 id="13-hardfault-status-register-hfsr-0xe000ed2c">1.3 HardFault Status Register (HFSR) — <code>0xE000ED2C</code></h3>
+<table>
+<thead>
+<tr>
+<th>Bit</th>
+<th>Name</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>31</td>
+<td>DEBUGEVT</td>
+<td>Debug event escalated to HardFault</td>
+</tr>
+<tr>
+<td>30</td>
+<td>FORCED</td>
+<td>A configurable fault (MemManage/BusFault/UsageFault) was escalated</td>
+</tr>
+<tr>
+<td>1</td>
+<td>VECTTBL</td>
+<td>Vector table read fault</td>
+</tr>
+</tbody>
+</table>
+<p><code>FORCED=1</code> means the fault escalated from a specific handler — look at CFSR for the
+original cause. <code>VECTTBL=1</code> means your interrupt vector table address is wrong (check
+<code>VTOR</code> register at <code>0xE000ED08</code>).</p>
+<hr />
+<h2 id="2-reading-the-fault-in-gdb">2. Reading the Fault in GDB</h2>
+<h3 id="21-the-basic-info-registers-dump">2.1 The Basic <code>info registers</code> Dump</h3>
+<p>When Zephyr catches a HardFault, it prints a crash log over the serial console. If you
+are attached with GDB (OpenOCD or J-Link):</p>
+<div class="highlight"><pre><span></span><code>(gdb) info registers
+r0             0x00000000  0
+r1             0x20001234  536874548
+...
+pc             0x08012abc  0x8012abc &lt;my_function+24&gt;
+sp             0x20003f8c  0x20003f8c
+lr             0x08012a01  0x8012a01 &lt;my_function+1&gt;
+xpsr           0x61000004  1627390980
+</code></pre></div>
+
+<p>For <strong>precise faults</strong> (MemManage, BusFault <code>PRECISERR</code>), <code>pc</code> is the exact faulting
+instruction. For <strong>imprecise faults</strong> (<code>BFSR.IMPRECISERR=1</code>), <code>pc</code> may be 1–5 instructions
+ahead of the actual faulting write due to the Cortex-M7 write buffer — see below.</p>
+<p><strong>BusFault imprecise</strong>: If <code>BFSR.IMPRECISERR=1</code>, <code>pc</code> may be 1–5 instructions ahead of
+the actual faulting instruction (Cortex-M7 has a deeper write buffer than M4). The fault
+was reported asynchronously — the write completed in the buffer before the bus detected
+the error. Disable write buffering to force synchronous reporting and get a precise address:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// At startup, for debugging only (reduces performance)</span>
+<span class="n">SCnSCB</span><span class="o">-&gt;</span><span class="n">ACTLR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">SCnSCB_ACTLR_DISDEFWBUF_Msk</span><span class="p">;</span>
+</code></pre></div>
+
+<h3 id="22-reading-fault-registers-from-gdb">2.2 Reading Fault Registers from GDB</h3>
+<div class="highlight"><pre><span></span><code>(gdb) x/1xw 0xE000ED28   # CFSR
+0xe000ed28:     0x00020000
+
+(gdb) x/1xw 0xE000ED2C   # HFSR
+0xe000ed2c:     0x40000000
+
+(gdb) x/1xw 0xE000ED34   # MMFAR
+0xe000ed34:     0x00000000
+
+(gdb) x/1xw 0xE000ED38   # BFAR
+0xe000ed38:     0x20001234
+</code></pre></div>
+
+<p><strong>Decode CFSR = <code>0x00020000</code>:</strong></p>
+<p>Bit 17 = UFSR.INVSTATE — Invalid state. The processor tried to execute code with the
+Thumb bit (T bit in xPSR) cleared, meaning an ARM instruction executed on a Thumb-only
+core (all Cortex-M). Cause: function pointer with bit 0 = 0 (missing <code>|1</code> Thumb bit).</p>
+<h3 id="23-zephyrs-built-in-fault-output">2.3 Zephyr&rsquo;s Built-In Fault Output</h3>
+<p>Zephyr prints fault details automatically over the log backend. Example:</p>
+<div class="highlight"><pre><span></span><code>[00:00:12.345,678] &lt;err&gt; os: ***** HARD FAULT *****
+[00:00:12.345,679] &lt;err&gt; os:   Reason: FORCED
+[00:00:12.345,680] &lt;err&gt; os:   HFSR: 0x40000000
+[00:00:12.345,681] &lt;err&gt; os:   CFSR: 0x00000200  
+[00:00:12.345,682] &lt;err&gt; os:   BFAR: 0x00000000
+[00:00:12.345,683] &lt;err&gt; os: Faulting instruction: 0x08012abc
+</code></pre></div>
+
+<p>Use the <code>Faulting instruction</code> address to find the source line.</p>
+<hr />
+<h2 id="3-mapping-pc-to-source-line">3. Mapping PC to Source Line</h2>
+<h3 id="31-addr2line-quickest-method">3.1 <code>addr2line</code> — Quickest Method</h3>
+<div class="highlight"><pre><span></span><code>arm-zephyr-eabi-addr2line<span class="w"> </span>-e<span class="w"> </span>build/zephyr/zephyr.elf<span class="w"> </span>-f<span class="w"> </span>-p<span class="w"> </span>0x08012abc
+</code></pre></div>
+
+<p>Output:</p>
+<div class="highlight"><pre><span></span><code>my_function() at ~/amr/firmware/src/sensor/imu_reader.c:127
+</code></pre></div>
+
+<p>This is the exact source line. The <code>-f</code> flag shows the function name, <code>-p</code> formats it
+as one line.</p>
+<h3 id="32-arm-zephyr-eabi-nm-find-symbols-near-the-pc">3.2 <code>arm-zephyr-eabi-nm</code> — Find Symbols Near the PC</h3>
+<p>If <code>addr2line</code> returns <code>??</code> (missing debug info or wrong ELF), use <code>nm</code> to find the
+nearest symbol:</p>
+<div class="highlight"><pre><span></span><code>arm-zephyr-eabi-nm<span class="w"> </span>-n<span class="w"> </span>build/zephyr/zephyr.elf<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">&quot;08012&quot;</span>
+</code></pre></div>
+
+<p>Output:</p>
+<div class="highlight"><pre><span></span><code>08012a00 T my_function
+08012b80 T other_function
+</code></pre></div>
+
+<p>The PC <code>0x08012abc</code> is between <code>my_function</code> (starts at <code>0x08012a00</code>) and <code>other_function</code>
+(starts at <code>0x08012b80</code>). The fault is at offset <code>0x08012abc - 0x08012a00 = 0xbc = 188 bytes</code>
+into <code>my_function</code>.</p>
+<h3 id="33-objdump-disassemble-around-the-pc">3.3 <code>objdump</code> — Disassemble Around the PC</h3>
+<div class="highlight"><pre><span></span><code>arm-zephyr-eabi-objdump<span class="w"> </span>-d<span class="w"> </span>build/zephyr/zephyr.elf<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>awk<span class="w"> </span><span class="s1">&#39;/^08012a00/,/^08012b80/&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-A5<span class="w"> </span>-B5<span class="w"> </span><span class="s2">&quot;12abc:&quot;</span>
+</code></pre></div>
+
+<p>This shows the assembly instructions around the fault. Look for:
+- <code>ldr</code> / <code>str</code> to an invalid address → DACCVIOL
+- Branch to odd/invalid address → IACCVIOL or INVSTATE
+- Division instruction → DIVBYZERO</p>
+<h3 id="34-linker-map-verify-section-placement">3.4 Linker Map — Verify Section Placement</h3>
+<p>The <code>build/zephyr/zephyr.map</code> file shows where every symbol is placed in memory.</p>
+<div class="highlight"><pre><span></span><code>grep<span class="w"> </span><span class="s2">&quot;my_function&quot;</span><span class="w"> </span>build/zephyr/zephyr.map
+</code></pre></div>
+
+<p>Output:</p>
+<div class="highlight"><pre><span></span><code> .text.my_function  0x08012a00  0x180  CMakeFiles/app.dir/src/sensor/imu_reader.c.obj
+</code></pre></div>
+
+<p>If the faulting address falls outside the <code>.text</code> (code) region (e.g., in <code>.bss</code> or
+<code>.data</code>), you have a corrupt function pointer.</p>
+<hr />
+<h2 id="4-common-hardfault-patterns-in-zephyr">4. Common HardFault Patterns in Zephyr</h2>
+<h3 id="41-stack-overflow-stacking-fault">4.1 Stack Overflow → Stacking Fault</h3>
+<p><strong>Symptom</strong>: <code>MMFSR.MSTKERR=1</code>, PC is at an ISR entry or Zephyr context switch.</p>
+<p><strong>Cause</strong>: Thread stack overflowed. When an exception fires, the CPU tries to push the
+exception frame onto the thread stack — but the stack pointer is already below the stack
+boundary, causing a MemManage fault.</p>
+<p><strong>Diagnosis</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Check stack sentinel in Zephyr console</span>
+<span class="o">(</span>gdb<span class="o">)</span><span class="w"> </span>x/4xw<span class="w"> </span>&lt;thread_stack_address&gt;
+<span class="c1"># Last valid pattern: 0xAABBCCDD (Zephyr&#39;s sentinel)</span>
+<span class="c1"># If it&#39;s overwritten, the stack overflow happened here</span>
+</code></pre></div>
+
+<p><strong>Fix</strong>: Increase stack size in <code>prj.conf</code> or thread definition:</p>
+<div class="highlight"><pre><span></span><code><span class="n">K_THREAD_STACK_DEFINE</span><span class="p">(</span><span class="n">my_stack</span><span class="p">,</span><span class="w"> </span><span class="mi">4096</span><span class="p">);</span><span class="w">  </span><span class="c1">// increase from 2048</span>
+</code></pre></div>
+
+<p>Enable Zephyr&rsquo;s stack sentinel checking:</p>
+<div class="highlight"><pre><span></span><code>CONFIG_STACK_SENTINEL=y
+CONFIG_STACK_SENTINEL_DOUBLE_WIDE=y
+</code></pre></div>
+
+<h3 id="42-null-pointer-dereference">4.2 NULL Pointer Dereference</h3>
+<p><strong>Symptom</strong>: <code>MMFSR.DACCVIOL=1</code>, <code>MMFAR = 0x00000000</code> (or small offset like <code>0x00000004</code>).</p>
+<p><strong>Cause</strong>: Reading or writing through a NULL pointer. The offset tells you which field:
+<code>0x00000008</code> with a struct pointer = accessing the third 32-bit field of a NULL struct.</p>
+<p><strong>Find it</strong>: PC + <code>addr2line</code> → exact line. Look for any <code>-&gt;</code> or <code>[index]</code> access at
+that line.</p>
+<h3 id="43-dma-writing-to-cached-region">4.3 DMA Writing to Cached Region</h3>
+<p><strong>Symptom</strong>: No fault at time of DMA, but HardFault later when reading the data. CFSR
+may show UNDEFINSTR if DMA corrupted code. May also show as data corruption without a
+fault at all.</p>
+<p><strong>Cause</strong>: STM32H7 D-cache. DMA writes to physical memory but the CPU reads from cache
+(which has stale data). DMA cannot write to Flash (where <code>.text</code> lives), so code is not
+directly corrupted. The more common scenario: DMA writes to a <code>.data</code> region containing
+<strong>function pointers or vtables</strong>. The CPU reads a stale cache copy, dereferences a garbage
+pointer, and the fault appears as <code>DACCVIOL</code> (NULL-like address) or <code>INVSTATE</code> (pointer
+with bit 0 = 0, missing Thumb bit) — not as a code execution fault.</p>
+<p><strong>Fix</strong>: Ensure DMA buffers are placed in non-cacheable SRAM or use cache invalidation
+after DMA completion (see session 03).</p>
+<h3 id="44-unaligned-access-with-unalign_trp-enabled">4.4 Unaligned Access with UNALIGN_TRP Enabled</h3>
+<p><strong>Symptom</strong>: <code>UFSR.UNALIGNED=1</code>.</p>
+<p><strong>Cause</strong>: Accessing a 32-bit or 64-bit value at an address not aligned to its size.
+Example: reading a <code>uint32_t</code> from address <code>0x20001003</code> (not 4-byte aligned).</p>
+<p><strong>Common source</strong>: <code>memcpy</code> into a buffer followed by casting the buffer pointer to a
+struct pointer and reading multi-byte fields.</p>
+<p><strong>Fix</strong>: Use <code>memcpy</code> into a properly aligned local variable:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">uint32_t</span><span class="w"> </span><span class="n">value</span><span class="p">;</span>
+<span class="n">memcpy</span><span class="p">(</span><span class="o">&amp;</span><span class="n">value</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">buffer</span><span class="p">[</span><span class="n">unaligned_offset</span><span class="p">],</span><span class="w"> </span><span class="mi">4</span><span class="p">);</span><span class="w">  </span><span class="c1">// safe</span>
+<span class="c1">// NOT: uint32_t value = *(uint32_t*)&amp;buffer[unaligned_offset];  // UNSAFE</span>
+</code></pre></div>
+
+<h3 id="45-fpu-instruction-with-fpu-disabled">4.5 FPU Instruction with FPU Disabled</h3>
+<p><strong>Symptom</strong>: <code>UFSR.NOCP=1</code>.</p>
+<p><strong>Cause</strong>: Floating-point instruction executed but <code>CPACR.CP10/CP11</code> bits not set (FPU
+not enabled in firmware config).</p>
+<p><strong>Zephyr fix</strong>:</p>
+<div class="highlight"><pre><span></span><code>CONFIG_FPU=y
+CONFIG_FPU_SHARING=y
+</code></pre></div>
+
+<p>Or manually in startup code:</p>
+<div class="highlight"><pre><span></span><code><span class="n">SCB</span><span class="o">-&gt;</span><span class="n">CPACR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="p">(</span><span class="mh">0xF</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">20</span><span class="p">);</span><span class="w">  </span><span class="c1">// Enable CP10 and CP11 (FPU)</span>
+<span class="n">__DSB</span><span class="p">();</span>
+<span class="n">__ISB</span><span class="p">();</span>
+</code></pre></div>
+
+<hr />
+<h2 id="5-quick-reference-decode-workflow">5. Quick Reference: Decode Workflow</h2>
+<div class="highlight"><pre><span></span><code>HardFault fires
+│
+├── Read HFSR at 0xE000ED2C
+│   ├── FORCED=1 → look at CFSR for actual cause
+│   └── VECTTBL=1 → vector table address corrupt (check VTOR)
+│
+├── Read CFSR at 0xE000ED28
+│   ├── MMFSR bits set?
+│   │   ├── MMARVALID=1 → read MMFAR for faulting address
+│   │   ├── DACCVIOL → NULL ptr or MPU violation
+│   │   ├── IACCVIOL → executing non-executable memory
+│   │   └── MSTKERR → stack overflow (check thread stack)
+│   │
+│   ├── BFSR bits set?
+│   │   ├── PRECISERR=1 + BFARVALID=1 → read BFAR for address
+│   │   └── IMPRECISERR=1 → enable DISDEFWBUF for precise address
+│   │
+│   └── UFSR bits set?
+│       ├── NOCP → FPU not enabled
+│       ├── DIVBYZERO → integer division by zero
+│       ├── UNALIGNED → unaligned access
+│       ├── INVSTATE → corrupt function pointer (bit 0 = 0)
+│       └── UNDEFINSTR → executing garbage data as code
+│
+├── Read stacked PC from GDB: info registers → pc
+│
+├── arm-zephyr-eabi-addr2line -e zephyr.elf -f -p &lt;PC&gt;
+│   → source file + line number
+│
+└── If addr2line returns &quot;??&quot;:
+    arm-zephyr-eabi-nm -n zephyr.elf → find nearest symbol
+    arm-zephyr-eabi-objdump -d zephyr.elf → disassemble
+</code></pre></div>
+
+<hr />
+<h2 id="6-enabling-all-fault-handlers-in-zephyr">6. Enabling All Fault Handlers in Zephyr</h2>
+<p>By default, Zephyr enables MemManage and BusFault handlers separately from HardFault.
+Enable all of them explicitly in your early init for maximum information:</p>
+<div class="highlight"><pre><span></span><code><span class="cm">/* In main() or board init, before any unsafe code */</span>
+<span class="n">SCB</span><span class="o">-&gt;</span><span class="n">SHCSR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">SCB_SHCSR_MEMFAULTENA_Msk</span>
+<span class="w">           </span><span class="o">|</span><span class="w">  </span><span class="n">SCB_SHCSR_BUSFAULTENA_Msk</span>
+<span class="w">           </span><span class="o">|</span><span class="w">  </span><span class="n">SCB_SHCSR_USGFAULTENA_Msk</span><span class="p">;</span>
+
+<span class="cm">/* Enable div-by-zero trap */</span>
+<span class="n">SCB</span><span class="o">-&gt;</span><span class="n">CCR</span><span class="w"> </span><span class="o">|=</span><span class="w"> </span><span class="n">SCB_CCR_DIV_0_TRP_Msk</span><span class="p">;</span>
+
+<span class="cm">/* ⚠️  UNALIGN_TRP — DEBUGGING USE ONLY:</span>
+<span class="cm"> * Enabling this traps on ANY unaligned access, including those performed by</span>
+<span class="cm"> * Zephyr&#39;s internal memcpy, newlib string functions, and nanopb&#39;s pb_encode.</span>
+<span class="cm"> * On Cortex-M7, unaligned accesses are hardware-supported by default;</span>
+<span class="cm"> * enabling this trap will immediately fault on the first Zephyr memcpy call.</span>
+<span class="cm"> * Uncomment ONLY when hunting a specific unaligned access bug, then remove. */</span>
+<span class="cm">/* SCB-&gt;CCR |= SCB_CCR_UNALIGN_TRP_Msk; */</span>
+</code></pre></div>
+
+<p>And enable Zephyr&rsquo;s fault reporting:</p>
+<div class="highlight"><pre><span></span><code>CONFIG_FAULT_DUMP=2
+CONFIG_EXTRA_EXCEPTION_INFO=y
+</code></pre></div>
+
+<p><code>FAULT_DUMP=2</code> produces a full register dump including all fault status registers.
+<code>EXTRA_EXCEPTION_INFO=y</code> decodes each bit of CFSR in the log output.</p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>
