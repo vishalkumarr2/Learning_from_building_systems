@@ -5,18 +5,20 @@
 
 ## The Gap Analysis
 
-Existing tracks cover **hardware/firmware foundations** (electronics → protocols → Zephyr) and
-**advanced C++**. Missing tracks are all on the **software/algorithm side** — which is where
-the daily RCA work actually happens.
+All seven tracks have been written. The table below shows each track's current status.
+Future work: Linux RT internals (extend cpp-advanced/03) and deeper hardware exercises once
+the STM32 + logic analyzer are in hand.
 
 ```
-EXISTING                            MISSING
-────────────────────────────────    ────────────────────────────────────────
-electronics/    (hardware theory)   navigation-estimator/  ← HIGHEST PRIORITY
-zephyr/         (firmware)          ros2-handson/           ← HIGH
-cpp-advanced/   (C++ depth)         python-scripting/             ← MEDIUM
-                                    zephyr/deep-dive/       ← MEDIUM (stub only)
-                                    linux-rt/               ← LOW (cpp-advanced/03 partial)
+EXISTING (COMPLETE)                     STATUS
+────────────────────────────────────    ────────────────────────────────────────
+electronics/    (hardware theory)       🟢 7 lessons + exercises
+zephyr/         (firmware + deep-dive)  🟢 17 tutorials + 12 deep-dives
+cpp-advanced/   (C++ depth)             🟢 18 modules + exercises
+control-systems/ (PID → advanced)       🟢 10 lessons + exercises
+navigation-estimator/ (EKF/IMU)         🟢 5 lessons + 5 exercises
+ros2-handson/   (nodes/TF/Nav2)         🟢 3 lessons + 4 exercises
+python-scripting/ (typing/test/polars)  🟢 3 lessons + 3 exercises
 ```
 
 ---
@@ -32,7 +34,7 @@ the observed covariance trajectory is expected or anomalous.
 
 **Timeline:** 5 weeks · 3–4 hrs/week · no hardware needed
 
-**Status:** 🔴 Not started
+**Status:** � Complete — 5 lessons + 5 exercises written
 **Folder:** `learn/navigation-estimator/`
 
 | Week | Topic | Practical Relevance |
@@ -72,7 +74,7 @@ well enough to explain frame drop bugs.
 
 **Timeline:** 3 weeks · 3–4 hrs/week
 
-**Status:** 🔴 Not started
+**Status:** � Complete — 3 lessons + 4 exercises written
 **Folder:** `learn/ros2-handson/`
 
 | Week | Topic | Practical Relevance |
@@ -108,7 +110,7 @@ test coverage for scripts.
 
 **Timeline:** 3 weeks · 2–3 hrs/week
 
-**Status:** 🔴 Not started
+**Status:** � Complete — 3 lessons + 3 exercises written
 **Folder:** `learn/python-scripting/`
 
 | Week | Topic | Practical Relevance |
@@ -139,7 +141,7 @@ the STM32 + logic analyzer are in hand.
 
 **Timeline:** Add content incrementally as hardware is acquired (see `zephyr/00-mastery-plan.md` hardware list)
 
-**Status:** 🟡 Stub created, blocked on hardware
+**Status:** � Complete — 12 deep-dives + README written
 **Folder:** `learn/zephyr/deep-dive/`
 
 **Files to create (when hardware arrives):**
@@ -169,28 +171,24 @@ Not a separate track — extend cpp-advanced/03 instead.
 
 ## Recommended Study Order
 
-```
-PARALLEL TRACKS (can interleave):
+All content is written. Suggested study order for the best learning flow:
 
-NOW
+```
+CORE (do these first, in parallel):
 │
-├── navigation-estimator/   ← start immediately, highest RCA value
-│   Week 1: Dead-reckoning math
-│   Week 2: EKF theory
-│   Week 3: Measurement models
-│   Week 4: IMU fusion
-│   Week 5: Failure mode diagnosis
+├── navigation-estimator/   ← highest RCA value, 5 weeks
+├── cpp-advanced/           ← 18 modules, work through progressively
 │
-├── cpp-advanced/ (continue from wherever you are)
+THEN:
 │
-IN 6–8 WEEKS
+├── ros2-handson/           ← builds on navigation-estimator theory
+├── python-scripting/       ← can interleave with anything
 │
-├── ros2-handson/           ← after navigation-estimator (builds on the theory)
-├── python-scripting/             ← can start in parallel with navigation-estimator
+ALWAYS AVAILABLE:
 │
-WHEN HARDWARE ARRIVES
-│
-└── zephyr/deep-dive/       ← hardware-gated, builds on existing zephyr/ theory
+├── electronics/            ← reference as needed
+├── control-systems/        ← PID → advanced control theory
+└── zephyr/                 ← firmware + 12 deep-dives
 ```
 
 ---

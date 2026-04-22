@@ -43,5 +43,4 @@ read a Nav2 behaviour tree without looking anything up.
 
 ---
 
-## Status: 🔴 Content not yet written
-## See GAPS-ROADMAP.md for priority and scheduling
+## Status: � Content complete — 3 lessons + 4 exercises
