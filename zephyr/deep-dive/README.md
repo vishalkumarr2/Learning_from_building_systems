@@ -15,7 +15,7 @@ will make the hands-on sessions much faster when hardware arrives.
 
 ---
 
-## Session Files (all created, hardware-gated on execution)
+## Session Files (11 hardware-gated sessions plus 2 reference guides)
 
 | File | Status | What It Covers |
 |------|--------|----------------|
@@ -30,6 +30,13 @@ will make the hands-on sessions much faster when hardware arrives.
 | `09-zbus-nanopb-bridge.md` | 🟡 HW-gated | ZBus channels; nanopb proto3 encoding; length-prefix framing for DMA |
 | `10-jetson-rt-setup.md` | 🟡 HW-gated | Jetson Orin NX: nvpmodel, irqbalance, isolcpus, spidev pinmux, cyclictest |
 | `11-ekf-integration.md` | 🟡 HW-gated | robot_localization EKF; TF2 frame tree; covariance tuning; rviz2 validation |
+
+## Reference Files (read these before your first hardware session)
+
+| File | Status | What It Covers |
+|------|--------|----------------|
+| `00-logic-analyzer-guide.md` | ✅ Ready | Saleae Logic 2 trigger discipline, decoder config, SPI/I2C/CAN/UART capture workflows |
+| `12-hardfault-decode.md` | ✅ Ready | CFSR/HFSR/MMFAR bit decoding, GDB addr2line, 5 common Zephyr HardFault patterns |
 
 ---
 

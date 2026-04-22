@@ -54,6 +54,11 @@ The OKS robot's IMU sits on the chassis with the **z-axis pointing upward**. Thi
          This is the angular velocity around the vertical axis.
 ```
 
+> **Configuration note:** The **2D navigation estimator** is configured to use only ω_z.
+> The ICM-42688-P outputs all 6 axes at full rate; the estimator simply ignores the others.
+> If you see a future 3D estimator configuration, or need to investigate a gyro-related
+> bug, the full IMU output is always available in the bag on `/robotXX/imu/data`.
+
 **Key insight:** The gyroscope does not know where "north" is, what angle the robot is at, or even which direction it was pointing when powered on. It only knows *how fast the robot is currently rotating*. Heading is a computed quantity that accumulates from the first sample.
 
 ## 1.2 How MEMS Gyroscopes Work (Physical Intuition)

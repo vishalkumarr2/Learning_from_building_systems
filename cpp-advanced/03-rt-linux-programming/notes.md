@@ -476,6 +476,229 @@ Understanding RT programming helps us:
 
 ---
 
+---
+
+## Section 8 — RT Profiling Tools: `perf`, `ftrace`, and Latency Measurement
+
+This section is the practical complement to Section 2 (PREEMPT_RT theory). The tools here
+let you *measure* the system instead of only reasoning about it.
+
+---
+
+### 8.1 `perf` — CPU Performance Counters
+
+`perf` exposes hardware performance counters (PMU) and kernel tracepoints. Two modes matter
+for RT work:
+
+**`perf stat` — summary of execution:**
+
+```bash
+sudo perf stat -e cache-misses,cache-references,context-switches,cpu-migrations \
+  ./my_rt_loop
+```
+
+Output:
+```
+10,234      cache-misses          # 1.23% of cache refs
+831,002     cache-references
+12          context-switches      # should be 0 for isolated RT thread
+0           cpu-migrations        # should be 0 with sched_setaffinity
+```
+
+**`context-switches > 0` for an RT thread is a red flag** — something is preempting your
+RT loop. Common causes: timer softirqs not redirected, network interrupts on same CPU,
+`SCHED_OTHER` thread at priority 0 being scheduled.
+
+**`perf record` + `perf report` — flame graph of hot code:**
+
+```bash
+sudo perf record -g -F 1000 -p $(pgrep my_rt_loop) -- sleep 5
+sudo perf report --stdio
+```
+
+The `-F 1000` samples at 1kHz. For a 100Hz RT loop, this gives ~10 samples per loop
+iteration — enough to identify which function dominates runtime.
+
+**`perf sched` — scheduling latency histogram:**
+
+```bash
+sudo perf sched record -- sleep 10
+sudo perf sched latency --sort max
+```
+
+This shows the worst-case scheduling wakeup latency for each thread — how long it took
+from `nanosleep` waking to the thread actually executing. Values > 100µs for an RT thread
+indicate kernel scheduling pathology.
+
+---
+
+### 8.2 `ftrace` — In-Kernel Tracing Without Overhead
+
+`ftrace` is built into the kernel (no binary needed, use `/sys/kernel/debug/tracing`).
+The critical tracer for RT work is **`irqsoff`** — it records the longest interval during
+which interrupts were disabled.
+
+**Enable irqsoff tracer:**
+
+```bash
+# Must be root
+cd /sys/kernel/debug/tracing
+echo irqsoff > current_tracer
+echo 1 > tracing_on
+sleep 5
+echo 0 > tracing_on
+cat trace | head -50
+```
+
+**Interpreting output:**
+
+```
+# Tracer: irqsoff
+# TASK-PID   CPU#  TIMESTAMP  DURATION
+# | | | |
+nav_estim-1234 [003]  1234.567890:  427 us  <= worst case!
+  <...kernel stack of functions that held IRQs off...>
+```
+
+The `427 us` is the longest IRQ-off window found. For a 100Hz RT loop with 10ms period,
+anything > 1ms is a problem. For a 1kHz loop, anything > 200µs is a problem.
+
+**`trace-cmd` — easier ftrace interface:**
+
+```bash
+# Install: sudo apt install trace-cmd
+sudo trace-cmd record -p irqsoff -d 5  # 5 seconds
+sudo trace-cmd report | grep "us$" | sort -t: -k2 -rn | head -20
+```
+
+**`preemptoff` tracer** — same idea, but records how long preemption was disabled
+(slightly different from irqsoff; both matter). Use `preemptirqsoff` to catch both.
+
+---
+
+### 8.3 `/proc/latency_stats` and `/proc/timer_stats`
+
+These proc files give kernel-level timing data without needing root tracing setup.
+
+**`/proc/latency_stats`** (requires `CONFIG_LATENCYTOP=y`):
+
+```bash
+sudo bash -c 'echo 1 > /proc/sys/kernel/latencytop'
+sleep 5
+cat /proc/latency_stats | head -20
+```
+
+Shows: `<count> <max_latency_us> <operation>` — the top sources of scheduling latency.
+Useful for identifying what kernel path is causing your thread to miss deadlines.
+
+**`/proc/timer_stats`** (older kernels):
+
+```bash
+sudo bash -c 'echo 1 > /proc/timer_stats; sleep 5; cat /proc/timer_stats'
+```
+
+Lists which kernel timers fired most frequently — helps find spurious wakeup sources.
+
+---
+
+### 8.4 `cyclictest` — The Standard RT Benchmark
+
+`cyclictest` measures the gap between a timer wakeup request and actual execution.
+This is the end-to-end scheduling latency number, not just IRQ or preempt-off time.
+
+```bash
+# Install: sudo apt install rt-tests
+# Run 10 seconds, SCHED_FIFO prio 99, 1ms interval, on CPU 3
+sudo cyclictest -l 10000 -p 99 -i 1000 -a 3 -t 1 -q
+```
+
+**Interpreting output:**
+
+```
+T: 0 ( 1234) P:99 I:1000 C:10000 Min:   4 Act:   8 Avg:  11 Max:  427
+```
+
+| Field | Meaning |
+|---|---|
+| `Min` | Best wakeup latency (µs) — bound by CPU speed |
+| `Avg` | Average — should be low (5–20µs on modern hardware) |
+| `Max` | **Worst case** — the one that matters for RT guarantees |
+| `C` | Iterations completed |
+
+**Histogram output** (for deeper analysis):
+
+```bash
+sudo cyclictest -l 100000 -p 99 -i 1000 -a 3 -h 200 -q > hist.txt
+# Plot with gnuplot or Python matplotlib
+```
+
+The histogram shows how many iterations landed in each latency bucket. A healthy
+PREEMPT_RT system has a very tight distribution with a long but low-count tail.
+
+**Correlation with perf:**
+
+Run `cyclictest` and `perf sched record` simultaneously:
+```bash
+sudo perf sched record & sudo cyclictest -l 10000 -p 99 -i 1000 -a 3
+```
+
+Then `perf sched latency` will show the scheduling overhead that `cyclictest` is measuring.
+
+---
+
+### 8.5 `iotop`, `htop`, and IRQ affinity
+
+**Check IRQ affinity** — which IRQs are hitting your RT CPU?
+
+```bash
+for irq in $(ls /proc/irq/); do
+  aff=$(cat /proc/irq/$irq/smp_affinity_list 2>/dev/null)
+  name=$(cat /proc/irq/$irq/name 2>/dev/null || echo "unknown")
+  echo "$irq: $aff -- $name"
+done | grep -v "^default"
+```
+
+If CPU 3 appears in any IRQ's affinity mask other than your SPI IRQ, redirect it:
+
+```bash
+# Remove CPU 3 from IRQ 45's affinity (move it to CPUs 0-2 only)
+sudo bash -c 'echo 7 > /proc/irq/45/smp_affinity'  # 0b0111 = CPUs 0,1,2
+```
+
+**`htop`** — set CPU affinity display: press `F2 → Display → Show CPUs (1/1)` to see
+per-core usage. Watch CPU 3 — in a well-isolated RT setup, it should show ~100% system
+time (your RT thread) with zero idle time, and no other threads appearing on it.
+
+---
+
+### 8.6 Summary: Profiling Workflow for a Jetson RT Node
+
+When your RT loop shows unexpected latency spikes (>100µs on Jetson Orin NX), follow
+this sequence:
+
+```
+1. cyclictest → measure Max latency
+   If Max < 200µs: acceptable for 100Hz loop
+   If Max > 1ms: investigate
+
+2. ftrace irqsoff → find longest IRQ-off interval
+   If > 200µs: kernel driver holding IRQs off (SPI driver, GPU driver)
+
+3. perf sched latency → find wakeup latency per thread
+   Identify which kernel thread is competing
+
+4. /proc/irq/*/smp_affinity → check IRQ routing
+   Remove all non-essential IRQs from your RT CPU
+
+5. perf stat -e context-switches → confirm your RT thread is not preempted
+   Should be 0 context switches for the RT thread
+
+6. nvpmodel -q / jetson_clocks --show → confirm clock state
+   Verify cores are not throttled
+```
+
+---
+
 ## Further Reading
 
 - "The Design of the PREEMPT_RT Patch" — LWN.net series
@@ -483,4 +706,6 @@ Understanding RT programming helps us:
 - "Is Parallel Programming Hard?" — Paul McKenney, Ch. 7-8 on RT
 - "Linux Device Drivers, 3rd Ed." — Ch. 7 (Time, Delays, Deferred Work)
 - cyclictest tool — the standard RT latency benchmark
+- `trace-cmd` documentation: `trace-cmd.org`
+- perf tutorial: Brendan Gregg's "Linux Performance" (perf chapter)
 - OKS firmware: `oks_navigation_estimator` runs a cyclic pattern at 100Hz

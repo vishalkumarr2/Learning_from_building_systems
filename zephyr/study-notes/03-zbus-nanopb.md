@@ -4,7 +4,7 @@
 
 > **Electronics prerequisite:** Understanding the SPI frame framing (header + length + CRC) assumes you've read:
 > - SPI protocol framing → `electronics/05-spi-deep-dive.md` (why raw SPI has no message boundaries)
-> - Serialization concept → `electronics/03-opamps-adc-sampling.md` § Serializer/Deserializer
+> - Serialization concept → Part 2 of this document covers nanopb proto3 encoding (no separate deep-dive yet)
 
 ---
 
@@ -102,6 +102,12 @@ The packer thread, the logger thread, and a new debug-visualizer thread can ALL 
 ```
 
 The IMU thread has zero dependencies on any downstream consumer. Add or remove consumers → zero changes to the publisher.
+
+> ⚠️ **Listener vs Subscriber — critical distinction:**
+> The "walks away immediately" description above applies to **subscribers** (`ZBUS_SUBSCRIBER_DEFINE`) and **message subscribers** (`ZBUS_MSG_SUBSCRIBER_DEFINE`), both of which are asynchronous.
+> If you instead use **`ZBUS_LISTENER_DEFINE`** (callback-based), the callback runs **synchronously inside `zbus_chan_pub()`** — the publisher blocks until every registered listener callback returns.
+> A slow listener in the packer thread **will make your 100Hz IMU thread miss its deadline**.
+> Rule of thumb: **listeners are for lightweight work only** (set a flag, post a semaphore). Any real processing belongs in a subscriber thread.
 
 ---
 
