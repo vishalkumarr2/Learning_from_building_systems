@@ -27,6 +27,7 @@ SECTION_COLORS = {
     "zephyr": {"accent": "emerald", "hex": "#047857"},
     "electronics": {"accent": "amber", "hex": "#b45309"},
     "control-systems": {"accent": "rose", "hex": "#be123c"},
+    "logic": {"accent": "cyan", "hex": "#0891b2"},
 }
 
 # ── HTML template for content pages ──────────────────────────────────────────
@@ -459,6 +460,54 @@ def build_control_systems():
     return len(cards)
 
 
+def build_logic():
+    """Build Logic & Critical Reasoning section pages."""
+    section = LEARN / "logic"
+    accent = "cyan"
+    cards = []
+
+    # Learning plan
+    md = section / "00-learning-plan.md"
+    if md.exists():
+        out = section / "00-learning-plan.html"
+        convert_md_to_html(md, out, "index.html", "Back to Logic", accent)
+        cards.append(card_html("00-learning-plan.html", "Learning Plan", "9-lesson curriculum overview with engineering connections", accent))
+
+    # Numbered lessons
+    lessons = sorted([f for f in section.iterdir()
+                      if f.is_file() and f.suffix == ".md"
+                      and re.match(r"\d{2}-", f.name)
+                      and f.name != "00-learning-plan.md"])
+
+    for md in lessons:
+        md_text = md.read_text(encoding="utf-8")
+        title = extract_title(md_text)
+        out_name = md.stem + ".html"
+        out = section / out_name
+        convert_md_to_html(md, out, "index.html", "Back to Logic", accent)
+        cards.append(card_html(out_name, title, "", accent))
+
+    # Exercises
+    exercises_dir = section / "exercises"
+    if exercises_dir.exists():
+        for md in sorted(exercises_dir.glob("*.md")):
+            md_text = md.read_text(encoding="utf-8")
+            title = extract_title(md_text)
+            out = exercises_dir / (md.stem + ".html")
+            convert_md_to_html(md, out, "../index.html", "Back to Logic", accent)
+            cards.append(card_html(f"exercises/{md.stem}.html", f"Exercise: {title}", "", accent))
+
+    idx = index_page(
+        "Logic & Critical Reasoning",
+        "Arguments, fallacies, propositional logic, deduction, scientific reasoning — 9 lessons + exercises",
+        "\n".join(cards),
+        "../index.html", "Back to Robotics",
+        accent,
+    )
+    (section / "index.html").write_text(idx, encoding="utf-8")
+    return len(cards)
+
+
 def build_study_plan():
     """Build the top-level STUDY-PLAN page."""
     md = LEARN / "STUDY-PLAN.md"
@@ -615,6 +664,10 @@ def build_robotics_index():
                            "Python Scripting",
                            "Type-safe Python, testing, CLI tools, and timeseries analysis",
                            "teal"))
+    cards.append(card_html("learn/logic/index.html",
+                           "Logic & Critical Reasoning",
+                           "Arguments, fallacies, propositional logic, deduction, scientific reasoning — 9 lessons + exercises",
+                           "cyan"))
 
     idx = index_page(
         "Robotics",
@@ -652,13 +705,16 @@ def main():
     n7 = build_python_scripting()
     print(f"  Python:       {n7} pages")
 
+    n8 = build_logic()
+    print(f"  Logic:        {n8} pages")
+
     build_study_plan()
     print("  Study Plan:   1 page")
 
     build_robotics_index()
     print("  Robotics index: 1 page")
 
-    total = n1 + n2 + n3 + n4 + n5 + n6 + n7 + 2  # +2 for study plan + robotics index
+    total = n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + 2  # +2 for study plan + robotics index
     print(f"\nDone! Generated {total} HTML files.")
     print("Next: add Robotics link to index.html sidebar and category grid.")
 
