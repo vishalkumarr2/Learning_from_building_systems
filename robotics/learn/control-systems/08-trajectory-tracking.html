@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>08 — Trajectory Tracking and Path Following - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="08-trajectory-tracking-and-path-following">08 — Trajectory Tracking and Path Following</h1>
+<h3 id="from-nav2s-cmd_vel-to-smooth-wheel-motion-the-jetson-layer">From Nav2&rsquo;s cmd_vel to smooth wheel motion — the Jetson layer</h3>
+<p><strong>Prerequisite:</strong> <code>07-cascaded-loops.md</code> (cascaded PID on MCU)
+<strong>Unlocks:</strong> <code>09-two-layer-architecture.md</code> (MCU↔Jetson coordination)</p>
+<hr />
+<h2 id="why-should-i-care-oks-context">Why Should I Care? (OKS Context)</h2>
+<p>The MCU cascade (Lessons 05-07) controls individual motors. But the OKS robot has TWO driven wheels (differential drive). The <strong>Jetson</strong> runs ROS2 Nav2, which plans paths and outputs <code>cmd_vel</code> — a linear+angular velocity command. Something must translate <code>cmd_vel</code> into <strong>left and right wheel speed commands</strong> and ensure the robot follows the planned path accurately.</p>
+<p><strong>This is where 80% of &ldquo;the robot drifts&rdquo; bugs live:</strong>
+- Pure pursuit lookahead too short → oscillation around the path
+- DWB max_vel_theta too high → aggressive rotation → sensorbar triggers
+- No velocity profiling → jerky starts and stops → load shifts</p>
+<hr />
+<h1 id="part-1-differential-drive-kinematics">PART 1 — DIFFERENTIAL DRIVE KINEMATICS</h1>
+<h2 id="11-forward-kinematics">1.1 Forward Kinematics</h2>
+<p>A differential drive robot with wheel radius $r$ and wheelbase (distance between wheels) $L$:</p>
+<div class="highlight"><pre><span></span><code>          ↑ x (forward)
+          │
+     ┌────┼────┐
+     │    │    │
+  ωL │    ●    │ ωR      ● = center of rotation
+     │    │    │
+     └────┼────┘
+          │
+     ←─ L ─→
+</code></pre></div>
+
+<p>Given left wheel speed $\omega_L$ and right wheel speed $\omega_R$:</p>
+<p>$$v = \frac{r(\omega_R + \omega_L)}{2} \quad \text{(linear velocity)}$$</p>
+<p>$$\omega = \frac{r(\omega_R - \omega_L)}{L} \quad \text{(angular velocity)}$$</p>
+<h2 id="12-inverse-kinematics">1.2 Inverse Kinematics</h2>
+<p>Given desired $v$ and $\omega$ (from Nav2 <code>cmd_vel</code>):</p>
+<p>$$\omega_L = \frac{v - \omega L/2}{r}$$</p>
+<p>$$\omega_R = \frac{v + \omega L/2}{r}$$</p>
+<p><strong>OKS parameters:</strong> $r = 0.065$ m, $L = 0.43$ m</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Inverse kinematics: cmd_vel → wheel speeds</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">cmd_vel_to_wheels</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">omega</span><span class="p">,</span> <span class="n">wheel_radius</span><span class="o">=</span><span class="mf">0.065</span><span class="p">,</span> <span class="n">wheelbase</span><span class="o">=</span><span class="mf">0.43</span><span class="p">):</span>
+    <span class="n">omega_left</span> <span class="o">=</span> <span class="p">(</span><span class="n">v</span> <span class="o">-</span> <span class="n">omega</span> <span class="o">*</span> <span class="n">wheelbase</span> <span class="o">/</span> <span class="mf">2.0</span><span class="p">)</span> <span class="o">/</span> <span class="n">wheel_radius</span>
+    <span class="n">omega_right</span> <span class="o">=</span> <span class="p">(</span><span class="n">v</span> <span class="o">+</span> <span class="n">omega</span> <span class="o">*</span> <span class="n">wheelbase</span> <span class="o">/</span> <span class="mf">2.0</span><span class="p">)</span> <span class="o">/</span> <span class="n">wheel_radius</span>
+    <span class="k">return</span> <span class="n">omega_left</span><span class="p">,</span> <span class="n">omega_right</span>
+
+<span class="c1"># Example: v = 0.5 m/s, turning at 0.2 rad/s</span>
+<span class="n">wL</span><span class="p">,</span> <span class="n">wR</span> <span class="o">=</span> <span class="n">cmd_vel_to_wheels</span><span class="p">(</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">)</span>
+<span class="c1"># wL = (0.5 - 0.2*0.215) / 0.065 = 7.03 rad/s</span>
+<span class="c1"># wR = (0.5 + 0.2*0.215) / 0.065 = 8.35 rad/s</span>
+</code></pre></div>
+
+<h2 id="13-odometry-dead-reckoning">1.3 Odometry (Dead Reckoning)</h2>
+<p>Integrating wheel speeds gives position estimate:</p>
+<p>$$\Delta x = v \cdot \cos(\theta) \cdot \Delta t$$
+$$\Delta y = v \cdot \sin(\theta) \cdot \Delta t$$
+$$\Delta \theta = \omega \cdot \Delta t$$</p>
+<p><strong>OKS odometry runs at 50 Hz on the Jetson</strong>, fusing encoder feedback with IMU data in the navigation estimator.</p>
+<p><strong>Why odometry drifts:</strong> Wheel slip, wheel radius errors, wheelbase calibration errors. After 100 m of driving, pure odometry can be off by 1-3 m. That&rsquo;s why OKS uses LiDAR AMCL or fusion estimators.</p>
+<hr />
+<h1 id="part-2-path-following-algorithms">PART 2 — PATH FOLLOWING ALGORITHMS</h1>
+<h2 id="21-pure-pursuit">2.1 Pure Pursuit</h2>
+<p><strong>Idea:</strong> Pick a &ldquo;lookahead point&rdquo; on the path at distance $L_d$ ahead of the robot, and steer toward it.</p>
+<div class="highlight"><pre><span></span><code>Path:  ─────────●─────────────
+                 │ L_d (lookahead distance)
+                 │
+                ╔╗  ← Robot
+                ╚╝
+</code></pre></div>
+
+<p>The required curvature to reach the lookahead point:</p>
+<p>$$\kappa = \frac{2 \sin(\alpha)}{L_d}$$</p>
+<p>where $\alpha$ is the angle between the robot&rsquo;s heading and the lookahead point.</p>
+<p>Angular velocity command:</p>
+<p>$$\omega = v \cdot \kappa = \frac{2v \sin(\alpha)}{L_d}$$</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">pure_pursuit</span><span class="p">(</span><span class="n">robot_x</span><span class="p">,</span> <span class="n">robot_y</span><span class="p">,</span> <span class="n">robot_theta</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">lookahead_dist</span><span class="p">,</span> <span class="n">velocity</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Compute cmd_vel using pure pursuit.</span>
+<span class="sd">    Returns: (v, omega)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Find lookahead point on path</span>
+    <span class="n">lookahead_point</span> <span class="o">=</span> <span class="n">find_lookahead_point</span><span class="p">(</span><span class="n">robot_x</span><span class="p">,</span> <span class="n">robot_y</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">lookahead_dist</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">lookahead_point</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span>  <span class="c1"># No valid point → stop</span>
+
+    <span class="c1"># Transform lookahead point to robot frame</span>
+    <span class="n">dx</span> <span class="o">=</span> <span class="n">lookahead_point</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">robot_x</span>
+    <span class="n">dy</span> <span class="o">=</span> <span class="n">lookahead_point</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">robot_y</span>
+
+    <span class="c1"># Angle to lookahead point relative to robot heading</span>
+    <span class="n">alpha</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arctan2</span><span class="p">(</span><span class="n">dy</span><span class="p">,</span> <span class="n">dx</span><span class="p">)</span> <span class="o">-</span> <span class="n">robot_theta</span>
+    <span class="n">alpha</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arctan2</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">alpha</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">alpha</span><span class="p">))</span>  <span class="c1"># Normalize to [-π, π]</span>
+
+    <span class="c1"># Curvature</span>
+    <span class="n">curvature</span> <span class="o">=</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">alpha</span><span class="p">)</span> <span class="o">/</span> <span class="n">lookahead_dist</span>
+
+    <span class="c1"># Cmd_vel</span>
+    <span class="n">omega</span> <span class="o">=</span> <span class="n">velocity</span> <span class="o">*</span> <span class="n">curvature</span>
+    <span class="k">return</span> <span class="n">velocity</span><span class="p">,</span> <span class="n">omega</span>
+</code></pre></div>
+
+<p><strong>Tuning $L_d$ (lookahead distance):</strong></p>
+<table>
+<thead>
+<tr>
+<th>$L_d$</th>
+<th>Effect</th>
+<th>OKS usage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Small (0.2 m)</td>
+<td>Tracks path tightly, oscillates at high speed</td>
+<td>Docking, precision approach</td>
+</tr>
+<tr>
+<td>Medium (0.5 m)</td>
+<td>Good balance</td>
+<td>Normal corridor driving</td>
+</tr>
+<tr>
+<td>Large (1.0 m)</td>
+<td>Smooth but cuts corners</td>
+<td>High-speed transit</td>
+</tr>
+</tbody>
+</table>
+<p><strong>OKS uses regulated pure pursuit</strong> (Nav2&rsquo;s RPP plugin), which adaptively adjusts $L_d$ based on curvature and speed.</p>
+<h2 id="22-stanley-controller">2.2 Stanley Controller</h2>
+<p><strong>Idea:</strong> Control both the <strong>heading error</strong> and the <strong>cross-track error</strong> (distance from path).</p>
+<p>$$\delta = \theta_e + \arctan\left(\frac{k \cdot e_{cross}}{v}\right)$$</p>
+<p>where:
+- $\theta_e$ = heading error (angle between robot heading and path tangent)
+- $e_{cross}$ = cross-track error (perpendicular distance to path)
+- $k$ = gain parameter
+- $v$ = forward velocity</p>
+<p><strong>Advantage:</strong> Converges to the path exponentially. <strong>Disadvantage:</strong> Assumes bicycle model (front-wheel steering), needs adaptation for differential drive.</p>
+<h2 id="23-dwb-dynamic-window-based-nav2s-default">2.3 DWB (Dynamic Window Based) — Nav2&rsquo;s Default</h2>
+<p>The DWB planner samples many (v, ω) pairs in the robot&rsquo;s velocity space, simulates each trajectory forward, and picks the one that:
+1. Avoids obstacles
+2. Stays close to the global path
+3. Makes progress toward the goal
+4. Is kinematically feasible (respects max acceleration)</p>
+<div class="highlight"><pre><span></span><code>Velocity space:
+  ω ↑
+    │  ╳ ╳ ╳ ╳         ╳ = infeasible (obstacle collision)
+    │  ╳ ○ ○ ╳         ○ = feasible
+    │  ╳ ○ ★ ╳         ★ = best scored trajectory
+    │  ╳ ○ ○ ╳
+    └──────────→ v
+
+  ★ is selected → becomes cmd_vel
+</code></pre></div>
+
+<p><strong>Key DWB parameters (OKS tuning):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Value</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>max_vel_x</code></td>
+<td>0.5 m/s</td>
+<td>Max forward speed</td>
+</tr>
+<tr>
+<td><code>max_vel_theta</code></td>
+<td>0.5 rad/s</td>
+<td>Max rotation speed</td>
+</tr>
+<tr>
+<td><code>max_accel_x</code></td>
+<td>0.3 m/s²</td>
+<td>Acceleration limit → smooth starts</td>
+</tr>
+<tr>
+<td><code>max_accel_theta</code></td>
+<td>0.5 rad/s²</td>
+<td>Angular accel → prevents jerky turns</td>
+</tr>
+<tr>
+<td><code>sim_time</code></td>
+<td>2.0 s</td>
+<td>How far ahead to simulate</td>
+</tr>
+<tr>
+<td><code>vx_samples</code></td>
+<td>10</td>
+<td>Velocity space resolution</td>
+</tr>
+<tr>
+<td><code>vtheta_samples</code></td>
+<td>20</td>
+<td>Angular vel resolution</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Common OKS DWB bugs:</strong>
+- <code>max_vel_theta</code> too high → robot rotates aggressively → triggers sensorbar safety → e-stop
+- <code>sim_time</code> too short → robot doesn&rsquo;t see obstacles ahead → last-second swerve
+- <code>max_accel_x</code> too high → wheels slip on smooth floor → odometry error → position drift</p>
+<hr />
+<h1 id="part-3-velocity-profiling">PART 3 — VELOCITY PROFILING</h1>
+<h2 id="31-the-problem">3.1 The Problem</h2>
+<p>If the Nav2 planner outputs a raw path (sequence of waypoints), and the robot tries to follow it at constant speed, what happens at corners?</p>
+<p><strong>Without profiling:</strong> Robot hits corner at full speed → needs impossible angular acceleration → either misses the turn or jerks violently.</p>
+<p><strong>With profiling:</strong> Plan a velocity profile that decelerates before corners, stops at the goal, and respects acceleration limits.</p>
+<h2 id="32-trapezoidal-velocity-profile">3.2 Trapezoidal Velocity Profile</h2>
+<p>The simplest: accelerate, cruise, decelerate.</p>
+<div class="highlight"><pre><span></span><code>Speed
+  ▲
+  │     ┌───────────────┐
+  │    /│               │\
+  │   / │               │ \
+  │  /  │               │  \
+  │ /   │               │   \
+  └─────┴───────────────┴─────→ Time
+    acc    cruise         dec
+</code></pre></div>
+
+<p>$$d_{accel} = \frac{v_{max}^2}{2a_{max}}$$</p>
+<p>If the total distance is too short for full speed, use a triangular profile (accelerate then immediately decelerate).</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">trapezoidal_profile</span><span class="p">(</span><span class="n">distance</span><span class="p">,</span> <span class="n">v_max</span><span class="p">,</span> <span class="n">a_max</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Generate trapezoidal velocity profile.&quot;&quot;&quot;</span>
+    <span class="c1"># Distance needed to accelerate to v_max and decelerate</span>
+    <span class="n">d_accel</span> <span class="o">=</span> <span class="n">v_max</span><span class="o">**</span><span class="mi">2</span> <span class="o">/</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">a_max</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">d_accel</span> <span class="o">&gt;=</span> <span class="n">distance</span><span class="p">:</span>
+        <span class="c1"># Triangular profile: can&#39;t reach v_max</span>
+        <span class="n">v_peak</span> <span class="o">=</span> <span class="p">(</span><span class="n">a_max</span> <span class="o">*</span> <span class="n">distance</span><span class="p">)</span> <span class="o">**</span> <span class="mf">0.5</span>
+        <span class="n">t_accel</span> <span class="o">=</span> <span class="n">v_peak</span> <span class="o">/</span> <span class="n">a_max</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;triangular&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;v_peak&#39;</span><span class="p">:</span> <span class="n">v_peak</span><span class="p">,</span>
+            <span class="s1">&#39;t_accel&#39;</span><span class="p">:</span> <span class="n">t_accel</span><span class="p">,</span>
+            <span class="s1">&#39;t_total&#39;</span><span class="p">:</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">t_accel</span>
+        <span class="p">}</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Trapezoidal: full cruise segment</span>
+        <span class="n">d_cruise</span> <span class="o">=</span> <span class="n">distance</span> <span class="o">-</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">d_accel</span>
+        <span class="n">t_accel</span> <span class="o">=</span> <span class="n">v_max</span> <span class="o">/</span> <span class="n">a_max</span>
+        <span class="n">t_cruise</span> <span class="o">=</span> <span class="n">d_cruise</span> <span class="o">/</span> <span class="n">v_max</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;trapezoidal&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;v_max&#39;</span><span class="p">:</span> <span class="n">v_max</span><span class="p">,</span>
+            <span class="s1">&#39;t_accel&#39;</span><span class="p">:</span> <span class="n">t_accel</span><span class="p">,</span>
+            <span class="s1">&#39;t_cruise&#39;</span><span class="p">:</span> <span class="n">t_cruise</span><span class="p">,</span>
+            <span class="s1">&#39;t_total&#39;</span><span class="p">:</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">t_accel</span> <span class="o">+</span> <span class="n">t_cruise</span>
+        <span class="p">}</span>
+</code></pre></div>
+
+<h2 id="33-s-curve-profile-smoother">3.3 S-Curve Profile (Smoother)</h2>
+<p>Trapezoidal profiles have discontinuous acceleration → jerky motion. S-curve profiles limit jerk (rate of change of acceleration):</p>
+<div class="highlight"><pre><span></span><code>Acceleration
+  ▲
+  │  ╱─────╲
+  │ ╱       ╲
+  ├─╱─────────╲─→ Time
+  │             ╲       ╱
+  │              ╲─────╱
+  ▼
+</code></pre></div>
+
+<p><strong>OKS uses S-curve for docking</strong> (final 0.5 m approach) because precision matters more than speed. For corridor driving, trapezoidal is sufficient.</p>
+<hr />
+<h1 id="part-4-from-cmd_vel-to-wheel-commands">PART 4 — FROM CMD_VEL TO WHEEL COMMANDS</h1>
+<h2 id="41-the-complete-pipeline-on-jetson">4.1 The Complete Pipeline on Jetson</h2>
+<div class="highlight"><pre><span></span><code>Nav2 Planner → Global Path
+       │
+       ▼
+Nav2 Controller (RPP/DWB) → cmd_vel (v, ω) at 20 Hz
+       │
+       ▼
+Velocity Smoother → smoothed cmd_vel (acceleration-limited)
+       │
+       ▼
+Inverse Kinematics → (ω_left, ω_right)
+       │
+       ▼
+SPI → MCU → cascaded PID → motor PWM
+</code></pre></div>
+
+<h2 id="42-velocity-smoother">4.2 Velocity Smoother</h2>
+<p>Nav2&rsquo;s velocity smoother enforces acceleration and deceleration limits on <code>cmd_vel</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">VelocitySmoother</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">max_accel</span><span class="p">,</span> <span class="n">max_decel</span><span class="p">,</span> <span class="n">dt</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_accel</span> <span class="o">=</span> <span class="n">max_accel</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_decel</span> <span class="o">=</span> <span class="n">max_decel</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dt</span> <span class="o">=</span> <span class="n">dt</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_v</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_omega</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">smooth</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">target_v</span><span class="p">,</span> <span class="n">target_omega</span><span class="p">):</span>
+        <span class="c1"># Linear velocity</span>
+        <span class="n">dv</span> <span class="o">=</span> <span class="n">target_v</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_v</span>
+        <span class="n">max_dv</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_accel</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">dt</span> <span class="k">if</span> <span class="n">dv</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_decel</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">dt</span>
+        <span class="n">dv</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="n">dv</span><span class="p">,</span> <span class="n">max_dv</span><span class="p">),</span> <span class="o">-</span><span class="n">max_dv</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_v</span> <span class="o">+=</span> <span class="n">dv</span>
+
+        <span class="c1"># Angular velocity (same logic)</span>
+        <span class="n">dw</span> <span class="o">=</span> <span class="n">target_omega</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_omega</span>
+        <span class="n">max_dw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_accel</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">dt</span>  <span class="c1"># Angular accel limit</span>
+        <span class="n">dw</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="n">dw</span><span class="p">,</span> <span class="n">max_dw</span><span class="p">),</span> <span class="o">-</span><span class="n">max_dw</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_omega</span> <span class="o">+=</span> <span class="n">dw</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_v</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_omega</span>
+</code></pre></div>
+
+<h2 id="43-handling-the-zero-velocity-dead-zone">4.3 Handling the Zero-Velocity Dead Zone</h2>
+<p>At very low speeds, the motor has static friction (stiction). The PID commands a tiny duty, but the motor doesn&rsquo;t move. The position error grows, integral winds up, and eventually the motor lurches forward.</p>
+<p><strong>Solutions used in OKS:</strong>
+1. <strong>Minimum speed threshold:</strong> If $|v_{cmd}| &lt; v_{min}$, clamp to 0 (accept position holding, not creeping)
+2. <strong>Feedforward dither:</strong> Add a small oscillating signal to overcome stiction
+3. <strong>Friction compensation:</strong> Measure the static friction torque and add it as feedforward</p>
+<hr />
+<h1 id="part-5-coordinate-frames-and-transforms">PART 5 — COORDINATE FRAMES AND TRANSFORMS</h1>
+<h2 id="51-frames-in-oks">5.1 Frames in OKS</h2>
+<div class="highlight"><pre><span></span><code>map → odom → base_link → wheel_left, wheel_right
+ │      │        │
+ │      │        └── Robot center (between wheels, on ground)
+ │      └── Odometry frame (continuous, drift-allowed)
+ └── Map frame (corrected by AMCL/localization)
+</code></pre></div>
+
+<p><strong>All cmd_vel is in <code>base_link</code> frame:</strong> $v$ is forward, $\omega$ is counter-clockwise viewed from above.</p>
+<h2 id="52-transform-timing-matters">5.2 Transform Timing Matters</h2>
+<p>The path following controller needs to know &ldquo;where is the robot now?&rdquo; to compute errors. This requires a TF lookup from <code>map</code> → <code>base_link</code>. If this transform is <strong>stale</strong> (the TF hasn&rsquo;t been updated recently), the controller uses an outdated position and makes wrong corrections.</p>
+<p><strong>OKS TF staleness budget:</strong>
+- Acceptable: &lt; 50 ms
+- Warning: 50–100 ms → reduced speed mode
+- Critical: &gt; 100 ms → stop and wait</p>
+<hr />
+<h2 id="checkpoint-questions">Checkpoint Questions</h2>
+<ol>
+<li>Derive the inverse kinematics for a differential drive: given (v, ω), find (ω_left, ω_right).</li>
+<li>In pure pursuit, what happens to tracking if $L_d$ is set too small? Too large?</li>
+<li>Why does DWB sample many (v, ω) pairs instead of just computing the optimal one analytically?</li>
+<li>A trapezoidal profile has a total distance of 0.5 m, $v_{max} = 0.5$ m/s, $a_{max} = 0.3$ m/s². Is this trapezoidal or triangular?</li>
+<li>The velocity smoother limits acceleration to 0.3 m/s². Nav2 commands an instant jump from 0 to 0.5 m/s. How long does the smoother take to reach 0.5 m/s?</li>
+<li>Why does OKS use pure pursuit for docking instead of DWB?</li>
+<li>The robot drifts left even though cmd_vel is straight (v=0.5, ω=0). List three possible causes.</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ul>
+<li><strong>Differential drive inverse kinematics</strong> converts (v, ω) → (ω_left, ω_right)</li>
+<li><strong>Pure pursuit</strong> is simple and effective; lookahead distance $L_d$ is the key tuning knob</li>
+<li><strong>DWB</strong> is more sophisticated (obstacle avoidance, multi-objective scoring) but harder to tune</li>
+<li><strong>Velocity profiling</strong> prevents impossible acceleration demands at corners and stops</li>
+<li><strong>The pipeline:</strong> Nav2 path → controller → velocity smoother → inverse kinematics → SPI → MCU PID</li>
+<li><strong>Stale transforms</strong> cause path-tracking errors — timing matters as much as algorithm choice</li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

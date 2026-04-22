@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>02 — Modeling DC Motors - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="02-modeling-dc-motors">02 — Modeling DC Motors</h1>
+<h3 id="the-plant-youre-actually-controlling">The plant you&rsquo;re actually controlling</h3>
+<p><strong>Prerequisite:</strong> <code>01-what-is-control.md</code> (block diagrams, transfer functions, poles)
+<strong>Unlocks:</strong> <code>03-pid-controller.md</code> — you need the motor transfer function to design a controller for it</p>
+<hr />
+<h2 id="why-should-i-care-oks-context">Why Should I Care? (OKS Context)</h2>
+<p>Before you can design a PID controller, you need to know <em>what you&rsquo;re controlling</em>. On an OKS robot, that&rsquo;s a <strong>brushed DC motor</strong> (earlier models) or <strong>brushless DC motor</strong> (BLDC, newer models) driving each wheel through a gearbox.</p>
+<p>When you see a motor oscillating, or the robot can&rsquo;t maintain speed on a ramp, or the current draw spikes unexpectedly — the explanation is in the motor&rsquo;s physics. This lesson derives the motor model from first principles so you can predict these behaviors before they happen.</p>
+<p><strong>Real OKS scenario:</strong> A firmware update changed the motor PWM frequency from 20 kHz to 50 kHz. The motors ran hotter and drew more current at the same speed. Why? Because the motor&rsquo;s electrical time constant ($L/R \approx 0.5$ ms) is comparable to the 20 µs PWM period at 50 kHz — the current ripple increased. You can&rsquo;t predict this without understanding the electrical model.</p>
+<hr />
+<h1 id="part-1-the-dc-motor-as-two-coupled-systems">PART 1 — THE DC MOTOR AS TWO COUPLED SYSTEMS</h1>
+<h2 id="11-physical-intuition">1.1 Physical Intuition</h2>
+<p>A DC motor converts electrical energy to mechanical energy. It&rsquo;s two systems coupled through electromagnetism:</p>
+<ol>
+<li><strong>Electrical circuit:</strong> Voltage in → current through winding → magnetic field</li>
+<li><strong>Mechanical system:</strong> Magnetic field × current → torque → rotation</li>
+</ol>
+<p>The coupling goes <em>both ways</em>:
+- Current → torque (motor action)
+- Rotation → back-EMF voltage (generator action)</p>
+<p>This bidirectional coupling is what makes the motor self-regulating: as it speeds up, back-EMF increases, which reduces current, which reduces torque, until equilibrium.</p>
+<div class="highlight"><pre><span></span><code>    ELECTRICAL SIDE              COUPLING              MECHANICAL SIDE
+   ┌─────────────────┐     ┌──────────────┐     ┌──────────────────┐
+   │                  │     │              │     │                  │
+   │  V_in ──→ R ──→ L ──→│ τ = Kt · i   │──→  │  J·(dω/dt) + B·ω │
+   │       ↑         │     │              │     │         = τ       │
+   │       │         │     │ e = Ke · ω   │◄── │                  │
+   │       │         │     │              │     │                  │
+   │  V_in = R·i +   │     └──────────────┘     └──────────────────┘
+   │  L·(di/dt) + e  │
+   │                  │
+   └─────────────────┘
+</code></pre></div>
+
+<h2 id="12-the-electrical-equation">1.2 The Electrical Equation</h2>
+<p>Apply Kirchhoff&rsquo;s voltage law around the motor circuit:</p>
+<p>$$V(t) = R \cdot i(t) + L \cdot \frac{di(t)}{dt} + e(t)$$</p>
+<p>where:
+- $V(t)$ = applied voltage (from H-bridge PWM)
+- $R$ = winding resistance (Ω) — typically 0.5–5 Ω for small robot motors
+- $L$ = winding inductance (H) — typically 0.1–5 mH
+- $i(t)$ = motor current (A)
+- $e(t) = K_e \cdot \omega(t)$ = back-EMF voltage
+- $K_e$ = back-EMF constant (V·s/rad)</p>
+<p><strong>Electrical time constant:</strong> $\tau_e = L/R$</p>
+<p>For a typical OKS motor: $L \approx 1$ mH, $R \approx 2$ Ω → $\tau_e = 0.5$ ms.
+This means the current responds to voltage changes in ~0.5 ms — fast enough that for the <em>speed</em> loop (settling in ~10 ms), we can sometimes approximate the electrical dynamics as instantaneous.</p>
+<h2 id="13-the-mechanical-equation">1.3 The Mechanical Equation</h2>
+<p>Newton&rsquo;s second law for rotation:</p>
+<p>$$J \cdot \frac{d\omega(t)}{dt} = \tau_{motor}(t) - B \cdot \omega(t) - \tau_{load}(t)$$</p>
+<p>where:
+- $J$ = total moment of inertia (kg·m²) — motor rotor + gearbox + wheel
+- $\omega(t)$ = angular velocity (rad/s)
+- $\tau_{motor} = K_t \cdot i(t)$ = motor torque
+- $K_t$ = torque constant (N·m/A) — numerically equal to $K_e$ in SI units
+- $B$ = viscous friction coefficient (N·m·s/rad)
+- $\tau_{load}$ = external load torque (friction, slope, payload)</p>
+<p><strong>Mechanical time constant:</strong> $\tau_m = J \cdot R / (K_t \cdot K_e)$</p>
+<p>For a typical OKS motor+gearbox: $\tau_m \approx 50–200$ ms. This is the dominant dynamic — mechanical response is 100–400× slower than electrical response.</p>
+<h2 id="14-the-key-insight-k_t-k_e">1.4 The Key Insight: $K_t = K_e$</h2>
+<p>In SI units, the torque constant and back-EMF constant are <strong>exactly equal</strong>. This isn&rsquo;t a coincidence — it&rsquo;s conservation of energy:</p>
+<p>$$P_{electrical} = e \cdot i = K_e \omega \cdot i$$
+$$P_{mechanical} = \tau \cdot \omega = K_t i \cdot \omega$$</p>
+<p>For power to be conserved: $K_e = K_t$. This constant is often called simply $K$ or $K_m$ (motor constant).</p>
+<p><strong>Practical consequence:</strong> If the datasheet gives you $K_e$ = 0.01 V·s/rad, you immediately know $K_t$ = 0.01 N·m/A. One less parameter to measure.</p>
+<hr />
+<h1 id="part-2-transfer-functions">PART 2 — TRANSFER FUNCTIONS</h1>
+<h2 id="21-voltage-speed-transfer-function">2.1 Voltage → Speed Transfer Function</h2>
+<p>Taking the Laplace transform of both equations and eliminating current:</p>
+<p>$$\frac{\Omega(s)}{V(s)} = \frac{K_t}{(Ls + R)(Js + B) + K_t K_e}$$</p>
+<p>This is a <strong>second-order system</strong> with two time constants (electrical and mechanical).</p>
+<p><strong>Simplified form</strong> (when $L \ll R$, i.e., electrical dynamics are much faster than mechanical — usually true for small motors):</p>
+<p>$$\frac{\Omega(s)}{V(s)} \approx \frac{K_t / (RB + K_t K_e)}{\frac{RJ}{RB + K_t K_e} s + 1} = \frac{K_{motor}}{\tau_m s + 1}$$</p>
+<p>where:
+- $K_{motor} = \frac{K_t}{RB + K_t K_e}$ = DC gain (rad/s per volt)
+- $\tau_m = \frac{RJ}{RB + K_t K_e}$ = electromechanical time constant</p>
+<p><strong>This is a first-order system!</strong> For most robot motor applications, you can model the motor as a simple first-order lag from voltage to speed.</p>
+<h2 id="22-voltage-position-transfer-function">2.2 Voltage → Position Transfer Function</h2>
+<p>Position is the integral of speed: $\Theta(s) = \Omega(s) / s$</p>
+<p>$$\frac{\Theta(s)}{V(s)} = \frac{K_{motor}}{s(\tau_m s + 1)}$$</p>
+<p>This has a <strong>pole at s = 0</strong> (the integrator from speed to position), making it a Type 1 system. This means:
+- Position eventually tracks a step input with zero error (it&rsquo;ll get there)
+- But it&rsquo;s <strong>marginally stable</strong> — without damping, a position controller can oscillate</p>
+<h2 id="23-voltage-current-transfer-function">2.3 Voltage → Current Transfer Function</h2>
+<p>$$\frac{I(s)}{V(s)} = \frac{Js + B}{(Ls + R)(Js + B) + K_t K_e}$$</p>
+<p>The current has a <em>zero</em> in the numerator — it initially spikes (when you apply voltage, back-EMF is zero, so all voltage drives current) then settles as the motor spins up and back-EMF reduces the current.</p>
+<div class="highlight"><pre><span></span><code>  Current
+  │
+  │  peak (stall current = V/R)
+  │╲
+  │ ╲
+  │  ╲
+  │   ╲___________  steady-state (running current)
+  │
+  └──────────────────── t
+  0   τ_e        τ_m
+</code></pre></div>
+
+<p><strong>OKS relevance:</strong> This initial current spike is why motor drivers have <strong>current limiting</strong>. At stall (wheel blocked), current = V/R = 12V / 2Ω = 6A. The motor driver may only handle 3A continuous. The current PID loop (innermost loop) prevents this spike from damaging the driver.</p>
+<hr />
+<h1 id="part-3-practical-motor-parameters">PART 3 — PRACTICAL MOTOR PARAMETERS</h1>
+<h2 id="31-reading-a-motor-datasheet">3.1 Reading a Motor Datasheet</h2>
+<p>A typical OKS motor datasheet provides:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Symbol</th>
+<th>Typical value</th>
+<th>Unit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Nominal voltage</td>
+<td>$V_{nom}$</td>
+<td>12</td>
+<td>V</td>
+</tr>
+<tr>
+<td>No-load speed</td>
+<td>$\omega_{nl}$</td>
+<td>6000</td>
+<td>RPM (= 628 rad/s)</td>
+</tr>
+<tr>
+<td>No-load current</td>
+<td>$I_{nl}$</td>
+<td>0.2</td>
+<td>A</td>
+</tr>
+<tr>
+<td>Stall torque</td>
+<td>$\tau_{stall}$</td>
+<td>0.5</td>
+<td>N·m</td>
+</tr>
+<tr>
+<td>Stall current</td>
+<td>$I_{stall}$</td>
+<td>6.0</td>
+<td>A</td>
+</tr>
+<tr>
+<td>Terminal resistance</td>
+<td>$R$</td>
+<td>2.0</td>
+<td>Ω</td>
+</tr>
+<tr>
+<td>Rotor inertia</td>
+<td>$J_{rotor}$</td>
+<td>5.0 × 10⁻⁶</td>
+<td>kg·m²</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Derived parameters:</strong></p>
+<p>$$K_t = \frac{\tau_{stall}}{I_{stall}} = \frac{0.5}{6.0} = 0.083 \text{ N·m/A}$$</p>
+<p>$$K_e = \frac{V_{nom} - R \cdot I_{nl}}{\omega_{nl}} = \frac{12 - 2 \times 0.2}{628} = 0.0185 \text{ V·s/rad}$$</p>
+<p>Wait — $K_t \neq K_e$? That&rsquo;s because the datasheet uses RPM and we need rad/s, and there&rsquo;s friction loss at no-load.</p>
+<p><strong>More accurate:</strong> $K_e = K_t = 0.083$ V·s/rad. The discrepancy comes from friction ($B$) absorbing torque at no-load. Use the stall torque / stall current ratio as the most reliable estimate.</p>
+<p>$$B = \frac{\tau_{stall} - K_t \cdot I_{stall}}{no_load_speed}$$</p>
+<p>&hellip;but since $\tau_{stall} = K_t \cdot I_{stall}$ by definition, we get $B$ from the no-load torque:</p>
+<p>$$B = \frac{K_t \cdot I_{nl}}{\omega_{nl}} = \frac{0.083 \times 0.2}{628} = 2.6 \times 10^{-5} \text{ N·m·s/rad}$$</p>
+<h2 id="32-the-gearbox-changes-everything">3.2 The Gearbox Changes Everything</h2>
+<p>OKS motors have a <strong>gearbox</strong> (typical ratio $N$ = 50:1 to 100:1). The gearbox transforms:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Before gearbox</th>
+<th>After gearbox</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Speed</td>
+<td>$\omega_{motor}$</td>
+<td>$\omega_{wheel} = \omega_{motor} / N$</td>
+</tr>
+<tr>
+<td>Torque</td>
+<td>$\tau_{motor}$</td>
+<td>$\tau_{wheel} = \tau_{motor} \times N \times \eta$</td>
+</tr>
+<tr>
+<td>Inertia (reflected)</td>
+<td>$J_{motor}$</td>
+<td>$J_{total} = J_{motor} \times N^2 + J_{wheel}$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Critical:</strong> Inertia reflects as $N^2$, not $N$. A 100:1 gearbox makes the motor see the wheel as 10,000× lighter. This is why geared motors can accelerate heavy robots quickly.</p>
+<p><strong>The effective mechanical time constant after gearing:</strong></p>
+<p>$$\tau_m = \frac{(J_{motor} N^2 + J_{wheel}) \cdot R}{K_t^2 + R \cdot B_{total}}$$</p>
+<p>For OKS with $N = 50$, $J_{motor} = 5 \times 10^{-6}$:
+- $J_{reflected} = 5 \times 10^{-6} \times 2500 = 0.0125$ kg·m²
+- $J_{wheel} \approx 0.005$ kg·m²
+- $J_{total} \approx 0.0175$ kg·m²
+- $\tau_m \approx \frac{0.0175 \times 2}{0.083^2} \approx 5.1$ s</p>
+<p>That&rsquo;s very slow! This means the motor (after gearing) takes ~5 seconds to reach full speed from a voltage step. <strong>This is why you need a PID controller</strong> — proportional-only control with this time constant would be painfully slow. The derivative term predicts the trajectory; the integral term eliminates steady-state error.</p>
+<h2 id="33-the-speed-torque-curve">3.3 The Speed-Torque Curve</h2>
+<p>Every DC motor has a linear speed-torque relationship:</p>
+<div class="highlight"><pre><span></span><code>  Speed (ω)
+  ω_nl ──────╲
+  │           ╲
+  │            ╲
+  │             ╲
+  │              ╲
+  │               ╲
+  │                ╲
+  │                 ╲
+  0 ─────────────────╲──── Torque (τ)
+  0                   τ_stall
+</code></pre></div>
+
+<p>$$\omega = \omega_{nl} \left(1 - \frac{\tau}{\tau_{stall}}\right)$$</p>
+<p>or equivalently: $\omega = \frac{V}{K_e} - \frac{R}{K_e K_t} \tau$</p>
+<p><strong>Operating point:</strong> The motor settles where the speed-torque line intersects the load curve. If the load increases (slope, heavier payload), the operating point moves left (lower speed, higher torque, higher current).</p>
+<p><strong>OKS relevance:</strong> When a robot carries a heavier bin, the load torque increases. Without feedback, the motor slows down. With speed PID, the controller increases PWM to maintain the setpoint — but current increases. If current exceeds the driver&rsquo;s limit, it saturates. This is <strong>torque saturation</strong> — the controller wants more torque than the motor can provide. The robot slows down despite the controller&rsquo;s best effort.</p>
+<hr />
+<h1 id="part-4-simulation-in-python">PART 4 — SIMULATION IN PYTHON</h1>
+<h2 id="41-motor-step-response-simulation">4.1 Motor Step Response Simulation</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+
+<span class="c1"># Motor parameters (OKS-like geared motor)</span>
+<span class="n">R</span>  <span class="o">=</span> <span class="mf">2.0</span>        <span class="c1"># Ω</span>
+<span class="n">L</span>  <span class="o">=</span> <span class="mf">0.001</span>      <span class="c1"># H (1 mH — we&#39;ll include it for accuracy)</span>
+<span class="n">Kt</span> <span class="o">=</span> <span class="mf">0.083</span>      <span class="c1"># N·m/A = V·s/rad</span>
+<span class="n">Ke</span> <span class="o">=</span> <span class="n">Kt</span>         <span class="c1"># SI units</span>
+<span class="n">J</span>  <span class="o">=</span> <span class="mf">0.0175</span>     <span class="c1"># kg·m² (reflected through gearbox)</span>
+<span class="n">B</span>  <span class="o">=</span> <span class="mf">0.001</span>      <span class="c1"># N·m·s/rad (friction)</span>
+
+<span class="c1"># Transfer function: V(s) → ω(s)</span>
+<span class="c1"># G(s) = Kt / [(Ls + R)(Js + B) + KtKe]</span>
+<span class="c1">#       = Kt / [LJs² + (LB + RJ)s + (RB + KtKe)]</span>
+
+<span class="n">a2</span> <span class="o">=</span> <span class="n">L</span> <span class="o">*</span> <span class="n">J</span>                    <span class="c1"># s² coefficient</span>
+<span class="n">a1</span> <span class="o">=</span> <span class="n">L</span> <span class="o">*</span> <span class="n">B</span> <span class="o">+</span> <span class="n">R</span> <span class="o">*</span> <span class="n">J</span>            <span class="c1"># s¹ coefficient</span>
+<span class="n">a0</span> <span class="o">=</span> <span class="n">R</span> <span class="o">*</span> <span class="n">B</span> <span class="o">+</span> <span class="n">Kt</span> <span class="o">*</span> <span class="n">Ke</span>          <span class="c1"># s⁰ coefficient</span>
+<span class="n">K_dc</span> <span class="o">=</span> <span class="n">Kt</span> <span class="o">/</span> <span class="n">a0</span>                <span class="c1"># DC gain</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;DC gain: </span><span class="si">{</span><span class="n">K_dc</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> rad/s per volt&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Electrical τ: </span><span class="si">{</span><span class="n">L</span><span class="o">/</span><span class="n">R</span><span class="o">*</span><span class="mi">1000</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> ms&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Mechanical τ: </span><span class="si">{</span><span class="n">R</span><span class="o">*</span><span class="n">J</span><span class="o">/</span><span class="p">(</span><span class="n">Kt</span><span class="o">*</span><span class="n">Ke</span><span class="p">)</span><span class="o">*</span><span class="mi">1000</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> ms&quot;</span><span class="p">)</span>
+
+<span class="c1"># Simulate step response using scipy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy</span><span class="w"> </span><span class="kn">import</span> <span class="n">signal</span>
+
+<span class="n">num</span> <span class="o">=</span> <span class="p">[</span><span class="n">Kt</span><span class="p">]</span>
+<span class="n">den</span> <span class="o">=</span> <span class="p">[</span><span class="n">a2</span><span class="p">,</span> <span class="n">a1</span><span class="p">,</span> <span class="n">a0</span><span class="p">]</span>
+<span class="n">sys</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">TransferFunction</span><span class="p">(</span><span class="n">num</span><span class="p">,</span> <span class="n">den</span><span class="p">)</span>
+
+<span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mi">5000</span><span class="p">)</span>
+<span class="n">t_out</span><span class="p">,</span> <span class="n">y_out</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">sys</span><span class="p">,</span> <span class="n">T</span><span class="o">=</span><span class="n">t</span><span class="p">)</span>
+
+<span class="c1"># Apply a 12V step</span>
+<span class="n">V_step</span> <span class="o">=</span> <span class="mf">12.0</span>
+<span class="n">speed_rpm</span> <span class="o">=</span> <span class="n">y_out</span> <span class="o">*</span> <span class="n">V_step</span> <span class="o">*</span> <span class="mi">60</span> <span class="o">/</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span>  <span class="c1"># convert to RPM</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">t_out</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span> <span class="n">speed_rpm</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Time (ms)&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Speed (RPM)&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s1">&#39;Motor Step Response (12V applied at t=0)&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">axhline</span><span class="p">(</span><span class="n">y</span><span class="o">=</span><span class="n">speed_rpm</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">,</span>
+            <span class="n">label</span><span class="o">=</span><span class="sa">f</span><span class="s1">&#39;Steady state: </span><span class="si">{</span><span class="n">speed_rpm</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s1">.0f</span><span class="si">}</span><span class="s1"> RPM&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s1">&#39;motor_step_response.png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</code></pre></div>
+
+<h2 id="42-current-during-startup">4.2 Current During Startup</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Current transfer function: V(s) → I(s)</span>
+<span class="c1"># I(s) = (Js + B) / [(Ls + R)(Js + B) + KtKe] * V(s)</span>
+<span class="n">num_i</span> <span class="o">=</span> <span class="p">[</span><span class="n">J</span><span class="p">,</span> <span class="n">B</span><span class="p">]</span>
+<span class="n">den_i</span> <span class="o">=</span> <span class="p">[</span><span class="n">a2</span><span class="p">,</span> <span class="n">a1</span><span class="p">,</span> <span class="n">a0</span><span class="p">]</span>
+<span class="n">sys_i</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">TransferFunction</span><span class="p">(</span><span class="n">num_i</span><span class="p">,</span> <span class="n">den_i</span><span class="p">)</span>
+
+<span class="n">t_out</span><span class="p">,</span> <span class="n">i_out</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">sys_i</span><span class="p">,</span> <span class="n">T</span><span class="o">=</span><span class="n">t</span><span class="p">)</span>
+<span class="n">current</span> <span class="o">=</span> <span class="n">i_out</span> <span class="o">*</span> <span class="n">V_step</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">t_out</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span> <span class="n">current</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Time (ms)&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Current (A)&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s1">&#39;Motor Current During Startup&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">axhline</span><span class="p">(</span><span class="n">y</span><span class="o">=</span><span class="n">V_step</span><span class="o">/</span><span class="n">R</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">,</span>
+            <span class="n">label</span><span class="o">=</span><span class="sa">f</span><span class="s1">&#39;Stall current: </span><span class="si">{</span><span class="n">V_step</span><span class="o">/</span><span class="n">R</span><span class="si">:</span><span class="s1">.1f</span><span class="si">}</span><span class="s1"> A&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">axhline</span><span class="p">(</span><span class="n">y</span><span class="o">=</span><span class="n">current</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;g&#39;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">,</span>
+            <span class="n">label</span><span class="o">=</span><span class="sa">f</span><span class="s1">&#39;Running current: </span><span class="si">{</span><span class="n">current</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s1">.2f</span><span class="si">}</span><span class="s1"> A&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s1">&#39;motor_current_startup.png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-5-nonlinearities-the-real-world">PART 5 — NONLINEARITIES (THE REAL WORLD)</h1>
+<h2 id="51-things-the-linear-model-ignores">5.1 Things the Linear Model Ignores</h2>
+<p>The transfer function model assumes linearity. Real motors have:</p>
+<table>
+<thead>
+<tr>
+<th>Nonlinearity</th>
+<th>Effect</th>
+<th>When it matters</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Stiction</strong></td>
+<td>Motor doesn&rsquo;t move until torque exceeds static friction</td>
+<td>Low-speed precision moves</td>
+</tr>
+<tr>
+<td><strong>Backlash</strong></td>
+<td>Gearbox has play; reversing direction → dead zone</td>
+<td>Position control, direction changes</td>
+</tr>
+<tr>
+<td><strong>Saturation</strong></td>
+<td>PWM can&rsquo;t exceed 100%; current can&rsquo;t exceed driver limit</td>
+<td>High-load situations</td>
+</tr>
+<tr>
+<td><strong>Cogging</strong></td>
+<td>Permanent magnets create torque ripple at certain positions</td>
+<td>Low-speed smoothness</td>
+</tr>
+<tr>
+<td><strong>Temperature</strong></td>
+<td>R increases ~0.4%/°C; Kt changes with magnet temperature</td>
+<td>Long duty cycles</td>
+</tr>
+<tr>
+<td><strong>Dead zone</strong></td>
+<td>Motor doesn&rsquo;t respond below a minimum voltage (due to friction)</td>
+<td>Very low speed commands</td>
+</tr>
+</tbody>
+</table>
+<p><strong>OKS motors exhibit ALL of these.</strong> The PID controller partially compensates, but extreme cases (stiction at very low speed, saturation on ramps) require explicit handling:
+- <strong>Dead zone compensation:</strong> Add a minimum PWM offset when speed command &gt; 0
+- <strong>Anti-backlash:</strong> In position mode, always approach from the same direction
+- <strong>Current limiting:</strong> Clamp the PID output to prevent driver damage</p>
+<h2 id="52-coulomb-friction-model">5.2 Coulomb Friction Model</h2>
+<p>Real friction isn&rsquo;t purely viscous ($B \cdot \omega$). It includes:</p>
+<p>$$\tau_{friction} = B \cdot \omega + \tau_{coulomb} \cdot \text{sign}(\omega) + \tau_{stiction} \cdot \delta(\omega = 0)$$</p>
+<div class="highlight"><pre><span></span><code>  Friction torque
+  │
+  │  ────────────── τ_stiction (breakaway)
+  │ /
+  │/ τ_coulomb
+  ├─────────────────────── ω
+  │╲ -τ_coulomb
+  │ ╲
+  │  ────────────── -τ_stiction
+  │
+</code></pre></div>
+
+<p><strong>The stiction problem:</strong> At zero speed, static friction is <em>higher</em> than kinetic friction. The motor must produce more torque to <em>start</em> moving than to <em>keep</em> moving. This creates a <strong>dead zone</strong> around zero speed where the PID controller requests torque but the motor doesn&rsquo;t move. The integral term winds up. When the motor finally breaks free, the accumulated integral causes an overshoot.</p>
+<hr />
+<h2 id="checkpoint-questions">Checkpoint Questions</h2>
+<ol>
+<li>Write the voltage equation and torque equation for a DC motor. Identify each term.</li>
+<li>What is the back-EMF and why does it make the motor self-regulating?</li>
+<li>Derive the simplified (first-order) voltage→speed transfer function. What assumption allows the simplification?</li>
+<li>A motor with $K_t = 0.05$ N·m/A, $R = 1.5$ Ω, $J = 0.01$ kg·m² has mechanical time constant ___?</li>
+<li>Why does reflected inertia scale as $N^2$ through a gearbox?</li>
+<li>The motor draws 3A at stall and 0.5A when running at full speed. Where is the missing power going?</li>
+<li>Why does changing PWM frequency from 20 kHz to 50 kHz increase motor heating?</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ul>
+<li>A DC motor is two coupled first-order systems: electrical ($\tau_e = L/R$) and mechanical ($\tau_m = RJ/K_t^2$)</li>
+<li>The simplified voltage→speed transfer function is first-order: $G(s) = K/(\tau_m s + 1)$</li>
+<li>$K_t = K_e$ in SI units (conservation of energy)</li>
+<li>Gearbox reflects inertia as $N^2$ — dominant term in the mechanical time constant</li>
+<li>Real motors have stiction, backlash, saturation, and cogging that the linear model doesn&rsquo;t capture</li>
+<li>The current spike at startup can be $V/R$ (6A at 12V/2Ω) — <strong>current limiting is essential</strong></li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

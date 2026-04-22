@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 — Cascaded Control Loops - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="07-cascaded-control-loops">07 — Cascaded Control Loops</h1>
+<h3 id="current-inside-speed-inside-position-three-pids-one-motor">Current inside speed inside position — three PIDs, one motor</h3>
+<p><strong>Prerequisite:</strong> <code>06-fixed-point-pid.md</code> (fixed-point PID), <code>05-mcu-motor-control.md</code> (hardware)
+<strong>Unlocks:</strong> <code>08-trajectory-tracking.md</code> (what feeds the position/speed commands)</p>
+<hr />
+<h2 id="why-should-i-care-oks-context">Why Should I Care? (OKS Context)</h2>
+<p>A single PID controlling motor speed from voltage is <em>okay</em> for a toy. For an OKS warehouse robot carrying 200 kg at 1 m/s, you need <strong>cascaded loops</strong>: an inner current (torque) loop, a middle speed loop, and an outer position loop. Each loop handles a different timescale and gives you independent control over torque, speed, and position.</p>
+<p><strong>Why cascade matters in practice:</strong>
+- Without current limiting → motor stall at startup = 15A peak → trips the battery BMS → e-stop
+- Without speed limiting → acceleration spike → load slides off the shelf
+- Without position loop → can&rsquo;t hold position at a station (drift on slopes)</p>
+<p><strong>OKS cascade architecture:</strong></p>
+<div class="highlight"><pre><span></span><code>Nav2 → position_cmd (50 Hz)
+          ↓
+     Position PID (1 kHz)
+          ↓ speed_cmd
+     Speed PID (10 kHz)
+          ↓ current_cmd
+     Current PID (20 kHz)
+          ↓ duty
+     PWM → H-Bridge → Motor
+</code></pre></div>
+
+<hr />
+<h1 id="part-1-why-cascade">PART 1 — WHY CASCADE?</h1>
+<h2 id="11-the-problem-with-a-single-loop">1.1 The Problem with a Single Loop</h2>
+<p>A single PID from position to PWM duty:</p>
+<p>$$u = K_p(r - \theta) + K_i \int(r - \theta)dt + K_d \frac{d(r - \theta)}{dt}$$</p>
+<p><strong>Problems:</strong>
+1. <strong>Can&rsquo;t limit current:</strong> The PID output is a duty cycle. If the position error is large, the duty goes to 100%, drawing unlimited current.
+2. <strong>Slow response to disturbances:</strong> If the load suddenly increases, the motor slows. The position PID notices&hellip; eventually&hellip; after the position has drifted. By then, the error is large and the response is aggressive.
+3. <strong>Can&rsquo;t independently tune torque, speed, and position:</strong> You have 3 gains but 3 <em>different</em> dynamic behaviors to control.</p>
+<h2 id="12-the-cascade-solution">1.2 The Cascade Solution</h2>
+<p>Each loop controls one physical quantity and limits it:</p>
+<table>
+<thead>
+<tr>
+<th>Loop</th>
+<th>Controls</th>
+<th>Limits</th>
+<th>Rate</th>
+<th>Bandwidth</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Current (inner)</strong></td>
+<td>Motor current → torque</td>
+<td>Max current (e.g., 5A)</td>
+<td>20 kHz</td>
+<td>~2 kHz</td>
+</tr>
+<tr>
+<td><strong>Speed (middle)</strong></td>
+<td>Motor speed</td>
+<td>Max speed (e.g., 100 RPM at wheel)</td>
+<td>10 kHz</td>
+<td>~50 Hz</td>
+</tr>
+<tr>
+<td><strong>Position (outer)</strong></td>
+<td>Wheel/robot position</td>
+<td>Max speed command</td>
+<td>1 kHz</td>
+<td>~5 Hz</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The 10:1 bandwidth rule:</strong> Each outer loop should have bandwidth ≤ 1/10 of the inner loop. This ensures the inner loop &ldquo;looks like a gain of 1&rdquo; to the outer loop (it&rsquo;s so fast that it perfectly tracks its setpoint).</p>
+<p>$$f_{BW,outer} \leq \frac{1}{10} f_{BW,inner}$$</p>
+<hr />
+<h1 id="part-2-the-current-torque-loop">PART 2 — THE CURRENT (TORQUE) LOOP</h1>
+<h2 id="21-purpose">2.1 Purpose</h2>
+<p>The current loop:
+1. Makes the motor <strong>behave like a torque source</strong> (command current → get torque)
+2. Protects against <strong>overcurrent</strong> (hard-limits current even if speed PID demands more)
+3. Rejects electrical disturbances (back-EMF changes) <strong>fast</strong></p>
+<h2 id="22-plant-model">2.2 Plant Model</h2>
+<p>The motor&rsquo;s electrical equation:</p>
+<p>$$V = Ri + L\frac{di}{dt} + K_e \omega$$</p>
+<p>From the current loop&rsquo;s perspective, $K_e \omega$ is a disturbance (back-EMF). The &ldquo;plant&rdquo; is:</p>
+<p>$$G_i(s) = \frac{I(s)}{V(s)} = \frac{1/R}{\frac{L}{R}s + 1} = \frac{1/R}{\tau_e s + 1}$$</p>
+<p>where $\tau_e = L/R$ is the electrical time constant (~0.5 ms for OKS motor).</p>
+<h2 id="23-pi-controller-no-d">2.3 PI Controller (No D)</h2>
+<p>The current loop uses <strong>PI only</strong> (no derivative) because:
+- The electrical dynamics are fast and noisy
+- Derivative amplifies current sensor noise
+- PI is sufficient for first-order plant + disturbance rejection</p>
+<p>$$C_i(s) = K_{p,i} + \frac{K_{i,i}}{s}$$</p>
+<p><strong>Tuning by pole placement:</strong> Place the closed-loop pole at $f_{cl} = 2$ kHz ($\omega_{cl} = 4000\pi$ rad/s):</p>
+<p>$$K_{p,i} = L \cdot \omega_{cl} = 0.001 \times 4000\pi = 12.57$$</p>
+<p>$$K_{i,i} = R \cdot \omega_{cl} = 1.0 \times 4000\pi = 12566$$</p>
+<p><strong>This cancels the plant pole</strong> (zero of PI at $R/L$ cancels pole at $R/L$), leaving a first-order closed-loop with bandwidth $\omega_{cl}$.</p>
+<h2 id="24-implementation">2.4 Implementation</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// Current PID — runs at 20 kHz</span>
+<span class="c1">// PI only, velocity form</span>
+<span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">Kp</span><span class="p">;</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">Ki_Ts</span><span class="p">;</span><span class="w">        </span><span class="c1">// Ki × Ts pre-multiplied</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">prev_error</span><span class="p">;</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">output</span><span class="p">;</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">output_min</span><span class="p">;</span><span class="w">   </span><span class="c1">// = -MAX_DUTY (Q16.16)</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">output_max</span><span class="p">;</span><span class="w">   </span><span class="c1">// = +MAX_DUTY (Q16.16)</span>
+<span class="p">}</span><span class="w"> </span><span class="n">CurrentPI</span><span class="p">;</span>
+
+<span class="n">q16_t</span><span class="w"> </span><span class="nf">current_pi_compute</span><span class="p">(</span><span class="n">CurrentPI</span><span class="w"> </span><span class="o">*</span><span class="n">pi</span><span class="p">,</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="n">current_cmd</span><span class="p">,</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="n">current_meas</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">current_cmd</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">current_meas</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Velocity form: Δu = Kp*(e - e_prev) + Ki*Ts*e</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">delta_u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">q16_mul</span><span class="p">(</span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">Kp</span><span class="p">,</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="p">)</span>
+<span class="w">                  </span><span class="o">+</span><span class="w"> </span><span class="n">q16_mul</span><span class="p">(</span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">Ki_Ts</span><span class="p">,</span><span class="w"> </span><span class="n">error</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">q16_add_sat</span><span class="p">(</span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">output</span><span class="p">,</span><span class="w"> </span><span class="n">delta_u</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Clamp to valid duty cycle</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">output_max</span><span class="p">)</span><span class="w"> </span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">output_max</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">output_min</span><span class="p">)</span><span class="w"> </span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">output_min</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">error</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">pi</span><span class="o">-&gt;</span><span class="n">output</span><span class="p">;</span><span class="w">  </span><span class="c1">// This is the PWM duty cycle</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-3-the-speed-loop">PART 3 — THE SPEED LOOP</h1>
+<h2 id="31-purpose">3.1 Purpose</h2>
+<p>The speed loop:
+1. Makes the motor <strong>behave like a speed source</strong> (command speed → get speed)
+2. Limits acceleration (rate-limits the current command)
+3. Compensates for load torque disturbances</p>
+<h2 id="32-plant-model">3.2 Plant Model</h2>
+<p>From the speed loop&rsquo;s perspective, the current loop is fast enough to be &ldquo;transparent&rdquo; (gain ≈ 1). The &ldquo;plant&rdquo; is the motor&rsquo;s mechanical dynamics:</p>
+<p>$$G_\omega(s) = \frac{\Omega(s)}{T(s)} = \frac{1/B}{Js/B + 1} = \frac{1/B}{\tau_m s + 1}$$</p>
+<p>where $\tau_m = J/B$ is the mechanical time constant (~50 ms for OKS with gearbox).</p>
+<p>But since the current loop output → torque: $T = K_t \times i$, the combined plant is:</p>
+<p>$$G_\omega(s) = \frac{K_t}{Js + B}$$</p>
+<h2 id="33-pi-controller">3.3 PI Controller</h2>
+<p>Again PI only, because:
+- Speed from encoder is noisy (quantization)
+- D term amplifies encoder noise → duty cycle jitter → audible motor whine</p>
+<p><strong>Tuning:</strong> Bandwidth ≤ 1/10 of current loop = 200 Hz max. Target: ~50 Hz.</p>
+<p>$$K_{p,\omega} = \frac{J \cdot \omega_{BW}}{K_t} = \frac{0.001 \times 100\pi}{0.05} = 6.28$$</p>
+<p>$$K_{i,\omega} = \frac{B \cdot \omega_{BW}}{K_t} = \frac{0.002 \times 100\pi}{0.05} = 12.57$$</p>
+<h2 id="34-output-of-speed-pid-current-setpoint">3.4 Output of Speed PID = Current Setpoint</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// Speed PID — conceptually at 10 kHz (or 1 kHz with feedforward)</span>
+<span class="n">q16_t</span><span class="w"> </span><span class="nf">speed_pid_compute</span><span class="p">(</span><span class="n">SpeedPID</span><span class="w"> </span><span class="o">*</span><span class="n">pid</span><span class="p">,</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="n">speed_cmd</span><span class="p">,</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="n">speed_meas</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">speed_cmd</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">speed_meas</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Standard velocity-form PI</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">delta_u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">q16_mul</span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kp</span><span class="p">,</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="p">)</span>
+<span class="w">                  </span><span class="o">+</span><span class="w"> </span><span class="n">q16_mul</span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ki_Ts</span><span class="p">,</span><span class="w"> </span><span class="n">error</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">q16_add_sat</span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="p">,</span><span class="w"> </span><span class="n">delta_u</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Clamp to MAX CURRENT (this is the safety limit!)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">current_limit_pos</span><span class="p">)</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">current_limit_pos</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">current_limit_neg</span><span class="p">)</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">current_limit_neg</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">error</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="p">;</span><span class="w">  </span><span class="c1">// This is the current setpoint for the inner loop</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Critical point:</strong> The speed PID output is clamped to the <strong>maximum allowed current</strong>, not the maximum PWM duty. This is how cascade provides current limiting — the speed loop can never ask for more current than the motor/driver can safely handle.</p>
+<hr />
+<h1 id="part-4-the-position-loop">PART 4 — THE POSITION LOOP</h1>
+<h2 id="41-purpose">4.1 Purpose</h2>
+<p>The position loop:
+1. Tracks a position trajectory (for docking, station alignment)
+2. Holds position against external disturbances (slopes, impacts)
+3. Limits speed (the position PID output = speed command)</p>
+<h2 id="42-plant-model">4.2 Plant Model</h2>
+<p>From the position loop&rsquo;s perspective, the speed loop is a perfect speed source (gain ≈ 1). The &ldquo;plant&rdquo; is just integration:</p>
+<p>$$\frac{\Theta(s)}{\Omega(s)} = \frac{1}{s}$$</p>
+<p>An integrator — infinite DC gain already, so:</p>
+<h2 id="43-p-controller-often-sufficient">4.3 P Controller (Often Sufficient!)</h2>
+<p>For a pure integrator plant, a simple proportional controller gives first-order closed-loop response:</p>
+<p>$$C_{pos}(s) = K_{p,pos}$$</p>
+<p>$$G_{cl}(s) = \frac{K_{p,pos}/s}{1 + K_{p,pos}/s} = \frac{K_{p,pos}}{s + K_{p,pos}}$$</p>
+<p>Bandwidth = $K_{p,pos}$ rad/s. For 5 Hz bandwidth: $K_{p,pos} = 10\pi \approx 31$.</p>
+<p><strong>Why no I term?</strong> The plant itself is an integrator (speed → position). Adding I to the controller means <strong>double integration</strong> → 180° phase lag → stability problems. Use I only if there&rsquo;s a steady-state position error (e.g., friction preventing final positioning).</p>
+<p><strong>Why no D term?</strong> D on position = a speed feedforward, which can be useful but makes tuning harder. Usually handled separately as explicit feedforward (see Lesson 08).</p>
+<h2 id="44-implementation">4.4 Implementation</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// Position PID — runs at 1 kHz</span>
+<span class="c1">// P-only with optional feedforward</span>
+<span class="n">q16_t</span><span class="w"> </span><span class="nf">position_pid_compute</span><span class="p">(</span><span class="n">PositionPID</span><span class="w"> </span><span class="o">*</span><span class="n">pid</span><span class="p">,</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="n">pos_cmd</span><span class="p">,</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="n">pos_meas</span><span class="p">,</span>
+<span class="w">                           </span><span class="n">q16_t</span><span class="w"> </span><span class="n">feedforward_speed</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pos_cmd</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">pos_meas</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// P-only</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">speed_cmd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">q16_mul</span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kp</span><span class="p">,</span><span class="w"> </span><span class="n">error</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">feedforward_speed</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Clamp to MAX SPEED</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">speed_cmd</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">speed_limit_pos</span><span class="p">)</span><span class="w"> </span><span class="n">speed_cmd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">speed_limit_pos</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">speed_cmd</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">speed_limit_neg</span><span class="p">)</span><span class="w"> </span><span class="n">speed_cmd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">speed_limit_neg</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">speed_cmd</span><span class="p">;</span><span class="w">  </span><span class="c1">// This is the speed setpoint for the middle loop</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-5-bandwidth-separation-and-tuning-order">PART 5 — BANDWIDTH SEPARATION AND TUNING ORDER</h1>
+<h2 id="51-bandwidth-summary">5.1 Bandwidth Summary</h2>
+<div class="highlight"><pre><span></span><code>Position loop: 5 Hz bandwidth → responds in ~50 ms
+    │
+    │ 10× separation
+    ▼
+Speed loop: 50 Hz bandwidth → responds in ~5 ms
+    │
+    │ 10× separation (at least)
+    ▼
+Current loop: 2 kHz bandwidth → responds in ~0.15 ms
+</code></pre></div>
+
+<h2 id="52-tuning-order-critical">5.2 Tuning Order (CRITICAL)</h2>
+<p><strong>Always tune from the inside out:</strong></p>
+<ol>
+<li><strong>Current loop first</strong> — disconnect speed loop, command current directly, verify step response</li>
+<li><strong>Speed loop second</strong> — keep current loop tuned, disconnect position loop, command speed directly</li>
+<li><strong>Position loop last</strong> — keep everything tuned, command position</li>
+</ol>
+<p><strong>Why inside-out?</strong> Each outer loop assumes the inner loop is already working. If you tune the speed loop with a badly-tuned current loop, you&rsquo;re compensating for the current loop&rsquo;s errors — and everything breaks when you fix the current loop later.</p>
+<h2 id="53-practical-tuning-procedure">5.3 Practical Tuning Procedure</h2>
+<div class="highlight"><pre><span></span><code>STEP 1: Current loop tuning
+  a. Set speed PID output to 0
+  b. Inject step current commands (e.g., 0 → 1A → 0A → -1A)
+  c. Observe actual current on oscilloscope
+  d. Adjust Kp_i and Ki_i for:
+     - Rise time &lt; 0.5 ms (for 2 kHz bandwidth)
+     - No overshoot (or &lt; 5%)
+     - No ringing
+     - No audible motor whine
+
+STEP 2: Speed loop tuning
+  a. Set position PID output to 0
+  b. Inject step speed commands (e.g., 0 → 50 RPM → 0 → -50 RPM)
+  c. Observe actual speed (encoder feedback)
+  d. Adjust Kp_w and Ki_w for:
+     - Rise time &lt; 20 ms (for 50 Hz bandwidth)
+     - Overshoot &lt; 10%
+     - Steady-state error = 0 (guaranteed by I term)
+     - No oscillation under load changes
+
+STEP 3: Position loop tuning
+  a. Inject step position commands (e.g., rotate 1 revolution)
+  b. Observe actual position
+  c. Adjust Kp_pos for:
+     - Smooth approach, no overshoot
+     - Position held within ±1 encoder count
+     - Speed limit not exceeded during slew
+</code></pre></div>
+
+<hr />
+<h1 id="part-6-inter-loop-coordination">PART 6 — INTER-LOOP COORDINATION</h1>
+<h2 id="61-rate-differences">6.1 Rate Differences</h2>
+<p>The loops run at different rates. How do they communicate?</p>
+<div class="highlight"><pre><span></span><code>20 kHz (current)     : ─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─
+10 kHz (speed)       : ─┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───
+1 kHz (position)     : ─┬───────────┬───────────┬───────────┬─────
+</code></pre></div>
+
+<p><strong>Implementation:</strong> The speed PID runs in the 10 kHz ISR. The current PID runs in the 20 kHz ISR. The position PID runs in a separate 1 kHz timer ISR (or in the main loop at 1 kHz).</p>
+<p><strong>Data flow:</strong> Each loop reads the <em>most recent</em> setpoint from the loop above it. No synchronization needed because the inner loop always runs faster.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Shared between ISRs (volatile for compiler)</span>
+<span class="k">volatile</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="n">speed_setpoint</span><span class="p">;</span><span class="w">     </span><span class="c1">// Written by position PID, read by speed PID</span>
+<span class="k">volatile</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="n">current_setpoint</span><span class="p">;</span><span class="w">   </span><span class="c1">// Written by speed PID, read by current PID</span>
+
+<span class="c1">// 1 kHz position timer ISR</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">position_timer_handler</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">pos</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">read_position</span><span class="p">();</span>
+<span class="w">    </span><span class="n">speed_setpoint</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">position_pid_compute</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pos_pid</span><span class="p">,</span><span class="w"> </span><span class="n">pos_cmd</span><span class="p">,</span><span class="w"> </span><span class="n">pos</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="c1">// 10 kHz speed timer ISR</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">speed_timer_handler</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">spd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">compute_speed</span><span class="p">();</span>
+<span class="w">    </span><span class="n">current_setpoint</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">speed_pid_compute</span><span class="p">(</span><span class="o">&amp;</span><span class="n">spd_pid</span><span class="p">,</span><span class="w"> </span><span class="n">speed_setpoint</span><span class="p">,</span><span class="w"> </span><span class="n">spd</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="c1">// 20 kHz current timer ISR</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">current_timer_handler</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">cur</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">read_current</span><span class="p">();</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">duty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">current_pi_compute</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cur_pid</span><span class="p">,</span><span class="w"> </span><span class="n">current_setpoint</span><span class="p">,</span><span class="w"> </span><span class="n">cur</span><span class="p">);</span>
+<span class="w">    </span><span class="n">set_pwm_duty</span><span class="p">(</span><span class="n">duty</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="62-anti-windup-across-loops">6.2 Anti-Windup Across Loops</h2>
+<p>When the current is saturated (motor at max torque), the speed PID&rsquo;s integral winds up because speed can&rsquo;t track the command. Solution:</p>
+<p><strong>Back-calculation anti-windup:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// In speed PID, after computing output</span>
+<span class="n">q16_t</span><span class="w"> </span><span class="n">current_cmd_raw</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="p">;</span><span class="w">  </span><span class="c1">// Before clamping</span>
+<span class="n">q16_t</span><span class="w"> </span><span class="n">current_cmd_clamped</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">current_cmd_raw</span><span class="p">,</span><span class="w"> </span><span class="o">-</span><span class="n">I_MAX</span><span class="p">,</span><span class="w"> </span><span class="n">I_MAX</span><span class="p">);</span>
+
+<span class="c1">// Back-calculate: reduce integral by the amount that was clamped</span>
+<span class="n">q16_t</span><span class="w"> </span><span class="n">saturation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">current_cmd_clamped</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">current_cmd_raw</span><span class="p">;</span>
+<span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">q16_mul</span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">back_calc_gain</span><span class="p">,</span><span class="w"> </span><span class="n">saturation</span><span class="p">);</span>
+</code></pre></div>
+
+<p>The same applies to the position loop when speed is saturated.</p>
+<hr />
+<h2 id="checkpoint-questions">Checkpoint Questions</h2>
+<ol>
+<li>Why must the current loop be at least 10× faster than the speed loop?</li>
+<li>If you only had one PID (position → duty), how would you limit motor current? (Hint: you can&rsquo;t, easily.)</li>
+<li>The speed PID output is clamped to ±3A. What does this mean physically?</li>
+<li>Why is the position controller often P-only? What happens if you add an I term?</li>
+<li>You tune the speed loop perfectly, then re-tune the current loop. Does the speed loop still work? Why or why not?</li>
+<li>Sketch the step response of the entire cascade to a 1-revolution position command. Label the current, speed, and position trajectories.</li>
+<li>The motor hits a wall (stall). Describe what each loop does in the next 100 ms.</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ul>
+<li><strong>Cascade = nested loops:</strong> current (fastest) → speed → position (slowest)</li>
+<li><strong>Each loop limits its output:</strong> current PID limits duty, speed PID limits current, position PID limits speed</li>
+<li><strong>10:1 bandwidth separation</strong> ensures each loop is &ldquo;transparent&rdquo; to the one above</li>
+<li><strong>Tune from inside out:</strong> current first, speed second, position last</li>
+<li><strong>Position loop often needs only P</strong> because the plant (speed → position) is already an integrator</li>
+<li><strong>Anti-windup propagates outward:</strong> when an inner loop saturates, outer loop integrals must be managed</li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

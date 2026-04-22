@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Senior Interview Questions — Embedded Control - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="senior-interview-questions-embedded-control">Senior Interview Questions — Embedded Control</h1>
+<p><strong>Purpose:</strong> Questions that expose the gap between &ldquo;I know PID&rdquo; and &ldquo;I&rsquo;ve shipped motor control firmware.&rdquo;
+<strong>Level:</strong> Senior embedded/firmware engineer (5+ years)</p>
+<hr />
+<h2 id="question-1-isr-priority-inversion">Question 1: ISR Priority Inversion</h2>
+<blockquote>
+<p>&ldquo;You have a current loop ISR at 10 kHz and a speed loop ISR at 1 kHz. The speed ISR takes 200 µs. What&rsquo;s the problem?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;No problem, they run at different rates.&rdquo;</p>
+<p><strong>Deep answer:</strong></p>
+<p>The speed ISR at 200 µs blocks the current ISR for 200 µs. The current loop period is 100 µs. So <strong>two current loop samples are missed</strong> every time the speed ISR fires.</p>
+<p>Result:
+- Current loop runs at effectively 5 kHz (every 10th cycle has a 200 µs hole)
+- Phase margin drops by ~15° at that frequency
+- Possible current oscillation at the current loop crossover frequency</p>
+<p><strong>Fixes:</strong>
+1. Speed ISR should be <strong>lower priority</strong> than current ISR (preemptive)
+2. Keep speed ISR under 50 µs (half the current loop period)
+3. Use DMA for ADC readings so current measurement isn&rsquo;t blocked
+4. Or: do speed computation in the current ISR (every 10th call) — same priority, no preemption issue</p>
+<hr />
+<h2 id="question-2-adc-timing">Question 2: ADC Timing</h2>
+<blockquote>
+<p>&ldquo;I sample current at the center of the PWM period. Why?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;That&rsquo;s when the signal is stable&rdquo; or &ldquo;Convention.&rdquo;</p>
+<p><strong>Deep answer:</strong></p>
+<p>PWM switching causes current ripple:</p>
+<div class="highlight"><pre><span></span><code>PWM:   _____|‾‾‾‾‾|_____|‾‾‾‾‾|_____
+
+Current: /\/\/\/\/\/\/\/\/\/\/\/\/\/\/
+           ↑ center (average value)
+</code></pre></div>
+
+<ul>
+<li>At the PWM edge (switching instant), the current has a large transient due to parasitic inductance and reverse recovery of the body diode in the MOSFET</li>
+<li>At the center of the ON or OFF period, the current ripple is at its <strong>midpoint</strong> — sampling here gives the true <strong>average</strong> current without needing a low-pass filter</li>
+<li>If you sample at the wrong time, you get ripple-corrupted readings. This corrupts the current controller and causes <strong>audible noise</strong> (because the current oscillates at sub-harmonics of the PWM frequency)</li>
+<li>Center-aligned PWM makes this easier: the counter counts up then down, and you trigger ADC at the peak/valley</li>
+</ul>
+<hr />
+<h2 id="question-3-fixed-point-truncation-drift">Question 3: Fixed-Point Truncation Drift</h2>
+<blockquote>
+<p>&ldquo;My fixed-point PID works perfectly in unit tests but drifts 0.1 rad/s over 10 minutes on the actual robot. What&rsquo;s happening?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;Maybe the plant model is wrong&rdquo; or &ldquo;Sensor drift.&rdquo;</p>
+<p><strong>Deep answer:</strong> <strong>Integral truncation accumulation.</strong></p>
+<p>In Q16.16, the integral update is:</p>
+<div class="highlight"><pre><span></span><code><span class="n">integral</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">Ki_Ts</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">error</span><span class="p">;</span><span class="w">  </span><span class="c1">// Q16.16 multiplication</span>
+</code></pre></div>
+
+<p>If <code>Ki_Ts * error</code> rounds to zero (because <code>error</code> is very small), the integral never accumulates. But the small nonzero analog error still exists. Over millions of iterations, the <strong>missing micro-accumulations</strong> add up.</p>
+<p>Example: $K_i T_s = 0.1$ (Q16.16: 6553), error = 0.00001 rad/s (Q16.16: 0 — rounds to zero!)</p>
+<p><strong>Fixes:</strong>
+1. <strong>Extended accumulator:</strong> Use a 64-bit accumulator for the integral, only truncate when outputting:
+   <code>c
+   int64_t integral_ext += (int64_t)Ki_Ts * error;  // 64-bit
+   int32_t integral = (int32_t)(integral_ext &gt;&gt; 16); // Truncate for output only</code>
+2. <strong>Residual tracking:</strong> Track the truncation remainder and add it back next cycle
+3. <strong>Higher Q resolution for integral:</strong> Use Q8.24 for the integral term even if everything else is Q16.16</p>
+<hr />
+<h2 id="question-4-dma-vs-isr-for-motor-control">Question 4: DMA vs ISR for Motor Control</h2>
+<blockquote>
+<p>&ldquo;Should I use DMA or ISR to read the ADC for current sensing?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;DMA is faster&rdquo; or &ldquo;ISR is simpler.&rdquo;</p>
+<p><strong>Deep answer:</strong> Both are valid but for different reasons:</p>
+<p><strong>DMA approach:</strong>
+- ADC triggers on PWM center → DMA transfers result to memory → DMA complete interrupt fires → ISR reads from memory
+- <strong>Advantage:</strong> Zero-jitter sampling. The ADC timing is purely hardware, unaffected by software delays.
+- <strong>Advantage:</strong> The ISR only processes data, doesn&rsquo;t wait for conversion
+- <strong>Disadvantage:</strong> More complex setup, harder to debug</p>
+<p><strong>ISR approach:</strong>
+- PWM center interrupt → ISR starts ADC → ISR waits for conversion (or uses polling) → ISR processes
+- <strong>Advantage:</strong> Simpler code, easier to understand
+- <strong>Disadvantage:</strong> If the ISR is delayed (by another ISR), the ADC sample point shifts, corrupting the current reading
+- <strong>Disadvantage:</strong> ADC conversion time (1-5 µs) is wasted in the ISR</p>
+<p><strong>For OKS motor control:</strong> DMA is preferred. The ADC-trigger-PWM hardware chain guarantees consistent sampling regardless of software load. The ISR computation budget is 100 µs (10 kHz), and wasting 5 µs on ADC wait is acceptable but unnecessary.</p>
+<hr />
+<h2 id="question-5-watchdog-strategy">Question 5: Watchdog Strategy</h2>
+<blockquote>
+<p>&ldquo;How would you implement a watchdog for the motor controller?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;Use the hardware watchdog timer, pet it in the main loop.&rdquo;</p>
+<p><strong>Deep answer:</strong> Multi-level watchdog strategy:</p>
+<p><strong>Level 1: Hardware WDT</strong> — catches hard lockups (infinite loops, stack overflow)</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Pet in the current loop ISR (10 kHz)</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">current_isr</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">wdt_feed</span><span class="p">();</span>
+<span class="w">    </span><span class="c1">// ... control computation</span>
+<span class="p">}</span>
+<span class="c1">// If ISR stops firing → hardware reset in 5 ms</span>
+</code></pre></div>
+
+<p><strong>Level 2: Software task watchdog</strong> — catches soft lockups (task starvation, priority inversion)</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Each task increments a counter</span>
+<span class="k">volatile</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">task_alive</span><span class="p">[</span><span class="n">NUM_TASKS</span><span class="p">];</span>
+
+<span class="c1">// Watchdog task checks all counters every 100 ms</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">watchdog_task</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">NUM_TASKS</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">task_alive</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">last_alive</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// Task i is stuck!</span>
+<span class="w">            </span><span class="n">enter_safe_state</span><span class="p">();</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">last_alive</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">task_alive</span><span class="p">[</span><span class="n">i</span><span class="p">];</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Level 3: Communication watchdog</strong> — catches Jetson→MCU link failures</p>
+<div class="highlight"><pre><span></span><code><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">millis</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">last_spi_msg</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">10</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">  </span><span class="c1">// 10 ms timeout</span>
+<span class="w">    </span><span class="c1">// Jetson is silent → decelerate and hold</span>
+<span class="w">    </span><span class="n">enter_reduced_mode</span><span class="p">();</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Level 4: Sanity watchdog</strong> — catches control divergence</p>
+<div class="highlight"><pre><span></span><code><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">abs</span><span class="p">(</span><span class="n">speed_error</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">MAX_SPEED_ERROR</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>
+<span class="w">    </span><span class="n">abs</span><span class="p">(</span><span class="n">current</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mf">0.9</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">CURRENT_LIMIT</span><span class="w"> </span><span class="o">&amp;&amp;</span>
+<span class="w">    </span><span class="n">duration</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">500</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">  </span><span class="c1">// 500 ms</span>
+<span class="w">    </span><span class="c1">// Something is mechanically wrong</span>
+<span class="w">    </span><span class="n">emergency_stop</span><span class="p">();</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Trap:</strong> A single watchdog is not enough. Each level catches a different failure class.</p>
+<hr />
+<h2 id="question-6-stack-overflow-in-isr">Question 6: Stack Overflow in ISR</h2>
+<blockquote>
+<p>&ldquo;The motor controller works for 2 hours then crashes randomly. No pattern. What do you suspect?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;Memory leak&rdquo; or &ldquo;Race condition.&rdquo;</p>
+<p><strong>Deep answer:</strong> Top suspects in order:</p>
+<ol>
+<li>
+<p><strong>Stack overflow:</strong> The ISR uses local variables that overflow into adjacent memory. Works for hours because the corrupted memory location isn&rsquo;t accessed often. Use stack painting to diagnose:
+   <code>c
+   // Fill stack with 0xDEADBEEF at boot
+   // Periodically check how many are left
+   uint32_t stack_free = check_stack_watermark(current_isr_stack);</code></p>
+</li>
+<li>
+<p><strong>Uninitialized variable read:</strong> A variable on the ISR stack is sometimes read before being written (depends on code path). Works most of the time because the stack happens to contain reasonable values from previous invocations.</p>
+</li>
+<li>
+<p><strong>Integer overflow accumulation:</strong> A counter or accumulator wraps after exactly $2^{32}$ increments. At 10 kHz: $2^{32} / 10000 / 3600 = 119$ hours. At 100 kHz: 11.9 hours. Close to 2 hours? Check 16-bit counters: $2^{16} / 10000 = 6.5$ seconds — too fast. $2^{16} / 100 = 655$ seconds ≈ 11 minutes. Check all counter sizes.</p>
+</li>
+<li>
+<p><strong>Heap fragmentation:</strong> If the ISR (or a task) allocates/frees memory. <strong>Never allocate in real-time code.</strong> But library functions sometimes allocate internally (printf, sprintf, malloc in C string operations).</p>
+</li>
+<li>
+<p><strong>EMI-induced bit flip:</strong> Hardware noise corrupts a RAM cell. More likely in noisy motor control environments. Use ECC RAM if available, or periodic state validation.</p>
+</li>
+</ol>
+<hr />
+<h2 id="question-7-rtos-timing-guarantee">Question 7: RTOS Timing Guarantee</h2>
+<blockquote>
+<p>&ldquo;I need the current loop to run exactly every 100 µs. Can an RTOS guarantee this?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;Yes, RTOS gives deterministic timing&rdquo; or &ldquo;Use a high-priority task.&rdquo;</p>
+<p><strong>Deep answer:</strong> <strong>No, an RTOS cannot guarantee exact timing for software tasks.</strong> It can guarantee a <strong>worst-case latency bound</strong>, but there&rsquo;s always jitter.</p>
+<p>Sources of jitter:
+1. <strong>Interrupt latency:</strong> Even the highest-priority ISR has 0.1–5 µs entry latency (context save, pipeline flush)
+2. <strong>Critical sections:</strong> Other code that disables interrupts (even briefly) adds jitter
+3. <strong>Cache misses:</strong> First execution after a context switch may be slower
+4. <strong>Flash wait states:</strong> Code fetched from flash has variable timing if flash cache misses</p>
+<p>For guaranteed 100 µs timing:
+- <strong>Best approach:</strong> Hardware timer ISR (not RTOS task). Timer triggers ADC → DMA → ISR fires after conversion. Jitter &lt; 1 µs.
+- <strong>Good approach:</strong> RTOS task at highest priority with timer interrupt as trigger. Jitter: 1–5 µs.
+- <strong>Bad approach:</strong> RTOS periodic task with vTaskDelayUntil(). Jitter: 5–50 µs depending on system load.</p>
+<p><strong>OKS approach:</strong> The current loop runs in a timer ISR, not an RTOS task. The speed loop runs in a lower-priority ISR. Only the communication and monitoring tasks use RTOS scheduling.</p>
+<hr />
+<h2 id="question-8-motor-identification-on-line">Question 8: Motor Identification On-Line</h2>
+<blockquote>
+<p>&ldquo;We manufacture 1000 robots. Each motor has ±10% parameter variation. How do you handle this?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;Use robust gains that work for all motors&rdquo; or &ldquo;Tune each robot manually.&rdquo;</p>
+<p><strong>Deep answer:</strong> <strong>On-line identification + adaptive tuning at startup:</strong></p>
+<div class="highlight"><pre><span></span><code>Boot sequence:
+1. Apply known voltage step (e.g., 2V for 200 ms)
+2. Record current and speed transients
+3. Fit first-order model: extract τ_m, K, R_a
+4. Compute PID gains from identified parameters
+5. Validate: run a speed step test, check overshoot &lt; 10%
+6. If validation fails: fall back to conservative default gains
+7. Store identified parameters in EEPROM for next boot
+</code></pre></div>
+
+<p>This runs once at every boot (takes ~2 seconds). Benefits:
+- Handles motor-to-motor variation
+- Handles aging (brush wear increases $R_a$, bearing wear changes $B$)
+- Handles motor replacement (new motor, different parameters)
+- Provides diagnostic data (if identified $R_a$ is 3× higher than nominal, the motor is failing)</p>
+<p><strong>Trap:</strong> &ldquo;Robust gains&rdquo; sounds safe but wastes 30-50% of performance headroom. In a warehouse with tight corridors, that headroom translates to speed and precision.</p>
+<hr />
+<h2 id="question-9-safety-critical-braking">Question 9: Safety-Critical Braking</h2>
+<blockquote>
+<p>&ldquo;The Jetson crashes mid-transit. The MCU must stop the robot safely. What&rsquo;s the braking strategy?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;Set PWM to zero&rdquo; or &ldquo;Emergency stop, cut power.&rdquo;</p>
+<p><strong>Deep answer:</strong> Cutting power is the <strong>worst</strong> option for a moving robot:</p>
+<ol>
+<li><strong>No power = no braking.</strong> DC motors coast when unpowered. The robot continues moving with only friction to slow it.</li>
+<li><strong>Passive regenerative braking:</strong> Short the motor terminals through a low-resistance path. Back-EMF drives current through the short, creating braking torque. Simple, effective, no control needed.</li>
+<li><strong>Active braking:</strong> Continue running the PID with setpoint = 0, decelerating at the maximum safe rate. Best tracking performance, but requires the controller to still be functional.</li>
+<li><strong>Mechanical brake:</strong> Engage a physical brake (spring-loaded, power-off-to-engage). Guaranteed stop but harsh — can damage goods on the robot.</li>
+</ol>
+<p><strong>OKS braking cascade:</strong></p>
+<div class="highlight"><pre><span></span><code>Level 0: Active deceleration (PID running, normal stop)
+Level 1: Passive regen braking (short motor terminals via H-bridge low-side)
+Level 2: Mechanical brake engagement (spring-loaded)
+Level 3: Power cut (last resort, motor coasts)
+</code></pre></div>
+
+<p>The MCU firmware implements all four levels. On Jetson communication loss:
+- Hold current velocity for 50 ms (tolerate brief jitter)
+- Decelerate at 0.5 m/s² (active braking) for up to 2 seconds
+- If speed doesn&rsquo;t decrease → engage mechanical brake
+- If SPI is still down after 5 seconds → power cut</p>
+<hr />
+<h2 id="question-10-the-volatile-keyword">Question 10: The volatile Keyword</h2>
+<blockquote>
+<p>&ldquo;Should PID variables shared between the ISR and main loop be marked volatile?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;Yes, always use volatile for shared variables.&rdquo;</p>
+<p><strong>Deep answer:</strong> <strong><code>volatile</code> is necessary but not sufficient.</strong></p>
+<p><code>volatile</code> tells the compiler:
+- Don&rsquo;t optimize away reads/writes
+- Don&rsquo;t reorder accesses
+- Re-read from memory every time</p>
+<p>But <code>volatile</code> does NOT guarantee:
+- <strong>Atomicity:</strong> Reading a 32-bit value on an 8/16-bit MCU takes multiple instructions. The ISR can modify it mid-read.
+- <strong>Consistency:</strong> Reading <code>speed</code> and <code>position</code> separately might get speed from cycle N and position from cycle N+1.</p>
+<p><strong>Correct approach:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Option 1: Disable interrupts briefly</span>
+<span class="n">__disable_irq</span><span class="p">();</span>
+<span class="kt">int32_t</span><span class="w"> </span><span class="n">local_speed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">shared_speed</span><span class="p">;</span>
+<span class="kt">int32_t</span><span class="w"> </span><span class="n">local_position</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">shared_position</span><span class="p">;</span>
+<span class="n">__enable_irq</span><span class="p">();</span>
+
+<span class="c1">// Option 2: Double-buffer with sequence counter</span>
+<span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">volatile</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">sequence</span><span class="p">;</span>
+<span class="w">    </span><span class="k">volatile</span><span class="w"> </span><span class="kt">int32_t</span><span class="w"> </span><span class="n">speed</span><span class="p">;</span>
+<span class="w">    </span><span class="k">volatile</span><span class="w"> </span><span class="kt">int32_t</span><span class="w"> </span><span class="n">position</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="n">motor_state_t</span><span class="p">;</span>
+
+<span class="n">motor_state_t</span><span class="w"> </span><span class="n">state_buf</span><span class="p">[</span><span class="mi">2</span><span class="p">];</span>
+<span class="k">volatile</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">active_buf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="c1">// ISR writes to inactive buffer, then flips</span>
+<span class="c1">// Main loop reads from active buffer</span>
+</code></pre></div>
+
+<p><strong>Trap:</strong> Many embedded tutorials say &ldquo;just use volatile.&rdquo; This causes subtle bugs in multi-variable consistency that only manifest under specific timing conditions.</p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Senior Interview Questions — System Integration - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="senior-interview-questions-system-integration">Senior Interview Questions — System Integration</h1>
+<p><strong>Purpose:</strong> Questions about the MCU↔Jetson boundary, real-world failure modes, and architectural decisions.
+<strong>Level:</strong> Senior systems/robotics engineer (5+ years)</p>
+<hr />
+<h2 id="question-1-latency-budget-allocation">Question 1: Latency Budget Allocation</h2>
+<blockquote>
+<p>&ldquo;You have a 50 ms budget from Nav2 decision to wheel motion. How do you allocate it?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;Just make everything fast.&rdquo;</p>
+<p><strong>Deep answer:</strong> Work backward from the physics:</p>
+<div class="highlight"><pre><span></span><code>Budget: 50 ms (20 Hz control loop)
+
+Nav2 path computation:     0-15 ms  (variable, depends on costmap)
+ROS2 DDS serialization:    1-3 ms   (topic publish + subscribe)
+Velocity smoother:         1-2 ms   (acceleration limiting)
+SPI to MCU:                0.5-1 ms (transfer + CRC check)
+MCU speed PID:             0.01 ms  (trivial computation)
+Motor electrical response: 1-2 ms   (current rise in L/R)
+Motor mechanical response: 5-40 ms  (J/B time constant)
+                           ─────────
+Total:                     8.5-63 ms (worst case exceeds budget!)
+</code></pre></div>
+
+<p><strong>Key insight:</strong> The budget is not a hard deadline — it&rsquo;s a <strong>jitter sensitivity analysis.</strong></p>
+<ul>
+<li>The motor mechanical response (5-40 ms) is the dominant term and is <strong>fixed</strong> by physics</li>
+<li>The controllable latency is Nav2 + DDS + SPI ≈ 2-19 ms</li>
+<li>The <strong>variation</strong> matters more than the <strong>absolute</strong> latency. A constant 40 ms delay is fine (the controller adapts). A latency that varies 10-40 ms causes oscillation.</li>
+<li>Allocate: make the controllable parts <strong>consistent</strong>, not just fast. CPU pinning and RT priority reduce jitter more than raw speed.</li>
+</ul>
+<hr />
+<h2 id="question-2-spi-failure-modes">Question 2: SPI Failure Modes</h2>
+<blockquote>
+<p>&ldquo;The SPI link between Jetson and MCU drops packets. How do you handle this?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;Retransmit lost packets.&rdquo;</p>
+<p><strong>Deep answer:</strong> <strong>Never retransmit in real-time control.</strong> A retransmitted packet arrives late — the data is stale.</p>
+<p><strong>SPI failure taxonomy:</strong>
+1. <strong>Corruption</strong> (CRC fail): Data arrived but is wrong
+2. <strong>Dropout</strong> (no response): MCU didn&rsquo;t respond within timeout
+3. <strong>Stuck bus</strong> (SCK frozen): Hardware failure, bus locked
+4. <strong>Desync</strong> (byte offset): Master and slave are out of frame alignment</p>
+<p><strong>Handling strategy per type:</strong></p>
+<div class="highlight"><pre><span></span><code>Corruption: 
+  → Discard this frame
+  → Use previous good data (one frame old)
+  → Increment error counter
+  → If 3 consecutive CRC fails → re-sync (toggle CS, send sync pattern)
+
+Dropout:
+  → Use previous good data
+  → Start watchdog timer
+  → If &gt; 10 ms of dropouts → enter reduced mode
+  → If &gt; 50 ms → active braking
+
+Stuck bus:
+  → Toggle GPIO to reset SPI peripheral
+  → Re-initialize SPI
+  → If still stuck → switch to UART fallback (if available)
+
+Desync:
+  → Send magic byte sequence (0xAA, 0x55) to re-frame
+  → Wait for sync acknowledgment
+  → Resume normal framing
+</code></pre></div>
+
+<p><strong>Critical principle:</strong> The MCU must <strong>never assume the Jetson is healthy.</strong> Every received frame must be validated independently. The MCU operates autonomously if communication is lost.</p>
+<hr />
+<h2 id="question-3-clock-synchronization">Question 3: Clock Synchronization</h2>
+<blockquote>
+<p>&ldquo;The Jetson timestamps a cmd_vel at T=1.000s. The MCU receives it and its local clock reads T=1.003s. What&rsquo;s the real latency — 3 ms or unknown?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;3 ms.&rdquo;</p>
+<p><strong>Deep answer:</strong> <strong>Unknown.</strong> The clocks are not synchronized.</p>
+<ul>
+<li>The Jetson has a crystal oscillator accurate to ±20 ppm</li>
+<li>The MCU has an internal RC oscillator accurate to ±1%</li>
+<li>After 1 second, the MCU clock has drifted by up to 10 ms from the Jetson clock</li>
+<li>The 3 ms difference could be: 3 ms real latency, or 0 ms latency with 3 ms clock drift, or 13 ms latency with -10 ms clock drift</li>
+</ul>
+<p><strong>Solutions:</strong></p>
+<ol>
+<li>
+<p><strong>Periodic sync pulse:</strong> Jetson sends a GPIO pulse every 100 ms. MCU measures its own timer at the pulse edge. Calculate drift: $\Delta_{drift} = (T_{mcu}[n] - T_{mcu}[n-1]) - 100.0$ ms. Compensate timestamps.</p>
+</li>
+<li>
+<p><strong>Round-trip measurement:</strong> Jetson sends timestamp $T_1$, MCU echoes with its own $T_2$, Jetson receives at $T_3$. One-way latency ≈ $(T_3 - T_1) / 2$. No clock sync needed, but assumes symmetric latency.</p>
+</li>
+<li>
+<p><strong>Crystal oscillator on MCU:</strong> Replace RC with 8 MHz crystal. Drift drops to ±20 ppm = 0.02 ms per second. Acceptable for most control applications.</p>
+</li>
+</ol>
+<p><strong>OKS approach:</strong> Option 3 (crystal on MCU) + option 1 (periodic sync) as validation. The sync pulse also serves as a heartbeat — if the MCU doesn&rsquo;t see it, the Jetson is in trouble.</p>
+<hr />
+<h2 id="question-4-the-shared-state-problem">Question 4: The Shared State Problem</h2>
+<blockquote>
+<p>&ldquo;Nav2 publishes cmd_vel. The velocity smoother rate-limits it. The motor bridge converts it to wheel speeds. The MCU executes it. Three nodes, one intent. What can go wrong?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;Nothing if DDS QoS is configured correctly.&rdquo;</p>
+<p><strong>Deep answer:</strong> <strong>The distributed state consistency problem.</strong> Multiple nodes each have a different view of the robot&rsquo;s state.</p>
+<p><strong>Failure mode 1: Temporal inconsistency</strong>
+- Nav2 computed cmd_vel using TF transform from 50 ms ago
+- The smoother applies acceleration limits based on the velocity it last saw (which might be 20 ms old)
+- The motor bridge converts using its cached wheel separation (which doesn&rsquo;t account for tire wear)
+- Each node is correct locally but the chain is wrong globally</p>
+<p><strong>Failure mode 2: Race condition on mode switch</strong>
+- Nav2 publishes the last cmd_vel for the current goal
+- Simultaneously, the behavior tree cancels the goal
+- The smoother receives the cmd_vel but not the cancel
+- The motor bridge accelerates while Nav2 thinks it&rsquo;s stopped</p>
+<p><strong>Failure mode 3: QoS mismatch</strong>
+- Nav2 uses RELIABLE QoS (guaranteed delivery)
+- Motor bridge uses BEST_EFFORT (low latency)
+- A bridge node converts between them
+- Under load, the bridge drops packets → motor bridge gets intermittent cmd_vel</p>
+<p><strong>Architectural fix:</strong> <strong>Single source of truth with monotonic timestamps.</strong></p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">CmdVelFrame</span><span class="p">:</span>
+    <span class="n">stamp</span><span class="p">:</span> <span class="n">Time</span>          <span class="c1"># When was this computed</span>
+    <span class="n">sequence</span><span class="p">:</span> <span class="n">uint32</span>     <span class="c1"># Monotonically increasing</span>
+    <span class="n">v</span><span class="p">:</span> <span class="n">float64</span>           <span class="c1"># Linear velocity</span>
+    <span class="n">omega</span><span class="p">:</span> <span class="n">float64</span>       <span class="c1"># Angular velocity</span>
+    <span class="n">valid_until</span><span class="p">:</span> <span class="n">Time</span>    <span class="c1"># Expiry timestamp</span>
+    <span class="n">source</span><span class="p">:</span> <span class="n">string</span>       <span class="c1"># Who generated this</span>
+</code></pre></div>
+
+<p>Every downstream consumer checks <code>sequence</code> (detect missing frames) and <code>valid_until</code> (reject stale commands).</p>
+<hr />
+<h2 id="question-5-graceful-degradation">Question 5: Graceful Degradation</h2>
+<blockquote>
+<p>&ldquo;Design the degradation hierarchy when things start failing.&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> A simple table of &ldquo;if X fails, do Y.&rdquo;</p>
+<p><strong>Deep answer:</strong> Multi-dimensional degradation with independent axes:</p>
+<div class="highlight"><pre><span></span><code>Communication axis:
+  FULL      → All SPI + DDS + TF working
+  DEGRADED  → SPI okay, DDS intermittent (use last good TF)
+  MINIMAL   → SPI only, no higher-level commands
+  ISOLATED  → SPI lost, MCU autonomous
+
+Sensing axis:
+  FULL      → LiDAR + cameras + encoders + IMU
+  REDUCED   → LiDAR down → reduce speed, wider margins
+  MINIMAL   → Encoders only → dead reckoning, 0.1 m/s max
+  BLIND     → Encoders failed → immediate stop
+
+Power axis:
+  FULL      → Battery &gt; 30%
+  LOW       → Battery 10-30% → reduce max speed
+  CRITICAL  → Battery &lt; 10% → navigate to charger only
+  DEAD      → Battery &lt; 5% → stop and call for help
+
+Control axis:
+  FULL      → Cascade PID + feedforward + gain scheduling
+  REDUCED   → PID only, no feedforward (higher error, still safe)
+  BASIC     → P-only control (jerky but functional)
+  OPEN      → Fixed PWM (emergency crawl)
+</code></pre></div>
+
+<p><strong>Key design principle:</strong> Each axis degrades independently. A robot with DEGRADED communication + REDUCED sensing + FULL power + FULL control can still operate (at reduced speed with wider margins). The system only stops when <strong>any axis hits its terminal state</strong>.</p>
+<p><strong>Implementation:</strong> Finite state machine with hysteresis (don&rsquo;t flap between states):</p>
+<div class="highlight"><pre><span></span><code><span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">DegradationLevel</span><span class="w"> </span><span class="n">comm</span><span class="p">;</span>
+<span class="w">    </span><span class="n">DegradationLevel</span><span class="w"> </span><span class="n">sensing</span><span class="p">;</span>
+<span class="w">    </span><span class="n">DegradationLevel</span><span class="w"> </span><span class="n">power</span><span class="p">;</span>
+<span class="w">    </span><span class="n">DegradationLevel</span><span class="w"> </span><span class="n">control</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="n">SystemHealth</span><span class="p">;</span>
+
+<span class="n">OperatingMode</span><span class="w"> </span><span class="nf">compute_mode</span><span class="p">(</span><span class="n">SystemHealth</span><span class="w"> </span><span class="n">h</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">h</span><span class="p">.</span><span class="n">comm</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">ISOLATED</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">h</span><span class="p">.</span><span class="n">sensing</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">BLIND</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>
+<span class="w">        </span><span class="n">h</span><span class="p">.</span><span class="n">power</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">DEAD</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">h</span><span class="p">.</span><span class="n">control</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">OPEN</span><span class="p">)</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">EMERGENCY_STOP</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Take the worst axis</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">worst</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">max</span><span class="p">(</span><span class="n">h</span><span class="p">.</span><span class="n">comm</span><span class="p">,</span><span class="w"> </span><span class="n">h</span><span class="p">.</span><span class="n">sensing</span><span class="p">,</span><span class="w"> </span><span class="n">h</span><span class="p">.</span><span class="n">power</span><span class="p">,</span><span class="w"> </span><span class="n">h</span><span class="p">.</span><span class="n">control</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">switch</span><span class="w"> </span><span class="p">(</span><span class="n">worst</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">FULL</span><span class="p">:</span><span class="w">     </span><span class="k">return</span><span class="w"> </span><span class="n">NORMAL</span><span class="p">;</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">DEGRADED</span><span class="p">:</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">REDUCED_SPEED</span><span class="p">;</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">REDUCED</span><span class="p">:</span><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">SLOW_CRAWL</span><span class="p">;</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">MINIMAL</span><span class="p">:</span><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">STOP_AND_HOLD</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="question-6-firmware-update-while-running">Question 6: Firmware Update While Running</h2>
+<blockquote>
+<p>&ldquo;Can you update the motor controller firmware without stopping the fleet?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;Just OTA update and reboot.&rdquo;</p>
+<p><strong>Deep answer:</strong> The motor controller is <strong>safety-critical.</strong> Firmware update requires a careful protocol:</p>
+<ol>
+<li><strong>Dual-bank flash:</strong> MCU has two firmware banks (A and B). Currently running from A.</li>
+<li><strong>Download to B</strong> while A is still running. Robot continues operating normally.</li>
+<li><strong>Validate B:</strong> Check CRC, verify it&rsquo;s a valid image, check version compatibility with Jetson.</li>
+<li><strong>Schedule switchover:</strong> Wait for the robot to be stationary, at a charging station, with no pending tasks.</li>
+<li><strong>Atomic switch:</strong> Mark B as active, reboot. First thing B does: self-test (motor drives, sensors, SPI communication).</li>
+<li><strong>Rollback:</strong> If self-test fails, switch back to A automatically.</li>
+<li><strong>Confirm:</strong> Robot operates on B for 5 minutes. If no anomalies, mark A as &ldquo;previous good&rdquo; (not delete it).</li>
+</ol>
+<p><strong>Never update while moving.</strong> The reboot takes 200-500 ms. At 0.5 m/s, the robot travels 10-25 cm uncontrolled. In a warehouse with 1.2 m aisles, that&rsquo;s unacceptable.</p>
+<p><strong>Never update all robots simultaneously.</strong> Rolling update: 10% at a time, 30-minute observation between batches.</p>
+<hr />
+<h2 id="question-7-when-pid-isnt-enough">Question 7: When PID Isn&rsquo;t Enough</h2>
+<blockquote>
+<p>&ldquo;Give me three real scenarios on an OKS robot where PID fails and you need something else.&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> Generic examples from textbooks.</p>
+<p><strong>Deep answer — OKS-specific:</strong></p>
+<p><strong>Scenario 1: Loaded vs unloaded robot</strong>
+- Empty robot: $J = 0.5$ kg·m². Loaded: $J = 5.0$ kg·m² (10× heavier).
+- PID tuned for empty overshoots violently when loaded.
+- Solution: <strong>Gain scheduling</strong> on payload weight (load cell + encoder current draw).</p>
+<p><strong>Scenario 2: Tight 90° corner at speed</strong>
+- The robot needs to decelerate, turn, and accelerate — three phases
+- PID reacts to error. At the turn apex, error is zero (you&rsquo;re at the waypoint) but you need to be <strong>accelerating out of the turn</strong>
+- Solution: <strong>Feedforward</strong> from the trajectory planner. The FF term provides the turn deceleration and acceleration. PID only corrects residual errors.</p>
+<p><strong>Scenario 3: Floor transition (concrete → epoxy → metal plate)</strong>
+- Friction coefficient changes suddenly. Wheels slip on metal plates.
+- PID integral winds up during slip (actual speed drops, error grows, integral accumulates)
+- When friction returns, the wound-up integral causes a lurch
+- Solution: <strong>Slip detection</strong> (compare encoder speed to IMU acceleration) + <strong>integral reset</strong> on slip detection + <strong>disturbance observer</strong> to estimate and compensate the friction change.</p>
+<hr />
+<h2 id="question-8-spi-vs-can-vs-uart">Question 8: SPI vs CAN vs UART</h2>
+<blockquote>
+<p>&ldquo;Why does OKS use SPI for Jetson↔MCU? Why not CAN or UART?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;SPI is faster.&rdquo;</p>
+<p><strong>Deep answer:</strong> It&rsquo;s a tradeoff matrix:</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>SPI</th>
+<th>CAN</th>
+<th>UART</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Speed</td>
+<td>10+ MHz</td>
+<td>1 Mbps</td>
+<td>1-3 Mbps</td>
+</tr>
+<tr>
+<td>Distance</td>
+<td>&lt; 20 cm (PCB)</td>
+<td>40 m (bus)</td>
+<td>15 m (RS-485)</td>
+</tr>
+<tr>
+<td>Wires</td>
+<td>4 (MOSI/MISO/SCK/CS)</td>
+<td>2 (CANH/CANL)</td>
+<td>2 (TX/RX)</td>
+</tr>
+<tr>
+<td>Latency</td>
+<td>&lt; 50 µs per frame</td>
+<td>0.1-1 ms (arbitration)</td>
+<td>0.1 ms</td>
+</tr>
+<tr>
+<td>Error detection</td>
+<td>None built-in</td>
+<td>CRC-15 built-in</td>
+<td>None built-in</td>
+</tr>
+<tr>
+<td>Multi-device</td>
+<td>CS per device</td>
+<td>Bus (128 nodes)</td>
+<td>Point-to-point</td>
+</tr>
+<tr>
+<td>Full duplex</td>
+<td>Yes</td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>CPU overhead</td>
+<td>Medium (DMA helps)</td>
+<td>Low (hardware CRC)</td>
+<td>Medium</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Why SPI for OKS:</strong>
+- Jetson and MCU are on the same PCB → short distance (SPI weakness irrelevant)
+- Need <strong>bidirectional data</strong> every 1 ms: command down + status up (full duplex advantage)
+- Need <strong>low latency</strong> for tight control loops (SPI &lt; 50 µs vs CAN 0.1-1 ms)
+- Frame size is 32-64 bytes → fits in one SPI transaction</p>
+<p><strong>When CAN is better:</strong>
+- Multiple motor controllers (one per wheel) → CAN bus is natural
+- Long cable runs (chassis wiring)
+- Need guaranteed message delivery with priority arbitration</p>
+<p><strong>When UART is better:</strong>
+- Debugging and logging (printf over UART)
+- GPS or sensor modules that speak UART natively
+- Simplest possible connection (2 wires)</p>
+<hr />
+<h2 id="question-9-the-timestamp-paradox">Question 9: The Timestamp Paradox</h2>
+<blockquote>
+<p>&ldquo;A ROS2 message has <code>header.stamp</code>. Should the MCU trust this timestamp?&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;Yes, it&rsquo;s the authoritative time.&rdquo;</p>
+<p><strong>Deep answer:</strong> <strong>Never trust the other side&rsquo;s timestamp for control decisions.</strong></p>
+<p>Problems:
+1. <strong>Clock drift:</strong> Jetson and MCU clocks are not synchronized (see Question 3)
+2. <strong>Stale data:</strong> The message might have been sitting in a DDS queue for 20 ms. The stamp says when it was <strong>created</strong>, not when the MCU <strong>received</strong> it.
+3. <strong>Spoofing:</strong> In a safety context, trusting external timestamps means a Jetson bug could make the MCU think data is fresh when it&rsquo;s minutes old.</p>
+<p><strong>Correct usage:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// MCU receives a SPI frame with Jetson timestamp</span>
+<span class="kt">uint32_t</span><span class="w"> </span><span class="n">jetson_stamp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">frame</span><span class="p">.</span><span class="n">timestamp</span><span class="p">;</span><span class="w">  </span><span class="c1">// Informational only</span>
+<span class="kt">uint32_t</span><span class="w"> </span><span class="n">mcu_rx_time</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">get_local_time</span><span class="p">();</span><span class="w">  </span><span class="c1">// Authority for freshness</span>
+
+<span class="c1">// Freshness check uses MCU clock</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">mcu_rx_time</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">last_good_rx</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">STALENESS_THRESHOLD</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">enter_degraded_mode</span><span class="p">();</span>
+<span class="p">}</span>
+
+<span class="c1">// Jetson timestamp is used for:</span>
+<span class="c1">// - Logging and post-mortem analysis</span>
+<span class="c1">// - Estimating communication latency (with clock sync correction)</span>
+<span class="c1">// - Detecting Jetson time jumps (NTP corrections, sim time glitches)</span>
+</code></pre></div>
+
+<p><strong>OKS rule: The MCU clock is king for safety decisions.</strong> The Jetson timestamp is informational metadata.</p>
+<hr />
+<h2 id="question-10-design-review-question">Question 10: Design Review Question</h2>
+<blockquote>
+<p>&ldquo;Your teammate proposes: &lsquo;Let&rsquo;s run the PID on the Jetson instead of the MCU. The Jetson has more compute power and we can use floating point.&rsquo; Argue against this.&rdquo;</p>
+</blockquote>
+<p><strong>Expected weak answer:</strong> &ldquo;The MCU is more real-time.&rdquo;</p>
+<p><strong>Deep answer — structured argument:</strong></p>
+<p><strong>1. Latency chain gets longer:</strong>
+- On MCU: encoder → PID → PWM. Total: &lt; 10 µs. All in one ISR.
+- On Jetson: encoder → SPI to Jetson → ROS2 DDS → PID node → DDS → SPI to MCU → PWM. Total: 5-30 ms. 500-3000× slower.</p>
+<p><strong>2. Jitter kills control performance:</strong>
+- Jetson runs Linux (not real-time). Timer callbacks have 1-50 ms jitter under load.
+- Current loop at 10 kHz with 5 ms jitter = unstable. Not viable.
+- Even speed loop at 1 kHz with 5 ms jitter = audible noise, poor tracking.</p>
+<p><strong>3. Single point of failure:</strong>
+- If Jetson crashes, all motor control is lost. Robot coasts uncontrolled.
+- With PID on MCU: Jetson crash → MCU detects loss → MCU brakes autonomously.
+- The MCU is the <strong>safety layer.</strong> It must function independently.</p>
+<p><strong>4. The Jetson IS more powerful — use it for what it&rsquo;s good at:</strong>
+- Path planning (search algorithms, costmaps) — Jetson
+- Localization (particle filters, AMCL) — Jetson
+- Trajectory generation (optimization, MPC) — Jetson
+- Inner-loop motor control (PID at kHz rates) — MCU
+- Safety monitoring (watchdog, braking) — MCU</p>
+<p><strong>5. Cost of &ldquo;more compute&rdquo;:</strong>
+- Floating-point PID is slightly easier to write but wastes Jetson CPU on trivial math
+- That CPU is better spent on perception (cameras, LiDAR processing)
+- The MCU costs $3. The Jetson costs $300. Use each where it adds value.</p>
+<p><strong>The two-layer split exists for a reason.</strong> It&rsquo;s not a legacy constraint — it&rsquo;s a deliberate safety and performance architecture.</p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

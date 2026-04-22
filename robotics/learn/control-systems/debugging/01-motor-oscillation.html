@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Session 1 — Motor Oscillation: &quot;The Wheel Won't Stop Shaking&quot; - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="debug-session-1-motor-oscillation-the-wheel-wont-stop-shaking">Debug Session 1 — Motor Oscillation: &ldquo;The Wheel Won&rsquo;t Stop Shaking&rdquo;</h1>
+<p><strong>Skills tested:</strong> PID tuning, stability analysis, frequency-domain thinking
+<strong>Difficulty:</strong> Intermediate
+<strong>Time estimate:</strong> 45–60 minutes</p>
+<hr />
+<h2 id="the-scenario">The Scenario</h2>
+<p><strong>Field report from OKS warehouse (Hamamatsu site):</strong></p>
+<blockquote>
+<p>Robot oksbot-scl-hamamatsu08 exhibits a loud buzzing sound from the right wheel at constant speed. The wheel visibly oscillates at ~30 Hz. The left wheel is fine. The robot was working normally yesterday. No firmware or software changes were deployed.</p>
+</blockquote>
+<p><strong>What you have:</strong>
+- Speed PID runs at 1 kHz on the MCU
+- PID gains: $K_p = 5.0$, $K_i = 25.0$, $K_d = 0.02$
+- Encoder: 2048 CPR × 4 (quadrature) = 8192 counts/rev
+- Motor: 24V DC, 12:1 gearbox
+- Right motor was replaced last week (maintenance record)</p>
+<hr />
+<h2 id="step-1-observe-before-touching">Step 1 — Observe Before Touching</h2>
+<h3 id="11-data-collection">1.1 Data Collection</h3>
+<p>You SSH into the robot and log speed data for 5 seconds at constant setpoint = 5.0 rad/s:</p>
+<div class="highlight"><pre><span></span><code>Time(ms)   Setpoint   Measured    Error    PWM_duty
+0          5.000      4.82       0.180    0.412
+1          5.000      5.31      -0.310    0.378
+2          5.000      4.65       0.350    0.445
+3          5.000      5.42      -0.420    0.361
+4          5.000      4.53       0.470    0.462
+5          5.000      5.55      -0.550    0.340
+...
+</code></pre></div>
+
+<p><strong>Observation:</strong> The measured speed oscillates around the setpoint with <strong>growing</strong> amplitude. This is an <strong>unstable oscillation</strong>, not just noise.</p>
+<h3 id="12-frequency-analysis">1.2 Frequency Analysis</h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.fft</span><span class="w"> </span><span class="kn">import</span> <span class="n">fft</span><span class="p">,</span> <span class="n">fftfreq</span>
+
+<span class="c1"># Load speed data (1000 samples at 1 kHz)</span>
+<span class="n">speed_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">loadtxt</span><span class="p">(</span><span class="s1">&#39;right_motor_speed.csv&#39;</span><span class="p">)</span>
+<span class="n">dt</span> <span class="o">=</span> <span class="mf">0.001</span>
+<span class="n">N</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">speed_data</span><span class="p">)</span>
+
+<span class="c1"># Remove mean (DC component)</span>
+<span class="n">speed_ac</span> <span class="o">=</span> <span class="n">speed_data</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">speed_data</span><span class="p">)</span>
+
+<span class="c1"># FFT</span>
+<span class="n">freqs</span> <span class="o">=</span> <span class="n">fftfreq</span><span class="p">(</span><span class="n">N</span><span class="p">,</span> <span class="n">dt</span><span class="p">)[:</span><span class="n">N</span><span class="o">//</span><span class="mi">2</span><span class="p">]</span>
+<span class="n">spectrum</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">fft</span><span class="p">(</span><span class="n">speed_ac</span><span class="p">))[:</span><span class="n">N</span><span class="o">//</span><span class="mi">2</span><span class="p">]</span> <span class="o">*</span> <span class="mi">2</span><span class="o">/</span><span class="n">N</span>
+
+<span class="c1"># Find peak frequency</span>
+<span class="n">peak_idx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argmax</span><span class="p">(</span><span class="n">spectrum</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span> <span class="o">+</span> <span class="mi">1</span>  <span class="c1"># Skip DC</span>
+<span class="n">peak_freq</span> <span class="o">=</span> <span class="n">freqs</span><span class="p">[</span><span class="n">peak_idx</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Oscillation frequency: </span><span class="si">{</span><span class="n">peak_freq</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> Hz&quot;</span><span class="p">)</span>
+<span class="c1"># Result: 33.2 Hz</span>
+</code></pre></div>
+
+<p><strong>Key finding:</strong> Oscillation at 33.2 Hz. The PID loop runs at 1 kHz, so 33.2 Hz is well within control bandwidth.</p>
+<hr />
+<h2 id="step-2-form-hypotheses">Step 2 — Form Hypotheses</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Hypothesis</th>
+<th>Evidence needed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>H1</td>
+<td>$K_p$ too high → marginal stability</td>
+<td>Reduce $K_p$ → does oscillation stop?</td>
+</tr>
+<tr>
+<td>H2</td>
+<td>Encoder noise → derivative kick</td>
+<td>Check raw encoder counts, $K_d$ contribution</td>
+</tr>
+<tr>
+<td>H3</td>
+<td>Mechanical resonance (new motor)</td>
+<td>Measure with motor disabled (coast down)</td>
+</tr>
+<tr>
+<td>H4</td>
+<td>Phase lag from computation</td>
+<td>Measure actual loop timing</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="step-3-investigate-h1-gain-too-high">Step 3 — Investigate H1: Gain Too High</h2>
+<h3 id="31-the-stability-theory">3.1 The Stability Theory</h3>
+<p>For a first-order plant (motor + load):</p>
+<p>$$G(s) = \frac{K_m}{Js + B}$$</p>
+<p>With proportional gain $K_p$, the closed-loop is:</p>
+<p>$$T(s) = \frac{K_p K_m}{Js + B + K_p K_m}$$</p>
+<p>This is <strong>always stable</strong> for first-order systems. So why is it oscillating?</p>
+<p><strong>Answer:</strong> The real system isn&rsquo;t first order. The encoder measurement, PWM, and motor electrical dynamics add delays. The plant is more like:</p>
+<p>$$G(s) = \frac{K_m}{(Js + B)(\tau_e s + 1)} \cdot e^{-s T_{delay}}$$</p>
+<p>where $\tau_e$ is the electrical time constant and $T_{delay}$ is the computational + PWM delay.</p>
+<h3 id="32-why-the-replacement-motor-changed-things">3.2 Why the Replacement Motor Changed Things</h3>
+<p>The maintenance record shows the right motor was replaced. The replacement motor has:
+- <strong>Different winding resistance</strong> → different electrical time constant $\tau_e$
+- <strong>Different rotor inertia</strong> → different mechanical time constant $J/B$</p>
+<p><strong>The old motor</strong> (lower inductance, faster electrical response) was stable with these gains. <strong>The new motor</strong> (higher inductance, slower electrical response) introduces more phase lag → the same gains are now marginally unstable.</p>
+<h3 id="33-gain-margin-analysis">3.3 Gain Margin Analysis</h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">control</span>
+
+<span class="c1"># Old motor parameters</span>
+<span class="n">Km_old</span> <span class="o">=</span> <span class="mf">0.05</span>   <span class="c1"># motor constant</span>
+<span class="n">J</span> <span class="o">=</span> <span class="mf">0.005</span>        <span class="c1"># inertia</span>
+<span class="n">B</span> <span class="o">=</span> <span class="mf">0.01</span>         <span class="c1"># friction</span>
+<span class="n">tau_e_old</span> <span class="o">=</span> <span class="mf">0.001</span>  <span class="c1"># 1 ms electrical time constant</span>
+
+<span class="c1"># New motor parameters (higher inductance)</span>
+<span class="n">tau_e_new</span> <span class="o">=</span> <span class="mf">0.003</span>  <span class="c1"># 3 ms electrical time constant</span>
+
+<span class="c1"># Plant transfer functions</span>
+<span class="n">G_old</span> <span class="o">=</span> <span class="n">control</span><span class="o">.</span><span class="n">tf</span><span class="p">([</span><span class="n">Km_old</span><span class="p">],</span> <span class="p">[</span><span class="n">J</span><span class="o">*</span><span class="n">tau_e_old</span><span class="p">,</span> <span class="n">J</span><span class="o">+</span><span class="n">B</span><span class="o">*</span><span class="n">tau_e_old</span><span class="p">,</span> <span class="n">B</span><span class="p">])</span>
+<span class="n">G_new</span> <span class="o">=</span> <span class="n">control</span><span class="o">.</span><span class="n">tf</span><span class="p">([</span><span class="n">Km_old</span><span class="p">],</span> <span class="p">[</span><span class="n">J</span><span class="o">*</span><span class="n">tau_e_new</span><span class="p">,</span> <span class="n">J</span><span class="o">+</span><span class="n">B</span><span class="o">*</span><span class="n">tau_e_new</span><span class="p">,</span> <span class="n">B</span><span class="p">])</span>
+
+<span class="c1"># PID controller (continuous approximation)</span>
+<span class="n">Kp</span><span class="p">,</span> <span class="n">Ki</span><span class="p">,</span> <span class="n">Kd</span> <span class="o">=</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">25.0</span><span class="p">,</span> <span class="mf">0.02</span>
+<span class="n">C</span> <span class="o">=</span> <span class="n">control</span><span class="o">.</span><span class="n">tf</span><span class="p">([</span><span class="n">Kd</span><span class="p">,</span> <span class="n">Kp</span><span class="p">,</span> <span class="n">Ki</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
+
+<span class="c1"># Gain and phase margins</span>
+<span class="n">gm_old</span><span class="p">,</span> <span class="n">pm_old</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">control</span><span class="o">.</span><span class="n">margin</span><span class="p">(</span><span class="n">C</span> <span class="o">*</span> <span class="n">G_old</span><span class="p">)</span>
+<span class="n">gm_new</span><span class="p">,</span> <span class="n">pm_new</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">control</span><span class="o">.</span><span class="n">margin</span><span class="p">(</span><span class="n">C</span> <span class="o">*</span> <span class="n">G_new</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Old motor: Gain margin = </span><span class="si">{</span><span class="mi">20</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">log10</span><span class="p">(</span><span class="n">gm_old</span><span class="p">)</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> dB, Phase margin = </span><span class="si">{</span><span class="n">pm_old</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">°&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;New motor: Gain margin = </span><span class="si">{</span><span class="mi">20</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">log10</span><span class="p">(</span><span class="n">gm_new</span><span class="p">)</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> dB, Phase margin = </span><span class="si">{</span><span class="n">pm_new</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">°&quot;</span><span class="p">)</span>
+
+<span class="c1"># Typical result:</span>
+<span class="c1"># Old motor: Gain margin = 12.3 dB, Phase margin = 45.2°  ← Stable</span>
+<span class="c1"># New motor: Gain margin = 3.1 dB, Phase margin = 8.7°    ← Barely stable!</span>
+</code></pre></div>
+
+<p><strong>Root cause:</strong> The new motor&rsquo;s higher electrical time constant reduced the phase margin from 45° to ~9°, causing marginal instability. The 33 Hz oscillation is the <strong>limit cycle</strong> at the gain crossover frequency.</p>
+<hr />
+<h2 id="step-4-fix-it">Step 4 — Fix It</h2>
+<h3 id="41-quick-fix-reduce-kp">4.1 Quick Fix: Reduce Kp</h3>
+<p>Reduce $K_p$ from 5.0 to 3.0. The oscillation stops immediately. But tracking performance degrades.</p>
+<h3 id="42-proper-fix-re-tune-for-the-new-motor">4.2 Proper Fix: Re-tune for the New Motor</h3>
+<p>Identify the new motor&rsquo;s electrical time constant:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Step response test: apply constant duty, measure current rise</span>
+<span class="c1"># Current: I(t) = I_ss * (1 - exp(-t/tau_e))</span>
+<span class="c1"># Fit exponential to find tau_e</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.optimize</span><span class="w"> </span><span class="kn">import</span> <span class="n">curve_fit</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">current_model</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">I_ss</span><span class="p">,</span> <span class="n">tau_e</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">I_ss</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">t</span> <span class="o">/</span> <span class="n">tau_e</span><span class="p">))</span>
+
+<span class="n">popt</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">curve_fit</span><span class="p">(</span><span class="n">current_model</span><span class="p">,</span> <span class="n">time_data</span><span class="p">,</span> <span class="n">current_data</span><span class="p">,</span> <span class="n">p0</span><span class="o">=</span><span class="p">[</span><span class="mf">5.0</span><span class="p">,</span> <span class="mf">0.002</span><span class="p">])</span>
+<span class="n">tau_e_measured</span> <span class="o">=</span> <span class="n">popt</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Measured tau_e = </span><span class="si">{</span><span class="n">tau_e_measured</span><span class="o">*</span><span class="mi">1000</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> ms&quot;</span><span class="p">)</span>
+<span class="c1"># Result: tau_e = 2.8 ms (confirms the hypothesis)</span>
+</code></pre></div>
+
+<p>Re-tune PID for the new motor:
+- Reduce $K_p$ to 3.5 (restore 35°+ phase margin)
+- Reduce $K_d$ to 0.008 (less amplification of high-freq noise)
+- Keep $K_i$ at 25.0 (steady-state accuracy preserved)</p>
+<h3 id="43-root-cause-prevention">4.3 Root Cause Prevention</h3>
+<p><strong>The real fix:</strong> Don&rsquo;t use fixed PID gains for different motors. Either:
+1. Add motor identification to the commissioning procedure
+2. Use gain scheduling based on measured motor parameters
+3. Store motor-specific PID gains in EEPROM per motor slot</p>
+<hr />
+<h2 id="step-5-verify">Step 5 — Verify</h2>
+<p>After re-tuning:</p>
+<div class="highlight"><pre><span></span><code>Oscillation amplitude: 0.82 rad/s → 0.05 rad/s (noise floor)
+Phase margin: 8.7° → 38.2°
+Step response overshoot: 45% → 12%
+Settling time: ∞ (oscillating) → 120 ms
+</code></pre></div>
+
+<hr />
+<h2 id="lessons-learned">Lessons Learned</h2>
+<ol>
+<li><strong>Motor replacement changes the plant</strong> — never assume PID gains transfer between motors.</li>
+<li><strong>Oscillation frequency tells you where the instability is.</strong> 33 Hz → likely related to electrical time constant or sensor delay, not mechanical resonance (which would be &lt; 10 Hz).</li>
+<li><strong>Phase margin &lt; 15° is asking for trouble.</strong> Target 30–45° for industrial motors.</li>
+<li><strong>Limit cycles</strong> (constant-amplitude oscillation) indicate the system is right at the stability boundary. The nonlinearity (PWM saturation) prevents the oscillation from growing to infinity.</li>
+<li><strong>Always measure before tuning.</strong> The FFT told us the oscillation frequency in 1 second. Without it, we&rsquo;d be guessing.</li>
+</ol>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

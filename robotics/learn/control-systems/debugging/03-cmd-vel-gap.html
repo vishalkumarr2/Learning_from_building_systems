@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Session 3 — cmd_vel Gap: &quot;The Robot Drifts Between Waypoints&quot; - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="debug-session-3-cmd_vel-gap-the-robot-drifts-between-waypoints">Debug Session 3 — cmd_vel Gap: &ldquo;The Robot Drifts Between Waypoints&rdquo;</h1>
+<p><strong>Skills tested:</strong> Two-layer architecture timing, ROS2 real-time issues, Jetson↔MCU coordination
+<strong>Difficulty:</strong> Advanced
+<strong>Time estimate:</strong> 60–90 minutes</p>
+<hr />
+<h2 id="the-scenario">The Scenario</h2>
+<p><strong>Field report from OKS warehouse (automated site, no operator present):</strong></p>
+<blockquote>
+<p>Multiple robots intermittently drift 5–15 cm off the planned path during corridor transit. The drift happens mid-straight-line, not at corners. It corrects within 1–2 seconds but causes near-misses with rack posts. AMCL localization is accurate (checked). Path planner output is correct (checked). The issue happens more under heavy CPU load (many robots active, cameras streaming).</p>
+</blockquote>
+<p><strong>What you have:</strong>
+- Nav2 controller (Regulated Pure Pursuit) runs at 20 Hz
+- Motor bridge (SPI) runs at 1 kHz
+- Velocity smoother at 50 Hz
+- Jetson Xavier NX, 6 cores, running ROS2 + AMCL + 2 cameras + DDS</p>
+<hr />
+<h2 id="step-1-gather-timing-data">Step 1 — Gather Timing Data</h2>
+<h3 id="11-cmd_vel-publication-intervals">1.1 cmd_vel Publication Intervals</h3>
+<p>Log the time between consecutive cmd_vel publications:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">geometry_msgs.msg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Twist</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">CmdVelMonitor</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;cmdvel_monitor&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">last_time</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">intervals</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">create_subscription</span><span class="p">(</span><span class="n">Twist</span><span class="p">,</span> <span class="s1">&#39;/cmd_vel&#39;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">cb</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">cb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">):</span>
+        <span class="n">now</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_clock</span><span class="p">()</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">last_time</span><span class="p">:</span>
+            <span class="n">dt</span> <span class="o">=</span> <span class="p">(</span><span class="n">now</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">last_time</span><span class="p">)</span><span class="o">.</span><span class="n">nanoseconds</span> <span class="o">/</span> <span class="mf">1e6</span>  <span class="c1"># ms</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">intervals</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dt</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">dt</span> <span class="o">&gt;</span> <span class="mi">80</span><span class="p">:</span>  <span class="c1"># Flag gaps &gt; 80 ms (4× nominal)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;cmd_vel gap: </span><span class="si">{</span><span class="n">dt</span><span class="si">:</span><span class="s1">.1f</span><span class="si">}</span><span class="s1"> ms&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">last_time</span> <span class="o">=</span> <span class="n">now</span>
+</code></pre></div>
+
+<h3 id="12-results">1.2 Results</h3>
+<div class="highlight"><pre><span></span><code>cmd_vel interval statistics (5 minute window):
+  Mean:   50.2 ms  (expected: 50 ms = 20 Hz ✓)
+  Median: 49.8 ms
+  P95:    62.3 ms
+  P99:    98.7 ms   ← Almost 2× period
+  Max:    187.4 ms  ← Nearly 4× period!
+
+  Gaps &gt; 80 ms:  23 occurrences in 5 minutes
+  Gaps &gt; 100 ms: 8 occurrences
+  Gaps &gt; 150 ms: 2 occurrences
+</code></pre></div>
+
+<p><strong>Finding:</strong> The Nav2 controller is supposed to publish cmd_vel every 50 ms, but under load, it occasionally takes 100–187 ms. During these gaps, the motor bridge sends <strong>the last cmd_vel</strong> repeatedly.</p>
+<hr />
+<h2 id="step-2-why-gaps-cause-drift">Step 2 — Why Gaps Cause Drift</h2>
+<h3 id="21-the-straight-line-case">2.1 The Straight-Line Case</h3>
+<p>The robot is driving straight at $v = 0.5$ m/s, $\omega = 0$. A small perturbation makes the robot rotate slightly ($\omega_{actual} = 0.01$ rad/s). Normally, the Nav2 controller corrects this in 50 ms:</p>
+<div class="highlight"><pre><span></span><code>t=0:    cmd_vel: v=0.5, ω=0.0     Robot heading: 0.000 rad
+t=50ms: Nav2 sees slight drift     Heading drifted to: 0.0005 rad
+        cmd_vel: v=0.5, ω=-0.01   (corrective angular velocity)
+t=100ms: Corrected back            Heading: 0.0001 rad
+</code></pre></div>
+
+<p><strong>With a 150 ms gap:</strong></p>
+<div class="highlight"><pre><span></span><code>t=0:    cmd_vel: v=0.5, ω=0.0     Robot heading: 0.000 rad
+t=50ms: Nav2 SHOULD correct...     Heading: 0.0005 rad
+        But Nav2 is delayed!       Motor bridge sends ω=0.0 (stale)
+t=100ms: Still delayed!            Heading: 0.0015 rad (drift growing)
+t=150ms: Nav2 finally updates      Heading: 0.0025 rad = 0.14°
+        cmd_vel: v=0.5, ω=-0.05   (larger correction needed)
+t=200ms: Heading: 0.001 rad       Still correcting...
+</code></pre></div>
+
+<p><strong>Cross-track error from 150 ms gap:</strong></p>
+<p>$$e_{cross} = v \cdot \sin(\Delta\theta) \cdot t_{gap} \approx 0.5 \times 0.0025 \times 0.15 = 0.19 \text{ mm}$$</p>
+<p>Wait — that&rsquo;s tiny. So where does the 5–15 cm drift come from?</p>
+<h3 id="22-the-real-mechanism-compounding">2.2 The Real Mechanism: Compounding</h3>
+<p>One gap doesn&rsquo;t cause 15 cm drift. But <strong>multiple gaps in sequence</strong> do. And the real problem is more subtle:</p>
+<p><strong>The estimator is also affected.</strong> When the Nav2 controller&rsquo;s timer fires late:
+1. The TF tree (<code>odom</code> → <code>base_link</code>) is stale
+2. The controller computes the error using an old robot pose
+3. The correction is <strong>wrong</strong> — it corrects for where the robot WAS, not where it IS
+4. This wrong correction causes a temporary overshoot in the other direction
+5. The next cycle (also potentially late) compounds the error</p>
+<h3 id="23-dds-queue-saturation">2.3 DDS Queue Saturation</h3>
+<p>Under heavy CPU load, the ROS2 DDS middleware also suffers:</p>
+<div class="highlight"><pre><span></span><code>Camera 1 topics: 30 Hz × 2 MB = 60 MB/s
+Camera 2 topics: 30 Hz × 2 MB = 60 MB/s  
+LiDAR:           10 Hz × 100 KB = 1 MB/s
+AMCL particles:  5 Hz × 50 KB = 0.25 MB/s
+cmd_vel:         20 Hz × 48 bytes = ~1 KB/s  ← Tiny!
+
+Total DDS load: ~120 MB/s
+</code></pre></div>
+
+<p>The cmd_vel message is tiny but competes with camera topics for DDS thread time. When the DDS executor is busy serializing a 2 MB image, cmd_vel publication can be delayed by <strong>up to one image serialization time</strong> (~5–15 ms on Xavier NX).</p>
+<hr />
+<h2 id="step-3-diagnose-root-causes">Step 3 — Diagnose Root Causes</h2>
+<h3 id="31-cpu-profiling">3.1 CPU Profiling</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># On the Jetson</span>
+sudo<span class="w"> </span>perf<span class="w"> </span>top<span class="w"> </span>-p<span class="w"> </span><span class="k">$(</span>pgrep<span class="w"> </span>nav2_controller<span class="k">)</span>
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>  35.2%  librcl.so          [.] rmw_take
+  22.1%  nav2_controller    [.] RegulatedPurePursuit::computeVelocityCommands
+   8.3%  libfastrtps.so     [.] eprosima::fastrtps::rtps::MessageReceiver
+   7.1%  libtf2_ros.so      [.] tf2_ros::BufferCore::lookupTransform
+</code></pre></div>
+
+<p><strong>Finding:</strong> 35% of the controller&rsquo;s time is spent in <code>rmw_take</code> (receiving DDS messages). When other nodes flood DDS, the controller spends more time waiting for the executor.</p>
+<h3 id="32-timer-jitter-analysis">3.2 Timer Jitter Analysis</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Measure actual timer callback intervals</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">statistics</span>
+
+<span class="n">intervals</span> <span class="o">=</span> <span class="p">[</span><span class="mf">50.1</span><span class="p">,</span> <span class="mf">49.8</span><span class="p">,</span> <span class="mf">50.3</span><span class="p">,</span> <span class="mf">51.2</span><span class="p">,</span> <span class="mf">48.9</span><span class="p">,</span> <span class="mf">50.0</span><span class="p">,</span> <span class="mf">50.5</span><span class="p">,</span> 
+             <span class="mf">89.3</span><span class="p">,</span>  <span class="c1"># ← gap</span>
+             <span class="mf">10.7</span><span class="p">,</span>  <span class="c1"># ← catch-up (timer fires immediately after gap)</span>
+             <span class="mf">50.2</span><span class="p">,</span> <span class="mf">50.1</span><span class="p">,</span> <span class="mf">50.0</span><span class="p">,</span> <span class="mf">50.3</span><span class="p">,</span>
+             <span class="mf">102.5</span><span class="p">,</span> <span class="c1"># ← larger gap</span>
+             <span class="mf">47.5</span><span class="p">,</span>  <span class="c1"># ← partial catch-up</span>
+             <span class="mf">50.0</span><span class="p">]</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Jitter std: </span><span class="si">{</span><span class="n">statistics</span><span class="o">.</span><span class="n">stdev</span><span class="p">(</span><span class="n">intervals</span><span class="p">)</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> ms&quot;</span><span class="p">)</span>
+<span class="c1"># Result: 15.3 ms standard deviation (should be &lt; 2 ms for 20 Hz)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="step-4-fix-it-multiple-layers">Step 4 — Fix It (Multiple Layers)</h2>
+<h3 id="41-fix-1-real-time-priority-for-nav2-controller">4.1 Fix 1: Real-Time Priority for Nav2 Controller</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Set SCHED_FIFO priority for the controller process</span>
+sudo<span class="w"> </span>chrt<span class="w"> </span>-f<span class="w"> </span><span class="m">50</span><span class="w"> </span>ros2<span class="w"> </span>run<span class="w"> </span>nav2_controller<span class="w"> </span>controller_server
+</code></pre></div>
+
+<p>Or in the ROS2 launch file:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Use ROS2 real-time executor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.executors</span><span class="w"> </span><span class="kn">import</span> <span class="n">MultiThreadedExecutor</span>
+
+<span class="n">executor</span> <span class="o">=</span> <span class="n">MultiThreadedExecutor</span><span class="p">(</span><span class="n">num_threads</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="n">executor</span><span class="o">.</span><span class="n">add_node</span><span class="p">(</span><span class="n">controller_node</span><span class="p">)</span>
+<span class="c1"># Pin to isolated CPU cores</span>
+<span class="n">os</span><span class="o">.</span><span class="n">sched_setaffinity</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="p">{</span><span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">})</span>  <span class="c1"># Cores 4-5 for controller</span>
+</code></pre></div>
+
+<h3 id="42-fix-2-separate-dds-domain-for-control">4.2 Fix 2: Separate DDS Domain for Control</h3>
+<p>Isolate control topics from camera topics:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># nav2_controller params</span>
+<span class="nt">ros__parameters</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">use_sim_time</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">  </span><span class="c1"># Use intra-process communication for cmd_vel</span>
+<span class="w">  </span><span class="c1"># (bypasses DDS serialization entirely)</span>
+<span class="w">  </span><span class="nt">use_intra_process_comms</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</code></pre></div>
+
+<h3 id="43-fix-3-cmd_vel-staleness-detection-on-motor-bridge">4.3 Fix 3: cmd_vel Staleness Detection on Motor Bridge</h3>
+<p>The motor bridge should detect and handle stale commands:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MotorBridge</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;motor_bridge&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cmd_vel_age_threshold</span> <span class="o">=</span> <span class="mf">0.08</span>  <span class="c1"># 80 ms = 1.5× period</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">decel_rate</span> <span class="o">=</span> <span class="mf">0.5</span>  <span class="c1"># m/s² when cmd_vel is stale</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">spi_callback</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">age</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">get_clock</span><span class="p">()</span><span class="o">.</span><span class="n">now</span><span class="p">()</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">cmd_vel_stamp</span><span class="p">)</span><span class="o">.</span><span class="n">nanoseconds</span> <span class="o">/</span> <span class="mf">1e9</span>
+
+        <span class="k">if</span> <span class="n">age</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">cmd_vel_age_threshold</span><span class="p">:</span>
+            <span class="c1"># STALE: decelerate smoothly instead of holding</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;cmd_vel stale: </span><span class="si">{</span><span class="n">age</span><span class="o">*</span><span class="mi">1000</span><span class="si">:</span><span class="s1">.0f</span><span class="si">}</span><span class="s1"> ms&#39;</span><span class="p">)</span>
+
+            <span class="c1"># Reduce speed toward zero</span>
+            <span class="n">v</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_v</span>
+            <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mf">0.01</span><span class="p">:</span>
+                <span class="n">sign</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="k">if</span> <span class="n">v</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="o">-</span><span class="mf">1.0</span>
+                <span class="n">v</span> <span class="o">-=</span> <span class="n">sign</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">decel_rate</span> <span class="o">*</span> <span class="mf">0.001</span>  <span class="c1"># 1 ms step</span>
+                <span class="n">v</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span> <span class="k">if</span> <span class="n">sign</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="nb">min</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+
+            <span class="c1"># Hold angular velocity at zero (don&#39;t turn while stale)</span>
+            <span class="n">omega</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">v</span><span class="p">,</span> <span class="n">omega</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">last_cmd_vel</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">send_to_mcu</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">omega</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="44-fix-4-velocity-smoother-with-gap-awareness">4.4 Fix 4: Velocity Smoother with Gap Awareness</h3>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">GapAwareVelocitySmoother</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">max_accel</span><span class="p">,</span> <span class="n">max_decel</span><span class="p">,</span> <span class="n">nominal_dt</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_accel</span> <span class="o">=</span> <span class="n">max_accel</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_decel</span> <span class="o">=</span> <span class="n">max_decel</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">nominal_dt</span> <span class="o">=</span> <span class="n">nominal_dt</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_v</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_omega</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">last_update_time</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">smooth</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">target_v</span><span class="p">,</span> <span class="n">target_omega</span><span class="p">,</span> <span class="n">current_time</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">last_update_time</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">actual_dt</span> <span class="o">=</span> <span class="n">current_time</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">last_update_time</span>
+
+            <span class="c1"># If actual_dt &gt; 2× nominal, we had a gap</span>
+            <span class="k">if</span> <span class="n">actual_dt</span> <span class="o">&gt;</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">nominal_dt</span><span class="p">:</span>
+                <span class="c1"># Use nominal_dt for smoothing (don&#39;t allow huge jumps)</span>
+                <span class="n">dt</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">nominal_dt</span>
+                <span class="c1"># Log the gap</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Gap detected: </span><span class="si">{</span><span class="n">actual_dt</span><span class="o">*</span><span class="mi">1000</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2"> ms&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">dt</span> <span class="o">=</span> <span class="n">actual_dt</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">dt</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">nominal_dt</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">last_update_time</span> <span class="o">=</span> <span class="n">current_time</span>
+
+        <span class="c1"># Standard acceleration limiting</span>
+        <span class="n">dv</span> <span class="o">=</span> <span class="n">target_v</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_v</span>
+        <span class="n">max_dv</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">max_accel</span> <span class="k">if</span> <span class="n">dv</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_decel</span><span class="p">)</span> <span class="o">*</span> <span class="n">dt</span>
+        <span class="n">dv</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="n">dv</span><span class="p">,</span> <span class="n">max_dv</span><span class="p">),</span> <span class="o">-</span><span class="n">max_dv</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_v</span> <span class="o">+=</span> <span class="n">dv</span>
+
+        <span class="n">dw</span> <span class="o">=</span> <span class="n">target_omega</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_omega</span>
+        <span class="n">max_dw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_accel</span> <span class="o">*</span> <span class="n">dt</span>
+        <span class="n">dw</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="n">dw</span><span class="p">,</span> <span class="n">max_dw</span><span class="p">),</span> <span class="o">-</span><span class="n">max_dw</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">current_omega</span> <span class="o">+=</span> <span class="n">dw</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_v</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_omega</span>
+</code></pre></div>
+
+<hr />
+<h2 id="step-5-verify">Step 5 — Verify</h2>
+<h3 id="51-before-fixes">5.1 Before Fixes</h3>
+<div class="highlight"><pre><span></span><code>cmd_vel gaps &gt; 80 ms:  23 per 5 minutes
+Max path deviation:     15.2 cm
+Near-misses per hour:   3.1
+</code></pre></div>
+
+<h3 id="52-after-fixes-all-four-layers">5.2 After Fixes (All Four Layers)</h3>
+<div class="highlight"><pre><span></span><code>cmd_vel gaps &gt; 80 ms:  2 per 5 minutes (RT priority)
+Max path deviation:     2.1 cm (gap detection + decel)
+Near-misses per hour:   0.0
+</code></pre></div>
+
+<hr />
+<h2 id="step-6-the-systemic-lesson">Step 6 — The Systemic Lesson</h2>
+<h3 id="61-the-real-time-budget">6.1 The Real-Time Budget</h3>
+<p>On a shared Jetson, you have a <strong>timing budget</strong> just like a financial budget:</p>
+<div class="highlight"><pre><span></span><code>Jetson Xavier NX: 6 cores, 8 GB RAM
+
+Core allocation:
+  Cores 0-1: Linux kernel, DDS, cameras, misc
+  Cores 2-3: AMCL, costmap, planner (can be slow)
+  Core  4:   Nav2 controller (20 Hz, SCHED_FIFO)
+  Core  5:   Motor bridge (1 kHz, SCHED_FIFO)
+
+CPU budget at 20 Hz (50 ms per cycle):
+  TF lookup:              2 ms
+  Costmap query:          5 ms
+  RPP computation:        3 ms
+  DDS publish:            1 ms
+  ─────────────────────────────
+  Total:                 11 ms (22% utilization, safe)
+  Headroom:              39 ms (78% margin for jitter)
+</code></pre></div>
+
+<h3 id="62-why-this-bug-is-hard-to-find">6.2 Why This Bug Is Hard to Find</h3>
+<ol>
+<li><strong>Intermittent:</strong> Only happens under load. Works perfectly in lab testing.</li>
+<li><strong>Small individually:</strong> Each gap causes &lt; 1 mm error. Only compounding makes it visible.</li>
+<li><strong>Correct at every layer:</strong> Nav2&rsquo;s algorithm is correct. Motor bridge is correct. SPI is correct. The bug is in the <strong>timing between layers</strong>.</li>
+<li><strong>Not a &ldquo;bug&rdquo; in code:</strong> The code is correct. The deployment configuration (CPU affinity, priorities, DDS tuning) is the issue.</li>
+</ol>
+<hr />
+<h2 id="checkpoint-questions">Checkpoint Questions</h2>
+<ol>
+<li>The Nav2 controller runs at 20 Hz. A cmd_vel gap of 150 ms is how many missed cycles?</li>
+<li>Why does DDS queue saturation affect cmd_vel (48 bytes) when camera topics (2 MB) are the bottleneck?</li>
+<li>The motor bridge detects stale cmd_vel and decelerates. Why decelerate instead of holding the last velocity?</li>
+<li><code>SCHED_FIFO</code> with priority 50 is used for the controller. What happens to other ROS2 nodes when the controller needs CPU?</li>
+<li>Why is this bug almost impossible to reproduce in simulation?</li>
+<li>The velocity smoother uses <code>nominal_dt</code> during gaps instead of <code>actual_dt</code>. Why? What would happen with <code>actual_dt</code>?</li>
+<li>Core pinning (CPU affinity) is applied. What happens if the Jetson has only 4 cores and you try to pin 3 real-time processes to dedicated cores?</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ul>
+<li><strong>cmd_vel gaps</strong> are the most common source of path tracking drift in OKS</li>
+<li><strong>Root cause:</strong> Linux scheduler jitter under CPU load — not a control algorithm bug</li>
+<li><strong>Defense in depth:</strong> RT priority + CPU pinning + DDS isolation + staleness detection + graceful deceleration</li>
+<li><strong>Timing between layers</strong> matters as much as the algorithms in each layer</li>
+<li><strong>Lab testing rarely catches this</strong> because lab conditions have no CPU contention</li>
+<li><strong>Monitor cmd_vel intervals in production</strong> — it&rsquo;s the canary for system health</li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

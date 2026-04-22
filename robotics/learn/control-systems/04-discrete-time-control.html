@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04 — Discrete-Time Control - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="04-discrete-time-control">04 — Discrete-Time Control</h1>
+<h3 id="because-microcontrollers-dont-do-calculus-they-do-loops">Because microcontrollers don&rsquo;t do calculus — they do loops</h3>
+<p><strong>Prerequisite:</strong> <code>03-pid-controller.md</code> (continuous PID, tuning)
+<strong>Unlocks:</strong> <code>05-mcu-motor-control.md</code> (hardware that executes the discrete PID)</p>
+<hr />
+<h2 id="why-should-i-care-oks-context">Why Should I Care? (OKS Context)</h2>
+<p>The PID equations in Lesson 03 are <em>continuous-time</em> — they assume infinitely fast computation with infinitely precise math. Real controllers run on a microcontroller that:</p>
+<ol>
+<li>Samples the encoder at <strong>discrete intervals</strong> (every 100 µs = 10 kHz)</li>
+<li>Computes using <strong>finite-precision arithmetic</strong> (32-bit float or fixed-point)</li>
+<li>Updates the PWM at the <strong>same discrete rate</strong></li>
+</ol>
+<p>The gap between continuous theory and discrete practice causes real bugs:
+- <strong>Aliasing:</strong> Sample too slowly and fast disturbances appear as slow ones
+- <strong>Quantization:</strong> Encoder resolution limits the minimum detectable speed
+- <strong>Integration method:</strong> Forward Euler vs. Tustin bilinear transform changes the stability boundary</p>
+<p><strong>OKS example:</strong> The STM32 motor control runs at 10 kHz. At this rate, the electrical time constant (0.5 ms = 2 kHz bandwidth) is adequately sampled. But if someone reduces the rate to 1 kHz (100 µs → 1 ms) &ldquo;to save CPU,&rdquo; the current loop becomes unstable because the electrical dynamics aren&rsquo;t sampled fast enough.</p>
+<hr />
+<h1 id="part-1-sampling-and-aliasing">PART 1 — SAMPLING AND ALIASING</h1>
+<h2 id="11-the-sampling-theorem-shannonnyquist">1.1 The Sampling Theorem (Shannon/Nyquist)</h2>
+<p>To faithfully capture a signal of frequency $f$, you must sample at rate $f_s \geq 2f$.</p>
+<p><strong>For control systems, the rule is stricter:</strong></p>
+<p>$$f_s \geq 10 \times f_{BW}$$</p>
+<p>where $f_{BW}$ is the closed-loop bandwidth. This is because:
+- Shannon says 2× is the <em>minimum</em> to avoid aliasing
+- But a controller needs to <em>react</em> to the signal, not just record it
+- 10× gives enough samples per cycle for the controller to effectively act</p>
+<p><strong>OKS motor control sampling rates:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Loop</th>
+<th>Bandwidth</th>
+<th>Min sample rate (10×)</th>
+<th>Actual OKS rate</th>
+<th>Margin</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Current</td>
+<td>~2 kHz</td>
+<td>20 kHz</td>
+<td>20 kHz</td>
+<td>1× (tight!)</td>
+</tr>
+<tr>
+<td>Speed</td>
+<td>~50 Hz</td>
+<td>500 Hz</td>
+<td>10 kHz</td>
+<td>20× (comfortable)</td>
+</tr>
+<tr>
+<td>Position</td>
+<td>~5 Hz</td>
+<td>50 Hz</td>
+<td>1 kHz</td>
+<td>20× (comfortable)</td>
+</tr>
+<tr>
+<td>Nav2 cmd_vel</td>
+<td>~2 Hz</td>
+<td>20 Hz</td>
+<td>50 Hz</td>
+<td>2.5× (adequate)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="12-what-aliasing-looks-like-in-control">1.2 What Aliasing Looks Like in Control</h2>
+<p>If you sample a 300 Hz vibration at 500 Hz, it appears as a 200 Hz signal (500 - 300 = 200). The controller &ldquo;sees&rdquo; a phantom 200 Hz disturbance and tries to reject it — making things worse.</p>
+<p><strong>OKS example:</strong> Motor cogging at 200 Hz + speed loop at 10 kHz = no problem (10000 &gt;&gt; 2×200). But if the SPI bus delays speed feedback to an effective 300 Hz rate, the cogging can alias into the controller&rsquo;s useful bandwidth.</p>
+<p><strong>Solution:</strong> Anti-alias filter before sampling. A simple first-order low-pass filter:</p>
+<p>$$H(s) = \frac{1}{\tau_f s + 1}, \quad \tau_f = \frac{1}{2\pi f_{cutoff}}$$</p>
+<p>Set $f_{cutoff} = f_s / 4$ to prevent aliasing while preserving useful bandwidth.</p>
+<hr />
+<h1 id="part-2-discretization-methods">PART 2 — DISCRETIZATION METHODS</h1>
+<h2 id="21-the-problem">2.1 The Problem</h2>
+<p>The continuous PID controller:</p>
+<p>$$C(s) = K_p + \frac{K_i}{s} + K_d s$$</p>
+<p>Must be converted to a discrete-time difference equation that a microcontroller can execute every $T_s$ seconds.</p>
+<p>The question: <strong>How do you approximate the continuous integral and derivative?</strong></p>
+<h2 id="22-forward-euler-simplest-least-accurate">2.2 Forward Euler (Simplest, Least Accurate)</h2>
+<p>Replace: $s \approx \frac{z - 1}{T_s}$</p>
+<p><strong>Integral:</strong></p>
+<p>$$\int e \,dt \approx \sum_{k=0}^{n} e[k] \cdot T_s$$</p>
+<p>or equivalently: $I[n] = I[n-1] + T_s \cdot e[n]$</p>
+<p><strong>Derivative:</strong></p>
+<p>$$\frac{de}{dt} \approx \frac{e[n] - e[n-1]}{T_s}$$</p>
+<p><strong>Full discrete PID (Forward Euler):</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Positional form</span>
+<span class="kt">float</span><span class="w"> </span><span class="nf">pid_compute</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">error</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">dt</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">integral</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">dt</span><span class="p">;</span><span class="w">                          </span><span class="c1">// Forward Euler integration</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">derivative</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">error</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">prev_error</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">dt</span><span class="p">;</span><span class="w">    </span><span class="c1">// Forward Euler derivative</span>
+<span class="w">    </span><span class="n">prev_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">error</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">Kp</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">Ki</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">integral</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">Kd</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">derivative</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Pros:</strong> Dead simple, one multiply-add per term.
+<strong>Cons:</strong> Can be unstable for fast dynamics. The stability region of Forward Euler is a circle of radius 1 centered at (-1, 0) in the z-plane. If the motor&rsquo;s poles lie outside this circle at your sample rate, the discrete controller is unstable even though the continuous one is stable.</p>
+<h2 id="23-backward-euler-more-stable">2.3 Backward Euler (More Stable)</h2>
+<p>Replace: $s \approx \frac{z - 1}{T_s \cdot z}$</p>
+<p><strong>Integral:</strong></p>
+<p>$$I[n] = I[n-1] + T_s \cdot e[n]$$</p>
+<p>(Same equation, but it&rsquo;s derived differently and has better stability properties.)</p>
+<p><strong>Derivative:</strong></p>
+<p>$$D[n] = \frac{e[n] - e[n-1]}{T_s}$$</p>
+<p>Backward Euler is <strong>unconditionally stable</strong> for stable continuous systems — it never introduces instability through discretization. But it&rsquo;s more damped than the continuous system (slightly sluggish).</p>
+<h2 id="24-bilinear-transform-tustins-method-best-for-most-cases">2.4 Bilinear Transform / Tustin&rsquo;s Method (Best for Most Cases)</h2>
+<p>Replace: $s \approx \frac{2}{T_s} \cdot \frac{z - 1}{z + 1}$</p>
+<p>This maps the left half of the s-plane exactly to the interior of the unit circle in the z-plane. <strong>Stability is preserved perfectly.</strong></p>
+<p><strong>Tustin integral:</strong></p>
+<p>$$I[n] = I[n-1] + \frac{T_s}{2}(e[n] + e[n-1])$$</p>
+<p>This is the <strong>trapezoidal rule</strong> — average of current and previous error × time step. Much more accurate than Forward Euler for the same sample rate.</p>
+<p><strong>Tustin derivative (with filter):</strong></p>
+<p>$$D[n] = \frac{2K_d}{2\tau_f + T_s} (e[n] - e[n-1]) + \frac{2\tau_f - T_s}{2\tau_f + T_s} D[n-1]$$</p>
+<p>where $\tau_f = K_d / (N \cdot K_p)$ is the derivative filter time constant.</p>
+<p><strong>Full Tustin PID:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="kt">float</span><span class="w"> </span><span class="nf">pid_compute_tustin</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Proportional</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">P</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Kp</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">error</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Integral (trapezoidal)</span>
+<span class="w">    </span><span class="n">integral</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mf">0.5f</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">Ki</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">Ts</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">error</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">prev_error</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Derivative (filtered, Tustin)</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">c1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">2.0f</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">Kd</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="p">(</span><span class="mf">2.0f</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">tau_f</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">Ts</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">c2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="mf">2.0f</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">tau_f</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">Ts</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="p">(</span><span class="mf">2.0f</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">tau_f</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">Ts</span><span class="p">);</span>
+<span class="w">    </span><span class="n">deriv</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">c1</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">error</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">prev_error</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">c2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">prev_deriv</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">prev_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">error</span><span class="p">;</span>
+<span class="w">    </span><span class="n">prev_deriv</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">deriv</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">P</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">integral</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">deriv</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>OKS firmware uses Tustin for the speed loop</strong> because it&rsquo;s the best accuracy-to-cost ratio. The current loop uses Forward Euler because at 20 kHz, even Forward Euler is accurate enough (the electrical time constant is only ~1 ms = 20 samples).</p>
+<h2 id="25-comparison-of-methods">2.5 Comparison of Methods</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Stability</th>
+<th>Accuracy</th>
+<th>Computation</th>
+<th>When to use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Forward Euler</td>
+<td>Can destabilize</td>
+<td>Low</td>
+<td>1 multiply + 1 add</td>
+<td>Very fast sample rate (&gt;20× bandwidth)</td>
+</tr>
+<tr>
+<td>Backward Euler</td>
+<td>Always stable</td>
+<td>Low-Medium</td>
+<td>1 multiply + 1 add</td>
+<td>Safety-critical, slow sample rate</td>
+</tr>
+<tr>
+<td>Tustin (Bilinear)</td>
+<td>Preserves stability</td>
+<td>High</td>
+<td>2 multiplies + 2 adds</td>
+<td>Default choice for motor control</td>
+</tr>
+<tr>
+<td>ZOH (exact)</td>
+<td>Preserves stability</td>
+<td>Exact</td>
+<td>Matrix exponential</td>
+<td>Simulation only (too expensive for MCU)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="part-3-velocity-form-pid">PART 3 — VELOCITY FORM PID</h1>
+<h2 id="31-positional-vs-velocity-form">3.1 Positional vs Velocity Form</h2>
+<p>The <strong>positional form</strong> computes the absolute output:</p>
+<p>$$u[n] = K_p e[n] + K_i \sum e[k] T_s + K_d \frac{e[n] - e[n-1]}{T_s}$$</p>
+<p>The <strong>velocity form</strong> computes the <em>change</em> in output:</p>
+<p>$$\Delta u[n] = u[n] - u[n-1] = K_p(e[n] - e[n-1]) + K_i T_s \cdot e[n] + K_d \frac{e[n] - 2e[n-1] + e[n-2]}{T_s}$$</p>
+<p>Then: $u[n] = u[n-1] + \Delta u[n]$</p>
+<h2 id="32-why-velocity-form-is-better-for-embedded">3.2 Why Velocity Form Is Better for Embedded</h2>
+<ol>
+<li><strong>No integral windup by construction:</strong> The integral is implicit in $u[n-1]$. Clamping $u[n]$ automatically limits the integral.</li>
+<li><strong>Bumpless transfer:</strong> Switching to manual mode just means stopping the $\Delta u$ updates. No accumulated integral to manage.</li>
+<li><strong>Simpler anti-windup:</strong> Just clamp $u[n]$ to $[u_{min}, u_{max}]$ after each step.</li>
+</ol>
+<p><strong>OKS firmware velocity-form PID:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">Kp</span><span class="p">,</span><span class="w"> </span><span class="n">Ki</span><span class="p">,</span><span class="w"> </span><span class="n">Kd</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">Ts</span><span class="p">;</span><span class="w">              </span><span class="c1">// Sample period</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">prev_error</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">prev_prev_error</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">output</span><span class="p">;</span><span class="w">          </span><span class="c1">// Accumulated output</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">output_min</span><span class="p">,</span><span class="w"> </span><span class="n">output_max</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="n">PID_VelocityForm</span><span class="p">;</span>
+
+<span class="kt">float</span><span class="w"> </span><span class="nf">pid_velocity_compute</span><span class="p">(</span><span class="n">PID_VelocityForm</span><span class="w"> </span><span class="o">*</span><span class="n">pid</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">delta_u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kp</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">error</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="p">)</span>
+<span class="w">                  </span><span class="o">+</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ki</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ts</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">error</span>
+<span class="w">                  </span><span class="o">+</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kd</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ts</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">error</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mf">2.0f</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_prev_error</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">delta_u</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Clamp (inherent anti-windup)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output_max</span><span class="p">)</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output_max</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output_min</span><span class="p">)</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output_min</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_prev_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">error</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-4-quantization-and-resolution">PART 4 — QUANTIZATION AND RESOLUTION</h1>
+<h2 id="41-encoder-quantization">4.1 Encoder Quantization</h2>
+<p>A quadrature encoder with $N$ counts per revolution gives:</p>
+<p>$$\Delta\theta_{min} = \frac{2\pi}{4N} \text{ rad (with 4× decoding)}$$</p>
+<p><strong>Speed from encoder</strong> at sample rate $f_s$:</p>
+<p>$$\omega[n] = \frac{\theta[n] - \theta[n-1]}{T_s} = \frac{\Delta\theta \cdot \text{count_diff}}{T_s}$$</p>
+<p><strong>Minimum detectable speed:</strong></p>
+<p>$$\omega_{min} = \frac{2\pi}{4N \cdot T_s}$$</p>
+<p><strong>OKS encoder:</strong> $N = 512$ counts/rev, 4× decoding = 2048 edges/rev, $f_s = 10$ kHz:</p>
+<p>$$\omega_{min} = \frac{2\pi}{2048 \times 0.0001} = 30.7 \text{ rad/s} = 293 \text{ RPM}$$</p>
+<p>That&rsquo;s a terrible resolution for low-speed control! At the wheel (after 50:1 gearbox), the minimum detectable speed is 30.7/50 = 0.61 rad/s. For the OKS wheel (radius ~0.065 m), that&rsquo;s 0.04 m/s.</p>
+<h2 id="42-improving-speed-resolution">4.2 Improving Speed Resolution</h2>
+<h3 id="method-1-reduce-sample-rate-for-speed-calculation">Method 1: Reduce sample rate for speed calculation</h3>
+<p>Instead of computing speed every 100 µs (10 kHz), compute it every 1 ms (1 kHz) but still run the PID at 10 kHz with the most recent speed estimate.</p>
+<p>$$\omega_{min} \text{@ 1 kHz} = \frac{2\pi}{2048 \times 0.001} = 3.07 \text{ rad/s}$$</p>
+<p>10× better resolution, but 10× more delay in the speed estimate.</p>
+<h3 id="method-2-moving-average-filter">Method 2: Moving average filter</h3>
+<p>Average the count differences over $M$ samples:</p>
+<p>$$\omega[n] = \frac{1}{M \cdot T_s} \sum_{k=0}^{M-1} (\theta[n-k] - \theta[n-k-1])$$</p>
+<p>Equivalently: $\omega[n] = \frac{\theta[n] - \theta[n-M]}{M \cdot T_s}$</p>
+<p>This is a FIR low-pass filter. $M = 10$ gives 10× better resolution with only $M \cdot T_s / 2 = 0.5$ ms group delay.</p>
+<h3 id="method-3-period-measurement">Method 3: Period measurement</h3>
+<p>Instead of counting edges per time, measure time per edge. At low speed, this gives much better resolution. At high speed, revert to counting.</p>
+<p><strong>OKS firmware uses a hybrid:</strong> Edge counting at high speed (&gt;100 RPM) and period measurement at low speed (&lt;100 RPM), with crossover blending.</p>
+<h2 id="43-adc-quantization-current-sensing">4.3 ADC Quantization (Current Sensing)</h2>
+<p>The current sensor&rsquo;s ADC has $n$-bit resolution:</p>
+<p>$$\Delta I_{min} = \frac{I_{range}}{2^n}$$</p>
+<p>For OKS: 12-bit ADC, ±10A range → $\Delta I = 20/4096 = 4.9$ mA per LSB. This is adequate for current control.</p>
+<hr />
+<h1 id="part-5-sample-rate-selection-guide">PART 5 — SAMPLE RATE SELECTION GUIDE</h1>
+<h2 id="51-the-trade-off">5.1 The Trade-off</h2>
+<table>
+<thead>
+<tr>
+<th>Higher sample rate</th>
+<th>Lower sample rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✅ Better accuracy</td>
+<td>✅ Less CPU load</td>
+</tr>
+<tr>
+<td>✅ More stability margin</td>
+<td>✅ More time for computation</td>
+</tr>
+<tr>
+<td>✅ Less aliasing</td>
+<td>✅ Better encoder resolution</td>
+</tr>
+<tr>
+<td>❌ More CPU load</td>
+<td>❌ Risk of aliasing</td>
+</tr>
+<tr>
+<td>❌ Worse encoder resolution (count diff = 0 or 1)</td>
+<td>❌ Risk of instability</td>
+</tr>
+</tbody>
+</table>
+<h2 id="52-decision-framework">5.2 Decision Framework</h2>
+<div class="highlight"><pre><span></span><code>1. Determine the fastest dynamic you need to control
+   → OKS: electrical time constant = 0.5 ms → f_elec = 2 kHz
+
+2. Multiply by 10-20× for the minimum sample rate
+   → f_s_min = 20 kHz for current loop
+   → f_s_min = 500 Hz for speed loop (bandwidth ~50 Hz)
+
+3. Check encoder resolution at that rate
+   → 20 kHz with 2048 CPR = ω_min = 61 rad/s (too coarse for speed)
+   → Use period measurement or lower-rate speed computation
+
+4. Check CPU budget
+   → STM32F4 @ 168 MHz: ~8400 cycles per 20 kHz interrupt
+   → PID computation: ~50-100 cycles
+   → Plenty of headroom
+
+5. Choose the highest rate your CPU can sustain
+   → Current loop: 20 kHz
+   → Speed loop: 10 kHz (or 1 kHz speed estimate feeding 10 kHz PID)
+</code></pre></div>
+
+<hr />
+<h2 id="checkpoint-questions">Checkpoint Questions</h2>
+<ol>
+<li>Why is the control engineering rule $f_s \geq 10 \times f_{BW}$ stricter than Shannon&rsquo;s $f_s \geq 2f$?</li>
+<li>Forward Euler discretization of the integral term gives <code>I[n] = I[n-1] + Ts * e[n]</code>. Write the Tustin version.</li>
+<li>A motor&rsquo;s electrical time constant is 0.5 ms. What is the minimum acceptable sample rate for the current loop?</li>
+<li>Explain why the velocity form of PID has inherent anti-windup.</li>
+<li>An encoder has 1024 CPR with 4× decoding. At 10 kHz sampling, what is the minimum detectable speed in RPM?</li>
+<li>Why would reducing the PID loop from 10 kHz to 1 kHz improve encoder-based speed resolution?</li>
+<li>The current loop is stable at 20 kHz but oscillates when reduced to 5 kHz. Where in the z-plane did the poles go?</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ul>
+<li><strong>Discretization method matters:</strong> Tustin (bilinear) preserves stability; Forward Euler can destabilize</li>
+<li><strong>Velocity form PID</strong> is preferred in embedded systems for inherent anti-windup and bumpless transfer</li>
+<li><strong>Sample rate must be ≥ 10× bandwidth</strong> — not just 2× (Shannon is for recording, not controlling)</li>
+<li><strong>Encoder quantization</strong> limits low-speed resolution; use period measurement or averaging to compensate</li>
+<li><strong>The choice of sample rate is a 4-way trade-off:</strong> accuracy vs CPU vs encoder resolution vs computation time</li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>09 — Two-Layer Architecture: MCU ↔ Jetson - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="09-two-layer-architecture-mcu-jetson">09 — Two-Layer Architecture: MCU ↔ Jetson</h1>
+<h3 id="the-spi-bus-between-real-time-and-best-effort-where-timing-contracts-live">The SPI bus between real-time and best-effort — where timing contracts live</h3>
+<p><strong>Prerequisite:</strong> <code>07-cascaded-loops.md</code> (MCU cascade), <code>08-trajectory-tracking.md</code> (Jetson path following)
+<strong>Unlocks:</strong> <code>10-advanced-control.md</code> (when this architecture isn&rsquo;t enough)</p>
+<hr />
+<h2 id="why-should-i-care-oks-context">Why Should I Care? (OKS Context)</h2>
+<p>The OKS robot runs <strong>two computers</strong> that must cooperate in real-time:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>STM32 MCU</th>
+<th>Jetson (Linux + ROS2)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Clock</strong></td>
+<td>168 MHz bare-metal / RTOS</td>
+<td>1.5 GHz Linux + preempt_RT</td>
+</tr>
+<tr>
+<td><strong>Latency</strong></td>
+<td>Deterministic (µs)</td>
+<td>Best-effort (ms)</td>
+</tr>
+<tr>
+<td><strong>Role</strong></td>
+<td>Motor control, safety</td>
+<td>Navigation, planning, perception</td>
+</tr>
+<tr>
+<td><strong>Rate</strong></td>
+<td>10–20 kHz ISRs</td>
+<td>20–50 Hz ROS nodes</td>
+</tr>
+<tr>
+<td><strong>Failure mode</strong></td>
+<td>Watchdog reset</td>
+<td>Process crash, OOM kill</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The SPI bus is the handshake</strong> between these two worlds. When the handshake breaks, the robot drifts, stops, or (worst case) drives into a rack.</p>
+<p><strong>Real OKS failures from architecture issues:</strong>
+- Jetson GC pause (50 ms) → no SPI update → MCU watchdog → emergency stop (#99589)
+- SPI frame corruption → MCU interprets noise as speed command → motor spike (#98367)
+- Clock drift between MCU and Jetson → cmd_vel timestamps misaligned → estimator rejects data</p>
+<hr />
+<h1 id="part-1-the-communication-protocol">PART 1 — THE COMMUNICATION PROTOCOL</h1>
+<h2 id="11-spi-bus-overview">1.1 SPI Bus Overview</h2>
+<div class="highlight"><pre><span></span><code>Jetson (SPI Master)              STM32 (SPI Slave)
+┌──────────────┐                 ┌──────────────┐
+│              │────── SCLK ────→│              │
+│              │────── MOSI ────→│    SPI DMA   │
+│              │←───── MISO ─────│              │
+│              │────── CS   ────→│              │
+│   SPI @      │                 │   SPI @      │
+│   2 MHz      │                 │   2 MHz      │
+└──────────────┘                 └──────────────┘
+</code></pre></div>
+
+<p><strong>OKS SPI parameters:</strong>
+- Clock: 2 MHz (500 ns per bit)
+- Frame size: 64 bytes (32 bytes each direction)
+- Transfer rate: 1 kHz (every 1 ms)
+- Protocol: nanopb (protocol buffers for embedded)</p>
+<h2 id="12-message-format">1.2 Message Format</h2>
+<p><strong>Jetson → MCU (command frame):</strong></p>
+<div class="highlight"><pre><span></span><code><span class="kd">message</span><span class="w"> </span><span class="nc">MotorCommand</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint32</span><span class="w"> </span><span class="na">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">    </span><span class="c1">// Jetson&#39;s microsecond clock</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">left_speed_cmd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w">   </span><span class="c1">// rad/s, at wheel</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">right_speed_cmd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span><span class="w">  </span><span class="c1">// rad/s, at wheel</span>
+<span class="w">    </span><span class="n">uint8</span><span class="w"> </span><span class="na">control_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span><span class="w">     </span><span class="c1">// 0=idle, 1=speed, 2=position, 3=raw_duty</span>
+<span class="w">    </span><span class="n">uint8</span><span class="w"> </span><span class="na">enable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span><span class="w">           </span><span class="c1">// 0=disabled, 1=enabled</span>
+<span class="w">    </span><span class="n">uint16</span><span class="w"> </span><span class="na">crc16</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">6</span><span class="p">;</span><span class="w">           </span><span class="c1">// CRC-16/CCITT</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>MCU → Jetson (feedback frame):</strong></p>
+<div class="highlight"><pre><span></span><code><span class="kd">message</span><span class="w"> </span><span class="nc">MotorFeedback</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint32</span><span class="w"> </span><span class="na">timestamp_us</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">     </span><span class="c1">// MCU&#39;s microsecond clock</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">left_speed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w">        </span><span class="c1">// rad/s, measured</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">right_speed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span><span class="w">       </span><span class="c1">// rad/s, measured</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">left_current</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span><span class="w">      </span><span class="c1">// Amps, measured</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="na">right_current</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span><span class="w">     </span><span class="c1">// Amps, measured</span>
+<span class="w">    </span><span class="kt">int32</span><span class="w"> </span><span class="na">left_encoder</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">6</span><span class="p">;</span><span class="w">      </span><span class="c1">// Cumulative encoder count</span>
+<span class="w">    </span><span class="kt">int32</span><span class="w"> </span><span class="na">right_encoder</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">7</span><span class="p">;</span><span class="w">     </span><span class="c1">// Cumulative encoder count</span>
+<span class="w">    </span><span class="n">uint8</span><span class="w"> </span><span class="na">fault_flags</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8</span><span class="p">;</span><span class="w">       </span><span class="c1">// Overcurrent, overtemp, encoder error</span>
+<span class="w">    </span><span class="n">uint16</span><span class="w"> </span><span class="na">crc16</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">9</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="13-crc-validation">1.3 CRC Validation</h2>
+<p>Every frame includes a CRC-16 checksum. If the CRC doesn&rsquo;t match, the MCU <strong>ignores the command</strong> and holds the last valid command (for up to the watchdog timeout).</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// CRC-16/CCITT (polynomial 0x1021)</span>
+<span class="kt">uint16_t</span><span class="w"> </span><span class="nf">crc16_ccitt</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="o">*</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">len</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">crc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0xFFFF</span><span class="p">;</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">len</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">crc</span><span class="w"> </span><span class="o">^=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint16_t</span><span class="p">)</span><span class="n">data</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">;</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">8</span><span class="p">;</span><span class="w"> </span><span class="n">j</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">crc</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="mh">0x8000</span><span class="p">)</span>
+<span class="w">                </span><span class="n">crc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">crc</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">^</span><span class="w"> </span><span class="mh">0x1021</span><span class="p">;</span>
+<span class="w">            </span><span class="k">else</span>
+<span class="w">                </span><span class="n">crc</span><span class="w"> </span><span class="o">&lt;&lt;=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">crc</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>OKS failure rate:</strong> Approximately 1 in 10,000 SPI frames is corrupted (0.01%), usually from EMI near the motor drivers. The CRC catches all of these.</p>
+<hr />
+<h1 id="part-2-timing-contracts">PART 2 — TIMING CONTRACTS</h1>
+<h2 id="21-the-timing-budget">2.1 The Timing Budget</h2>
+<div class="highlight"><pre><span></span><code>                     1 ms SPI cycle
+        ├──────────────────────────────────┤
+
+Jetson: │ Prepare cmd ─→ SPI write ─→ Wait │
+        │     100 µs       200 µs     700 µs│
+
+MCU:    │ SPI DMA recv ─→ Validate ─→ Apply │
+        │     200 µs        10 µs      10 µs │
+        │                              ↓      │
+        │           Speed PID runs at 10 kHz  │
+        │           (every 100 µs within)     │
+</code></pre></div>
+
+<p><strong>Key contract:</strong> The Jetson must deliver a new command <strong>every 1 ms ± 0.2 ms</strong>. If a command doesn&rsquo;t arrive within 2 ms (2 missed cycles), the MCU enters <strong>hold mode</strong> (maintains last speed command). If no command arrives within 10 ms (10 missed cycles), the MCU enters <strong>emergency deceleration</strong>.</p>
+<h2 id="22-watchdog-architecture">2.2 Watchdog Architecture</h2>
+<div class="highlight"><pre><span></span><code>                    Timer-based watchdog
+                    ┌─────────────────┐
+                    │  Counter = 10   │
+                    │  Decrement @    │
+                    │  1 kHz          │
+                    │                 │
+  SPI valid frame ──→  Reset to 10   │
+                    │                 │
+  Counter = 5 ─────→  HOLD mode      │ (reduce speed by 50%)
+  Counter = 0 ─────→  E-STOP         │ (brake motors)
+                    └─────────────────┘
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code><span class="c1">// MCU watchdog for SPI communication</span>
+<span class="cp">#define WDG_RELOAD     10    </span><span class="c1">// 10 ms timeout</span>
+<span class="cp">#define WDG_HOLD_LEVEL  5    </span><span class="c1">// 5 ms → enter hold</span>
+
+<span class="k">volatile</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">spi_watchdog_counter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="c1">// Called in SPI RX complete callback</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">spi_frame_received_ok</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">spi_watchdog_counter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WDG_RELOAD</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// Called at 1 kHz by timer</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">watchdog_tick</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">spi_watchdog_counter</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">spi_watchdog_counter</span><span class="o">--</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">spi_watchdog_counter</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// E-STOP: brake motors immediately</span>
+<span class="w">        </span><span class="n">motor_brake</span><span class="p">();</span>
+<span class="w">        </span><span class="n">set_fault_flag</span><span class="p">(</span><span class="n">FAULT_COMM_LOST</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">spi_watchdog_counter</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">WDG_HOLD_LEVEL</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// HOLD: reduce speed command by 50%</span>
+<span class="w">        </span><span class="n">speed_setpoint_left</span><span class="w"> </span><span class="o">/=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">        </span><span class="n">speed_setpoint_right</span><span class="w"> </span><span class="o">/=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="23-jetson-side-timing">2.3 Jetson-Side Timing</h2>
+<p>The ROS2 node that sends SPI commands must respect the timing contract:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">rclpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rclpy.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">spidev</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MotorBridge</span><span class="p">(</span><span class="n">Node</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;motor_bridge&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span> <span class="o">=</span> <span class="n">spidev</span><span class="o">.</span><span class="n">SpiDev</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">max_speed_hz</span> <span class="o">=</span> <span class="mi">2000000</span>
+
+        <span class="c1"># Timer at 1 kHz (1 ms period)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">timer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">create_timer</span><span class="p">(</span><span class="mf">0.001</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">spi_callback</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">last_cmd_vel</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>  <span class="c1"># (v, omega)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cmd_vel_stamp</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_clock</span><span class="p">()</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">cmd_vel_callback</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">last_cmd_vel</span> <span class="o">=</span> <span class="p">(</span><span class="n">msg</span><span class="o">.</span><span class="n">linear</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="n">msg</span><span class="o">.</span><span class="n">angular</span><span class="o">.</span><span class="n">z</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cmd_vel_stamp</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_clock</span><span class="p">()</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">spi_callback</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Check cmd_vel freshness</span>
+        <span class="n">age</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">get_clock</span><span class="p">()</span><span class="o">.</span><span class="n">now</span><span class="p">()</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">cmd_vel_stamp</span><span class="p">)</span><span class="o">.</span><span class="n">nanoseconds</span> <span class="o">/</span> <span class="mf">1e9</span>
+        <span class="k">if</span> <span class="n">age</span> <span class="o">&gt;</span> <span class="mf">0.2</span><span class="p">:</span>  <span class="c1"># 200 ms stale → stop</span>
+            <span class="n">v</span><span class="p">,</span> <span class="n">omega</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">v</span><span class="p">,</span> <span class="n">omega</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">last_cmd_vel</span>
+
+        <span class="c1"># Inverse kinematics</span>
+        <span class="n">wL</span> <span class="o">=</span> <span class="p">(</span><span class="n">v</span> <span class="o">-</span> <span class="n">omega</span> <span class="o">*</span> <span class="n">WHEELBASE</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="n">WHEEL_RADIUS</span>
+        <span class="n">wR</span> <span class="o">=</span> <span class="p">(</span><span class="n">v</span> <span class="o">+</span> <span class="n">omega</span> <span class="o">*</span> <span class="n">WHEELBASE</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="n">WHEEL_RADIUS</span>
+
+        <span class="c1"># Build command frame</span>
+        <span class="n">frame</span> <span class="o">=</span> <span class="n">build_motor_command</span><span class="p">(</span><span class="n">wL</span><span class="p">,</span> <span class="n">wR</span><span class="p">)</span>
+
+        <span class="c1"># SPI transfer</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">spi</span><span class="o">.</span><span class="n">xfer2</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span>
+
+        <span class="c1"># Parse feedback</span>
+        <span class="n">feedback</span> <span class="o">=</span> <span class="n">parse_motor_feedback</span><span class="p">(</span><span class="n">response</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">publish_odom</span><span class="p">(</span><span class="n">feedback</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-3-latency-analysis">PART 3 — LATENCY ANALYSIS</h1>
+<h2 id="31-end-to-end-latency">3.1 End-to-End Latency</h2>
+<p>From Nav2 decision to motor torque change:</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Latency</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Nav2 controller → cmd_vel publish</td>
+<td>0–20 ms</td>
+<td>ROS2 DDS, timer jitter</td>
+</tr>
+<tr>
+<td>cmd_vel → motor_bridge callback</td>
+<td>0–5 ms</td>
+<td>ROS2 intra-process: ~0.1 ms, inter-process: ~5 ms</td>
+</tr>
+<tr>
+<td>Motor bridge processing</td>
+<td>0.1 ms</td>
+<td>Inverse kinematics</td>
+</tr>
+<tr>
+<td>SPI transfer</td>
+<td>0.2 ms</td>
+<td>64 bytes @ 2 MHz</td>
+</tr>
+<tr>
+<td>MCU validates + applies</td>
+<td>0.01 ms</td>
+<td>CRC check + register write</td>
+</tr>
+<tr>
+<td>Next speed PID cycle</td>
+<td>0–0.1 ms</td>
+<td>Waits for next 10 kHz tick</td>
+</tr>
+<tr>
+<td>Current PID → PWM update</td>
+<td>0.05 ms</td>
+<td>One current loop cycle</td>
+</tr>
+<tr>
+<td>Motor electrical response</td>
+<td>0.5 ms</td>
+<td>Electrical time constant</td>
+</tr>
+<tr>
+<td><strong>Total (typical)</strong></td>
+<td><strong>~5 ms</strong></td>
+<td></td>
+</tr>
+<tr>
+<td><strong>Total (worst case)</strong></td>
+<td><strong>~30 ms</strong></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="32-why-latency-matters">3.2 Why Latency Matters</h2>
+<p>A 30 ms delay at 0.5 m/s means the robot travels <strong>15 mm</strong> before responding to a command change. For corridor driving, this is fine. For docking (±5 mm precision), this is borderline.</p>
+<p><strong>Control theory perspective:</strong> A time delay $\tau$ in the loop adds phase lag:</p>
+<p>$$\angle G(j\omega) = -\omega \tau \text{ radians}$$</p>
+<p>At the speed loop&rsquo;s 50 Hz bandwidth ($\omega = 100\pi$):
+$-100\pi \times 0.030 = -9.4°$ of extra phase lag.</p>
+<p>The phase margin typically has ~40° to spare, so 9.4° is acceptable. But at 100 Hz bandwidth, the lag would be 18.8° — getting tight.</p>
+<h2 id="33-the-cmd_vel-gap-problem">3.3 The cmd_vel Gap Problem</h2>
+<p><strong>OKS-specific:</strong> If the Jetson&rsquo;s Nav2 controller runs at 20 Hz and the motor bridge runs at 1 kHz, there are ~50 SPI cycles between each new cmd_vel. The motor bridge sends the <strong>same</strong> cmd_vel 50 times.</p>
+<p>If Nav2 misses a cycle (garbage collection, CPU spike), there&rsquo;s a <strong>100 ms gap</strong> in cmd_vel updates. The velocity smoother helps, but the MCU sees stale commands.</p>
+<p><strong>Worse:</strong> If the Nav2 controller&rsquo;s timer fires late, the cmd_vel can be timestamped incorrectly, causing the estimator to compute wrong odometry deltas.</p>
+<hr />
+<h1 id="part-4-clock-synchronization">PART 4 — CLOCK SYNCHRONIZATION</h1>
+<h2 id="41-the-problem">4.1 The Problem</h2>
+<p>The Jetson&rsquo;s clock and the MCU&rsquo;s clock are independent. Over time, they drift:
+- Jetson: NTP-synced, typical drift ~1 ms/hour
+- MCU: Crystal oscillator, drift ~50 ppm = 50 µs/second = 180 ms/hour</p>
+<p>After 1 hour, the clocks can be 200 ms apart. If the Jetson stamps a command at time $t$ but the MCU thinks the current time is $t + 200ms$, the estimator&rsquo;s time-interpolation breaks.</p>
+<h2 id="42-solution-timestamp-exchange">4.2 Solution: Timestamp Exchange</h2>
+<p>Every SPI frame includes timestamps from both sides. The Jetson computes the offset:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">ClockSync</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">offset_us</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">alpha</span> <span class="o">=</span> <span class="mf">0.01</span>  <span class="c1"># Low-pass filter coefficient</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">jetson_send_time_us</span><span class="p">,</span> <span class="n">mcu_timestamp_us</span><span class="p">,</span> <span class="n">jetson_recv_time_us</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Estimate MCU clock offset using SPI round-trip.&quot;&quot;&quot;</span>
+        <span class="c1"># Round-trip time</span>
+        <span class="n">rtt</span> <span class="o">=</span> <span class="n">jetson_recv_time_us</span> <span class="o">-</span> <span class="n">jetson_send_time_us</span>
+
+        <span class="c1"># Assume symmetric delay: MCU received at send_time + rtt/2</span>
+        <span class="n">estimated_mcu_time_at_midpoint</span> <span class="o">=</span> <span class="n">jetson_send_time_us</span> <span class="o">+</span> <span class="n">rtt</span> <span class="o">//</span> <span class="mi">2</span>
+
+        <span class="c1"># Offset = Jetson time - MCU time</span>
+        <span class="n">raw_offset</span> <span class="o">=</span> <span class="n">estimated_mcu_time_at_midpoint</span> <span class="o">-</span> <span class="n">mcu_timestamp_us</span>
+
+        <span class="c1"># Exponential moving average to filter noise</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">offset_us</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">alpha</span> <span class="o">*</span> <span class="n">raw_offset</span> <span class="o">+</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">alpha</span><span class="p">)</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">offset_us</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">mcu_to_jetson_time</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mcu_time_us</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">mcu_time_us</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">offset_us</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-5-failure-modes-and-safety">PART 5 — FAILURE MODES AND SAFETY</h1>
+<h2 id="51-failure-mode-table">5.1 Failure Mode Table</h2>
+<table>
+<thead>
+<tr>
+<th>Failure</th>
+<th>Detection</th>
+<th>MCU response</th>
+<th>Jetson response</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SPI frame corrupt</td>
+<td>CRC mismatch</td>
+<td>Hold last valid command</td>
+<td>Log warning, retry</td>
+</tr>
+<tr>
+<td>SPI completely lost</td>
+<td>Watchdog timeout (10 ms)</td>
+<td>Emergency brake</td>
+<td>Publish <code>/motor_fault</code></td>
+</tr>
+<tr>
+<td>Jetson frozen/crashed</td>
+<td>No SPI writes</td>
+<td>Watchdog → brake</td>
+<td>(dead) Systemd restarts</td>
+</tr>
+<tr>
+<td>MCU frozen</td>
+<td>No SPI response</td>
+<td>(dead) Hardware WDG resets</td>
+<td>Detect stale feedback → stop</td>
+</tr>
+<tr>
+<td>Motor overcurrent</td>
+<td>Shunt ADC &gt; threshold</td>
+<td>Immediate PWM disable</td>
+<td>Publish fault diagnostic</td>
+</tr>
+<tr>
+<td>Encoder failure</td>
+<td>Speed estimate unreasonable</td>
+<td>Reduce to open-loop + brake</td>
+<td>Log, request service</td>
+</tr>
+</tbody>
+</table>
+<h2 id="52-the-never-trust-the-other-side-principle">5.2 The &ldquo;Never Trust the Other Side&rdquo; Principle</h2>
+<p><strong>MCU rule:</strong> Never trust that Jetson commands are sane. Always validate:
+- Speed command within ±$v_{max}$? If not, clamp.
+- CRC valid? If not, use last good command.
+- Command fresh? If not, decelerate.</p>
+<p><strong>Jetson rule:</strong> Never trust that MCU feedback is accurate. Always validate:
+- Speed physically possible? (&gt; 2× max speed = encoder error)
+- Current within range? (negative current = sensor failure)
+- Encoder monotonically consistent with speed sign?</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// MCU-side command validation</span>
+<span class="kt">bool</span><span class="w"> </span><span class="nf">validate_motor_command</span><span class="p">(</span><span class="n">MotorCommand</span><span class="w"> </span><span class="o">*</span><span class="n">cmd</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Range check</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">fabsf</span><span class="p">(</span><span class="n">cmd</span><span class="o">-&gt;</span><span class="n">left_speed_cmd</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">MAX_WHEEL_SPEED</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">fabsf</span><span class="p">(</span><span class="n">cmd</span><span class="o">-&gt;</span><span class="n">right_speed_cmd</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">MAX_WHEEL_SPEED</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Mode check</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">cmd</span><span class="o">-&gt;</span><span class="n">control_mode</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">3</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Rate-of-change check (no impossible acceleration)</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">dv_left</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fabsf</span><span class="p">(</span><span class="n">cmd</span><span class="o">-&gt;</span><span class="n">left_speed_cmd</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">prev_cmd</span><span class="p">.</span><span class="n">left_speed_cmd</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">dv_left</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">MAX_ACCEL</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">SPI_PERIOD</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="53-graceful-degradation">5.3 Graceful Degradation</h2>
+<p>When things go wrong, degrade smoothly:</p>
+<div class="highlight"><pre><span></span><code>NORMAL → REDUCED → HOLD → STOP → BRAKE
+  ↑                                 │
+  └─────── Recovery ────────────────┘
+
+NORMAL:  Full speed, full control
+REDUCED: 50% max speed, increased monitoring
+HOLD:    Maintain last velocity, start decelerating
+STOP:    Zero velocity command, PID still active
+BRAKE:   PWM off, motor shorted (dynamic braking), no PID
+</code></pre></div>
+
+<hr />
+<h2 id="checkpoint-questions">Checkpoint Questions</h2>
+<ol>
+<li>Why use SPI instead of UART for MCU↔Jetson communication?</li>
+<li>What happens if the SPI CRC fails? Why not just accept the frame anyway?</li>
+<li>The MCU watchdog triggers after 10 ms of no SPI. Is 10 ms too fast, too slow, or about right? Why?</li>
+<li>End-to-end latency from Nav2 cmd_vel to motor torque is ~5 ms typical, ~30 ms worst case. What physical distance does the robot travel in the worst case at 0.5 m/s?</li>
+<li>The Jetson&rsquo;s garbage collector pauses for 80 ms. Trace the sequence of events on the MCU side.</li>
+<li>MCU clock drifts 50 ppm from Jetson. After 10 minutes, what&rsquo;s the offset in milliseconds?</li>
+<li>Why must the MCU validate command rate-of-change, not just absolute range?</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ul>
+<li><strong>Two-layer architecture:</strong> MCU (deterministic, µs) + Jetson (flexible, ms) connected via SPI</li>
+<li><strong>nanopb protocol</strong> with CRC-16 ensures data integrity across the noisy power bus</li>
+<li><strong>Timing contracts</strong> (1 ms ± 0.2 ms SPI cycle, 10 ms watchdog) are the foundation of reliability</li>
+<li><strong>End-to-end latency</strong> (~5–30 ms) determines the achievable control bandwidth from the Jetson layer</li>
+<li><strong>Clock synchronization</strong> via timestamp exchange prevents estimator errors</li>
+<li><strong>&ldquo;Never trust the other side&rdquo;</strong> — both MCU and Jetson validate all incoming data</li>
+<li><strong>Graceful degradation:</strong> Normal → Reduced → Hold → Stop → Brake</li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

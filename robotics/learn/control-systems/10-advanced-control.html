@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10 — Advanced Control: Beyond PID - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="10-advanced-control-beyond-pid">10 — Advanced Control: Beyond PID</h1>
+<h3 id="feedforward-gain-scheduling-mpc-and-knowing-when-pid-isnt-enough">Feedforward, gain scheduling, MPC, and knowing when PID isn&rsquo;t enough</h3>
+<p><strong>Prerequisite:</strong> All previous lessons (01–09)
+<strong>Unlocks:</strong> Debugging sessions, exercises, senior interview questions</p>
+<hr />
+<h2 id="why-should-i-care-oks-context">Why Should I Care? (OKS Context)</h2>
+<p>PID handles 90% of OKS motor control. But the remaining 10% causes 50% of the field incidents:</p>
+<ul>
+<li><strong>Robot loaded vs. unloaded:</strong> A robot carrying 200 kg payload has 3× the inertia. PID gains tuned for empty robot oscillate with load. → <strong>Gain scheduling</strong></li>
+<li><strong>Predictable motion:</strong> When the robot follows a known trajectory, waiting for error to build before reacting is wasteful. → <strong>Feedforward</strong></li>
+<li><strong>Tight constraints:</strong> Navigating through narrow passages while respecting speed, acceleration, and obstacle distance simultaneously. → <strong>MPC</strong></li>
+</ul>
+<p>This lesson covers the three techniques that OKS engineers reach for when PID alone fails.</p>
+<hr />
+<h1 id="part-1-feedforward-control">PART 1 — FEEDFORWARD CONTROL</h1>
+<h2 id="11-the-fundamental-insight">1.1 The Fundamental Insight</h2>
+<p>PID is <strong>reactive</strong> — it waits for error, then corrects. Feedforward is <strong>proactive</strong> — if you know the desired trajectory, compute the control effort needed <strong>before</strong> error appears.</p>
+<div class="highlight"><pre><span></span><code>                   Feedforward
+Desired ───┬──────────────────────────────────┐
+trajectory  │                                  ↓ (+)
+            │     ┌──────┐   Error   ┌─────┐  ∑ ──→ Plant
+            └────→│ - Σ  │─────────→│ PID │──↑
+                  └──────┘          └─────┘
+                    ↑
+              Measured output
+</code></pre></div>
+
+<p><strong>PID alone:</strong> Motor must first fall behind → error accumulates → PID reacts → always lagging.</p>
+<p><strong>PID + Feedforward:</strong> Feedforward provides ~90% of control effort. PID handles the remaining ~10% (model errors, disturbances).</p>
+<h2 id="12-velocity-feedforward">1.2 Velocity Feedforward</h2>
+<p>For a DC motor with transfer function $G(s) = \frac{K}{Js + B}$:</p>
+<p>At steady state, the torque needed to maintain speed $\omega$ is:</p>
+<p>$$\tau_{ss} = B \cdot \omega$$</p>
+<p>The voltage needed:</p>
+<p>$$V_{ff} = \frac{B \cdot \omega}{K_t} \cdot R_a + K_e \cdot \omega$$</p>
+<p>In practice, we use a simpler model — a <strong>velocity feedforward gain</strong> $K_{ff,v}$:</p>
+<p>$$u_{ff} = K_{ff,v} \cdot \omega_{desired}$$</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Velocity feedforward in speed PID loop</span>
+<span class="kt">float</span><span class="w"> </span><span class="nf">speed_pid_with_ff</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">speed_setpoint</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">speed_measured</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Feedforward: voltage proportional to desired speed</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">ff</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">KFF_VEL</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">speed_setpoint</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// PID on the error (handles remaining mismatch)</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">speed_setpoint</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">speed_measured</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">pid_out</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid_compute</span><span class="p">(</span><span class="o">&amp;</span><span class="n">speed_pid</span><span class="p">,</span><span class="w"> </span><span class="n">error</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Sum feedforward + PID</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ff</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">pid_out</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">output</span><span class="p">,</span><span class="w"> </span><span class="o">-</span><span class="n">MAX_DUTY</span><span class="p">,</span><span class="w"> </span><span class="n">MAX_DUTY</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Calibrating $K_{ff,v}$:</strong> Run the motor at several constant speeds, record the steady-state duty cycle, fit a line. The slope is $K_{ff,v}$.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Calibration: constant speed → steady-state duty</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="n">speeds</span> <span class="o">=</span> <span class="p">[</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">7.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">]</span>  <span class="c1"># rad/s</span>
+<span class="n">duties</span> <span class="o">=</span> <span class="p">[</span><span class="mf">0.08</span><span class="p">,</span> <span class="mf">0.15</span><span class="p">,</span> <span class="mf">0.22</span><span class="p">,</span> <span class="mf">0.37</span><span class="p">,</span> <span class="mf">0.52</span><span class="p">,</span> <span class="mf">0.74</span><span class="p">]</span>  <span class="c1"># measured steady-state duty</span>
+
+<span class="c1"># Linear fit: duty = K_ff_v * speed + offset</span>
+<span class="n">K_ff_v</span><span class="p">,</span> <span class="n">offset</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">polyfit</span><span class="p">(</span><span class="n">speeds</span><span class="p">,</span> <span class="n">duties</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;K_ff_v = </span><span class="si">{</span><span class="n">K_ff_v</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">, offset = </span><span class="si">{</span><span class="n">offset</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="c1"># Typical OKS result: K_ff_v ≈ 0.074, offset ≈ 0.01 (friction)</span>
+</code></pre></div>
+
+<h2 id="13-acceleration-feedforward">1.3 Acceleration Feedforward</h2>
+<p>Newton&rsquo;s second law: $F = ma$, or for rotation: $\tau = J \cdot \alpha$.</p>
+<p>When accelerating, the motor needs extra torque beyond what&rsquo;s needed for steady speed:</p>
+<p>$$u_{ff,accel} = K_{ff,a} \cdot \dot{\omega}_{desired}$$</p>
+<div class="highlight"><pre><span></span><code><span class="kt">float</span><span class="w"> </span><span class="nf">speed_pid_with_full_ff</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">sp</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">sp_prev</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">meas</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">dt</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Velocity feedforward</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">ff_vel</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">KFF_VEL</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">sp</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Acceleration feedforward</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">accel</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">sp</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">sp_prev</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">dt</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">ff_accel</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">KFF_ACCEL</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">accel</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// PID for residual error</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sp</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">meas</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">pid_out</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid_compute</span><span class="p">(</span><span class="o">&amp;</span><span class="n">speed_pid</span><span class="p">,</span><span class="w"> </span><span class="n">error</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">ff_vel</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">ff_accel</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">pid_out</span><span class="p">,</span><span class="w"> </span><span class="o">-</span><span class="n">MAX_DUTY</span><span class="p">,</span><span class="w"> </span><span class="n">MAX_DUTY</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Impact of feedforward on OKS:</strong>
+- Without FF: Tracking error during acceleration is 50–100 rpm
+- With velocity FF: Tracking error drops to 10–20 rpm
+- With velocity + acceleration FF: Tracking error drops to 2–5 rpm</p>
+<hr />
+<h1 id="part-2-gain-scheduling">PART 2 — GAIN SCHEDULING</h1>
+<h2 id="21-the-problem-one-pid-doesnt-fit-all">2.1 The Problem: One PID Doesn&rsquo;t Fit All</h2>
+<p>The OKS robot motor has different dynamics depending on operating conditions:</p>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Inertia $J$</th>
+<th>Friction $B$</th>
+<th>Optimal $K_p$</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Unloaded</td>
+<td>0.005 kg·m²</td>
+<td>0.01 N·m·s</td>
+<td>2.5</td>
+</tr>
+<tr>
+<td>50 kg payload</td>
+<td>0.010 kg·m²</td>
+<td>0.015 N·m·s</td>
+<td>4.0</td>
+</tr>
+<tr>
+<td>200 kg payload</td>
+<td>0.020 kg·m²</td>
+<td>0.025 N·m·s</td>
+<td>6.5</td>
+</tr>
+<tr>
+<td>Low speed (&lt; 1 rad/s)</td>
+<td>Same</td>
+<td>Higher (stiction)</td>
+<td>+30%</td>
+</tr>
+<tr>
+<td>High speed (&gt; 8 rad/s)</td>
+<td>Same</td>
+<td>Lower (viscous dominant)</td>
+<td>-10%</td>
+</tr>
+</tbody>
+</table>
+<p><strong>A single PID tuning is always a compromise.</strong> Gain scheduling uses different gains for different operating conditions.</p>
+<h2 id="22-lookup-table-gain-scheduling">2.2 Lookup-Table Gain Scheduling</h2>
+<p>The simplest approach: a table of PID gains indexed by operating condition.</p>
+<div class="highlight"><pre><span></span><code><span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">Kp</span><span class="p">,</span><span class="w"> </span><span class="n">Ki</span><span class="p">,</span><span class="w"> </span><span class="n">Kd</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="n">PIDGains</span><span class="p">;</span>
+
+<span class="c1">// Gain table indexed by estimated load (from current draw)</span>
+<span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">PIDGains</span><span class="w"> </span><span class="n">gain_table</span><span class="p">[]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// load_index=0: unloaded</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">Kp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">2.5</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Ki</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">15.0</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Kd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.01</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="c1">// load_index=1: light load (~50 kg)</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">Kp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">4.0</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Ki</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">20.0</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Kd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.015</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="c1">// load_index=2: heavy load (~200 kg)</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">Kp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">6.5</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Ki</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">30.0</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">Kd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.025</span><span class="w"> </span><span class="p">},</span>
+<span class="p">};</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">estimate_load_index</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">avg_current</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">avg_current</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mf">1.0f</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">       </span><span class="c1">// Unloaded</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">avg_current</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mf">3.0f</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">       </span><span class="c1">// Light</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w">                                 </span><span class="c1">// Heavy</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">update_pid_gains</span><span class="p">(</span><span class="n">PIDController</span><span class="w"> </span><span class="o">*</span><span class="n">pid</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">avg_current</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">idx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">estimate_load_index</span><span class="p">(</span><span class="n">avg_current</span><span class="p">);</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gain_table</span><span class="p">[</span><span class="n">idx</span><span class="p">].</span><span class="n">Kp</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ki</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gain_table</span><span class="p">[</span><span class="n">idx</span><span class="p">].</span><span class="n">Ki</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gain_table</span><span class="p">[</span><span class="n">idx</span><span class="p">].</span><span class="n">Kd</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="23-interpolated-gain-scheduling">2.3 Interpolated Gain Scheduling</h2>
+<p>Discrete jumps between gain sets cause transients. Linear interpolation is smoother:</p>
+<div class="highlight"><pre><span></span><code><span class="n">PIDGains</span><span class="w"> </span><span class="nf">interpolate_gains</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">load_factor</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// load_factor: 0.0 (unloaded) to 1.0 (max load)</span>
+<span class="w">    </span><span class="c1">// Linearly interpolate between min and max gains</span>
+<span class="w">    </span><span class="n">PIDGains</span><span class="w"> </span><span class="n">result</span><span class="p">;</span>
+<span class="w">    </span><span class="n">result</span><span class="p">.</span><span class="n">Kp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">KP_MIN</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">load_factor</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">KP_MAX</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">KP_MIN</span><span class="p">);</span>
+<span class="w">    </span><span class="n">result</span><span class="p">.</span><span class="n">Ki</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">KI_MIN</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">load_factor</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">KI_MAX</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">KI_MIN</span><span class="p">);</span>
+<span class="w">    </span><span class="n">result</span><span class="p">.</span><span class="n">Kd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">KD_MIN</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">load_factor</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">KD_MAX</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">KD_MIN</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">result</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="24-speed-dependent-scheduling">2.4 Speed-Dependent Scheduling</h2>
+<p>At very low speed, stiction dominates. At high speed, back-EMF matters more. OKS uses different integral gains at low vs. high speed:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">speed_dependent_gains</span><span class="p">(</span><span class="n">PIDController</span><span class="w"> </span><span class="o">*</span><span class="n">pid</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">speed_abs</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">speed_abs</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">SPEED_LOW_THRESH</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Low speed: higher Ki to overcome stiction</span>
+<span class="w">        </span><span class="c1">// Lower Kp to prevent oscillation around zero</span>
+<span class="w">        </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ki</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">KI_LOW_SPEED</span><span class="p">;</span>
+<span class="w">        </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">KP_LOW_SPEED</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ki</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">KI_NORMAL</span><span class="p">;</span>
+<span class="w">        </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">KP_NORMAL</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Bumpless gain transfer:</strong> When switching gains, the integral term must be adjusted to prevent output jumps:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">bumpless_gain_switch</span><span class="p">(</span><span class="n">PIDController</span><span class="w"> </span><span class="o">*</span><span class="n">pid</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">new_Ki</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Adjust integral accumulator so output doesn&#39;t change</span>
+<span class="w">    </span><span class="c1">// old_output = Kp*e + Ki_old * integral + Kd*de</span>
+<span class="w">    </span><span class="c1">// new_output = Kp*e + Ki_new * integral_new + Kd*de</span>
+<span class="w">    </span><span class="c1">// Set integral_new = Ki_old * integral / Ki_new</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">new_Ki</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mf">0.001f</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">integral</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ki</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">integral</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">new_Ki</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ki</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">new_Ki</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-3-model-predictive-control-mpc">PART 3 — MODEL PREDICTIVE CONTROL (MPC)</h1>
+<h2 id="31-what-is-mpc">3.1 What Is MPC?</h2>
+<p>MPC is an optimization-based controller. At every timestep:
+1. <strong>Predict</strong> the system state over a horizon of $N$ steps using a model
+2. <strong>Optimize</strong> a control sequence that minimizes a cost function (tracking error + control effort)
+3. <strong>Apply</strong> only the <strong>first</strong> control action
+4. <strong>Repeat</strong> at the next timestep (receding horizon)</p>
+<div class="highlight"><pre><span></span><code>Past              Now              Future (predicted)
+  │                │                │
+  ├─ measured ─────●── predicted ──►│
+  │                │  ╱             │
+  │                │ ╱  Optimized   │
+  │                │╱   trajectory  │
+  │                ●────────────────│
+  │                │  Only first    │
+  │                │  step applied  │
+</code></pre></div>
+
+<h2 id="32-mpc-formulation">3.2 MPC Formulation</h2>
+<p><strong>State:</strong> $\mathbf{x} = [x, y, \theta, v, \omega]^T$ (robot pose + velocities)</p>
+<p><strong>Input:</strong> $\mathbf{u} = [a, \dot{\omega}]^T$ (linear acceleration, angular acceleration)</p>
+<p><strong>Model (discrete):</strong></p>
+<p>$$\mathbf{x}_{k+1} = f(\mathbf{x}_k, \mathbf{u}_k)$$</p>
+<p>For differential drive:
+$$x_{k+1} = x_k + v_k \cos(\theta_k) \cdot \Delta t$$
+$$y_{k+1} = y_k + v_k \sin(\theta_k) \cdot \Delta t$$
+$$\theta_{k+1} = \theta_k + \omega_k \cdot \Delta t$$
+$$v_{k+1} = v_k + a_k \cdot \Delta t$$
+$$\omega_{k+1} = \omega_k + \dot{\omega}_k \cdot \Delta t$$</p>
+<p><strong>Cost function:</strong></p>
+<p>$$J = \sum_{k=1}^{N} \left[ q_1(x_k - x_k^{ref})^2 + q_2(y_k - y_k^{ref})^2 + q_3(\theta_k - \theta_k^{ref})^2 \right] + \sum_{k=0}^{N-1} \left[ r_1 a_k^2 + r_2 \dot{\omega}_k^2 \right]$$</p>
+<p><strong>Subject to constraints:</strong>
+- $|v| \leq v_{max}$
+- $|\omega| \leq \omega_{max}$
+- $|a| \leq a_{max}$
+- Obstacle avoidance: distance to obstacles $\geq d_{safe}$</p>
+<h2 id="33-simplified-python-mpc-educational">3.3 Simplified Python MPC (Educational)</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.optimize</span><span class="w"> </span><span class="kn">import</span> <span class="n">minimize</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">robot_dynamics</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">control</span><span class="p">,</span> <span class="n">dt</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Predict next state.&quot;&quot;&quot;</span>
+    <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">theta</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">omega</span> <span class="o">=</span> <span class="n">state</span>
+    <span class="n">a</span><span class="p">,</span> <span class="n">alpha</span> <span class="o">=</span> <span class="n">control</span>
+
+    <span class="n">x_new</span> <span class="o">=</span> <span class="n">x</span> <span class="o">+</span> <span class="n">v</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">theta</span><span class="p">)</span> <span class="o">*</span> <span class="n">dt</span>
+    <span class="n">y_new</span> <span class="o">=</span> <span class="n">y</span> <span class="o">+</span> <span class="n">v</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">theta</span><span class="p">)</span> <span class="o">*</span> <span class="n">dt</span>
+    <span class="n">theta_new</span> <span class="o">=</span> <span class="n">theta</span> <span class="o">+</span> <span class="n">omega</span> <span class="o">*</span> <span class="n">dt</span>
+    <span class="n">v_new</span> <span class="o">=</span> <span class="n">v</span> <span class="o">+</span> <span class="n">a</span> <span class="o">*</span> <span class="n">dt</span>
+    <span class="n">omega_new</span> <span class="o">=</span> <span class="n">omega</span> <span class="o">+</span> <span class="n">alpha</span> <span class="o">*</span> <span class="n">dt</span>
+
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">x_new</span><span class="p">,</span> <span class="n">y_new</span><span class="p">,</span> <span class="n">theta_new</span><span class="p">,</span> <span class="n">v_new</span><span class="p">,</span> <span class="n">omega_new</span><span class="p">])</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">mpc_cost</span><span class="p">(</span><span class="n">control_sequence</span><span class="p">,</span> <span class="n">current_state</span><span class="p">,</span> <span class="n">reference_path</span><span class="p">,</span> <span class="n">N</span><span class="p">,</span> <span class="n">dt</span><span class="p">,</span>
+             <span class="n">Q</span><span class="p">,</span> <span class="n">R</span><span class="p">,</span> <span class="n">v_max</span><span class="p">,</span> <span class="n">omega_max</span><span class="p">,</span> <span class="n">a_max</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;MPC cost function to minimize.&quot;&quot;&quot;</span>
+    <span class="n">controls</span> <span class="o">=</span> <span class="n">control_sequence</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">N</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">state</span> <span class="o">=</span> <span class="n">current_state</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">cost</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">N</span><span class="p">):</span>
+        <span class="c1"># Apply control</span>
+        <span class="n">state</span> <span class="o">=</span> <span class="n">robot_dynamics</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">controls</span><span class="p">[</span><span class="n">k</span><span class="p">],</span> <span class="n">dt</span><span class="p">)</span>
+
+        <span class="c1"># Tracking cost</span>
+        <span class="n">ref</span> <span class="o">=</span> <span class="n">reference_path</span><span class="p">[</span><span class="n">k</span><span class="p">]</span>
+        <span class="n">cost</span> <span class="o">+=</span> <span class="n">Q</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="n">state</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">ref</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">**</span><span class="mi">2</span>  <span class="c1"># x error</span>
+        <span class="n">cost</span> <span class="o">+=</span> <span class="n">Q</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="n">state</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">ref</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span><span class="o">**</span><span class="mi">2</span>  <span class="c1"># y error</span>
+        <span class="n">cost</span> <span class="o">+=</span> <span class="n">Q</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="n">state</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">-</span> <span class="n">ref</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span><span class="o">**</span><span class="mi">2</span>  <span class="c1"># theta error</span>
+
+        <span class="c1"># Control effort cost</span>
+        <span class="n">cost</span> <span class="o">+=</span> <span class="n">R</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">controls</span><span class="p">[</span><span class="n">k</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">**</span><span class="mi">2</span>  <span class="c1"># acceleration penalty</span>
+        <span class="n">cost</span> <span class="o">+=</span> <span class="n">R</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="n">controls</span><span class="p">[</span><span class="n">k</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span><span class="o">**</span><span class="mi">2</span>  <span class="c1"># angular accel penalty</span>
+
+        <span class="c1"># Soft velocity constraints (penalty method)</span>
+        <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">state</span><span class="p">[</span><span class="mi">3</span><span class="p">])</span> <span class="o">&gt;</span> <span class="n">v_max</span><span class="p">:</span>
+            <span class="n">cost</span> <span class="o">+=</span> <span class="mi">1000</span> <span class="o">*</span> <span class="p">(</span><span class="nb">abs</span><span class="p">(</span><span class="n">state</span><span class="p">[</span><span class="mi">3</span><span class="p">])</span> <span class="o">-</span> <span class="n">v_max</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span>
+        <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">state</span><span class="p">[</span><span class="mi">4</span><span class="p">])</span> <span class="o">&gt;</span> <span class="n">omega_max</span><span class="p">:</span>
+            <span class="n">cost</span> <span class="o">+=</span> <span class="mi">1000</span> <span class="o">*</span> <span class="p">(</span><span class="nb">abs</span><span class="p">(</span><span class="n">state</span><span class="p">[</span><span class="mi">4</span><span class="p">])</span> <span class="o">-</span> <span class="n">omega_max</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span>
+
+    <span class="k">return</span> <span class="n">cost</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">run_mpc</span><span class="p">(</span><span class="n">current_state</span><span class="p">,</span> <span class="n">reference_path</span><span class="p">,</span> <span class="n">N</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">0.1</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Run one MPC step.&quot;&quot;&quot;</span>
+    <span class="n">Q</span> <span class="o">=</span> <span class="p">[</span><span class="mf">10.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">]</span>   <span class="c1"># State tracking weights</span>
+    <span class="n">R</span> <span class="o">=</span> <span class="p">[</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">]</span>           <span class="c1"># Control effort weights</span>
+
+    <span class="c1"># Initial guess: zero controls</span>
+    <span class="n">u0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">N</span> <span class="o">*</span> <span class="mi">2</span><span class="p">)</span>
+
+    <span class="c1"># Optimize</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">minimize</span><span class="p">(</span>
+        <span class="n">mpc_cost</span><span class="p">,</span> <span class="n">u0</span><span class="p">,</span>
+        <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">current_state</span><span class="p">,</span> <span class="n">reference_path</span><span class="p">,</span> <span class="n">N</span><span class="p">,</span> <span class="n">dt</span><span class="p">,</span> <span class="n">Q</span><span class="p">,</span> <span class="n">R</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">),</span>
+        <span class="n">method</span><span class="o">=</span><span class="s1">&#39;SLSQP&#39;</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Return first control action only</span>
+    <span class="n">optimal_controls</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">x</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">N</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">optimal_controls</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># [acceleration, angular_acceleration]</span>
+</code></pre></div>
+
+<h2 id="34-mpc-pros-and-cons">3.4 MPC: Pros and Cons</h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>MPC</th>
+<th>PID + Feedforward</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Constraint handling</td>
+<td>Explicit (in optimization)</td>
+<td>Implicit (clamping)</td>
+</tr>
+<tr>
+<td>Multi-variable</td>
+<td>Natural</td>
+<td>Separate loops</td>
+</tr>
+<tr>
+<td>Preview (look-ahead)</td>
+<td>Yes (horizon N)</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Computation</td>
+<td>Heavy (optimization every step)</td>
+<td>Light (arithmetic)</td>
+</tr>
+<tr>
+<td>Tuning</td>
+<td>Cost weights Q, R</td>
+<td>Kp, Ki, Kd</td>
+</tr>
+<tr>
+<td>Guarantee</td>
+<td>Optimal within model</td>
+<td>Heuristic</td>
+</tr>
+<tr>
+<td>Model requirement</td>
+<td>Good model needed</td>
+<td>Model-free</td>
+</tr>
+<tr>
+<td>Real-time feasibility</td>
+<td>Hard on MCU</td>
+<td>Easy on MCU</td>
+</tr>
+</tbody>
+</table>
+<p><strong>OKS usage:</strong> MPC runs on the <strong>Jetson</strong> for path tracking (replacing or supplementing DWB). The MCU still runs PID for low-level motor control. This is the standard architecture for mobile robots:
+- <strong>Jetson (20-50 Hz):</strong> MPC or DWB → cmd_vel (v, ω)
+- <strong>MCU (10 kHz):</strong> PID cascade → motor PWM</p>
+<h2 id="35-when-to-use-mpc-vs-pid">3.5 When to Use MPC vs. PID</h2>
+<div class="highlight"><pre><span></span><code>Decision tree:
+                Is it a SISO loop?
+                 ╱          ╲
+               Yes            No
+               │              │
+         Is bandwidth     → Consider MPC
+         &gt; 100 Hz?         or MIMO controller
+          ╱      ╲
+        Yes       No
+        │         │
+    PID on MCU   Can you formulate
+    (only option)  constraints explicitly?
+                    ╱          ╲
+                  Yes            No
+                  │              │
+              MPC on Jetson   PID + feedforward
+              (worth the       + gain scheduling
+               computation?)
+</code></pre></div>
+
+<hr />
+<h1 id="part-4-other-advanced-techniques-overview">PART 4 — OTHER ADVANCED TECHNIQUES (OVERVIEW)</h1>
+<h2 id="41-lqr-linear-quadratic-regulator">4.1 LQR (Linear Quadratic Regulator)</h2>
+<p>LQR finds the <strong>optimal</strong> state-feedback gains for a <strong>linear</strong> system by minimizing:</p>
+<p>$$J = \int_0^\infty (\mathbf{x}^T Q \mathbf{x} + \mathbf{u}^T R \mathbf{u}) dt$$</p>
+<p>Result: $\mathbf{u} = -K \mathbf{x}$, where $K$ is computed by solving the Riccati equation.</p>
+<p><strong>vs. PID:</strong> LQR is optimal for linear systems; PID is a special case. LQR naturally handles MIMO (multi-input, multi-output) systems.</p>
+<p><strong>Limitation:</strong> Requires a linear model. Real motors are nonlinear (saturation, stiction). Works well near an operating point.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">scipy.linalg</span><span class="w"> </span><span class="kn">import</span> <span class="n">solve_continuous_are</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">compute_lqr_gain</span><span class="p">(</span><span class="n">A</span><span class="p">,</span> <span class="n">B</span><span class="p">,</span> <span class="n">Q</span><span class="p">,</span> <span class="n">R</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compute LQR gain matrix K.&quot;&quot;&quot;</span>
+    <span class="c1"># Solve Algebraic Riccati Equation</span>
+    <span class="n">P</span> <span class="o">=</span> <span class="n">solve_continuous_are</span><span class="p">(</span><span class="n">A</span><span class="p">,</span> <span class="n">B</span><span class="p">,</span> <span class="n">Q</span><span class="p">,</span> <span class="n">R</span><span class="p">)</span>
+    <span class="n">K</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">inv</span><span class="p">(</span><span class="n">R</span><span class="p">)</span> <span class="o">@</span> <span class="n">B</span><span class="o">.</span><span class="n">T</span> <span class="o">@</span> <span class="n">P</span>
+    <span class="k">return</span> <span class="n">K</span>
+</code></pre></div>
+
+<h2 id="42-adaptive-control">4.2 Adaptive Control</h2>
+<p><strong>Idea:</strong> Estimate the plant parameters online and adjust the controller in real-time.</p>
+<p>For OKS, this means:
+- Measure motor response to known inputs
+- Estimate inertia $J$ and friction $B$
+- Update PID gains or feedforward parameters</p>
+<p><strong>Model Reference Adaptive Control (MRAC):</strong></p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">SimpleAdaptive</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Simplified MIT rule adaptive controller.&quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">gamma</span><span class="o">=</span><span class="mf">0.01</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">gamma</span> <span class="o">=</span> <span class="n">gamma</span>  <span class="c1"># Adaptation rate</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">theta</span> <span class="o">=</span> <span class="mf">1.0</span>    <span class="c1"># Estimated plant gain</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">reference_output</span><span class="p">,</span> <span class="n">actual_output</span><span class="p">,</span> <span class="n">input_signal</span><span class="p">):</span>
+        <span class="c1"># Error between reference model and actual</span>
+        <span class="n">error</span> <span class="o">=</span> <span class="n">actual_output</span> <span class="o">-</span> <span class="n">reference_output</span>
+
+        <span class="c1"># MIT rule: adjust parameter to reduce error</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">theta</span> <span class="o">-=</span> <span class="bp">self</span><span class="o">.</span><span class="n">gamma</span> <span class="o">*</span> <span class="n">error</span> <span class="o">*</span> <span class="n">input_signal</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">theta</span>
+</code></pre></div>
+
+<p><strong>OKS doesn&rsquo;t use full adaptive control</strong> (too risky for production — stability isn&rsquo;t guaranteed during adaptation). Instead, OKS uses:
+- <strong>Offline calibration</strong> at deployment
+- <strong>Gain scheduling</strong> (Part 2) based on load estimation
+- <strong>Feedforward calibration</strong> during commissioning</p>
+<h2 id="43-disturbance-observer-dob">4.3 Disturbance Observer (DOB)</h2>
+<p>A DOB estimates and compensates for unmodeled disturbances:</p>
+<div class="highlight"><pre><span></span><code>             ┌──────────┐
+  u ────────►│  Plant    ├──── y
+             └──────────┘
+                  ↑
+             ┌──────────┐
+  d_hat ←────┤   DOB    │◄── y
+  (estimated)└──────────┘
+</code></pre></div>
+
+<p>$$\hat{d} = \text{LPF}{y - \hat{G}(s) \cdot u}$$</p>
+<p>The estimated disturbance $\hat{d}$ is subtracted from the control signal, effectively canceling the disturbance.</p>
+<p><strong>OKS application:</strong> The robot drives over bumps and uneven floor. The DOB estimates the disturbance torque from floor irregularities and compensates, keeping speed constant.</p>
+<hr />
+<h1 id="part-5-mcu-vs-jetson-choosing-where-to-run">PART 5 — MCU vs JETSON: CHOOSING WHERE TO RUN</h1>
+<h2 id="51-decision-matrix">5.1 Decision Matrix</h2>
+<table>
+<thead>
+<tr>
+<th>Controller</th>
+<th>Where</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Current PID</td>
+<td>MCU (10 kHz)</td>
+<td>Electrical dynamics, µs response</td>
+</tr>
+<tr>
+<td>Speed PID + FF</td>
+<td>MCU (1–10 kHz)</td>
+<td>Mechanical dynamics, determinism</td>
+</tr>
+<tr>
+<td>Position PID</td>
+<td>MCU (100–1000 Hz)</td>
+<td>Encoder counting, tight loop</td>
+</tr>
+<tr>
+<td>Gain scheduling</td>
+<td>MCU</td>
+<td>Simple lookup, fast</td>
+</tr>
+<tr>
+<td>Velocity smoother</td>
+<td>Jetson (50 Hz)</td>
+<td>Part of Nav2 pipeline</td>
+</tr>
+<tr>
+<td>Pure pursuit / DWB</td>
+<td>Jetson (20 Hz)</td>
+<td>Needs map, costmap, TF</td>
+</tr>
+<tr>
+<td>MPC (path tracking)</td>
+<td>Jetson (10–50 Hz)</td>
+<td>Heavy computation, constraints</td>
+</tr>
+<tr>
+<td>LQR</td>
+<td>Either</td>
+<td>Light computation once K is computed</td>
+</tr>
+</tbody>
+</table>
+<h2 id="52-why-not-run-everything-on-the-jetson">5.2 Why Not Run Everything on the Jetson?</h2>
+<p><strong>Latency:</strong> The Jetson runs Linux. Even with <code>preempt_RT</code>, worst-case latency is ~1 ms. For current control at 10 kHz (100 µs period), 1 ms jitter is 10× the loop period. The motor would oscillate or blow a fuse.</p>
+<p><strong>Reliability:</strong> Linux can OOM-kill, GC-pause, or kernel panic. The MCU&rsquo;s bare-metal or RTOS code has none of these failure modes. Motor safety must survive a Jetson crash.</p>
+<h2 id="53-why-not-run-everything-on-the-mcu">5.3 Why Not Run Everything on the MCU?</h2>
+<p><strong>Computation:</strong> MPC requires solving an optimization problem every timestep. On a 168 MHz STM32, this would take ~50–100 ms — far too slow for 20 Hz updates.</p>
+<p><strong>Memory:</strong> Path planning needs the full occupancy grid (e.g., 200×200 cells × 4 bytes = 160 KB). The STM32F4 has 192 KB SRAM total.</p>
+<p><strong>Connectivity:</strong> The MCU has no LiDAR driver, no camera interface, no ROS2 DDS stack.</p>
+<hr />
+<h2 id="checkpoint-questions">Checkpoint Questions</h2>
+<ol>
+<li>Draw the block diagram for PID + velocity feedforward. Where does the feedforward signal enter?</li>
+<li>You&rsquo;ve tuned PID for an empty robot. The robot picks up a 200 kg payload. What changes in the system dynamics, and how should the gains respond?</li>
+<li>MPC runs at 20 Hz on the Jetson. The horizon is N=10 steps with dt=0.1s. How far ahead does MPC &ldquo;see&rdquo;?</li>
+<li>Why can&rsquo;t you run MPC on the STM32 MCU? Give two reasons.</li>
+<li>A gain scheduling system switches from low-speed gains to normal-speed gains at exactly $\omega = 1.0$ rad/s. What problem occurs when the robot speed oscillates around 1.0 rad/s?</li>
+<li>The velocity feedforward gain is calibrated at 25°C. At 60°C (motor hot), the winding resistance increases by 30%. What happens to the feedforward accuracy?</li>
+<li>When would you choose LQR over PID? When would LQR be a bad choice?</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ul>
+<li><strong>Feedforward</strong> is the single most impactful addition to PID — eliminates most tracking error during known trajectories</li>
+<li><strong>Gain scheduling</strong> handles varying operating conditions (load, speed) with a lookup table or interpolation</li>
+<li><strong>MPC</strong> handles constraints explicitly and optimizes over a horizon, but requires a model and heavy computation</li>
+<li><strong>The two-layer split persists:</strong> MCU runs PID + FF + gain scheduling (fast, deterministic). Jetson runs path following, MPC, planning (slow, flexible).</li>
+<li><strong>Don&rsquo;t over-engineer:</strong> 90% of OKS motor control is PID + velocity feedforward. Add complexity only when evidence shows PID isn&rsquo;t sufficient.</li>
+<li><strong>Calibration &gt; algorithms:</strong> A well-calibrated PID + feedforward usually outperforms a poorly-calibrated MPC.</li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Session 2 — Integral Windup: &quot;The Robot Lurches After E-Stop Release&quot; - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="debug-session-2-integral-windup-the-robot-lurches-after-e-stop-release">Debug Session 2 — Integral Windup: &ldquo;The Robot Lurches After E-Stop Release&rdquo;</h1>
+<p><strong>Skills tested:</strong> Anti-windup, integrator dynamics, e-stop recovery
+<strong>Difficulty:</strong> Intermediate–Advanced
+<strong>Time estimate:</strong> 30–45 minutes</p>
+<hr />
+<h2 id="the-scenario">The Scenario</h2>
+<p><strong>Operator report from OKS warehouse:</strong></p>
+<blockquote>
+<p>After releasing the e-stop button, the robot suddenly lurches forward 20–30 cm before stopping. This happens every time. The e-stop is pressed when the robot is driving forward at 0.3 m/s to stop it near a rack. After clearing the e-stop, the robot jumps forward dangerously close to the rack.</p>
+</blockquote>
+<p><strong>What you have:</strong>
+- Speed PID with anti-windup (supposedly implemented)
+- E-stop cuts power to motor H-bridges via hardware relay
+- PID loop continues running during e-stop (software doesn&rsquo;t know about hardware e-stop immediately)
+- Anti-windup strategy: integral clamping (output limits ±1.0 duty)</p>
+<hr />
+<h2 id="step-1-reproduce-and-observe">Step 1 — Reproduce and Observe</h2>
+<h3 id="11-timeline-of-events">1.1 Timeline of Events</h3>
+<div class="highlight"><pre><span></span><code>Time    Event                          Speed_sp  Speed_meas  Integral  PWM_duty
+─────────────────────────────────────────────────────────────────────────────
+t=0.0   Driving normally               5.0       4.95        0.02      0.38
+t=0.5   E-stop pressed (hardware)      5.0       5.0→0       0.02      0.38→0*
+        * H-bridge disabled by relay, actual duty = 0 regardless of PWM
+
+t=0.5   PID still running:
+        error = 5.0 - 0.0 = 5.0
+        integral += 5.0 * 0.001 = 0.005 per ms
+
+t=0.6   integral = 0.02 + 5.0*100ms/1000 = 0.52
+t=0.7   integral = 0.52 + 5.0*100ms/1000 = 1.02  → clamped to 1.0
+t=0.8   integral = 1.0 (clamped at max)
+...
+t=3.0   Still clamped at 1.0 (2.5 seconds of e-stop)
+
+t=3.0   E-stop released
+        H-bridge re-enabled
+        PID output = Kp*error + Ki*integral + Kd*de
+                   = 5.0*5.0 + 25.0*1.0 + ...
+                   = 25.0 + 25.0 = 50.0  → clamped to 1.0
+        PWM duty = 100%  ← FULL POWER LURCH!
+</code></pre></div>
+
+<h3 id="12-the-problem">1.2 The Problem</h3>
+<p>The anti-windup clamp limits the integral to keep the output within ±1.0. But <strong>1.0 is still 100% duty cycle!</strong> When the e-stop is released, the motor receives full power because:
+1. The speed is still 0 (stopped) → large error
+2. The integral is at maximum (wound up during e-stop)
+3. Both proportional and integral terms point the same direction</p>
+<p>The robot accelerates at maximum torque until the speed catches up to the setpoint, overshoots, and eventually settles — but not before lurching forward 20–30 cm.</p>
+<hr />
+<h2 id="step-2-why-the-anti-windup-failed">Step 2 — Why the Anti-Windup Failed</h2>
+<h3 id="21-the-clamp-is-not-anti-windup">2.1 The Clamp Is Not Anti-Windup</h3>
+<p>Look at the &ldquo;anti-windup&rdquo; code:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// BAD: This is NOT proper anti-windup</span>
+<span class="kt">float</span><span class="w"> </span><span class="nf">pid_compute</span><span class="p">(</span><span class="n">PIDController</span><span class="w"> </span><span class="o">*</span><span class="n">pid</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">error</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">dt</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">integral</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">dt</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Clamp integral</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">integral</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">INTEGRAL_MAX</span><span class="p">)</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">integral</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">INTEGRAL_MAX</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">integral</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="o">-</span><span class="n">INTEGRAL_MAX</span><span class="p">)</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">integral</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">-</span><span class="n">INTEGRAL_MAX</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kp</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ki</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">integral</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kd</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">derivative</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Clamp output</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">output</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">OUTPUT_MAX</span><span class="p">)</span><span class="w"> </span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">OUTPUT_MAX</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">output</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="o">-</span><span class="n">OUTPUT_MAX</span><span class="p">)</span><span class="w"> </span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">-</span><span class="n">OUTPUT_MAX</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">output</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>The problem:</strong> The integral is clamped based on its own range, but it doesn&rsquo;t know whether the output is <strong>actually being applied.</strong> During e-stop, the H-bridge is disabled — the output is effectively zero regardless of what PID computes. But the integral keeps accumulating (up to its clamp limit).</p>
+<p><strong>True anti-windup requires knowing when the actuator is saturated</strong> (or disconnected).</p>
+<h3 id="22-the-correct-mental-model">2.2 The Correct Mental Model</h3>
+<div class="highlight"><pre><span></span><code>During normal operation:        During e-stop:
+  Error → PID → Motor            Error → PID → [disconnected]
+  Motor → Speed                   Motor → 0
+  Speed → Error (closed loop)     0 → Error = LARGE (open loop!)
+
+  Integral grows slowly           Integral grows rapidly
+  because error is small          because error is huge and
+                                  there&#39;s no feedback to reduce it
+</code></pre></div>
+
+<hr />
+<h2 id="step-3-fix-it">Step 3 — Fix It</h2>
+<h3 id="31-fix-1-back-calculation-anti-windup">3.1 Fix 1: Back-Calculation Anti-Windup</h3>
+<p>The integral should track the <strong>actual applied output</strong>, not the desired output:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">float</span><span class="w"> </span><span class="nf">pid_compute_with_back_calc</span><span class="p">(</span><span class="n">PIDController</span><span class="w"> </span><span class="o">*</span><span class="n">pid</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">error</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">dt</span><span class="p">,</span>
+<span class="w">                                  </span><span class="kt">bool</span><span class="w"> </span><span class="n">actuator_enabled</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">p_term</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kp</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">error</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">d_term</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kd</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">error</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">dt</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">i_term</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ki</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">integral</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">desired_output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p_term</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">i_term</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">d_term</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Clamp to actuator limits</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">actual_output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">desired_output</span><span class="p">,</span><span class="w"> </span><span class="o">-</span><span class="n">OUTPUT_MAX</span><span class="p">,</span><span class="w"> </span><span class="n">OUTPUT_MAX</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// If actuator is disabled (e-stop), effective output is 0</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">actuator_enabled</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">actual_output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0f</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Back-calculation: adjust integral based on what was actually applied</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">saturation_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">actual_output</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">desired_output</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">integral</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">dt</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">saturation_error</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ki</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kb</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">error</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">actual_output</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>$K_b$ (back-calculation gain) determines how fast the integral &ldquo;unwinds.&rdquo; Typical: $K_b = 1/T_i$ where $T_i = K_p/K_i$.</p>
+<h3 id="32-fix-2-reset-integral-on-e-stop">3.2 Fix 2: Reset Integral on E-Stop</h3>
+<p>Simpler and more robust for the OKS case:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// In the main control loop</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">control_loop</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">estop_active</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Reset integral to zero during e-stop</span>
+<span class="w">        </span><span class="n">pid_reset_integral</span><span class="p">(</span><span class="o">&amp;</span><span class="n">speed_pid_left</span><span class="p">);</span>
+<span class="w">        </span><span class="n">pid_reset_integral</span><span class="p">(</span><span class="o">&amp;</span><span class="n">speed_pid_right</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// Also reset setpoint to zero</span>
+<span class="w">        </span><span class="n">speed_setpoint_left</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0f</span><span class="p">;</span>
+<span class="w">        </span><span class="n">speed_setpoint_right</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0f</span><span class="p">;</span>
+<span class="w">        </span><span class="k">return</span><span class="p">;</span><span class="w">  </span><span class="c1">// Don&#39;t compute PID output</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Normal PID operation</span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="33-fix-3-ramp-setpoint-after-e-stop-release">3.3 Fix 3: Ramp Setpoint After E-Stop Release</h3>
+<p>Even with integral reset, the proportional term will cause a jump if the setpoint is still non-zero:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">post_estop_recovery</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">ramp_factor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0f</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">estop_just_released</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">ramp_factor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0f</span><span class="p">;</span><span class="w">  </span><span class="c1">// Start from zero</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ramp_factor</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mf">1.0f</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">ramp_factor</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">RAMP_RATE</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">dt</span><span class="p">;</span><span class="w">  </span><span class="c1">// e.g., RAMP_RATE = 2.0 → 500ms to full speed</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ramp_factor</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mf">1.0f</span><span class="p">)</span><span class="w"> </span><span class="n">ramp_factor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1.0f</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Apply ramp to setpoint</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">effective_setpoint</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cmd_setpoint</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ramp_factor</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid_compute</span><span class="p">(</span><span class="o">&amp;</span><span class="n">speed_pid</span><span class="p">,</span><span class="w"> </span><span class="n">effective_setpoint</span><span class="p">,</span><span class="w"> </span><span class="n">speed_measured</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>OKS implements all three:</strong> Reset integral on e-stop, ramp setpoint on release, and back-calculation anti-windup during normal operation.</p>
+<hr />
+<h2 id="step-4-verify">Step 4 — Verify</h2>
+<h3 id="41-before-fix">4.1 Before Fix</h3>
+<div class="highlight"><pre><span></span><code>t=3.0 (e-stop release):
+  Speed: 0 → 7.2 rad/s in 50ms (overshoot 44%)
+  Position: +22 cm lurch
+  Current: peaks at 15A (overcurrent warning)
+</code></pre></div>
+
+<h3 id="42-after-fix-all-three-measures">4.2 After Fix (all three measures)</h3>
+<div class="highlight"><pre><span></span><code>t=3.0 (e-stop release):
+  Speed: 0 → ramps to 5.0 over 500ms (no overshoot)
+  Position: smooth acceleration, no lurch
+  Current: peaks at 3A (normal)
+</code></pre></div>
+
+<hr />
+<h2 id="step-5-the-deeper-lesson">Step 5 — The Deeper Lesson</h2>
+<h3 id="51-where-else-does-this-happen">5.1 Where Else Does This Happen?</h3>
+<p>Integral windup occurs whenever the <strong>control loop is broken</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Loop broken because</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>E-stop</td>
+<td>Actuator disconnected</td>
+<td>Lurch on release</td>
+</tr>
+<tr>
+<td>Motor stall</td>
+<td>Torque limit reached, speed=0</td>
+<td>Lurch when unstalled</td>
+</tr>
+<tr>
+<td>Wheel in the air</td>
+<td>No load → speed maxes instantly</td>
+<td>Slam when wheel touches ground</td>
+</tr>
+<tr>
+<td>Mode switch</td>
+<td>Controller changes from position to speed mode</td>
+<td>Spike at mode transition</td>
+</tr>
+<tr>
+<td>Sensor failure</td>
+<td>Measured value freezes or jumps</td>
+<td>Integral diverges</td>
+</tr>
+</tbody>
+</table>
+<h3 id="52-the-golden-rule">5.2 The Golden Rule</h3>
+<blockquote>
+<p><strong>If the actuator can&rsquo;t do what the controller wants, the integral must know about it.</strong></p>
+</blockquote>
+<p>This is the fundamental principle of anti-windup. The integral should only accumulate error when the system is actually responding to the control effort.</p>
+<hr />
+<h2 id="checkpoint-questions">Checkpoint Questions</h2>
+<ol>
+<li>Why doesn&rsquo;t clamping the integral term prevent windup during e-stop?</li>
+<li>The integral accumulated to 1.0 during 2.5 seconds of e-stop with error = 5.0 and Ki = 25.0. Show the math: $1.0 = 25.0 \times 5.0 \times t_{windup}$. Solve for $t_{windup}$.</li>
+<li>Back-calculation anti-windup uses a gain $K_b$. If $K_b$ is too large, what happens? Too small?</li>
+<li>Why does OKS reset the setpoint to zero during e-stop (not just the integral)?</li>
+<li>A robot wheel lifts off the ground during a ramp ascent. The speed PID winds up. What happens when the wheel touches down again?</li>
+</ol>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 — Fixed-Point PID on a Microcontroller - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="06-fixed-point-pid-on-a-microcontroller">06 — Fixed-Point PID on a Microcontroller</h1>
+<h3 id="no-floats-no-malloc-no-mercy-integer-only-control-at-10-khz">No floats, no malloc, no mercy — integer-only control at 10 kHz</h3>
+<p><strong>Prerequisite:</strong> <code>05-mcu-motor-control.md</code> (hardware), <code>04-discrete-time-control.md</code> (discrete PID)
+<strong>Unlocks:</strong> <code>07-cascaded-loops.md</code> (stacking multiple PIDs)</p>
+<hr />
+<h2 id="why-should-i-care-oks-context">Why Should I Care? (OKS Context)</h2>
+<p>The STM32F4 in OKS <em>has</em> a floating-point unit (FPU), so you might think: &ldquo;Why bother with fixed-point?&rdquo; Three reasons:</p>
+<ol>
+<li><strong>Deterministic timing:</strong> Fixed-point operations take exactly the same time every call. Floating-point can vary with denormalized numbers, NaN propagation, and FPU pipeline stalls.</li>
+<li><strong>Smaller MCUs:</strong> The sensorbar controller (STM32G0 series) has NO FPU. All math must be integer.</li>
+<li><strong>FPGA/DSP targets:</strong> When porting PID to an FPGA (for current loop offloading), you need integer math.</li>
+</ol>
+<p><strong>Real OKS failure:</strong> A firmware developer used <code>float</code> for the current PID on an STM32G0-based sensorbar board. Compilation succeeded (soft-float), but execution was 20× slower (software float emulation). The 10 kHz ISR took 150 µs instead of 7 µs, causing timer overruns and erratic sensor readings.</p>
+<hr />
+<h1 id="part-1-fixed-point-arithmetic">PART 1 — FIXED-POINT ARITHMETIC</h1>
+<h2 id="11-what-is-fixed-point">1.1 What Is Fixed-Point?</h2>
+<p>Fixed-point represents fractional numbers using integers by implicitly dividing by a power of 2:</p>
+<p>$$\text{real value} = \frac{\text{integer value}}{2^Q}$$</p>
+<p><strong>Q16.16 format</strong> (32-bit total, 16 integer bits, 16 fractional bits):
+- Integer range: $-32768$ to $+32767$
+- Fractional resolution: $1/2^{16} = 0.0000153$
+- This gives ~4.5 decimal digits of precision</p>
+<div class="highlight"><pre><span></span><code>  32-bit integer: [SIIIIIIIIIIIIIII.FFFFFFFFFFFFFFFF]
+                   ↑               ↑
+                   sign bit        implied decimal point
+
+  Example: 3.14159 in Q16.16:
+  3.14159 × 65536 = 205887.3 → store as integer 205887
+
+  Verify: 205887 / 65536 = 3.14158... ✓ (error = 0.00001)
+</code></pre></div>
+
+<h2 id="12-fixed-point-operations">1.2 Fixed-Point Operations</h2>
+<div class="highlight"><pre><span></span><code><span class="k">typedef</span><span class="w"> </span><span class="kt">int32_t</span><span class="w"> </span><span class="n">q16_t</span><span class="p">;</span><span class="w">  </span><span class="c1">// Q16.16 fixed-point</span>
+
+<span class="cp">#define Q16_SHIFT  16</span>
+<span class="cp">#define Q16_ONE    (1 &lt;&lt; Q16_SHIFT)  </span><span class="c1">// = 65536</span>
+
+<span class="c1">// Convert float to Q16.16</span>
+<span class="k">static</span><span class="w"> </span><span class="kr">inline</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="nf">q16_from_float</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">f</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="n">q16_t</span><span class="p">)(</span><span class="n">f</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">Q16_ONE</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="c1">// Convert Q16.16 to float (for debugging/logging only)</span>
+<span class="k">static</span><span class="w"> </span><span class="kr">inline</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="nf">q16_to_float</span><span class="p">(</span><span class="n">q16_t</span><span class="w"> </span><span class="n">q</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="kt">float</span><span class="p">)</span><span class="n">q</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">Q16_ONE</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// Addition: same as integer addition (trivial)</span>
+<span class="k">static</span><span class="w"> </span><span class="kr">inline</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="nf">q16_add</span><span class="p">(</span><span class="n">q16_t</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// Multiplication: must shift right by Q to correct the scale</span>
+<span class="k">static</span><span class="w"> </span><span class="kr">inline</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="nf">q16_mul</span><span class="p">(</span><span class="n">q16_t</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// a × b gives Q32.32 (64-bit), shift right by 16 to get Q16.16</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="n">q16_t</span><span class="p">)(((</span><span class="kt">int64_t</span><span class="p">)</span><span class="n">a</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="kt">int64_t</span><span class="p">)</span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">Q16_SHIFT</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="c1">// Division: shift left first to preserve precision</span>
+<span class="k">static</span><span class="w"> </span><span class="kr">inline</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="nf">q16_div</span><span class="p">(</span><span class="n">q16_t</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="n">q16_t</span><span class="p">)(((</span><span class="kt">int64_t</span><span class="p">)</span><span class="n">a</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">Q16_SHIFT</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">b</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="13-why-64-bit-intermediates-are-essential">1.3 Why 64-bit Intermediates Are Essential</h2>
+<p>When you multiply two Q16.16 numbers:
+- $a = 3.5$ → stored as $3.5 \times 65536 = 229376$
+- $b = 2.0$ → stored as $2.0 \times 65536 = 131072$
+- $a \times b = 229376 \times 131072 = 30064771072$ (exceeds 32-bit!)</p>
+<p><strong>Without 64-bit intermediate:</strong> overflow → garbage result → PID goes wild.
+<strong>With 64-bit intermediate:</strong> $30064771072 &gt;&gt; 16 = 458752 = 7.0 \times 65536$ ✓</p>
+<p>The ARM Cortex-M4 has a single-cycle 32×32→64 multiply instruction (<code>SMULL</code>), so this is essentially free.</p>
+<h2 id="14-overflow-protection">1.4 Overflow Protection</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// Saturating addition (prevents wrap-around)</span>
+<span class="k">static</span><span class="w"> </span><span class="kr">inline</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="nf">q16_add_sat</span><span class="p">(</span><span class="n">q16_t</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int64_t</span><span class="w"> </span><span class="n">sum</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int64_t</span><span class="p">)</span><span class="n">a</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="kt">int64_t</span><span class="p">)</span><span class="n">b</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">sum</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">INT32_MAX</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">INT32_MAX</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">sum</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">INT32_MIN</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">INT32_MIN</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="n">q16_t</span><span class="p">)</span><span class="n">sum</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Rule of thumb:</strong> Use saturating arithmetic for the integrator (accumulated value grows unbounded). Use regular arithmetic for P and D terms (bounded by input range).</p>
+<hr />
+<h1 id="part-2-q-format-selection">PART 2 — Q-FORMAT SELECTION</h1>
+<h2 id="21-choosing-the-right-q-format">2.1 Choosing the Right Q Format</h2>
+<p>The format determines your <strong>range vs precision</strong> trade-off:</p>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Total bits</th>
+<th>Integer bits</th>
+<th>Frac bits</th>
+<th>Range</th>
+<th>Resolution</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Q8.8</td>
+<td>16</td>
+<td>8</td>
+<td>8</td>
+<td>±127</td>
+<td>0.0039</td>
+</tr>
+<tr>
+<td>Q16.16</td>
+<td>32</td>
+<td>16</td>
+<td>16</td>
+<td>±32767</td>
+<td>0.0000153</td>
+</tr>
+<tr>
+<td>Q8.24</td>
+<td>32</td>
+<td>8</td>
+<td>24</td>
+<td>±127</td>
+<td>0.0000000596</td>
+</tr>
+<tr>
+<td>Q24.8</td>
+<td>32</td>
+<td>24</td>
+<td>8</td>
+<td>±8M</td>
+<td>0.0039</td>
+</tr>
+<tr>
+<td>Q1.31</td>
+<td>32</td>
+<td>1</td>
+<td>31</td>
+<td>±1.0</td>
+<td>0.00000000047</td>
+</tr>
+</tbody>
+</table>
+<h2 id="22-oks-motor-control-q-format-choices">2.2 OKS Motor Control Q-Format Choices</h2>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Physical range</th>
+<th>Needed resolution</th>
+<th>Q format</th>
+<th>Reasoning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Motor current</td>
+<td>±10 A</td>
+<td>0.01 A</td>
+<td>Q16.16</td>
+<td>10 A fits in 16 int bits; 0.001 A resolution</td>
+</tr>
+<tr>
+<td>Speed (rad/s)</td>
+<td>±200 rad/s</td>
+<td>0.01 rad/s</td>
+<td>Q16.16</td>
+<td>200 fits comfortably</td>
+</tr>
+<tr>
+<td>Position (rad)</td>
+<td>0–2π × 10⁶ revs</td>
+<td>0.001 rad</td>
+<td>Q24.8</td>
+<td>Large range for cumulative position</td>
+</tr>
+<tr>
+<td>PID gains</td>
+<td>0.001–100</td>
+<td>0.0001</td>
+<td>Q16.16</td>
+<td>Good balance</td>
+</tr>
+<tr>
+<td>PWM duty</td>
+<td>0.0–1.0</td>
+<td>0.0001</td>
+<td>Q1.15 (16-bit)</td>
+<td>Exact mapping to timer compare register</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key insight:</strong> You can use different Q formats for different signals, but you must <strong>align</strong> them before arithmetic (shift to match Q values).</p>
+<h2 id="23-mixed-q-format-arithmetic">2.3 Mixed Q-Format Arithmetic</h2>
+<p>When multiplying Q16.16 gain × Q16.16 error → result is Q32.32 (stored in 64-bit), then truncate to Q16.16 by shifting right 16.</p>
+<p>When multiplying Q16.16 gain × Q24.8 position → result is Q40.24, shift right 8 to get Q16.16.</p>
+<p><strong>General rule:</strong> $Q_{result} = Q_a + Q_b$, then shift right by $(Q_a + Q_b - Q_{desired})$.</p>
+<hr />
+<h1 id="part-3-fixed-point-pid-implementation">PART 3 — FIXED-POINT PID IMPLEMENTATION</h1>
+<h2 id="31-velocity-form-production-ready">3.1 Velocity Form (Production-Ready)</h2>
+<div class="highlight"><pre><span></span><code><span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">Kp</span><span class="p">;</span><span class="w">           </span><span class="c1">// Q16.16</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">Ki</span><span class="p">;</span><span class="w">           </span><span class="c1">// Q16.16 (already includes Ts)</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">Kd</span><span class="p">;</span><span class="w">           </span><span class="c1">// Q16.16 (already includes 1/Ts)</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">prev_error</span><span class="p">;</span><span class="w">   </span><span class="c1">// Q16.16</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">prev2_error</span><span class="p">;</span><span class="w">  </span><span class="c1">// Q16.16</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">output</span><span class="p">;</span><span class="w">       </span><span class="c1">// Q16.16</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">output_min</span><span class="p">;</span><span class="w">   </span><span class="c1">// Q16.16</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">output_max</span><span class="p">;</span><span class="w">   </span><span class="c1">// Q16.16</span>
+<span class="p">}</span><span class="w"> </span><span class="n">FixedPID</span><span class="p">;</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">pid_init</span><span class="p">(</span><span class="n">FixedPID</span><span class="w"> </span><span class="o">*</span><span class="n">pid</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">kp</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">ki</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">kd</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">ts</span><span class="p">,</span>
+<span class="w">              </span><span class="kt">float</span><span class="w"> </span><span class="n">out_min</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">out_max</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">q16_from_float</span><span class="p">(</span><span class="n">kp</span><span class="p">);</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ki</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">q16_from_float</span><span class="p">(</span><span class="n">ki</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ts</span><span class="p">);</span><span class="w">     </span><span class="c1">// Pre-multiply by Ts</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">q16_from_float</span><span class="p">(</span><span class="n">kd</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">ts</span><span class="p">);</span><span class="w">     </span><span class="c1">// Pre-multiply by 1/Ts</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev2_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output_min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">q16_from_float</span><span class="p">(</span><span class="n">out_min</span><span class="p">);</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output_max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">q16_from_float</span><span class="p">(</span><span class="n">out_max</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">q16_t</span><span class="w"> </span><span class="nf">pid_compute</span><span class="p">(</span><span class="n">FixedPID</span><span class="w"> </span><span class="o">*</span><span class="n">pid</span><span class="p">,</span><span class="w"> </span><span class="n">q16_t</span><span class="w"> </span><span class="n">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Velocity form: Δu = Kp*(e - e_prev) + Ki*e + Kd*(e - 2*e_prev + e_prev2)</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">de</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="p">;</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">d2e</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev2_error</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">delta_u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">q16_mul</span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kp</span><span class="p">,</span><span class="w"> </span><span class="n">de</span><span class="p">)</span>
+<span class="w">                  </span><span class="o">+</span><span class="w"> </span><span class="n">q16_mul</span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Ki</span><span class="p">,</span><span class="w"> </span><span class="n">error</span><span class="p">)</span>
+<span class="w">                  </span><span class="o">+</span><span class="w"> </span><span class="n">q16_mul</span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">Kd</span><span class="p">,</span><span class="w"> </span><span class="n">d2e</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">q16_add_sat</span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="p">,</span><span class="w"> </span><span class="n">delta_u</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Clamp (inherent anti-windup)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output_max</span><span class="p">)</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output_max</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output_min</span><span class="p">)</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output_min</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Shift history</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev2_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="p">;</span>
+<span class="w">    </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">prev_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">error</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">pid</span><span class="o">-&gt;</span><span class="n">output</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="32-pre-multiplying-gains">3.2 Pre-Multiplying Gains</h2>
+<p>Notice: <code>Ki = ki * ts</code> and <code>Kd = kd / ts</code> are computed once at initialization. This eliminates two multiplies per loop iteration. At 10 kHz on a Cortex-M0+ (no hardware multiplier), saving 2 multiplies = saving 40 µs.</p>
+<p><strong>But:</strong> If $T_s$ changes (e.g., adaptive rate), you must recalculate the gains. In OKS, $T_s$ is fixed, so pre-multiplication is safe.</p>
+<h2 id="33-why-velocity-form-avoids-integrator-overflow">3.3 Why Velocity Form Avoids Integrator Overflow</h2>
+<p>In positional form, the integral term accumulates forever:</p>
+<p>$$I[n] = \sum_{k=0}^{n} e[k] \cdot T_s$$</p>
+<p>If the error is 0.1 and the rate is 10 kHz, after just 1 minute:
+$I = 0.1 \times 10000 \times 60 = 60000$ — this approaches Q16.16 overflow (32767 in integer part)!</p>
+<p>In velocity form, the &ldquo;integral&rdquo; is implicit in the accumulated output, which is clamped every cycle. No unbounded accumulation.</p>
+<hr />
+<h1 id="part-4-isr-structure-and-timing">PART 4 — ISR STRUCTURE AND TIMING</h1>
+<h2 id="41-the-10-khz-timer-isr">4.1 The 10 kHz Timer ISR</h2>
+<div class="highlight"><pre><span></span><code><span class="c1">// Called by TIM1 update interrupt at 10 kHz</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">TIM1_UP_IRQHandler</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// 1. Clear interrupt flag (MUST be first)</span>
+<span class="w">    </span><span class="n">__HAL_TIM_CLEAR_FLAG</span><span class="p">(</span><span class="o">&amp;</span><span class="n">htim1</span><span class="p">,</span><span class="w"> </span><span class="n">TIM_FLAG_UPDATE</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// 2. Read current (ADC was triggered by timer, result ready via DMA)</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">current_measured</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">adc_to_q16</span><span class="p">(</span><span class="n">adc_dma_buffer</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+
+<span class="w">    </span><span class="c1">// 3. Read encoder</span>
+<span class="w">    </span><span class="kt">int32_t</span><span class="w"> </span><span class="n">enc_count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int16_t</span><span class="p">)</span><span class="n">TIM3</span><span class="o">-&gt;</span><span class="n">CNT</span><span class="p">;</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="kt">int32_t</span><span class="w"> </span><span class="n">prev_enc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int32_t</span><span class="w"> </span><span class="n">enc_diff</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">enc_count</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">prev_enc</span><span class="p">;</span>
+<span class="w">    </span><span class="n">prev_enc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">enc_count</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Handle 16-bit overflow</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">enc_diff</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">32767</span><span class="p">)</span><span class="w"> </span><span class="n">enc_diff</span><span class="w"> </span><span class="o">-=</span><span class="w"> </span><span class="mi">65536</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">enc_diff</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">-32767</span><span class="p">)</span><span class="w"> </span><span class="n">enc_diff</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">65536</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// 4. Compute speed (Q16.16, rad/s)</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">speed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">q16_mul</span><span class="p">(</span><span class="n">q16_from_float</span><span class="p">(</span><span class="n">RAD_PER_COUNT</span><span class="p">),</span><span class="w"> </span>
+<span class="w">                          </span><span class="p">(</span><span class="n">q16_t</span><span class="p">)(</span><span class="n">enc_diff</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">Q16_SHIFT</span><span class="p">));</span>
+<span class="w">    </span><span class="c1">// Divide by Ts already baked into the constant</span>
+
+<span class="w">    </span><span class="c1">// 5. Speed PID → current command</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">speed_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">speed_setpoint</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">speed</span><span class="p">;</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">current_cmd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid_compute</span><span class="p">(</span><span class="o">&amp;</span><span class="n">speed_pid</span><span class="p">,</span><span class="w"> </span><span class="n">speed_error</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// 6. Current PID → PWM duty</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">current_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">current_cmd</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">current_measured</span><span class="p">;</span>
+<span class="w">    </span><span class="n">q16_t</span><span class="w"> </span><span class="n">duty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pid_compute</span><span class="p">(</span><span class="o">&amp;</span><span class="n">current_pid</span><span class="p">,</span><span class="w"> </span><span class="n">current_error</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// 7. Update PWM (convert Q16.16 duty to timer compare value)</span>
+<span class="w">    </span><span class="kt">int32_t</span><span class="w"> </span><span class="n">ccr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int32_t</span><span class="p">)(((</span><span class="kt">int64_t</span><span class="p">)</span><span class="n">duty</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">PWM_PERIOD</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">Q16_SHIFT</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ccr</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="n">ccr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ccr</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">PWM_PERIOD</span><span class="p">)</span><span class="w"> </span><span class="n">ccr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">PWM_PERIOD</span><span class="p">;</span>
+<span class="w">    </span><span class="n">TIM1</span><span class="o">-&gt;</span><span class="n">CCR1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint16_t</span><span class="p">)</span><span class="n">ccr</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// 8. Update direction</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">duty</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">GPIOA</span><span class="o">-&gt;</span><span class="n">BSRR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DIR_PIN</span><span class="p">;</span><span class="w">  </span><span class="c1">// Set direction reverse</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">GPIOA</span><span class="o">-&gt;</span><span class="n">BSRR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DIR_PIN</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">16</span><span class="p">;</span><span class="w">  </span><span class="c1">// Reset direction</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// 9. Feed watchdog</span>
+<span class="w">    </span><span class="n">IWDG</span><span class="o">-&gt;</span><span class="n">KR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0xAAAA</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="42-isr-timing-rules">4.2 ISR Timing Rules</h2>
+<ol>
+<li><strong>No blocking:</strong> Never wait for anything. No <code>while</code> loops, no <code>HAL_Delay</code>, no mutex locks.</li>
+<li><strong>No dynamic allocation:</strong> <code>malloc</code> in an ISR is a fatal error. Everything is pre-allocated.</li>
+<li><strong>No floating point</strong> (on MCUs without FPU, or when determinism is required).</li>
+<li><strong>Minimize branches:</strong> Branch misprediction on Cortex-M = 3-cycle penalty. Use arithmetic where possible.</li>
+<li><strong>Constant execution time:</strong> The ISR should take the same time whether error is 0 or 1000.</li>
+</ol>
+<p><strong>Measuring ISR duration (toggle a GPIO):</strong></p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">TIM1_UP_IRQHandler</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">GPIOB</span><span class="o">-&gt;</span><span class="n">BSRR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEBUG_PIN</span><span class="p">;</span><span class="w">   </span><span class="c1">// Pin HIGH at ISR start</span>
+
+<span class="w">    </span><span class="c1">// ... all PID computation ...</span>
+
+<span class="w">    </span><span class="n">GPIOB</span><span class="o">-&gt;</span><span class="n">BSRR</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DEBUG_PIN</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">16</span><span class="p">;</span><span class="w">  </span><span class="c1">// Pin LOW at ISR end</span>
+<span class="p">}</span>
+<span class="c1">// Measure the pulse width on an oscilloscope → ISR duration</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-5-common-fixed-point-pitfalls">PART 5 — COMMON FIXED-POINT PITFALLS</h1>
+<h2 id="51-the-deadly-pitfalls">5.1 The Deadly Pitfalls</h2>
+<h3 id="pitfall-1-forgetting-64-bit-intermediate">Pitfall 1: Forgetting 64-bit Intermediate</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// WRONG: 32-bit overflow</span>
+<span class="n">q16_t</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">a</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">16</span><span class="p">;</span><span class="w">  </span><span class="c1">// a*b overflows int32_t!</span>
+
+<span class="c1">// RIGHT: 64-bit intermediate</span>
+<span class="n">q16_t</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">q16_t</span><span class="p">)(((</span><span class="kt">int64_t</span><span class="p">)</span><span class="n">a</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">16</span><span class="p">);</span>
+</code></pre></div>
+
+<h3 id="pitfall-2-signed-vs-unsigned-shift">Pitfall 2: Signed vs Unsigned Shift</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// WRONG: Arithmetic shift on unsigned type</span>
+<span class="kt">uint32_t</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mh">0x80000000</span><span class="p">;</span>
+<span class="kt">int32_t</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">16</span><span class="p">;</span><span class="w">  </span><span class="c1">// Implementation-defined! May not sign-extend</span>
+
+<span class="c1">// RIGHT: Cast to signed first</span>
+<span class="kt">int32_t</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">int32_t</span><span class="p">)</span><span class="n">x</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">16</span><span class="p">;</span>
+</code></pre></div>
+
+<h3 id="pitfall-3-loss-of-precision-in-gain-pre-multiplication">Pitfall 3: Loss of Precision in Gain Pre-multiplication</h3>
+<p>If $K_i = 0.01$ and $T_s = 0.0001$:
+$K_i \times T_s = 0.000001$</p>
+<p>In Q16.16: $0.000001 \times 65536 = 0.065$ → stored as <strong>0</strong> (integer truncation!)</p>
+<p><strong>Fix:</strong> Use a higher Q format for gains (Q8.24) or scale the error instead.</p>
+<h3 id="pitfall-4-integer-division-truncation">Pitfall 4: Integer Division Truncation</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// WRONG: loses fractional part</span>
+<span class="n">q16_t</span><span class="w"> </span><span class="n">half</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Q16_ONE</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span><span class="w">  </span><span class="c1">// = 65536 / 3 = 21845 (0.3333... truncated)</span>
+
+<span class="c1">// This is actually fine for most cases (error &lt; 0.00002)</span>
+<span class="c1">// But beware cumulative truncation in filters</span>
+</code></pre></div>
+
+<h3 id="pitfall-5-comparing-fixed-point-across-different-q-formats">Pitfall 5: Comparing Fixed-Point Across Different Q Formats</h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// WRONG: comparing Q16.16 with Q8.24 directly</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">speed_q16</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">threshold_q24</span><span class="p">)</span><span class="w">  </span><span class="c1">// Meaningless comparison!</span>
+
+<span class="c1">// RIGHT: convert to same Q format first</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">speed_q16</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="p">(</span><span class="n">threshold_q24</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">8</span><span class="p">))</span>
+</code></pre></div>
+
+<h2 id="52-testing-fixed-point-back-to-back-with-float">5.2 Testing Fixed-Point: Back-to-Back with Float</h2>
+<p>The gold standard: run the float and fixed-point PID in parallel and compare outputs.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Python verification script</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">struct</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">q16_from_float</span><span class="p">(</span><span class="n">f</span><span class="p">):</span>
+    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">f</span> <span class="o">*</span> <span class="mi">65536</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0xFFFFFFFF</span>  <span class="c1"># Simulate 32-bit</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">q16_mul</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+    <span class="c1"># Simulate 64-bit intermediate</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="p">(</span><span class="n">a</span> <span class="o">*</span> <span class="n">b</span><span class="p">)</span> <span class="o">&gt;&gt;</span> <span class="mi">16</span>
+    <span class="c1"># Clamp to 32-bit signed</span>
+    <span class="k">if</span> <span class="n">result</span> <span class="o">&gt;</span> <span class="mh">0x7FFFFFFF</span><span class="p">:</span>
+        <span class="n">result</span> <span class="o">-=</span> <span class="mh">0x100000000</span>
+    <span class="k">if</span> <span class="n">result</span> <span class="o">&lt;</span> <span class="o">-</span><span class="mh">0x80000000</span><span class="p">:</span>
+        <span class="n">result</span> <span class="o">+=</span> <span class="mh">0x100000000</span>
+    <span class="k">return</span> <span class="n">result</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">compare_pid</span><span class="p">(</span><span class="n">kp</span><span class="p">,</span> <span class="n">ki</span><span class="p">,</span> <span class="n">kd</span><span class="p">,</span> <span class="n">ts</span><span class="p">,</span> <span class="n">errors</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Run float and fixed-point PID, report max deviation.&quot;&quot;&quot;</span>
+    <span class="c1"># Float reference</span>
+    <span class="n">float_integral</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="n">float_prev_err</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+    <span class="c1"># Fixed-point</span>
+    <span class="n">fp_integral</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">fp_prev_err</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">fp_kp</span> <span class="o">=</span> <span class="n">q16_from_float</span><span class="p">(</span><span class="n">kp</span><span class="p">)</span>
+    <span class="n">fp_ki_ts</span> <span class="o">=</span> <span class="n">q16_from_float</span><span class="p">(</span><span class="n">ki</span> <span class="o">*</span> <span class="n">ts</span><span class="p">)</span>
+    <span class="n">fp_kd_ts</span> <span class="o">=</span> <span class="n">q16_from_float</span><span class="p">(</span><span class="n">kd</span> <span class="o">/</span> <span class="n">ts</span><span class="p">)</span>
+
+    <span class="n">max_deviation</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+    <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">errors</span><span class="p">:</span>
+        <span class="c1"># Float PID</span>
+        <span class="n">float_integral</span> <span class="o">+=</span> <span class="n">e</span> <span class="o">*</span> <span class="n">ts</span>
+        <span class="n">float_deriv</span> <span class="o">=</span> <span class="p">(</span><span class="n">e</span> <span class="o">-</span> <span class="n">float_prev_err</span><span class="p">)</span> <span class="o">/</span> <span class="n">ts</span>
+        <span class="n">float_out</span> <span class="o">=</span> <span class="n">kp</span> <span class="o">*</span> <span class="n">e</span> <span class="o">+</span> <span class="n">ki</span> <span class="o">*</span> <span class="n">float_integral</span> <span class="o">+</span> <span class="n">kd</span> <span class="o">*</span> <span class="n">float_deriv</span>
+        <span class="n">float_prev_err</span> <span class="o">=</span> <span class="n">e</span>
+
+        <span class="c1"># Fixed-point PID (positional form for comparison)</span>
+        <span class="n">fp_e</span> <span class="o">=</span> <span class="n">q16_from_float</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+        <span class="n">fp_integral</span> <span class="o">+=</span> <span class="n">q16_mul</span><span class="p">(</span><span class="n">fp_ki_ts</span><span class="p">,</span> <span class="n">fp_e</span><span class="p">)</span>
+        <span class="n">fp_deriv</span> <span class="o">=</span> <span class="n">q16_mul</span><span class="p">(</span><span class="n">fp_kd_ts</span><span class="p">,</span> <span class="n">fp_e</span> <span class="o">-</span> <span class="n">fp_prev_err</span><span class="p">)</span>
+        <span class="n">fp_out</span> <span class="o">=</span> <span class="n">q16_mul</span><span class="p">(</span><span class="n">fp_kp</span><span class="p">,</span> <span class="n">fp_e</span><span class="p">)</span> <span class="o">+</span> <span class="n">fp_integral</span> <span class="o">+</span> <span class="n">fp_deriv</span>
+        <span class="n">fp_prev_err</span> <span class="o">=</span> <span class="n">fp_e</span>
+
+        <span class="c1"># Compare</span>
+        <span class="n">fp_out_float</span> <span class="o">=</span> <span class="n">fp_out</span> <span class="o">/</span> <span class="mf">65536.0</span>
+        <span class="n">deviation</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">float_out</span> <span class="o">-</span> <span class="n">fp_out_float</span><span class="p">)</span>
+        <span class="n">max_deviation</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">max_deviation</span><span class="p">,</span> <span class="n">deviation</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">max_deviation</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-6-when-to-use-float-anyway">PART 6 — WHEN TO USE FLOAT ANYWAY</h1>
+<p>The Cortex-M4 FPU does single-precision float in <strong>1 cycle</strong> (multiply) or <strong>14 cycles</strong> (divide). If your MCU has an FPU:</p>
+<table>
+<thead>
+<tr>
+<th>Criterion</th>
+<th>Fixed-point</th>
+<th>Float</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MCU has FPU</td>
+<td>Use float</td>
+<td>✅ Use float</td>
+</tr>
+<tr>
+<td>MCU has no FPU</td>
+<td>✅ Must use fixed</td>
+<td>Can&rsquo;t (too slow)</td>
+</tr>
+<tr>
+<td>Deterministic timing required</td>
+<td>✅ Fixed</td>
+<td>Float (mostly deterministic on M4)</td>
+</tr>
+<tr>
+<td>Porting to FPGA later</td>
+<td>✅ Fixed</td>
+<td>Must convert</td>
+</tr>
+<tr>
+<td>Team familiarity</td>
+<td>Lower</td>
+<td>✅ Higher</td>
+</tr>
+</tbody>
+</table>
+<p><strong>OKS decision:</strong> Float for speed/position PID on STM32F4 (has FPU). Fixed-point for sensorbar controller on STM32G0 (no FPU) and for any future FPGA offloading.</p>
+<hr />
+<h2 id="checkpoint-questions">Checkpoint Questions</h2>
+<ol>
+<li>What is Q16.16 format? What&rsquo;s the range and resolution?</li>
+<li>Why does <code>q16_mul</code> need a 64-bit intermediate? Show an example that overflows without it.</li>
+<li>Write a Q16.16 <code>q16_add_sat()</code> function with overflow protection.</li>
+<li>$K_i = 0.001$, $T_s = 0.0001$. Can you pre-multiply $K_i \times T_s$ in Q16.16? What goes wrong?</li>
+<li>Why does the velocity form avoid integrator overflow?</li>
+<li>List three things you must NEVER do inside a 10 kHz timer ISR.</li>
+<li>How would you verify that your fixed-point PID matches the float reference?</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ul>
+<li><strong>Fixed-point</strong> = integer arithmetic with an implied binary point. Use Q16.16 for most motor control.</li>
+<li><strong>64-bit intermediates</strong> in multiplication are non-negotiable — overflow is silent and catastrophic</li>
+<li><strong>Velocity form PID</strong> is preferred: inherent anti-windup, no unbounded accumulation</li>
+<li><strong>Pre-multiply gains by $T_s$</strong> to save cycles, but check for precision loss</li>
+<li><strong>ISR rules:</strong> No blocking, no malloc, no floats (without FPU), constant execution time</li>
+<li><strong>Test by comparing</strong> fixed-point output to float reference — max deviation should be &lt; 0.1%</li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

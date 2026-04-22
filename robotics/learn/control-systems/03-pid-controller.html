@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>03 — PID Controller - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="03-pid-controller">03 — PID Controller</h1>
+<h3 id="the-workhorse-of-industrial-control-and-why-95-of-all-control-loops-use-it">The workhorse of industrial control — and why 95% of all control loops use it</h3>
+<p><strong>Prerequisite:</strong> <code>02-modeling-dc-motors.md</code> (motor transfer function, time constants)
+<strong>Unlocks:</strong> <code>04-discrete-time-control.md</code> (you design in continuous, then discretize)</p>
+<hr />
+<h2 id="why-should-i-care-oks-context">Why Should I Care? (OKS Context)</h2>
+<p>Every motor on every OKS robot uses PID. The sensorbar controller uses PID. The lifter position controller uses PID. Nav2&rsquo;s DWB uses a PID-like feedback law. When firmware tunes a new robot model, they&rsquo;re tuning PID gains.</p>
+<p>When you see a robot oscillating, overshooting, or sluggishly following commands — it&rsquo;s a PID problem. This lesson teaches you to <em>predict</em> the behavior from the gains, <em>tune</em> the gains systematically, and <em>recognize</em> when PID isn&rsquo;t enough.</p>
+<p><strong>Real OKS failures caused by PID issues:</strong>
+- Ticket #98382: Motor oscillation at 180 Hz — Kp set too high after firmware update
+- Ticket #99589: Robot overshoot into rack after e-stop release — integral windup
+- Ticket #100413: Sluggish trajectory following — Kp reduced to 40% of original during &ldquo;safety fix&rdquo;</p>
+<hr />
+<h1 id="part-1-the-pid-equation">PART 1 — THE PID EQUATION</h1>
+<h2 id="11-continuous-time-pid">1.1 Continuous-Time PID</h2>
+<p>$$u(t) = K_p \cdot e(t) + K_i \int_0^t e(\tau)\,d\tau + K_d \cdot \frac{de(t)}{dt}$$</p>
+<p>where:
+- $e(t) = r(t) - y(t)$ = error (reference minus measurement)
+- $u(t)$ = control output (PWM duty, voltage command)
+- $K_p$ = proportional gain
+- $K_i$ = integral gain
+- $K_d$ = derivative gain</p>
+<p><strong>Laplace form:</strong></p>
+<p>$$C(s) = K_p + \frac{K_i}{s} + K_d s = K_p \left(1 + \frac{1}{T_i s} + T_d s\right)$$</p>
+<p>where $T_i = K_p / K_i$ (integral time) and $T_d = K_d / K_p$ (derivative time).</p>
+<h2 id="12-what-each-term-does">1.2 What Each Term Does</h2>
+<h3 id="proportional-p-the-spring">Proportional (P): The Spring</h3>
+<p>$$u_P = K_p \cdot e(t)$$</p>
+<p>The output is proportional to the current error. Like a spring: the further from target, the harder you push.</p>
+<p><strong>What it gives you:</strong> Immediate response to error. Higher $K_p$ → faster response.
+<strong>What it costs you:</strong> Higher $K_p$ → more overshoot, eventually oscillation. <strong>Never</strong> zero steady-state error alone (unless the plant already has an integrator).</p>
+<p><strong>OKS intuition:</strong> $K_p$ = &ldquo;how aggressively do we correct speed error?&rdquo; High $K_p$ → motor snaps to target speed quickly but may overshoot and ring. Low $K_p$ → motor slowly drifts toward target.</p>
+<div class="highlight"><pre><span></span><code>Response with increasing Kp:
+
+  ω(t)
+  │     Kp = 3.0 (oscillating)
+  │    /╲  /╲
+  │   /  ╲/  ╲───  Kp = 1.5 (overshoot + ring)
+  │  /        ╱──── Kp = 0.8 (good)
+  │ /      ╱─────── Kp = 0.3 (sluggish)
+  │/    ╱
+  └──────────────── t
+  ω_ref ─ ─ ─ ─ ─ ─ ─ ─
+</code></pre></div>
+
+<h3 id="integral-i-the-memory">Integral (I): The Memory</h3>
+<p>$$u_I = K_i \int_0^t e(\tau)\,d\tau$$</p>
+<p>Accumulates past error. Even a tiny persistent error eventually builds up a large control signal.</p>
+<p><strong>What it gives you:</strong> Eliminates steady-state error. If the motor runs 0.1 rad/s too slow, the integral keeps growing until the PWM increases enough to close the gap.
+<strong>What it costs you:</strong> Slows down the response (adds phase lag). Can cause <strong>integral windup</strong> (see Part 3).</p>
+<p><strong>OKS intuition:</strong> $K_i$ = &ldquo;how impatient are we about persistent error?&rdquo; High $K_i$ → drives error to zero quickly but makes the system more oscillatory. Low $K_i$ → takes a long time to eliminate offset.</p>
+<h3 id="derivative-d-the-prediction">Derivative (D): The Prediction</h3>
+<p>$$u_D = K_d \cdot \frac{de(t)}{dt}$$</p>
+<p>Responds to the <em>rate of change</em> of error. If the error is decreasing fast (we&rsquo;re approaching the target quickly), it <em>reduces</em> the control output to prevent overshoot.</p>
+<p><strong>What it gives you:</strong> Reduced overshoot, improved stability. Acts as a damper.
+<strong>What it costs you:</strong> Amplifies high-frequency noise. In practice, ALWAYS used with a low-pass filter (see 1.4).</p>
+<p><strong>OKS intuition:</strong> $K_d$ = &ldquo;how much do we brake as we approach the target?&rdquo; High $K_d$ → smooth approach, no overshoot, but slow. Low $K_d$ → less damping, may overshoot.</p>
+<h2 id="13-combining-the-terms">1.3 Combining the Terms</h2>
+<table>
+<thead>
+<tr>
+<th>Controller</th>
+<th>Steady-state error</th>
+<th>Overshoot</th>
+<th>Oscillation risk</th>
+<th>Use case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P only</td>
+<td>Yes (offset)</td>
+<td>Moderate</td>
+<td>Low</td>
+<td>Quick regulation, don&rsquo;t need zero error</td>
+</tr>
+<tr>
+<td>PI</td>
+<td>Zero</td>
+<td>Moderate→High</td>
+<td>Medium</td>
+<td>Most OKS motor loops</td>
+</tr>
+<tr>
+<td>PD</td>
+<td>Yes (reduced)</td>
+<td>Low</td>
+<td>Low</td>
+<td>Position loops where speed has integral</td>
+</tr>
+<tr>
+<td>PID</td>
+<td>Zero</td>
+<td>Tunable</td>
+<td>Medium→High</td>
+<td>General purpose, need zero error + damping</td>
+</tr>
+</tbody>
+</table>
+<p><strong>OKS motor speed loop:</strong> Uses PI (no derivative — encoder noise makes D noisy at 10 kHz).
+<strong>OKS motor current loop:</strong> Uses P-only (fast response, steady-state error is absorbed by outer speed loop).</p>
+<h2 id="14-derivative-filter-practical-d-term">1.4 Derivative Filter (Practical D-Term)</h2>
+<p>Pure derivative amplifies noise. A high-frequency encoder glitch that lasts 1 µs produces a derivative spike of enormous magnitude. Solution: filter the derivative:</p>
+<p>$$D_{filtered}(s) = \frac{K_d s}{1 + \frac{K_d}{N \cdot K_p} s} = \frac{K_d s}{\frac{\tau_f}{1} s + 1}$$</p>
+<p>where $N$ = filter coefficient (typically 8–20). This limits the derivative gain at high frequencies to $N \cdot K_p$.</p>
+<p><strong>Practical rule:</strong> Use $N = 10$ unless you have a reason not to. This means the D-term acts as pure derivative up to $f = N \cdot K_p / (2\pi K_d)$, then rolls off.</p>
+<h2 id="15-derivative-kick">1.5 Derivative Kick</h2>
+<p>When the reference $r(t)$ changes suddenly (step command), the error changes instantly, and $de/dt$ → ∞. The derivative term produces a huge spike (&ldquo;derivative kick&rdquo;) that can damage actuators.</p>
+<p><strong>Solution:</strong> Differentiate the <em>measurement</em> instead of the <em>error</em>:</p>
+<p>$$u_D = -K_d \cdot \frac{dy(t)}{dt} \quad \text{(derivative on measurement)}$$</p>
+<p>The measurement $y(t)$ changes smoothly (motor can&rsquo;t teleport), so no spike. Many textbooks use $\frac{de}{dt}$, but production code uses $-\frac{dy}{dt}$.</p>
+<p><strong>OKS firmware uses derivative-on-measurement.</strong> If you ever see derivative-on-error in embedded code, it&rsquo;s a bug.</p>
+<hr />
+<h1 id="part-2-pid-tuning-methods">PART 2 — PID TUNING METHODS</h1>
+<h2 id="21-manual-tuning-the-practical-way">2.1 Manual Tuning (The Practical Way)</h2>
+<ol>
+<li><strong>Set $K_i = 0$, $K_d = 0$</strong></li>
+<li><strong>Increase $K_p$</strong> until the output oscillates at a steady frequency. This is the <strong>ultimate gain</strong> $K_u$. The oscillation period is $T_u$.</li>
+<li><strong>Back off $K_p$</strong> to ~60% of $K_u$.</li>
+<li><strong>Add $K_i$</strong> starting small. Increase until steady-state error disappears without excessive overshoot.</li>
+<li><strong>Add $K_d$</strong> (if needed) to reduce overshoot. Start small.</li>
+</ol>
+<p><strong>The feel-based approach used by OKS firmware engineers:</strong></p>
+<div class="highlight"><pre><span></span><code>Start with Kp only:
+  - &quot;Motor barely moves&quot; → Kp too low, 2x it
+  - &quot;Motor gets to speed but settles 5% below&quot; → need Ki
+  - &quot;Motor overshoots and rings 3 times before settling&quot; → Kp too high, reduce by 30%
+  - &quot;Motor buzzes at high frequency&quot; → WAY too much gain, reduce by 10x
+
+Add Ki:
+  - &quot;Offset gone but overshoot increased&quot; → reduce Ki
+  - &quot;Still has offset after 1 second&quot; → increase Ki
+  - &quot;Oscillation at low frequency (1-5 Hz)&quot; → Ki too high
+
+Add Kd (rarely needed for speed loops):
+  - &quot;Overshoot reduced but response is sluggish&quot; → Kd too high
+  - &quot;Noise appears on the control signal&quot; → Kd amplifying encoder noise, add filter
+</code></pre></div>
+
+<h2 id="22-ziegler-nichols-method-the-textbook-way">2.2 Ziegler-Nichols Method (The Textbook Way)</h2>
+<h3 id="method-1-ultimate-gain-method">Method 1: Ultimate Gain Method</h3>
+<ol>
+<li>Set $K_i = 0$, $K_d = 0$</li>
+<li>Increase $K_p$ until sustained oscillation → $K_u$ (ultimate gain), $T_u$ (ultimate period)</li>
+<li>Set gains from table:</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Controller</th>
+<th>$K_p$</th>
+<th>$K_i$</th>
+<th>$K_d$</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P</td>
+<td>$0.50 \cdot K_u$</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>PI</td>
+<td>$0.45 \cdot K_u$</td>
+<td>$0.54 \cdot K_u / T_u$</td>
+<td>—</td>
+</tr>
+<tr>
+<td>PID</td>
+<td>$0.60 \cdot K_u$</td>
+<td>$1.2 \cdot K_u / T_u$</td>
+<td>$0.075 \cdot K_u \cdot T_u$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Warning:</strong> Ziegler-Nichols gives aggressive tuning (quarter-decay ratio — 25% overshoot). For OKS, you usually want less overshoot. Use the values as a starting point and reduce $K_p$ by 30–50%.</p>
+<h3 id="method-2-step-response-method">Method 2: Step Response Method</h3>
+<p>Apply a step input to the <em>open-loop</em> plant. Measure:
+- $L$ = time delay (from step to first response)
+- $T$ = time constant (time from first response to 63% of final value)
+- $K$ = steady-state gain</p>
+<p>Then:</p>
+<table>
+<thead>
+<tr>
+<th>Controller</th>
+<th>$K_p$</th>
+<th>$K_i$</th>
+<th>$K_d$</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P</td>
+<td>$\frac{T}{K \cdot L}$</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>PI</td>
+<td>$\frac{0.9T}{K \cdot L}$</td>
+<td>$\frac{0.27T}{K \cdot L^2}$</td>
+<td>—</td>
+</tr>
+<tr>
+<td>PID</td>
+<td>$\frac{1.2T}{K \cdot L}$</td>
+<td>$\frac{0.6T}{K \cdot L^2}$</td>
+<td>$\frac{0.6T \cdot L}{K}$</td>
+</tr>
+</tbody>
+</table>
+<h2 id="23-cohen-coon-method-better-for-slow-processes">2.3 Cohen-Coon Method (Better for Slow Processes)</h2>
+<p>If $L/T &gt; 0.3$ (significant delay relative to time constant), Cohen-Coon gives better results than Ziegler-Nichols. Tables omitted for brevity — the point is: <strong>no single tuning formula works for all systems</strong>. Use them as starting points, then iterate.</p>
+<h2 id="24-rule-of-thumb-gains-for-oks-motors">2.4 Rule-of-Thumb Gains for OKS Motors</h2>
+<p>From firmware team&rsquo;s experience (these are starting points, not final values):</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Speed loop (PI)</th>
+<th>Current loop (P)</th>
+<th>Position loop (PID)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>$K_p$</td>
+<td>0.5 – 2.0</td>
+<td>0.1 – 0.5</td>
+<td>5.0 – 20.0</td>
+</tr>
+<tr>
+<td>$K_i$</td>
+<td>10 – 100</td>
+<td>0 (or very small)</td>
+<td>0.5 – 5.0</td>
+</tr>
+<tr>
+<td>$K_d$</td>
+<td>0</td>
+<td>0</td>
+<td>0.01 – 0.1</td>
+</tr>
+<tr>
+<td>Sample rate</td>
+<td>10 kHz</td>
+<td>20 kHz</td>
+<td>1 kHz</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="part-3-anti-windup-the-1-pid-pitfall">PART 3 — ANTI-WINDUP (THE #1 PID PITFALL)</h1>
+<h2 id="31-what-is-integral-windup">3.1 What Is Integral Windup?</h2>
+<p>When the control output <strong>saturates</strong> (PWM at 100%, current at maximum), the error persists but the controller can&rsquo;t increase the output further. However, the integral term <em>keeps accumulating</em>. When the saturation condition ends, the accumulated integral causes a massive overshoot.</p>
+<p><strong>The scenario (OKS ticket #99589):</strong></p>
+<div class="highlight"><pre><span></span><code>Timeline:
+  t=0:    Robot moving at 0.3 m/s
+  t=1:    Robot hits obstacle, e-stop activates, PWM → 0
+  t=1-5:  E-stop active. Speed command still 0.3 m/s. Error = 0.3 - 0 = 0.3 m/s.
+          Integral accumulates: 0.3 × 4 seconds = 1.2 m/s·s
+  t=5:    E-stop released. Integral is huge.
+          Controller output = Kp × 0.3 + Ki × 1.2 = massive
+          PWM goes to 100%.
+          Motor surges forward → robot overshoots into rack.
+</code></pre></div>
+
+<h2 id="32-anti-windup-strategies">3.2 Anti-Windup Strategies</h2>
+<h3 id="strategy-1-output-clamping-simple-but-incomplete">Strategy 1: Output Clamping (Simple but Incomplete)</h3>
+<div class="highlight"><pre><span></span><code><span class="kt">float</span><span class="w"> </span><span class="n">integral</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="kt">float</span><span class="w"> </span><span class="nf">pid_compute</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">error</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">dt</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">integral</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">dt</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Clamp integral</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">integral</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">INTEGRAL_MAX</span><span class="p">)</span><span class="w"> </span><span class="n">integral</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">INTEGRAL_MAX</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">integral</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">INTEGRAL_MIN</span><span class="p">)</span><span class="w"> </span><span class="n">integral</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">INTEGRAL_MIN</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Kp</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">Ki</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">integral</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">Kd</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">deriv</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Clamp output</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">output</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">OUTPUT_MAX</span><span class="p">)</span><span class="w"> </span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">OUTPUT_MAX</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">output</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">OUTPUT_MIN</span><span class="p">)</span><span class="w"> </span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">OUTPUT_MIN</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">output</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Problem:</strong> The clamp values are arbitrary. Too tight → integral doesn&rsquo;t help. Too loose → windup still happens.</p>
+<h3 id="strategy-2-conditional-integration-better">Strategy 2: Conditional Integration (Better)</h3>
+<p>Only integrate when the output is NOT saturated:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">float</span><span class="w"> </span><span class="nf">pid_compute</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">error</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">dt</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">p_term</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Kp</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">error</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">d_term</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Kd</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">error</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">prev_error</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">dt</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">output_before_sat</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p_term</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">Ki</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">integral</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">d_term</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Only integrate if not saturated OR error is reducing saturation</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">saturated_high</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">output_before_sat</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">OUTPUT_MAX</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">saturated_low</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">output_before_sat</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">OUTPUT_MIN</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">error_reducing</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">saturated_high</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>
+<span class="w">                          </span><span class="p">(</span><span class="n">saturated_low</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">saturated_high</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="n">saturated_low</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">error_reducing</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">integral</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">dt</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p_term</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">Ki</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">integral</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">d_term</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">CLAMP</span><span class="p">(</span><span class="n">output</span><span class="p">,</span><span class="w"> </span><span class="n">OUTPUT_MIN</span><span class="p">,</span><span class="w"> </span><span class="n">OUTPUT_MAX</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="strategy-3-back-calculation-the-professional-way">Strategy 3: Back-Calculation (The Professional Way)</h3>
+<p>Feed the saturation error back into the integrator:</p>
+<p>$$\frac{d}{dt} \int e = e(t) + \frac{1}{T_t} (u_{saturated} - u_{unsaturated})$$</p>
+<p>where $T_t$ is the tracking time constant (often set to $T_t = \sqrt{T_i \cdot T_d}$ or $T_t = T_d$).</p>
+<div class="highlight"><pre><span></span><code><span class="kt">float</span><span class="w"> </span><span class="nf">pid_compute</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">error</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">dt</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">p_term</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Kp</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">error</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">d_term</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Kd</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">derivative</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">output_unsat</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p_term</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">Ki</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">integral</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">d_term</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">output_sat</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CLAMP</span><span class="p">(</span><span class="n">output_unsat</span><span class="p">,</span><span class="w"> </span><span class="n">OUTPUT_MIN</span><span class="p">,</span><span class="w"> </span><span class="n">OUTPUT_MAX</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Back-calculation: reduce integral by saturation amount</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">sat_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">output_sat</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">output_unsat</span><span class="p">;</span>
+<span class="w">    </span><span class="n">integral</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="p">(</span><span class="n">error</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">sat_error</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">Tt</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">dt</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">output_sat</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>OKS firmware uses back-calculation</strong> for the speed PID loop. The current loop uses simple clamping since it rarely saturates (the speed loop limits the current command).</p>
+<h3 id="strategy-4-reset-on-e-stop">Strategy 4: Reset on E-Stop</h3>
+<p>For OKS specifically, the simplest additional protection:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">on_estop_release</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">pid</span><span class="p">.</span><span class="n">integral</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">  </span><span class="c1">// Reset integral to prevent windup surge</span>
+<span class="w">    </span><span class="c1">// Optionally: ramp up the setpoint instead of step</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h1 id="part-4-pid-analysis-with-math">PART 4 — PID ANALYSIS WITH MATH</h1>
+<h2 id="41-closed-loop-with-pi-controller">4.1 Closed-Loop with PI Controller</h2>
+<p>Plant: $G(s) = \frac{K_m}{\tau_m s + 1}$ (motor speed)</p>
+<p>Controller: $C(s) = K_p + \frac{K_i}{s} = \frac{K_p s + K_i}{s}$</p>
+<p>Open-loop: $L(s) = C(s) \cdot G(s) = \frac{K_m(K_p s + K_i)}{s(\tau_m s + 1)}$</p>
+<p>Closed-loop:</p>
+<p>$$T(s) = \frac{L(s)}{1 + L(s)} = \frac{K_m(K_p s + K_i)}{s(\tau_m s + 1) + K_m(K_p s + K_i)}$$</p>
+<p>$$= \frac{K_m(K_p s + K_i)}{\tau_m s^2 + (1 + K_m K_p) s + K_m K_i}$$</p>
+<p><strong>Matching to standard second-order form</strong> $\frac{\omega_n^2}{s^2 + 2\zeta\omega_n s + \omega_n^2}$:</p>
+<p>$$\omega_n = \sqrt{\frac{K_m K_i}{\tau_m}}, \quad \zeta = \frac{1 + K_m K_p}{2\sqrt{\tau_m K_m K_i}}$$</p>
+<p><strong>This is powerful!</strong> You can directly compute the natural frequency and damping ratio from the PID gains and motor parameters:</p>
+<ul>
+<li>Increasing $K_i$ → increases $\omega_n$ (faster) but decreases $\zeta$ (more oscillatory)</li>
+<li>Increasing $K_p$ → increases $\zeta$ (more damped) but also changes the zero location</li>
+</ul>
+<p><strong>Design target:</strong> $\zeta = 0.7$ (5% overshoot, fast settling). Solve for $K_p$ and $K_i$:</p>
+<p>$$K_i = \frac{\omega_n^2 \tau_m}{K_m}, \quad K_p = \frac{2\zeta\omega_n\tau_m - 1}{K_m}$$</p>
+<h2 id="42-numerical-example-oks-motor">4.2 Numerical Example (OKS Motor)</h2>
+<p>Motor: $K_m = 10$ rad/s/V, $\tau_m = 0.1$ s</p>
+<p>Target: $\omega_n = 50$ rad/s, $\zeta = 0.7$</p>
+<p>$$K_i = \frac{50^2 \times 0.1}{10} = 25 \quad [\text{V/rad}]$$</p>
+<p>$$K_p = \frac{2 \times 0.7 \times 50 \times 0.1 - 1}{10} = \frac{7 - 1}{10} = 0.6 \quad [\text{V·s/rad}]$$</p>
+<p><strong>Verification in Python:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">scipy</span><span class="w"> </span><span class="kn">import</span> <span class="n">signal</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+
+<span class="n">Km</span><span class="p">,</span> <span class="n">tau_m</span> <span class="o">=</span> <span class="mf">10.0</span><span class="p">,</span> <span class="mf">0.1</span>
+<span class="n">Kp</span><span class="p">,</span> <span class="n">Ki</span> <span class="o">=</span> <span class="mf">0.6</span><span class="p">,</span> <span class="mf">25.0</span>
+
+<span class="c1"># Closed-loop TF</span>
+<span class="n">num_cl</span> <span class="o">=</span> <span class="p">[</span><span class="n">Km</span> <span class="o">*</span> <span class="n">Kp</span><span class="p">,</span> <span class="n">Km</span> <span class="o">*</span> <span class="n">Ki</span><span class="p">]</span>
+<span class="n">den_cl</span> <span class="o">=</span> <span class="p">[</span><span class="n">tau_m</span><span class="p">,</span> <span class="mi">1</span> <span class="o">+</span> <span class="n">Km</span> <span class="o">*</span> <span class="n">Kp</span><span class="p">,</span> <span class="n">Km</span> <span class="o">*</span> <span class="n">Ki</span><span class="p">]</span>
+
+<span class="n">sys_cl</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">TransferFunction</span><span class="p">(</span><span class="n">num_cl</span><span class="p">,</span> <span class="n">den_cl</span><span class="p">)</span>
+<span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">,</span> <span class="mi">1000</span><span class="p">)</span>
+<span class="n">t_out</span><span class="p">,</span> <span class="n">y_out</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">sys_cl</span><span class="p">,</span> <span class="n">T</span><span class="o">=</span><span class="n">t</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">t_out</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span> <span class="n">y_out</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Time (ms)&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Speed (normalized)&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Closed-loop step response (Kp=</span><span class="si">{</span><span class="n">Kp</span><span class="si">}</span><span class="s1">, Ki=</span><span class="si">{</span><span class="n">Ki</span><span class="si">}</span><span class="s1">)&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">axhline</span><span class="p">(</span><span class="n">y</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Reference&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</code></pre></div>
+
+<p>Expected: ~5% overshoot, settling in ~60 ms. If you see more overshoot → reduce $K_i$. If too slow → increase $\omega_n$.</p>
+<hr />
+<h1 id="part-5-practical-pid-considerations">PART 5 — PRACTICAL PID CONSIDERATIONS</h1>
+<h2 id="51-bumpless-transfer">5.1 Bumpless Transfer</h2>
+<p>When switching between manual and automatic mode (or between different PID parameter sets), the integral term must be initialized to the current control output. Otherwise, there&rsquo;s a sudden jump in output (&ldquo;bump&rdquo;):</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">switch_to_auto</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">current_output</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">pid</span><span class="p">.</span><span class="n">integral</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">current_output</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">Kp</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">error</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">Ki</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="52-output-rate-limiting">5.2 Output Rate Limiting</h2>
+<p>Even with good tuning, you may want to limit how fast the output changes to prevent mechanical stress:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">float</span><span class="w"> </span><span class="nf">rate_limited_output</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">new_output</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">prev_output</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">max_rate</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">dt</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">delta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">new_output</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">prev_output</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">max_delta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">max_rate</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">dt</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">delta</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">max_delta</span><span class="p">)</span><span class="w"> </span><span class="n">delta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">max_delta</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">delta</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="o">-</span><span class="n">max_delta</span><span class="p">)</span><span class="w"> </span><span class="n">delta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">-</span><span class="n">max_delta</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">prev_output</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">delta</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h2 id="53-setpoint-weighting">5.3 Setpoint Weighting</h2>
+<p>Sometimes you want the P and D terms to respond differently to setpoint changes vs disturbances. <strong>Setpoint weighting</strong> applies factors $b$ and $c$:</p>
+<p>$$u = K_p(b \cdot r - y) + K_i \int(r - y)dt + K_d \frac{d(c \cdot r - y)}{dt}$$</p>
+<ul>
+<li>$b = 0$: P-term only responds to measurement (no setpoint overshoot). <strong>Common in OKS.</strong></li>
+<li>$b = 1$: Normal PID (responds to setpoint changes)</li>
+<li>$c = 0$: D-term on measurement only (eliminates derivative kick)</li>
+</ul>
+<hr />
+<h2 id="checkpoint-questions">Checkpoint Questions</h2>
+<ol>
+<li>Write the PID equation in both time domain and Laplace domain.</li>
+<li>A PI controller eliminates steady-state error. Where does the &ldquo;extra&rdquo; torque come from physically?</li>
+<li>You increase $K_p$ and the motor starts oscillating at 200 Hz. What happened in terms of poles?</li>
+<li>Explain integral windup in 3 sentences. Why does back-calculation fix it?</li>
+<li>Ziegler-Nichols ultimate gain method: you find $K_u = 2.0$, $T_u = 0.05$ s. What are the ZN-recommended PID gains?</li>
+<li>Why does OKS firmware use derivative-on-measurement instead of derivative-on-error?</li>
+<li>Design a PI controller for a motor with $K_m = 8$ rad/s/V, $\tau_m = 0.15$ s, targeting $\zeta = 0.7$, $\omega_n = 40$ rad/s.</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ul>
+<li>PID = Proportional (spring) + Integral (memory) + Derivative (prediction)</li>
+<li><strong>Integral</strong> eliminates steady-state error but risks windup; <strong>derivative</strong> reduces overshoot but amplifies noise</li>
+<li><strong>Anti-windup is non-optional</strong> in any real system with actuator limits</li>
+<li>Use <strong>derivative-on-measurement</strong> (not error) to avoid derivative kick</li>
+<li>Ziegler-Nichols is a starting point, not a final answer — always verify on the real system</li>
+<li>For a first-order plant + PI controller, you can <strong>analytically compute</strong> $K_p$ and $K_i$ from desired $\omega_n$ and $\zeta$</li>
+</ul>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>

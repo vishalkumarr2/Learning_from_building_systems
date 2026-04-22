@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Systems — Learning Plan - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-rose-600 hover:text-rose-800 mb-4 inline-block">&larr; Back to Control Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="control-systems-learning-plan">Control Systems — Learning Plan</h1>
+<h3 id="from-a-bare-dc-motor-to-a-jetsonmcu-real-time-control-stack">From a bare DC motor to a Jetson↔MCU real-time control stack</h3>
+<h3 id="for-software-engineer-building-and-debugging-oks-amr-motornavigation-control">For: Software engineer building and debugging OKS AMR motor/navigation control</h3>
+<hr />
+<h2 id="why-this-track-exists">Why This Track Exists</h2>
+<p>You debug OKS robots daily. You&rsquo;ve seen:
+- <code>cmd_vel</code> gaps causing the robot to drift mid-tile
+- Integral windup after guardian releases e-stop → overshoot into a rack
+- Motor oscillation when PID gains are pushed too high on a new firmware branch
+- The mysterious 10 ms budget between Jetson sending <code>cmd_vel</code> and the STM32 executing it</p>
+<p>You know the <em>symptoms</em>. This track gives you the <em>theory</em> to predict them, the <em>math</em> to quantify them, and the <em>code</em> to reproduce them — on both microcontrollers (fixed-point C) and Jetson (floating-point C++/Python).</p>
+<hr />
+<h2 id="two-worlds-one-system">Two Worlds, One System</h2>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────────────────────────────┐
+│                      JETSON (Linux, ROS2)                       │
+│                                                                 │
+│   Nav2 Planner ──→ Controller ──→ cmd_vel @ 20–50 Hz           │
+│                                    │                            │
+│        Trajectory tracking         │  floating-point            │
+│        Pure pursuit / DWB          │  best-effort timing        │
+│        Covariance reasoning        │  ~1–10 ms jitter           │
+│                                    ▼                            │
+│  ─────────────────────── SPI bus (nanopb) ──────────────────── │
+│                                    │                            │
+│                                    ▼                            │
+│                       STM32 (Zephyr RTOS)                       │
+│                                                                 │
+│   cmd_vel ──→ [Speed PID] ──→ [Current PID] ──→ PWM ──→ Motor │
+│                    ↑               ↑                            │
+│                 encoder         current sensor                  │
+│                 @ 10 kHz        @ 20 kHz                        │
+│                                                                 │
+│        Fixed-point arithmetic      │  deterministic ISR         │
+│        No malloc, no floats        │  &lt;1 µs jitter             │
+│        Watchdog: 5 ms timeout      │                            │
+└─────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+
+<p><strong>This track teaches both layers</strong> and the critical contract between them.</p>
+<hr />
+<h2 id="dependency-graph">Dependency Graph</h2>
+<div class="highlight"><pre><span></span><code>                    ┌──────────────────────────┐
+                    │ 10-advanced-control.md   │
+                    │ (feedforward, MPC intro)  │
+                    └────────────┬─────────────┘
+                                 │
+           ┌─────────────────────┼─────────────────────┐
+           │                     │                      │
+┌──────────▼──────────┐ ┌───────▼────────┐ ┌──────────▼──────────┐
+│ 08-trajectory-      │ │ 09-two-layer-  │ │ 07-cascaded-        │
+│ tracking.md         │ │ architecture   │ │ loops.md            │
+│ (pure pursuit, DWB) │ │ (MCU↔Jetson)   │ │ (current→speed→pos) │
+└──────────┬──────────┘ └───────┬────────┘ └──────────┬──────────┘
+           │                    │                      │
+           └────────────────────┼──────────────────────┘
+                                │
+           ┌────────────────────┼────────────────────┐
+           │                    │                     │
+┌──────────▼──────────┐ ┌──────▼───────┐ ┌──────────▼──────────┐
+│ 05-mcu-motor-       │ │ 06-fixed-    │ │ 04-discrete-time-   │
+│ control.md          │ │ point-pid.md │ │ control.md          │
+│ (PWM, H-bridge,     │ │ (integer C)  │ │ (ZOH, Tustin,       │
+│  encoder)           │ │              │ │  sampling)          │
+└──────────┬──────────┘ └──────┬───────┘ └──────────┬──────────┘
+           │                   │                     │
+           └───────────────────┼─────────────────────┘
+                               │
+           ┌───────────────────┼───────────────────┐
+           │                   │                    │
+┌──────────▼──────────┐ ┌─────▼──────────┐ ┌──────▼──────────────┐
+│ 01-what-is-control  │ │ 02-modeling-   │ │ 03-pid-controller   │
+│ (feedback concept)  │ │ dc-motors.md   │ │ (PID, tuning,       │
+│                     │ │ (plant model)  │ │  anti-windup)       │
+└─────────────────────┘ └────────────────┘ └─────────────────────┘
+</code></pre></div>
+
+<p><strong>Reading order:</strong> 01 → 02 → 03 → 04 → 05 → 06 → 07 → 08 → 09 → 10 (strictly sequential)</p>
+<hr />
+<h2 id="topic-breakdown">Topic Breakdown</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>File</th>
+<th>Est. Time</th>
+<th>What It Gives You</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td><code>01-what-is-control.md</code></td>
+<td>3 hrs</td>
+<td>Open/closed loop, block diagrams, transfer functions, why feedback works</td>
+</tr>
+<tr>
+<td>02</td>
+<td><code>02-modeling-dc-motors.md</code></td>
+<td>4 hrs</td>
+<td>Electrical + mechanical model of a DC motor, step response, back-EMF</td>
+</tr>
+<tr>
+<td>03</td>
+<td><code>03-pid-controller.md</code></td>
+<td>5 hrs</td>
+<td>P/PI/PD/PID, Ziegler-Nichols, manual tuning, anti-windup, derivative kick</td>
+</tr>
+<tr>
+<td>04</td>
+<td><code>04-discrete-time-control.md</code></td>
+<td>4 hrs</td>
+<td>Continuous→discrete (ZOH, Tustin), Nyquist rate, aliasing, quantization</td>
+</tr>
+<tr>
+<td>05</td>
+<td><code>05-mcu-motor-control.md</code></td>
+<td>4 hrs</td>
+<td>PWM, H-bridge circuits, current sensing, quadrature encoder decoding</td>
+</tr>
+<tr>
+<td>06</td>
+<td><code>06-fixed-point-pid.md</code></td>
+<td>4 hrs</td>
+<td>Integer-only PID in C, Q16.16 math, timer ISR, no floats, no malloc</td>
+</tr>
+<tr>
+<td>07</td>
+<td><code>07-cascaded-loops.md</code></td>
+<td>4 hrs</td>
+<td>Current→speed→position cascade, bandwidth separation, why 3 nested loops</td>
+</tr>
+<tr>
+<td>08</td>
+<td><code>08-trajectory-tracking.md</code></td>
+<td>4 hrs</td>
+<td>Pure pursuit, Stanley, DWB, regulated pure pursuit, lookahead tuning</td>
+</tr>
+<tr>
+<td>09</td>
+<td><code>09-two-layer-architecture.md</code></td>
+<td>4 hrs</td>
+<td>MCU↔Jetson timing contract, cmd_vel latency budget, watchdog, SPI protocol</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>10-advanced-control.md</code></td>
+<td>4 hrs</td>
+<td>Feedforward, gain scheduling, intro to MPC, model-based vs model-free</td>
+</tr>
+</tbody>
+</table>
+<h3 id="debugging-sessions">Debugging Sessions</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>File</th>
+<th>What You Diagnose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D1</td>
+<td><code>debugging/01-motor-oscillation.md</code></td>
+<td>PID gains too high → limit cycle, diagnose with scope + step response</td>
+</tr>
+<tr>
+<td>D2</td>
+<td><code>debugging/02-integral-windup.md</code></td>
+<td>Robot hits wall, integrator winds up, e-stop release → overshoot</td>
+</tr>
+<tr>
+<td>D3</td>
+<td><code>debugging/03-cmd-vel-gap.md</code></td>
+<td>Jetson loop jitter → cmd_vel gap → robot drifts (OKS bag analysis)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="exercises-python-c">Exercises (Python + C)</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>File</th>
+<th>What You Build</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>E1</td>
+<td><code>exercises/01-block-diagrams.md</code></td>
+<td>Reduce block diagrams, compute closed-loop TF by hand</td>
+</tr>
+<tr>
+<td>E2</td>
+<td><code>exercises/02-motor-modeling.md</code></td>
+<td>Derive motor TF from datasheet, simulate step response</td>
+</tr>
+<tr>
+<td>E3</td>
+<td><code>exercises/03-pid-tuning-sim.md</code></td>
+<td>Tune PID in Python, plot step/ramp/disturbance response</td>
+</tr>
+<tr>
+<td>E4</td>
+<td><code>exercises/04-discrete-pid-c.md</code></td>
+<td>Implement discrete PID in C, float vs fixed-point comparison</td>
+</tr>
+<tr>
+<td>E5</td>
+<td><code>exercises/05-cascade-design.md</code></td>
+<td>Design current→speed cascade, compute bandwidth ratios</td>
+</tr>
+<tr>
+<td>E6</td>
+<td><code>exercises/06-pure-pursuit.md</code></td>
+<td>Implement pure pursuit in Python, animate on a track</td>
+</tr>
+<tr>
+<td>E7</td>
+<td><code>exercises/07-latency-analysis.md</code></td>
+<td>Given timing diagram, compute worst-case control delay</td>
+</tr>
+<tr>
+<td>E8</td>
+<td><code>exercises/08-full-pipeline.md</code></td>
+<td>End-to-end: cmd_vel → SPI → PID → motor → encoder → odom</td>
+</tr>
+</tbody>
+</table>
+<h3 id="senior-interview-questions">Senior Interview Questions</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>File</th>
+<th>Domain</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S1</td>
+<td><code>senior-questions/01-control-theory-deep.md</code></td>
+<td>Stability, robustness, gain margins, nonlinear traps</td>
+</tr>
+<tr>
+<td>S2</td>
+<td><code>senior-questions/02-embedded-control.md</code></td>
+<td>Fixed-point, ISR timing, DMA, RTOS scheduling</td>
+</tr>
+<tr>
+<td>S3</td>
+<td><code>senior-questions/03-system-integration.md</code></td>
+<td>Two-layer architecture, latency budgets, failure modes</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="prerequisites">Prerequisites</h2>
+<table>
+<thead>
+<tr>
+<th>You need</th>
+<th>From track</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Op-amp, ADC basics</td>
+<td><code>electronics/03</code></td>
+<td>Current sensing, encoder conditioning</td>
+</tr>
+<tr>
+<td>SPI protocol</td>
+<td><code>electronics/05</code></td>
+<td>MCU↔Jetson data link</td>
+</tr>
+<tr>
+<td>Zephyr timer ISR</td>
+<td><code>zephyr/01</code></td>
+<td>Where the PID loop actually runs</td>
+</tr>
+<tr>
+<td>Odometry math</td>
+<td><code>navigation-estimator/01</code></td>
+<td>Feeds the trajectory tracker</td>
+</tr>
+<tr>
+<td>C++ RTOS patterns</td>
+<td><code>cpp-advanced/03</code></td>
+<td>RT scheduling on Jetson side</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="checkpoints-test-yourself-before-moving-on">Checkpoints (test yourself before moving on)</h2>
+<p>After each lesson, you should be able to answer its checkpoint questions <em>from memory</em>.
+If you can&rsquo;t, re-read the relevant section before continuing.</p>
+<table>
+<thead>
+<tr>
+<th>After lesson</th>
+<th>You can&hellip;</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td>Draw the block diagram of a feedback system, explain what &ldquo;plant&rdquo;, &ldquo;controller&rdquo;, &ldquo;error&rdquo; mean</td>
+</tr>
+<tr>
+<td>02</td>
+<td>Write the transfer function of a DC motor from its datasheet parameters</td>
+</tr>
+<tr>
+<td>03</td>
+<td>Tune a PID controller using Ziegler-Nichols, explain when integral term helps vs hurts</td>
+</tr>
+<tr>
+<td>04</td>
+<td>Convert a continuous PID to discrete-time using bilinear transform, explain why sample rate matters</td>
+</tr>
+<tr>
+<td>05</td>
+<td>Explain how PWM drives a motor through an H-bridge, decode a quadrature encoder signal</td>
+</tr>
+<tr>
+<td>06</td>
+<td>Implement a PID controller in C using only integer arithmetic, explain Q-format</td>
+</tr>
+<tr>
+<td>07</td>
+<td>Design a two-loop cascade (speed over current), explain bandwidth separation rule</td>
+</tr>
+<tr>
+<td>08</td>
+<td>Implement pure pursuit, explain lookahead distance vs curvature trade-off</td>
+</tr>
+<tr>
+<td>09</td>
+<td>Draw the full MCU↔Jetson timing diagram, identify where 10 ms of latency budget goes</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Explain when PID is insufficient and what alternatives exist (feedforward, MPC)</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+</body>
+</html>
