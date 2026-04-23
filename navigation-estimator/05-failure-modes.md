@@ -69,8 +69,14 @@ Every failure follows the same three-stage structure:
   │ SPI bus glitch     │ measurements rejected, │ status=8         │
   │ (SPI conflict)     │ no updates despite     │ cov growing      │
   │                    │ topic alive            │                  │
+  ├────────────────────┼────────────────────────┼──────────────────┤
+  │ Off-tape dispatch  │ cov_yy = 0 (constant), │ collision_imu    │
+  │ + sensorbar HW     │ Y drift 0.115m over    │ (no physical     │
+  │ fault (health=-1)  │ 1.26s dead reckoning   │ obstacle)        │
   └────────────────────┴────────────────────────┴──────────────────┘
 ```
+
+> **New failure class (2026-04-23, #105126)**: The last row is a **dead reckoning Y drift** pattern. It is NOT a slip event, NOT a collision in the usual sense, NOT a sensorbar cascade. The estimator's Y covariance is ZERO (not growing) because zero Y measurements arrive during the forward leg — the robot is simply off-tape with a pre-existing HW fault on one bar. After 1.26s of zero Y correction, the robot has drifted 0.115m laterally and triggers `collision_imu` from position deviation alone. See §7 below.
 
 You work **backwards**: from robot behaviour → estimator state → physical event.
 
@@ -1075,7 +1081,7 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
 | 2 | UNINITIALIZED | N/A | No | Receive initial pose | Node restart without re-init |
 | 3 | NO_LINE | Slow rise | No | Robot onto a line | Off-path; blank floor; sensorbar height |
 | 4 | SLIPPED | **Jumps to INF** | No | Next line crossing | Wet floor; motor driver; corrupt odom |
-| 5 | COLLISION | Irrelevant | **YES** | Human restart | Real impact; EMI; power glitch; floor bump |
+| 5 | COLLISION | Irrelevant | **YES** | Human restart | Real impact; EMI; power glitch; floor bump; **dead reckoning Y drift (see §7b)** |
 | 6 | INITIALIZING | N/A | No | Init completes | Normal startup |
 | 7 | MISSING_ODOM | Slow rise (staleness) | No | Odom resumes | Motor ctrl crash; network; node death |
 | 8 | MISSED_UPDATES | Slow rise | No | Valid measurements | SPI conflict; innovation gate rejections; duplicate timestamps |
@@ -1100,4 +1106,103 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
     > 0.05          DELOCALIZED (threshold dependent on config)
     1e4 – 1e6       SLIPPED (set explicitly by odometryCallback())
     INF             SLIPPED (set explicitly by odometryCallback())
+    0.000           cov_yy = 0: dead reckoning with ZERO Y input  ← NEW
+                    (all sensorbars off-tape; see §7b below)
 ```
+
+---
+
+# §7b — Dead Reckoning Y Drift → collision_imu (No Obstacle)
+
+> **New failure class documented 2026-04-23 (ticket #105126)**. This is a `status=5` (COLLISION) incident with NO physical obstacle collision, NO slip event, and NO sensorbar cascade. The root cause is accumulated Y position error during zero-Y-constraint dead reckoning.
+
+## What Makes This Different
+
+Every failure mode above causes the estimator status to change first — then robot behaviour changes. In this pattern, the **estimator status stays OK** until `collision_imu` fires. The robot is navigating, odom is healthy, cmd_vel is fine. The silent failure is `cov_yy = 0` — meaning the Kalman filter is receiving ZERO Y measurements during the critical forward travel phase. The robot is on a floor area with no tape under any sensorbar.
+
+## Why cov_yy = 0 Is the Key Diagnostic
+
+In normal operation, `cov_yy` oscillates between:
+- High (~0.005–0.02): prediction phase — dead reckoning in Y
+- Low (~0.0001–0.001): update phase — sensorbar Y correction received
+
+When `cov_yy` is CONSTANT at zero for multiple consecutive samples during movement, there is only one explanation: the Kalman filter is not advancing the covariance estimate because it has frozen in an uninitialized or zero-measurement state. Combined with "Advancing without pose measurements" in rosout, this confirms: no Y measurement is arriving at all.
+
+```
+    NORMAL forward travel (tape under sensorbars):
+    ──────────────────────────────────────────────
+    cov_yy: 0.01 → 0.001 → 0.01 → 0.001 → 0.01 → 0.001  (oscillates)
+                   ↑update     ↑update     ↑update
+                   sensorbar Y correction accepted
+
+    DEAD RECKONING forward travel (no tape under sensorbars):
+    ──────────────────────────────────────────────────────────
+    cov_yy: 0.000e+00   0.000e+00   0.000e+00  (CONSTANT ZERO)
+            ← NO updates → ← NO updates → ← NO updates →
+
+    GROWING covariance (tape visible but Ceres rejecting):
+    ───────────────────────────────────────────────────────
+    cov_yy: 0.001 → 0.005 → 0.012 → 0.031  (slowly rising)
+                                            ← DIFFERENT from zero
+```
+
+The zero-constant pattern means: not "Ceres solved but rejected" — it means the Y-measurement callback was never invoked.
+
+## Required Conditions
+
+All three must be present:
+1. **Pre-existing sensorbar HW fault** — at least one bar has `health = -1` from bag start (not transient)
+2. **Off-tape dispatch** — robot started 1+ meters cross-track from nearest tape (RCS dispatched without checking position)
+3. **Two-leg nav task** — lateral correction leg (loses left/right bars) followed by forward leg (loses front/rear bars)
+
+## Bag Investigation Protocol
+
+```bash
+# 1. Check sensorbar health from bag start
+python3 scripts/analysis/timeline_extract.py <bag> \
+    --topic /robotN/sensorbars \
+    --fields health --window <start> <start+30> --sample-rate 2
+# EXPECT: health=-1 on at least one bar from the very first message
+
+# 2. Check cross-track deviation at nav start
+python3 scripts/analysis/timeline_extract.py <bag> \
+    --topic /robotN/estimated_state \
+    --fields pose.position.x pose.position.y \
+    --window <nav_start-1> <nav_start+0.5> --sample-rate 20
+# EXPECT: Y position significantly different from tape Y coordinate
+
+# 3. Check cov_yy during forward leg
+python3 scripts/analysis/timeline_extract.py <bag> \
+    --topic /robotN/estimated_state \
+    --fields pose.covariance[7] \
+    --window <forward_leg_start> <collision> --sample-rate 20
+# EXPECT: constant 0.000e+00 (not growing — distinguishes from Ceres rejection)
+
+# 4. Find sensorbar loss sequence in rosout
+python3 scripts/analysis/timeline_extract.py <bag> \
+    --topic /rosout \
+    --fields msg --window <nav_start> <collision> \
+    --grep "disabled\|without pose"
+# EXPECT: sequential "disabled N sensors on sensorbar_X" for left → front → rear
+#         and "Advancing without pose measurements" appearing 2+ times
+
+# 5. Confirm no fleet collision
+python3 scripts/analysis/timeline_extract.py <bag> \
+    --topic /robotN/obstacles \
+    --window <collision-5> <collision+1>
+# EXPECT: nearest robot > 2m at collision time
+```
+
+## What the Navigator Sees
+
+The navigator continues sending forward cmd_vel throughout — it has no visibility into `cov_yy`. Only `isFinite()` of covariance triggers a stop, and `cov_yy = 0` passes that check. The robot's Y position in the estimator is drifting from ground truth by ~65mm/s (mecanum lateral slip rate), but the estimator reports a Y covariance of zero — false confidence. After 1+ seconds, the physical robot is 0.1–0.12m off its estimated position.
+
+The collision is triggered by the IMU angular spike when the physically-drifted robot contacts a wall or fixture at low speed (≤0.3 m/s). From the navigator's perspective, this is unexpected — the estimated trajectory was clear.
+
+## Prevention
+
+- **Pre-dispatch health check**: Any robot with `sensorbar_X health = -1` on ANY bar must be pulled from dispatch queue until repaired
+- **Cross-track dispatch guard**: RCS should refuse to dispatch when robot position deviates > 0.5m from expected tape layout
+- **Diagnostic improvement**: Alert when `cov_yy = 0` persists for >500ms during a forward-travel leg (current system does not alarm on this)
+
+**Reference**: `memory/patterns/collision-from-localization-loss.md` §Variant B, `knowledge/cross-system-cascades.md` §1c, `knowledge/systems/oksbot/failure-modes.md` §Off-Tape Dispatch + Pre-Existing Sensorbar HW Fault
