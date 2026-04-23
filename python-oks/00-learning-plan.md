@@ -43,5 +43,4 @@ uses dataclasses/Pydantic for data boundaries.
 
 ---
 
-## Status: 🔴 Content not yet written
-## See GAPS-ROADMAP.md for priority and scheduling
+## Status: � Content complete — 3 lessons + 3 exercises

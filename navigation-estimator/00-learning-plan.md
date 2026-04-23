@@ -57,8 +57,9 @@ was rejected because innovation exceeded 2-sigma." This track fills that gap.
 | 03 | `03-measurement-models.md` | 3 hrs | Line sensor as a constraint; Mahalanobis distance; when OKS rejects a sensorbar update |
 | 04 | `04-imu-fusion.md` | 3 hrs | Gyro integration; bias estimation; how OKS theta update differs from XY update |
 | 05 | `05-failure-modes.md` | 3 hrs | Recognise slip vs delocalize vs collision from covariance patterns in bags |
+| 06 | `06-ceres-sensorbar-deep-dive.md` | 2 hrs | Ceres bell-curve solver internals: two code paths, Cauchy trap, self-perpetuating REJECT loop, tape intersection geometry failure |
 
-**Total: ~16 hours**
+**Total: ~18 hours**
 
 ---
 
