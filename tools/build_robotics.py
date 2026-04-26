@@ -41,6 +41,15 @@ def html_page(title, body_html, back_href, back_label, accent_class="blue"):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{esc(title)} - Learning From Building Systems</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        window.MathJax = {{
+            tex: {{
+                inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
+                displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']]
+            }}
+        }};
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -87,6 +96,7 @@ def html_page(title, body_html, back_href, back_label, accent_class="blue"):
         .md-content a:hover {{ color: #1d4ed8; }}
         .md-content img {{ max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }}
         .md-content .mermaid {{ margin: 1.5rem 0; overflow-x: auto; }}
+        .md-content .math-display {{ margin: 1.5rem 0; overflow-x: auto; }}
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800">
@@ -208,12 +218,18 @@ def slug_to_title(slug):
 
 def preprocess_markdown(md_text):
     """Expand markdown features the plain renderer doesn't handle well."""
+    display_math_pattern = re.compile(r"^\$\$\s*\n(.*?)\n\$\$\s*$", re.MULTILINE | re.DOTALL)
     mermaid_pattern = re.compile(r"```mermaid\n(.*?)```", re.DOTALL)
+
+    def display_math_replacer(match):
+        expression = match.group(1).strip()
+        return f'\n<div class="math-display">\n$$\n{expression}\n$$\n</div>\n'
 
     def mermaid_replacer(match):
         diagram = match.group(1).strip()
         return f'\n<div class="mermaid">\n{diagram}\n</div>\n'
 
+    md_text = display_math_pattern.sub(display_math_replacer, md_text)
     return mermaid_pattern.sub(mermaid_replacer, md_text)
 
 

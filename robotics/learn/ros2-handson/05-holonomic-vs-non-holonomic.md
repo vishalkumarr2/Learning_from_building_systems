@@ -179,7 +179,7 @@ That is why a 2D costmap path is not always a drivable path.
 This is exactly the intuition behind:
 
 - **NavFn** searching mostly in `(x, y)`
-- **Smac / Hybrid-A*** searching in `(x, y, \theta)`
+- **Smac / Hybrid-A\*** searching in `(x, y, \theta)`
 
 **Related reading:** [04-navfn-vs-smac-search-spaces.md](04-navfn-vs-smac-search-spaces.md)
 
