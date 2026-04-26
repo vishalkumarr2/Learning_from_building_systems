@@ -337,7 +337,7 @@ Weaknesses: Doesn't account for robot kinematics (can produce paths a
 Parameters: use_astar: true/false, allow_unknown: true/false
 ```
 
-**SmacPlanner (SE2 or Hybrid-A*)**:
+**SmacPlanner (SE2 / Hybrid-A* search)**:
 ```
 Strengths:  Kinematically-feasible paths (respects min turn radius)
             Better for non-holonomic robots in tight spaces
@@ -345,7 +345,383 @@ Weaknesses: Slower than NavFn, more parameters to tune
 Parameters: minimum_turning_radius, motion_model_for_search: DUBIN/REEDS_SHEPP
 ```
 
+Here, **SE2** means the planner reasons over $(x, y, \theta)$ instead of just $(x, y)$.
+**SE2** is the state space; **Hybrid-A*** is the style of search algorithm operating in
+that state space.
+
+### Why NavFn and Smac feel so different
+
+NavFn and Smac are not just two implementations of the same idea. They search in
+different spaces.
+
+- **NavFn** searches a 2D grid: "Which cells get me from start to goal?"
+- **SmacPlanner Hybrid-A*** searches a higher-dimensional state: "Which
+  position + heading states can this robot actually drive through?"
+
+That is why NavFn is fast and robust on open warehouse maps, but can return a path
+that looks good on the map and still asks the robot to do something physically ugly.
+Smac is slower because it carries more information, but that extra information is
+exactly what lets it respect turning radius and direction changes.
+
+---
+
+### Dijkstra vs A*: the search cost functions
+
+For grid planners, the most important mental model is the scoring function used to
+decide what node to expand next.
+
+**Dijkstra:**
+
+$$
+f(n) = g(n)
+$$
+
+- $g(n)$ = exact cost from the start to the current node
+- No goal-directed guess is used
+- Result: the search expands outward like a ripple
+
+**A*:**
+
+$$
+f(n) = g(n) + h(n)
+$$
+
+- $g(n)$ = exact cost from the start so far
+- $h(n)$ = heuristic estimate from the current node to the goal
+- Result: the search is biased toward states that appear closer to the goal
+
+For a 4-connected grid, a common heuristic is the **Manhattan distance**:
+
+$$
+h(n) = |x_n - x_g| + |y_n - y_g|
+$$
+
+If $h(n)$ never overestimates the true remaining cost, A* is still optimal. That is
+the key rule behind an **admissible heuristic**.
+
+### Tiny grid example
+
+Imagine a robot moving one cell at a time with cost 1 per move:
+
+```text
+S . . .
+. X . .
+. X . G
+. . . .
+```
+
+- `S` = start
+- `G` = goal
+- `X` = blocked cell
+
+If you run **Dijkstra**, it does not care where the goal is yet. It keeps expanding by
+increasing path cost:
+
+```text
+0 1 2 3
+1 X 3 4
+2 X 4 G
+3 4 5 6
+```
+
+This is good when you truly want the full shortest-path cost field, but it explores
+many cells that obviously do not help reach the goal quickly.
+
+If you run **A***, the heuristic nudges the search toward `G`. It still avoids the wall,
+but it wastes less work on cells that are moving away from the goal.
+
+**Intuition:**
+
+- Dijkstra says: "Expand the cheapest thing found so far."
+- A* says: "Expand the cheapest thing found so far, adjusted by how promising it
+  looks."
+
+In Nav2 terms, NavFn can run in either style depending on `use_astar: true/false`.
+
+---
+
+### Dubins vs Reeds-Shepp: motion models for car-like robots
+
+Once the robot is **non-holonomic** and has a minimum turning radius, shortest-path
+planning is no longer just a grid-search problem. The planner must care about how the
+vehicle can actually move.
+
+The two classical motion models used here are:
+
+| Feature | Dubins | Reeds-Shepp |
+| --- | --- | --- |
+| Direction of travel | Forward only | Forward and reverse |
+| Primitive idea | Left, Right, Straight | Forward/reverse Left, Right, Straight |
+| Typical optimal path length | Up to 3 segments | Up to 5 segments |
+| Best fit | Forward-only vehicle models | Cars, forklifts, parking maneuvers |
+
+#### Dubins model
+
+The **Dubins car** assumes:
+
+- fixed forward motion only
+- bounded curvature (equivalently, a minimum turning radius)
+- no sideways motion
+
+Its shortest paths are built from circular arcs and straight lines. The optimal path is
+always in one of two families containing the six classical Dubins words:
+
+- **CSC**: curve-straight-curve, such as `LSL`, `RSR`, `LSR`, `RSL`
+- **CCC**: curve-curve-curve, such as `LRL`, `RLR`
+
+This is a good model when reversing is impossible or undesirable. A fixed-wing UAV is a
+classic example: it cannot stop and back up to fix a bad approach.
+
+##### Dubins kinematics
+
+In the plane, define the vehicle state as:
+
+$$
+q = (x, y, \theta)
+$$
+
+where:
+
+- $x, y$ = position in the map
+- $\theta$ = heading angle
+
+For the normalized Dubins car, forward speed is fixed and steering is bounded:
+
+$$
+\dot{x} = \cos(\theta)
+$$
+
+$$
+\dot{y} = \sin(\theta)
+$$
+
+$$
+\dot{\theta} = u_1, \quad u_1 \in \{-u_{max}, 0, u_{max}\}
+$$
+
+This is the math version of: the car must keep moving forward, and it can only turn left,
+go straight, or turn right within a bounded curvature.
+
+#### Reeds-Shepp model
+
+The **Reeds-Shepp car** adds one extra capability: **reverse gear**.
+
+That single change matters a lot. The robot can now:
+
+- back out of tight areas
+- switch direction at a cusp
+- find shorter maneuvers in confined spaces
+
+Because of that extra freedom, optimal paths can use more segments and more word types.
+This is why Reeds-Shepp is the better match for parking, forklifts, and car-like robots
+that must re-orient in narrow aisles.
+
+##### Reeds-Shepp kinematics
+
+Reeds-Shepp keeps the same state, but adds a direction-control variable:
+
+$$
+\dot{x} = u_2 \cos(\theta)
+$$
+
+$$
+\dot{y} = u_2 \sin(\theta)
+$$
+
+$$
+\dot{\theta} = u_1
+$$
+
+with:
+
+$$
+u_2 \in \{-1, 1\}
+$$
+
+Here:
+
+- $u_2 = 1$ means forward motion
+- $u_2 = -1$ means reverse motion
+
+That is why Reeds-Shepp paths can contain **cusps**: points where the vehicle stops,
+changes direction, and then continues with the opposite sign of velocity.
+
+### Why both are called non-holonomic
+
+Dubins and Reeds-Shepp are both **non-holonomic** models. In practical terms, that means
+the robot cannot instantly move sideways. Its velocity is constrained by its current
+heading, so every path must be built from motions the wheels can really produce.
+
+That constraint is exactly why a plain grid planner is not enough for car-like robots.
+The robot's state is not just "which cell am I in?" but also "which way am I facing?"
+
+**Practical intuition:**
+
+- **Dubins** answers: "What is the shortest path if I am never allowed to reverse?"
+- **Reeds-Shepp** answers: "What is the shortest path if I may drive forward and back?"
+
+In Nav2 SmacPlanner, this appears directly in:
+
+```yaml
+motion_model_for_search: DUBIN
+# or
+motion_model_for_search: REEDS_SHEPP
+```
+
+Choose `DUBIN` when reverse motion is not allowed by platform or policy.
+Choose `REEDS_SHEPP` when reverse maneuvers are acceptable and tight-space performance
+matters more than search simplicity.
+
+### How this maps to real robots
+
+- **Differential-drive AMR in wide warehouse aisles:** NavFn or Smac can both work;
+  the controller often matters more than the motion model.
+- **Car-like robot or tugger with limited steering:** Smac with a realistic turning
+  radius matters a lot.
+- **Forklift / parking-style behavior:** Reeds-Shepp is often the right search model,
+  because reversing is part of the task, not a failure.
+
+### Real-world use cases: where each model actually shows up
+
+Use **Dubins** when forward momentum is mandatory or reverse is physically impossible:
+
+- **Fixed-wing UAVs:** the aircraft must keep forward airspeed and cannot back up in the
+  sky.
+- **Towed marine survey vessels:** a ship dragging long sonar arrays avoids reverse
+  maneuvers because backing up risks tangling or damaging the payload.
+
+Use **Reeds-Shepp** when the shortest feasible maneuver depends on gear changes:
+
+- **Autonomous valet parking:** backing into or out of tight spaces is part of normal
+  operation.
+- **Warehouse forklifts or AGVs in narrow aisles:** three-point turns and reverse
+  alignment maneuvers are often unavoidable.
+
+**Visual companion:** [NavFn vs Smac Search Spaces](04-navfn-vs-smac-search-spaces.md)
+
+**Companion exercise:** [Exercise05 — Search Costs and Motion Models](exercises/05-search-costs-and-motion-models.md)
+
+**Follow-up exercise:** [Exercise06 — Hybrid-A* and Minimum Turning Radius](exercises/06-hybrid-a-star-and-turning-radius.md)
+
+**Interview sheet:** [Exercise07 — Bellman-Ford, Dijkstra, and A* Interview Traps](exercises/07-bellman-ford-dijkstra-a-star-interview-traps.md)
+
+---
+
+### Interview gotchas: Dijkstra, A*, and Hybrid-A*
+
+These are the questions that usually expose whether someone actually understands the
+search model.
+
+#### 1. When does A* become exactly Dijkstra?
+
+When:
+
+$$
+h(n) = 0
+$$
+
+Then:
+
+$$
+f(n) = g(n) + h(n) = g(n)
+$$
+
+So A* expands nodes exactly like Dijkstra.
+
+#### 2. Can A* return a non-shortest path?
+
+Yes, if the heuristic **overestimates** the true remaining cost.
+
+That is a **non-admissible heuristic**, and it breaks A*'s optimality guarantee.
+
+#### 3. What is an admissible heuristic?
+
+A heuristic that never overestimates:
+
+$$
+h(n) \leq d^*(n, goal)
+$$
+
+where $d^*$ is the true shortest remaining cost.
+
+#### 4. What is a consistent heuristic?
+
+A stronger condition:
+
+$$
+h(n) \leq c(n, n') + h(n')
+$$
+
+for every neighbor $n'$.
+
+This gives A* a cleaner search frontier and avoids many re-openings.
+
+#### 5. Why is A* usually faster than Dijkstra?
+
+Because it uses both:
+
+- exact cost so far: $g(n)$
+- estimated cost to go: $h(n)$
+
+So it spends less time exploring directions that are obviously not helping.
+
+#### 6. When is Dijkstra still the better answer?
+
+- when you do not have a useful heuristic
+- when you need shortest paths to many or all nodes, not just one goal
+- when the graph is small enough that heuristic design is not worth the overhead
+
+#### 7. Can Dijkstra handle negative weights?
+
+No. Negative edges break its greedy ordering assumption.
+
+If negative weights exist, use an algorithm designed for that case, such as
+Bellman-Ford.
+
+#### 8. What happens if the heuristic is too small?
+
+A* stays correct, but becomes less informed and therefore slower.
+
+At the extreme, if $h(n)=0$, it collapses all the way to Dijkstra.
+
+#### 9. What happens if the heuristic is perfect?
+
+If the heuristic equals the exact remaining cost, A* expands almost only the nodes on
+the optimal path. That is the ideal case.
+
+#### 10. Why isn't greedy best-first search enough?
+
+Because greedy search uses only:
+
+$$
+f(n) = h(n)
+$$
+
+and ignores the real path cost already paid.
+
+A* works because it balances both:
+
+$$
+f(n) = g(n) + h(n)
+$$
+
+Greedy search can chase a promising-looking direction and still end up with a bad total
+path.
+
+#### 11. If all edges have equal weight, should you still use Dijkstra?
+
+Usually no. Use **BFS** instead. It is simpler and faster for unweighted or equal-weight
+graphs.
+
+#### 12. What extra difficulty does `Hybrid-A*` add compared with plain A*?
+
+Hybrid-A* is not just choosing among grid cells. It is choosing among
+position-plus-heading states, under curvature constraints. That makes the state space much
+larger, but it also makes the returned path something a real non-holonomic robot can
+actually execute.
+
 **When path planning fails:**
+
 ```bash
 # Check planner logs:
 ros2 topic echo /plan       # should publish a path
@@ -382,16 +758,152 @@ Trajectory Critics:
 
 Key parameters:
   max_vel_x: 0.5         # max forward speed (m/s)
-  min_vel_x: -0.1        # allows slight backward motion
-  max_vel_theta: 1.0     # max angular velocity (rad/s)
-  vx_samples: 20         # number of vx samples → affects CPU
-  vtheta_samples: 20     # number of vθ samples
+  max_vel_theta: 1.0     # max rotation speed (rad/s)
+  sim_time: 1.7          # seconds to roll out each sampled trajectory
+  vx_samples: 20         # how many forward-speed samples
+  vtheta_samples: 20     # how many rotation-speed samples
 ```
 
-**DWB failure modes:**
-- Robot oscillates: `PathAlign` weight too high, fighting `PathDist`. Balance the weights.
-- Robot stops near obstacles: `ObstacleDist` too aggressive. Reduce `obstacle_scale`.
-- Robot can't rotate in place: `min_speed_xy` > 0. Set to 0.0 for diff-drive.
+If `sim_time` is too low, the controller can't see far enough ahead — it may choose a trajectory that looks safe in the next 0.5s but collides 0.6s later.
+
+If `sim_time` is too high, the controller becomes over-conservative — every trajectory appears risky because it extrapolates too far.
+
+### RPP (Regulated Pure Pursuit)
+
+RPP picks a lookahead point on the path and steers toward it. It is:
+- smoother than DWB
+- simpler to tune
+- often better for Ackermann or high-speed robots
+
+Key idea: closer lookahead = sharper path following but more oscillation; farther lookahead = smoother path but cuts corners.
+
+---
+
+## 4.3 Common Controller Failure Patterns
+
+```
+Robot oscillates left-right in corridor:
+  → PathAlign weight too high, or sim_time too low
+
+Robot cuts corners and clips obstacles:
+  → lookahead too large (RPP), obstacle critic too weak (DWB)
+
+Robot gets stuck rotating in place:
+  → goal tolerance too strict, local costmap sees obstacle at goal pose
+```
+
+---
+
+## 4.4 Goal Tolerances
+
+```yaml
+xy_goal_tolerance: 0.25   # meters
+yaw_goal_tolerance: 0.25  # radians (~14°)
+```
+
+If these are too tight, the robot may endlessly re-approach the goal because it can't physically settle within the tolerance.
+
+**Symptom:** robot reaches goal area, then does micro-corrections forever.
+
+---
+
+# PART 5 — HOW LOCALIZATION FEEDS NAV2
+
+---
+
+## 5.1 `robot_localization` vs `amcl`
+
+```
+AMCL:
+  Input: map + laser scan
+  Output: pose in map frame → /amcl_pose, map → odom TF
+  Purpose: global localization on known map
+
+robot_localization EKF:
+  Input: wheel odom + IMU (+ GPS or other sensors)
+  Output: filtered odom in odom frame → /odometry/filtered
+  Purpose: smooth local motion estimate
+```
+
+Nav2 needs both:
+- **global pose** in `map` frame for planning
+- **smooth local velocity / odom** for the controller
+
+If AMCL is wrong, the planner plans from the wrong place.
+If EKF odom is noisy, the controller can't track smoothly.
+
+---
+
+## 5.2 TF Chain Required by Nav2
+
+```
+map → odom → base_link → laser_frame
+```
+
+If any link in that chain is missing or delayed, Nav2 will fail with TF lookup timeouts.
+
+Common failure:
+```bash
+[bt_navigator] Timed out waiting for transform from base_link to map
+```
+
+**Interpretation:** either AMCL not publishing `map → odom`, or timestamps are too old.
+
+---
+
+# PART 6 — FIELD DEBUGGING CHECKLIST
+
+---
+
+When a navigation failure occurs, inspect in this order:
+
+1. **TF is valid?**
+   ```bash
+   ros2 run tf2_tools view_frames
+   ros2 topic echo /tf
+   ```
+
+2. **Global costmap initialized?**
+   ```bash
+   ros2 topic echo /global_costmap/costmap
+   ```
+
+3. **Planner producing path?**
+   ```bash
+   ros2 topic echo /plan
+   ```
+
+4. **Controller publishing `/cmd_vel`?**
+   ```bash
+   ros2 topic echo /cmd_vel
+   ```
+
+5. **Recovery loop active?**
+   Look for repeated `Spin`, `BackUp`, `ClearEntireCostmap` in logs.
+
+This sequence isolates the failed layer in under 2 minutes.
+
+---
+
+## Summary
+
+- **BehaviorTree** decides what to try next
+- **Planner** finds a global path through the global costmap
+- **Controller** turns that path into velocity commands using the local costmap
+- **Localization** supplies the pose and odom that make the rest of Nav2 meaningful
+
+If you understand those four layers, most Nav2 logs stop looking like noise.
+
+---
+
+## Practice Exercises
+
+- [Exercise04 — Nav2 Diagnostics](exercises/04-nav2-diagnostics.md)
+- [Exercise05 — Search Costs and Motion Models](exercises/05-search-costs-and-motion-models.md)
+- [Exercise06 — Hybrid-A* and Minimum Turning Radius](exercises/06-hybrid-a-star-and-turning-radius.md)
+- [Exercise07 — Bellman-Ford, Dijkstra, and A* Interview Traps](exercises/07-bellman-ford-dijkstra-a-star-interview-traps.md)
+- [04 — NavFn vs Smac Search Spaces](04-navfn-vs-smac-search-spaces.md)
+- [05 — Holonomic vs Non-Holonomic vs Underactuated](05-holonomic-vs-non-holonomic.md)
 
 ### RPP (Regulated Pure Pursuit)
 

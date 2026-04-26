@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>03 — Nav2 Architecture: BehaviorTree, Costmaps, Planners, Controllers - Learning From Building Systems</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
@@ -49,6 +50,7 @@
         .md-content a { color: #2563eb; text-decoration: underline; }
         .md-content a:hover { color: #1d4ed8; }
         .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        .md-content .mermaid { margin: 1.5rem 0; overflow-x: auto; }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800">
@@ -365,13 +367,316 @@ Weaknesses: Doesn&#39;t account for robot kinematics (can produce paths a
 Parameters: use_astar: true/false, allow_unknown: true/false
 </code></pre></div>
 
-<p><strong>SmacPlanner (SE2 or Hybrid-A*)</strong>:</p>
+<p><strong>SmacPlanner (SE2 / Hybrid-A* search)</strong>:</p>
 <div class="highlight"><pre><span></span><code>Strengths:  Kinematically-feasible paths (respects min turn radius)
             Better for non-holonomic robots in tight spaces
 Weaknesses: Slower than NavFn, more parameters to tune
 Parameters: minimum_turning_radius, motion_model_for_search: DUBIN/REEDS_SHEPP
 </code></pre></div>
 
+<p>Here, <strong>SE2</strong> means the planner reasons over $(x, y, \theta)$ instead of just $(x, y)$.
+<strong>SE2</strong> is the state space; <strong>Hybrid-A</strong>* is the style of search algorithm operating in
+that state space.</p>
+<h3 id="why-navfn-and-smac-feel-so-different">Why NavFn and Smac feel so different</h3>
+<p>NavFn and Smac are not just two implementations of the same idea. They search in
+different spaces.</p>
+<ul>
+<li><strong>NavFn</strong> searches a 2D grid: &ldquo;Which cells get me from start to goal?&rdquo;</li>
+<li><strong>SmacPlanner Hybrid-A</strong>* searches a higher-dimensional state: &ldquo;Which
+  position + heading states can this robot actually drive through?&rdquo;</li>
+</ul>
+<p>That is why NavFn is fast and robust on open warehouse maps, but can return a path
+that looks good on the map and still asks the robot to do something physically ugly.
+Smac is slower because it carries more information, but that extra information is
+exactly what lets it respect turning radius and direction changes.</p>
+<hr />
+<h3 id="dijkstra-vs-a-the-search-cost-functions">Dijkstra vs A*: the search cost functions</h3>
+<p>For grid planners, the most important mental model is the scoring function used to
+decide what node to expand next.</p>
+<p><strong>Dijkstra:</strong></p>
+<p>$$
+f(n) = g(n)
+$$</p>
+<ul>
+<li>$g(n)$ = exact cost from the start to the current node</li>
+<li>No goal-directed guess is used</li>
+<li>Result: the search expands outward like a ripple</li>
+</ul>
+<p><strong>A*:</strong></p>
+<p>$$
+f(n) = g(n) + h(n)
+$$</p>
+<ul>
+<li>$g(n)$ = exact cost from the start so far</li>
+<li>$h(n)$ = heuristic estimate from the current node to the goal</li>
+<li>Result: the search is biased toward states that appear closer to the goal</li>
+</ul>
+<p>For a 4-connected grid, a common heuristic is the <strong>Manhattan distance</strong>:</p>
+<p>$$
+h(n) = |x_n - x_g| + |y_n - y_g|
+$$</p>
+<p>If $h(n)$ never overestimates the true remaining cost, A<em> is still optimal. That is
+the key rule behind an </em><em>admissible heuristic</em>*.</p>
+<h3 id="tiny-grid-example">Tiny grid example</h3>
+<p>Imagine a robot moving one cell at a time with cost 1 per move:</p>
+<div class="highlight"><pre><span></span><code>S . . .
+. X . .
+. X . G
+. . . .
+</code></pre></div>
+
+<ul>
+<li><code>S</code> = start</li>
+<li><code>G</code> = goal</li>
+<li><code>X</code> = blocked cell</li>
+</ul>
+<p>If you run <strong>Dijkstra</strong>, it does not care where the goal is yet. It keeps expanding by
+increasing path cost:</p>
+<div class="highlight"><pre><span></span><code>0 1 2 3
+1 X 3 4
+2 X 4 G
+3 4 5 6
+</code></pre></div>
+
+<p>This is good when you truly want the full shortest-path cost field, but it explores
+many cells that obviously do not help reach the goal quickly.</p>
+<p>If you run <strong>A</strong>*, the heuristic nudges the search toward <code>G</code>. It still avoids the wall,
+but it wastes less work on cells that are moving away from the goal.</p>
+<p><strong>Intuition:</strong></p>
+<ul>
+<li>Dijkstra says: &ldquo;Expand the cheapest thing found so far.&rdquo;</li>
+<li>A* says: &ldquo;Expand the cheapest thing found so far, adjusted by how promising it
+  looks.&rdquo;</li>
+</ul>
+<p>In Nav2 terms, NavFn can run in either style depending on <code>use_astar: true/false</code>.</p>
+<hr />
+<h3 id="dubins-vs-reeds-shepp-motion-models-for-car-like-robots">Dubins vs Reeds-Shepp: motion models for car-like robots</h3>
+<p>Once the robot is <strong>non-holonomic</strong> and has a minimum turning radius, shortest-path
+planning is no longer just a grid-search problem. The planner must care about how the
+vehicle can actually move.</p>
+<p>The two classical motion models used here are:</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Dubins</th>
+<th>Reeds-Shepp</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Direction of travel</td>
+<td>Forward only</td>
+<td>Forward and reverse</td>
+</tr>
+<tr>
+<td>Primitive idea</td>
+<td>Left, Right, Straight</td>
+<td>Forward/reverse Left, Right, Straight</td>
+</tr>
+<tr>
+<td>Typical optimal path length</td>
+<td>Up to 3 segments</td>
+<td>Up to 5 segments</td>
+</tr>
+<tr>
+<td>Best fit</td>
+<td>Forward-only vehicle models</td>
+<td>Cars, forklifts, parking maneuvers</td>
+</tr>
+</tbody>
+</table>
+<h4 id="dubins-model">Dubins model</h4>
+<p>The <strong>Dubins car</strong> assumes:</p>
+<ul>
+<li>fixed forward motion only</li>
+<li>bounded curvature (equivalently, a minimum turning radius)</li>
+<li>no sideways motion</li>
+</ul>
+<p>Its shortest paths are built from circular arcs and straight lines. The optimal path is
+always in one of two families containing the six classical Dubins words:</p>
+<ul>
+<li><strong>CSC</strong>: curve-straight-curve, such as <code>LSL</code>, <code>RSR</code>, <code>LSR</code>, <code>RSL</code></li>
+<li><strong>CCC</strong>: curve-curve-curve, such as <code>LRL</code>, <code>RLR</code></li>
+</ul>
+<p>This is a good model when reversing is impossible or undesirable. A fixed-wing UAV is a
+classic example: it cannot stop and back up to fix a bad approach.</p>
+<h5 id="dubins-kinematics">Dubins kinematics</h5>
+<p>In the plane, define the vehicle state as:</p>
+<p>$$
+q = (x, y, \theta)
+$$</p>
+<p>where:</p>
+<ul>
+<li>$x, y$ = position in the map</li>
+<li>$\theta$ = heading angle</li>
+</ul>
+<p>For the normalized Dubins car, forward speed is fixed and steering is bounded:</p>
+<p>$$
+\dot{x} = \cos(\theta)
+$$</p>
+<p>$$
+\dot{y} = \sin(\theta)
+$$</p>
+<p>$$
+\dot{\theta} = u_1, \quad u_1 \in {-u_{max}, 0, u_{max}}
+$$</p>
+<p>This is the math version of: the car must keep moving forward, and it can only turn left,
+go straight, or turn right within a bounded curvature.</p>
+<h4 id="reeds-shepp-model">Reeds-Shepp model</h4>
+<p>The <strong>Reeds-Shepp car</strong> adds one extra capability: <strong>reverse gear</strong>.</p>
+<p>That single change matters a lot. The robot can now:</p>
+<ul>
+<li>back out of tight areas</li>
+<li>switch direction at a cusp</li>
+<li>find shorter maneuvers in confined spaces</li>
+</ul>
+<p>Because of that extra freedom, optimal paths can use more segments and more word types.
+This is why Reeds-Shepp is the better match for parking, forklifts, and car-like robots
+that must re-orient in narrow aisles.</p>
+<h5 id="reeds-shepp-kinematics">Reeds-Shepp kinematics</h5>
+<p>Reeds-Shepp keeps the same state, but adds a direction-control variable:</p>
+<p>$$
+\dot{x} = u_2 \cos(\theta)
+$$</p>
+<p>$$
+\dot{y} = u_2 \sin(\theta)
+$$</p>
+<p>$$
+\dot{\theta} = u_1
+$$</p>
+<p>with:</p>
+<p>$$
+u_2 \in {-1, 1}
+$$</p>
+<p>Here:</p>
+<ul>
+<li>$u_2 = 1$ means forward motion</li>
+<li>$u_2 = -1$ means reverse motion</li>
+</ul>
+<p>That is why Reeds-Shepp paths can contain <strong>cusps</strong>: points where the vehicle stops,
+changes direction, and then continues with the opposite sign of velocity.</p>
+<h3 id="why-both-are-called-non-holonomic">Why both are called non-holonomic</h3>
+<p>Dubins and Reeds-Shepp are both <strong>non-holonomic</strong> models. In practical terms, that means
+the robot cannot instantly move sideways. Its velocity is constrained by its current
+heading, so every path must be built from motions the wheels can really produce.</p>
+<p>That constraint is exactly why a plain grid planner is not enough for car-like robots.
+The robot&rsquo;s state is not just &ldquo;which cell am I in?&rdquo; but also &ldquo;which way am I facing?&rdquo;</p>
+<p><strong>Practical intuition:</strong></p>
+<ul>
+<li><strong>Dubins</strong> answers: &ldquo;What is the shortest path if I am never allowed to reverse?&rdquo;</li>
+<li><strong>Reeds-Shepp</strong> answers: &ldquo;What is the shortest path if I may drive forward and back?&rdquo;</li>
+</ul>
+<p>In Nav2 SmacPlanner, this appears directly in:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">motion_model_for_search</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DUBIN</span>
+<span class="c1"># or</span>
+<span class="nt">motion_model_for_search</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">REEDS_SHEPP</span>
+</code></pre></div>
+
+<p>Choose <code>DUBIN</code> when reverse motion is not allowed by platform or policy.
+Choose <code>REEDS_SHEPP</code> when reverse maneuvers are acceptable and tight-space performance
+matters more than search simplicity.</p>
+<h3 id="how-this-maps-to-real-robots">How this maps to real robots</h3>
+<ul>
+<li><strong>Differential-drive AMR in wide warehouse aisles:</strong> NavFn or Smac can both work;
+  the controller often matters more than the motion model.</li>
+<li><strong>Car-like robot or tugger with limited steering:</strong> Smac with a realistic turning
+  radius matters a lot.</li>
+<li><strong>Forklift / parking-style behavior:</strong> Reeds-Shepp is often the right search model,
+  because reversing is part of the task, not a failure.</li>
+</ul>
+<h3 id="real-world-use-cases-where-each-model-actually-shows-up">Real-world use cases: where each model actually shows up</h3>
+<p>Use <strong>Dubins</strong> when forward momentum is mandatory or reverse is physically impossible:</p>
+<ul>
+<li><strong>Fixed-wing UAVs:</strong> the aircraft must keep forward airspeed and cannot back up in the
+  sky.</li>
+<li><strong>Towed marine survey vessels:</strong> a ship dragging long sonar arrays avoids reverse
+  maneuvers because backing up risks tangling or damaging the payload.</li>
+</ul>
+<p>Use <strong>Reeds-Shepp</strong> when the shortest feasible maneuver depends on gear changes:</p>
+<ul>
+<li><strong>Autonomous valet parking:</strong> backing into or out of tight spaces is part of normal
+  operation.</li>
+<li><strong>Warehouse forklifts or AGVs in narrow aisles:</strong> three-point turns and reverse
+  alignment maneuvers are often unavoidable.</li>
+</ul>
+<p><strong>Visual companion:</strong> <a href="04-navfn-vs-smac-search-spaces.html">NavFn vs Smac Search Spaces</a></p>
+<p><strong>Companion exercise:</strong> <a href="exercises/05-search-costs-and-motion-models.html">Exercise05 — Search Costs and Motion Models</a></p>
+<p><strong>Follow-up exercise:</strong> <a href="exercises/06-hybrid-a-star-and-turning-radius.html">Exercise06 — Hybrid-A* and Minimum Turning Radius</a></p>
+<p><strong>Interview sheet:</strong> <a href="exercises/07-bellman-ford-dijkstra-a-star-interview-traps.html">Exercise07 — Bellman-Ford, Dijkstra, and A* Interview Traps</a></p>
+<hr />
+<h3 id="interview-gotchas-dijkstra-a-and-hybrid-a">Interview gotchas: Dijkstra, A<em>, and Hybrid-A</em></h3>
+<p>These are the questions that usually expose whether someone actually understands the
+search model.</p>
+<h4 id="1-when-does-a-become-exactly-dijkstra">1. When does A* become exactly Dijkstra?</h4>
+<p>When:</p>
+<p>$$
+h(n) = 0
+$$</p>
+<p>Then:</p>
+<p>$$
+f(n) = g(n) + h(n) = g(n)
+$$</p>
+<p>So A* expands nodes exactly like Dijkstra.</p>
+<h4 id="2-can-a-return-a-non-shortest-path">2. Can A* return a non-shortest path?</h4>
+<p>Yes, if the heuristic <strong>overestimates</strong> the true remaining cost.</p>
+<p>That is a <strong>non-admissible heuristic</strong>, and it breaks A*&rsquo;s optimality guarantee.</p>
+<h4 id="3-what-is-an-admissible-heuristic">3. What is an admissible heuristic?</h4>
+<p>A heuristic that never overestimates:</p>
+<p>$$
+h(n) \leq d^*(n, goal)
+$$</p>
+<p>where $d^*$ is the true shortest remaining cost.</p>
+<h4 id="4-what-is-a-consistent-heuristic">4. What is a consistent heuristic?</h4>
+<p>A stronger condition:</p>
+<p>$$
+h(n) \leq c(n, n&rsquo;) + h(n&rsquo;)
+$$</p>
+<p>for every neighbor $n&rsquo;$.</p>
+<p>This gives A* a cleaner search frontier and avoids many re-openings.</p>
+<h4 id="5-why-is-a-usually-faster-than-dijkstra">5. Why is A* usually faster than Dijkstra?</h4>
+<p>Because it uses both:</p>
+<ul>
+<li>exact cost so far: $g(n)$</li>
+<li>estimated cost to go: $h(n)$</li>
+</ul>
+<p>So it spends less time exploring directions that are obviously not helping.</p>
+<h4 id="6-when-is-dijkstra-still-the-better-answer">6. When is Dijkstra still the better answer?</h4>
+<ul>
+<li>when you do not have a useful heuristic</li>
+<li>when you need shortest paths to many or all nodes, not just one goal</li>
+<li>when the graph is small enough that heuristic design is not worth the overhead</li>
+</ul>
+<h4 id="7-can-dijkstra-handle-negative-weights">7. Can Dijkstra handle negative weights?</h4>
+<p>No. Negative edges break its greedy ordering assumption.</p>
+<p>If negative weights exist, use an algorithm designed for that case, such as
+Bellman-Ford.</p>
+<h4 id="8-what-happens-if-the-heuristic-is-too-small">8. What happens if the heuristic is too small?</h4>
+<p>A* stays correct, but becomes less informed and therefore slower.</p>
+<p>At the extreme, if $h(n)=0$, it collapses all the way to Dijkstra.</p>
+<h4 id="9-what-happens-if-the-heuristic-is-perfect">9. What happens if the heuristic is perfect?</h4>
+<p>If the heuristic equals the exact remaining cost, A* expands almost only the nodes on
+the optimal path. That is the ideal case.</p>
+<h4 id="10-why-isnt-greedy-best-first-search-enough">10. Why isn&rsquo;t greedy best-first search enough?</h4>
+<p>Because greedy search uses only:</p>
+<p>$$
+f(n) = h(n)
+$$</p>
+<p>and ignores the real path cost already paid.</p>
+<p>A* works because it balances both:</p>
+<p>$$
+f(n) = g(n) + h(n)
+$$</p>
+<p>Greedy search can chase a promising-looking direction and still end up with a bad total
+path.</p>
+<h4 id="11-if-all-edges-have-equal-weight-should-you-still-use-dijkstra">11. If all edges have equal weight, should you still use Dijkstra?</h4>
+<p>Usually no. Use <strong>BFS</strong> instead. It is simpler and faster for unweighted or equal-weight
+graphs.</p>
+<h4 id="12-what-extra-difficulty-does-hybrid-a-add-compared-with-plain-a">12. What extra difficulty does <code>Hybrid-A*</code> add compared with plain A*?</h4>
+<p>Hybrid-A* is not just choosing among grid cells. It is choosing among
+position-plus-heading states, under curvature constraints. That makes the state space much
+larger, but it also makes the returned path something a real non-holonomic robot can
+actually execute.</p>
 <p><strong>When path planning fails:</strong></p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Check planner logs:</span>
 ros2<span class="w"> </span>topic<span class="w"> </span><span class="nb">echo</span><span class="w"> </span>/plan<span class="w">       </span><span class="c1"># should publish a path</span>
@@ -403,17 +708,123 @@ Trajectory Critics:
 
 Key parameters:
   max_vel_x: 0.5         # max forward speed (m/s)
-  min_vel_x: -0.1        # allows slight backward motion
-  max_vel_theta: 1.0     # max angular velocity (rad/s)
-  vx_samples: 20         # number of vx samples → affects CPU
-  vtheta_samples: 20     # number of vθ samples
+  max_vel_theta: 1.0     # max rotation speed (rad/s)
+  sim_time: 1.7          # seconds to roll out each sampled trajectory
+  vx_samples: 20         # how many forward-speed samples
+  vtheta_samples: 20     # how many rotation-speed samples
 </code></pre></div>
 
-<p><strong>DWB failure modes:</strong>
-- Robot oscillates: <code>PathAlign</code> weight too high, fighting <code>PathDist</code>. Balance the weights.
-- Robot stops near obstacles: <code>ObstacleDist</code> too aggressive. Reduce <code>obstacle_scale</code>.
-- Robot can&rsquo;t rotate in place: <code>min_speed_xy</code> &gt; 0. Set to 0.0 for diff-drive.</p>
+<p>If <code>sim_time</code> is too low, the controller can&rsquo;t see far enough ahead — it may choose a trajectory that looks safe in the next 0.5s but collides 0.6s later.</p>
+<p>If <code>sim_time</code> is too high, the controller becomes over-conservative — every trajectory appears risky because it extrapolates too far.</p>
 <h3 id="rpp-regulated-pure-pursuit">RPP (Regulated Pure Pursuit)</h3>
+<p>RPP picks a lookahead point on the path and steers toward it. It is:
+- smoother than DWB
+- simpler to tune
+- often better for Ackermann or high-speed robots</p>
+<p>Key idea: closer lookahead = sharper path following but more oscillation; farther lookahead = smoother path but cuts corners.</p>
+<hr />
+<h2 id="43-common-controller-failure-patterns">4.3 Common Controller Failure Patterns</h2>
+<div class="highlight"><pre><span></span><code>Robot oscillates left-right in corridor:
+  → PathAlign weight too high, or sim_time too low
+
+Robot cuts corners and clips obstacles:
+  → lookahead too large (RPP), obstacle critic too weak (DWB)
+
+Robot gets stuck rotating in place:
+  → goal tolerance too strict, local costmap sees obstacle at goal pose
+</code></pre></div>
+
+<hr />
+<h2 id="44-goal-tolerances">4.4 Goal Tolerances</h2>
+<div class="highlight"><pre><span></span><code><span class="nt">xy_goal_tolerance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.25</span><span class="w">   </span><span class="c1"># meters</span>
+<span class="nt">yaw_goal_tolerance</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.25</span><span class="w">  </span><span class="c1"># radians (~14°)</span>
+</code></pre></div>
+
+<p>If these are too tight, the robot may endlessly re-approach the goal because it can&rsquo;t physically settle within the tolerance.</p>
+<p><strong>Symptom:</strong> robot reaches goal area, then does micro-corrections forever.</p>
+<hr />
+<h1 id="part-5-how-localization-feeds-nav2">PART 5 — HOW LOCALIZATION FEEDS NAV2</h1>
+<hr />
+<h2 id="51-robot_localization-vs-amcl">5.1 <code>robot_localization</code> vs <code>amcl</code></h2>
+<div class="highlight"><pre><span></span><code>AMCL:
+  Input: map + laser scan
+  Output: pose in map frame → /amcl_pose, map → odom TF
+  Purpose: global localization on known map
+
+robot_localization EKF:
+  Input: wheel odom + IMU (+ GPS or other sensors)
+  Output: filtered odom in odom frame → /odometry/filtered
+  Purpose: smooth local motion estimate
+</code></pre></div>
+
+<p>Nav2 needs both:
+- <strong>global pose</strong> in <code>map</code> frame for planning
+- <strong>smooth local velocity / odom</strong> for the controller</p>
+<p>If AMCL is wrong, the planner plans from the wrong place.
+If EKF odom is noisy, the controller can&rsquo;t track smoothly.</p>
+<hr />
+<h2 id="52-tf-chain-required-by-nav2">5.2 TF Chain Required by Nav2</h2>
+<div class="highlight"><pre><span></span><code>map → odom → base_link → laser_frame
+</code></pre></div>
+
+<p>If any link in that chain is missing or delayed, Nav2 will fail with TF lookup timeouts.</p>
+<p>Common failure:</p>
+<div class="highlight"><pre><span></span><code><span class="o">[</span>bt_navigator<span class="o">]</span><span class="w"> </span>Timed<span class="w"> </span>out<span class="w"> </span>waiting<span class="w"> </span><span class="k">for</span><span class="w"> </span>transform<span class="w"> </span>from<span class="w"> </span>base_link<span class="w"> </span>to<span class="w"> </span>map
+</code></pre></div>
+
+<p><strong>Interpretation:</strong> either AMCL not publishing <code>map → odom</code>, or timestamps are too old.</p>
+<hr />
+<h1 id="part-6-field-debugging-checklist">PART 6 — FIELD DEBUGGING CHECKLIST</h1>
+<hr />
+<p>When a navigation failure occurs, inspect in this order:</p>
+<ol>
+<li>
+<p><strong>TF is valid?</strong>
+   <code>bash
+   ros2 run tf2_tools view_frames
+   ros2 topic echo /tf</code></p>
+</li>
+<li>
+<p><strong>Global costmap initialized?</strong>
+   <code>bash
+   ros2 topic echo /global_costmap/costmap</code></p>
+</li>
+<li>
+<p><strong>Planner producing path?</strong>
+   <code>bash
+   ros2 topic echo /plan</code></p>
+</li>
+<li>
+<p><strong>Controller publishing <code>/cmd_vel</code>?</strong>
+   <code>bash
+   ros2 topic echo /cmd_vel</code></p>
+</li>
+<li>
+<p><strong>Recovery loop active?</strong>
+   Look for repeated <code>Spin</code>, <code>BackUp</code>, <code>ClearEntireCostmap</code> in logs.</p>
+</li>
+</ol>
+<p>This sequence isolates the failed layer in under 2 minutes.</p>
+<hr />
+<h2 id="summary">Summary</h2>
+<ul>
+<li><strong>BehaviorTree</strong> decides what to try next</li>
+<li><strong>Planner</strong> finds a global path through the global costmap</li>
+<li><strong>Controller</strong> turns that path into velocity commands using the local costmap</li>
+<li><strong>Localization</strong> supplies the pose and odom that make the rest of Nav2 meaningful</li>
+</ul>
+<p>If you understand those four layers, most Nav2 logs stop looking like noise.</p>
+<hr />
+<h2 id="practice-exercises">Practice Exercises</h2>
+<ul>
+<li><a href="exercises/04-nav2-diagnostics.html">Exercise04 — Nav2 Diagnostics</a></li>
+<li><a href="exercises/05-search-costs-and-motion-models.html">Exercise05 — Search Costs and Motion Models</a></li>
+<li><a href="exercises/06-hybrid-a-star-and-turning-radius.html">Exercise06 — Hybrid-A* and Minimum Turning Radius</a></li>
+<li><a href="exercises/07-bellman-ford-dijkstra-a-star-interview-traps.html">Exercise07 — Bellman-Ford, Dijkstra, and A* Interview Traps</a></li>
+<li><a href="04-navfn-vs-smac-search-spaces.html">04 — NavFn vs Smac Search Spaces</a></li>
+<li><a href="05-holonomic-vs-non-holonomic.html">05 — Holonomic vs Non-Holonomic vs Underactuated</a></li>
+</ul>
+<h3 id="rpp-regulated-pure-pursuit_1">RPP (Regulated Pure Pursuit)</h3>
 <div class="highlight"><pre><span></span><code>Algorithm:
   1. Find the &quot;lookahead point&quot; on the path at lookahead_dist ahead
   2. Compute the curvature (1/radius) to reach that point
@@ -660,5 +1071,8 @@ Diagnosis:
             <p class="text-gray-500">Robotics Learning Resources</p>
         </footer>
     </div>
+    <script>
+        mermaid.initialize({ startOnLoad: true });
+    </script>
 </body>
 </html>

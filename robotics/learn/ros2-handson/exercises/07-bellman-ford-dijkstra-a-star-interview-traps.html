@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exercise07 — Bellman-Ford, Dijkstra, and A* Interview Traps - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        .md-content .mermaid { margin: 1.5rem 0; overflow-x: auto; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Back to ROS 2 Hands-on</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="exercise07-bellman-ford-dijkstra-and-a-interview-traps">Exercise07 — Bellman-Ford, Dijkstra, and A* Interview Traps</h1>
+<h2 id="companion-exercises-for-03-nav2-architecturemd">Companion exercises for <code>03-nav2-architecture.md</code></h2>
+<p><strong>Estimated time:</strong> 35 minutes<br />
+<strong>Prerequisite:</strong> <a href="../03-nav2-architecture.html">03-nav2-architecture.md</a>, <a href="05-search-costs-and-motion-models.html">Exercise05 — Search Costs and Motion Models</a></p>
+<p><strong>Self-assessment guide:</strong> If you can explain when Dijkstra fails, why Bellman-Ford keeps fixing distances, and why A* needs an admissible heuristic, you understand search behavior instead of memorizing algorithm names.</p>
+<hr />
+<h2 id="overview">Overview</h2>
+<p>This page is designed for exactly the kind of interview follow-up questions that catch people off guard:</p>
+<ol>
+<li>Why does A* fail when the heuristic overestimates?</li>
+<li>Why does consistency matter even if admissibility already gives correctness?</li>
+<li>Why does Dijkstra break on negative edges?</li>
+<li>Why can Bellman-Ford recover from those cases?</li>
+</ol>
+<p>In Nav2, Bellman-Ford is not the planner you usually deploy. But if you understand Bellman-Ford, you understand something deeper:</p>
+<blockquote>
+<p>When can a shortest-path algorithm trust its first answer, and when must it keep correcting itself?</p>
+</blockquote>
+<p>That is a very common interview axis.</p>
+<hr />
+<h2 id="section-a-bellman-ford-vs-dijkstra-vs-a-cheat-sheet">Section A — Bellman-Ford vs Dijkstra vs A* Cheat Sheet</h2>
+<table>
+<thead>
+<tr>
+<th>Algorithm</th>
+<th>Scoring idea</th>
+<th>Handles negative edges?</th>
+<th>Needs heuristic?</th>
+<th>Main strength</th>
+<th>Main failure mode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Dijkstra</td>
+<td>Expand the node with smallest <code>g(n)</code></td>
+<td>No</td>
+<td>No</td>
+<td>Exact shortest paths for non-negative graphs</td>
+<td>Breaks if a later negative edge makes a finalized node cheaper</td>
+</tr>
+<tr>
+<td>A*</td>
+<td>Expand the node with smallest <code>f(n) = g(n) + h(n)</code></td>
+<td>Not in the standard shortest-path guarantee sense</td>
+<td>Yes</td>
+<td>Goal-directed search that can stay optimal with a good heuristic</td>
+<td>Overestimating heuristic can hide the true optimal path</td>
+</tr>
+<tr>
+<td>Bellman-Ford</td>
+<td>Relax every edge repeatedly</td>
+<td>Yes</td>
+<td>No</td>
+<td>Works with negative edges and detects negative cycles</td>
+<td>Slower because it keeps revisiting estimates</td>
+</tr>
+</tbody>
+</table>
+<h3 id="quick-memory-hooks">Quick memory hooks</h3>
+<ul>
+<li><strong>Dijkstra</strong>: &ldquo;I trust the cheapest known frontier node now.&rdquo;</li>
+<li><strong>A</strong>*: &ldquo;I trust the cheapest frontier node after adjusting for promise.&rdquo;</li>
+<li><strong>Bellman-Ford</strong>: &ldquo;I do not trust early answers, so I keep repairing them.&rdquo;</li>
+</ul>
+<h3 id="when-each-one-is-the-right-answer">When each one is the right answer</h3>
+<ul>
+<li>Use <strong>Dijkstra</strong> when edges are non-negative and you want exact shortest paths.</li>
+<li>Use <strong>A</strong>* when you have a good admissible heuristic and care about one goal.</li>
+<li>Use <strong>Bellman-Ford</strong> when negative edges may exist or you must detect negative cycles.</li>
+</ul>
+<h3 id="cheat-sheet-checklist">Cheat-sheet checklist</h3>
+<p>Your comparison is strong if it clearly states:</p>
+<ul>
+<li>which algorithm is greedy and which one keeps repairing estimates</li>
+<li>which one depends on a heuristic</li>
+<li>which one tolerates negative edges</li>
+<li>
+<p>the main tradeoff between speed and generality</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h2 id="section-b-trap-style-interview-questions-with-model-answers">Section B — Trap-Style Interview Questions with Model Answers</h2>
+<h3 id="question-1-why-can-a-return-a-wrong-path-if-hn-overestimates">Question 1 — Why can A* return a wrong path if <code>h(n)</code> overestimates?</h3>
+<p><strong>Model answer:</strong></p>
+<ul>
+<li>A* ranks nodes using <code>f(n) = g(n) + h(n)</code>.</li>
+<li>If <code>h(n)</code> overestimates, the truly optimal branch can look artificially expensive.</li>
+<li>That can cause A* to prefer a worse branch and lose its optimality guarantee.</li>
+<li>That is why admissibility requires <code>h(n)</code> to never exceed the true remaining cost.</li>
+</ul>
+<h3 id="question-2-admissible-vs-consistent-what-is-the-real-difference">Question 2 — Admissible vs consistent: what is the real difference?</h3>
+<p><strong>Model answer:</strong></p>
+<ul>
+<li><strong>Admissible</strong> means the heuristic never overestimates the true remaining cost.</li>
+<li><strong>Consistent</strong> means the heuristic also behaves smoothly across edges: <code>h(n) &lt;= c(n, n') + h(n')</code>.</li>
+<li>Admissibility protects optimality.</li>
+<li>Consistency makes A* cleaner operationally because it avoids many node re-openings.</li>
+</ul>
+<h3 id="question-3-why-does-dijkstra-fail-with-negative-weights">Question 3 — Why does Dijkstra fail with negative weights?</h3>
+<p><strong>Model answer:</strong></p>
+<ul>
+<li>Dijkstra assumes once the current cheapest node is finalized, no later path can improve it.</li>
+<li>That assumption is only valid if all edge weights are non-negative.</li>
+<li>A negative edge can create a cheaper path after a node was already considered done.</li>
+<li>So the greedy &ldquo;finalize once&rdquo; logic breaks.</li>
+</ul>
+<h3 id="question-4-why-does-bellman-ford-not-have-the-same-problem">Question 4 — Why does Bellman-Ford not have the same problem?</h3>
+<p><strong>Model answer:</strong></p>
+<ul>
+<li>Bellman-Ford does not trust early estimates.</li>
+<li>It relaxes all edges repeatedly, so a better path discovered later can still repair an earlier answer.</li>
+<li>That is exactly why it handles negative edges correctly.</li>
+</ul>
+<h3 id="question-5-why-exactly-v-1-rounds-in-bellman-ford">Question 5 — Why exactly <code>V - 1</code> rounds in Bellman-Ford?</h3>
+<p><strong>Model answer:</strong></p>
+<ul>
+<li>A simple shortest path cannot contain more than <code>V - 1</code> edges in a graph with <code>V</code> vertices.</li>
+<li>Each relaxation pass can correctly propagate shortest-path information across one more edge.</li>
+<li>So after <code>V - 1</code> rounds, every valid shortest path has had enough passes to fully propagate.</li>
+</ul>
+<h3 id="question-6-why-does-one-extra-bellman-ford-pass-detect-a-negative-cycle">Question 6 — Why does one extra Bellman-Ford pass detect a negative cycle?</h3>
+<p><strong>Model answer:</strong></p>
+<ul>
+<li>After <code>V - 1</code> rounds, all shortest simple paths should already be stable.</li>
+<li>If a further relaxation still improves a distance, the only explanation is that a cycle is making the path cheaper.</li>
+<li>If that cycle has negative total cost, you can keep looping and reduce the path forever.</li>
+<li>So a finite shortest path no longer exists.</li>
+</ul>
+<h3 id="question-7-if-the-heuristic-in-a-is-too-small-is-that-bad">Question 7 — If the heuristic in A* is too small, is that bad?</h3>
+<p><strong>Model answer:</strong></p>
+<ul>
+<li>It is not wrong, but it is less useful.</li>
+<li>A* stays optimal if the heuristic remains admissible.</li>
+<li>But as the heuristic becomes less informative, A* explores more nodes and drifts toward Dijkstra.</li>
+</ul>
+<h3 id="question-8-what-happens-if-the-heuristic-is-perfect">Question 8 — What happens if the heuristic is perfect?</h3>
+<p><strong>Model answer:</strong></p>
+<ul>
+<li>If <code>h(n)</code> equals the exact remaining cost, A* becomes maximally informed.</li>
+<li>It expands almost only the nodes that matter for the optimal path.</li>
+<li>That is the ideal case for search efficiency.</li>
+</ul>
+<h3 id="question-9-why-isnt-greedy-best-first-search-equivalent-to-a">Question 9 — Why isn&rsquo;t greedy best-first search equivalent to A*?</h3>
+<p><strong>Model answer:</strong></p>
+<ul>
+<li>Greedy best-first search uses only the heuristic, effectively <code>f(n) = h(n)</code>.</li>
+<li>It ignores the real cost already paid.</li>
+<li>A* balances both past cost and estimated future cost, which is why it can stay optimal under the right conditions.</li>
+</ul>
+<h3 id="question-10-in-one-sentence-compare-the-three-algorithms">Question 10 — In one sentence, compare the three algorithms</h3>
+<p><strong>Model answer:</strong></p>
+<ul>
+<li>Dijkstra trusts accumulated cost, A* trusts accumulated cost plus a safe estimate, and Bellman-Ford keeps correcting estimates until no edge can improve them.</li>
+</ul>
+<h3 id="interview-answer-checklist">Interview-answer checklist</h3>
+<p>Your interview answers are strong if they mention:</p>
+<ul>
+<li>A* loses optimality when the heuristic overestimates</li>
+<li>consistency is about smooth heuristic behavior across edges</li>
+<li>Dijkstra fails because greedy finalization assumes no later cheaper path appears</li>
+<li>Bellman-Ford succeeds because repeated relaxation can repair earlier estimates</li>
+<li><code>V - 1</code> rounds correspond to the maximum number of edges in a simple shortest path</li>
+<li>
+<p>one extra round is used to expose a negative cycle</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h2 id="section-c-mini-scenarios">Section C — Mini Scenarios</h2>
+<h3 id="scenario-1-negative-edge-trap">Scenario 1 — Negative edge trap</h3>
+<p>Graph:</p>
+<div class="highlight"><pre><span></span><code>A -&gt; B = 5
+A -&gt; C = 2
+C -&gt; B = -10
+</code></pre></div>
+
+<p><strong>Questions:</strong></p>
+<ol>
+<li>Why is this graph a trap for Dijkstra?</li>
+<li>What result should Bellman-Ford eventually find for <code>dist(B)</code>?</li>
+<li>What interview lesson is hidden here?</li>
+</ol>
+<h3 id="scenario-1-answer">Scenario 1 Answer</h3>
+<ul>
+<li>It is a trap because a later negative edge can improve the cost to <code>B</code> after an earlier estimate looked final.</li>
+<li>Bellman-Ford should find <code>dist(B) = -8</code> through <code>A -&gt; C -&gt; B</code>.</li>
+<li>
+<p>The lesson is that greedy finalization only works when future edges cannot make old answers cheaper.</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h3 id="scenario-2-bad-heuristic-trap">Scenario 2 — Bad heuristic trap</h3>
+<p>Suppose the real shortest path from <code>S</code> to <code>G</code> has total cost <code>10</code>, but your heuristic assigns a large overestimate on that optimal branch and a tiny estimate on a longer branch.</p>
+<p><strong>Questions:</strong></p>
+<ol>
+<li>What wrong behavior can A* show here?</li>
+<li>Which formal property was broken?</li>
+<li>What is the safest interview answer for how to fix it?</li>
+</ol>
+<h3 id="scenario-2-answer">Scenario 2 Answer</h3>
+<ul>
+<li>A* can prefer the longer branch because the optimal branch looks falsely expensive under <code>g(n) + h(n)</code>.</li>
+<li>The heuristic is not admissible because it overestimates the true remaining cost.</li>
+<li>Fix the heuristic so it never overestimates, and ideally make it consistent as well.</li>
+</ul>
+<h3 id="scenario-checklist">Scenario checklist</h3>
+<p>Your scenario answers are strong if they identify:</p>
+<ul>
+<li>the exact hidden assumption that breaks in the scenario</li>
+<li>the corrected distance or branch preference, not just a vague description</li>
+<li>whether the problem is caused by edge weights, heuristic quality, or cycle structure</li>
+<li>
+<p>the safest formal fix: admissible heuristic, consistent heuristic, or Bellman-Ford-style repeated relaxation</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h2 id="section-d-robotics-translation">Section D — Robotics Translation</h2>
+<h3 id="why-this-still-matters-in-nav2-interviews">Why this still matters in Nav2 interviews</h3>
+<p>Even though Nav2 does not typically use Bellman-Ford for robot path planning, these questions matter because they test whether you understand search assumptions:</p>
+<ul>
+<li><strong>NavFn / A</strong>*: why a heuristic helps and when it is still safe</li>
+<li><strong>Grid search vs kinematic search</strong>: why <code>A*</code> on <code>(x, y)</code> is different from <code>Hybrid-A*</code> on <code>(x, y, θ)</code></li>
+<li><strong>Planner debugging</strong>: whether the failure is coming from the cost function, the state space, or the robot model</li>
+</ul>
+<p>If you can explain Bellman-Ford, you usually give better answers about why a planner trusts or distrusts partial solutions.</p>
+<h3 id="interview-bridge-answer">Interview bridge answer</h3>
+<p>If someone asks, &ldquo;Why should a robotics engineer care about Bellman-Ford if Nav2 mostly uses NavFn or Smac?&rdquo; a strong answer is:</p>
+<blockquote>
+<p>Because Bellman-Ford exposes the hidden assumption behind greedy shortest-path methods: whether a distance estimate can safely be finalized early. That same reasoning helps when explaining Dijkstra, A*, and why kinematic planners must reason more carefully about feasibility.</p>
+</blockquote>
+<h3 id="robotics-translation-checklist">Robotics-translation checklist</h3>
+<p>Your robotics translation is strong if it connects Bellman-Ford back to:</p>
+<ul>
+<li>why NavFn or A* can trust some partial answers</li>
+<li>why planner assumptions matter as much as formulas</li>
+<li>
+<p>why search state, heuristic choice, and feasibility constraints should be discussed separately</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h2 id="practical-takeaway">Practical Takeaway</h2>
+<p>Memorize this progression:</p>
+<ol>
+<li><strong>Dijkstra</strong>: exact, greedy, non-negative edges only</li>
+<li><strong>A</strong>*: Dijkstra plus heuristic guidance</li>
+<li><strong>Bellman-Ford</strong>: repeated correction instead of greedy finalization</li>
+</ol>
+<p>And memorize this failure map:</p>
+<ol>
+<li><strong>Bad heuristic</strong> -&gt; A* may lose optimality</li>
+<li><strong>Inconsistent heuristic</strong> -&gt; A* may reopen nodes and get messy</li>
+<li><strong>Negative edge</strong> -&gt; Dijkstra&rsquo;s greedy assumption breaks</li>
+<li><strong>Negative cycle</strong> -&gt; no finite shortest path exists</li>
+</ol>
+<p>That is enough to answer most interview follow-ups cleanly.</p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+    <script>
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+</body>
+</html>

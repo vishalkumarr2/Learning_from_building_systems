@@ -17,7 +17,7 @@ zephyr/         (firmware + deep-dive)  🟢 17 tutorials + 12 deep-dives
 cpp-advanced/   (C++ depth)             🟢 18 modules + exercises
 control-systems/ (PID → advanced)       🟢 10 lessons + exercises
 navigation-estimator/ (EKF/IMU)         🟢 5 lessons + 5 exercises
-ros2-handson/   (nodes/TF/Nav2)         🟢 3 lessons + 4 exercises
+ros2-handson/   (nodes/TF/Nav2)         🟢 5 lessons + 8 exercises
 python-scripting/ (typing/test/polars)  🟢 3 lessons + 3 exercises
 ```
 
@@ -74,14 +74,14 @@ well enough to explain frame drop bugs.
 
 **Timeline:** 3 weeks · 3–4 hrs/week
 
-**Status:** � Complete — 3 lessons + 4 exercises written
+**Status:** Complete — 5 lessons + 8 exercises written
 **Folder:** `learn/ros2-handson/`
 
 | Week | Topic | Practical Relevance |
 |------|-------|---------------|
 | 1 | Nodes, topics, services, actions, lifecycle | AMR node architecture |
 | 2 | tf2 transforms, time sync, QoS profiles | TF lookup failures in nav logs |
-| 3 | Nav2 BT architecture, costmaps, planner/controller | RCS navigation stack |
+| 3 | Nav2 BT architecture, search spaces, motion models, and interview traps | RCS navigation stack |
 
 **Files to create:**
 ```
@@ -90,11 +90,17 @@ ros2-handson/
 ├── 01-nodes-topics-actions.md
 ├── 02-tf2-time-qos.md
 ├── 03-nav2-architecture.md
+├── 04-navfn-vs-smac-search-spaces.md
+├── 05-holonomic-vs-non-holonomic.md
 └── exercises/
     ├── 01-pub-sub-timer.md
     ├── 02-tf2-broadcaster.md
     ├── 03-action-server.md
-    └── 04-nav2-custom-plugin.md
+    ├── 04-nav2-diagnostics.md
+    ├── 05-search-costs-and-motion-models.md
+    ├── 06-hybrid-a-star-and-turning-radius.md
+    ├── 07-bellman-ford-dijkstra-a-star-interview-traps.md
+    └── 08-holonomic-non-holonomic-underactuated-interview-traps.md
 ```
 
 ---

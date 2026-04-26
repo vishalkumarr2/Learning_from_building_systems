@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04 — NavFn vs Smac Search Spaces - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        .md-content .mermaid { margin: 1.5rem 0; overflow-x: auto; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Back to ROS 2</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="04-navfn-vs-smac-search-spaces">04 — NavFn vs Smac Search Spaces</h1>
+<h2 id="why-the-same-start-and-goal-can-produce-very-different-paths">Why the same start and goal can produce very different paths</h2>
+<p>This page is the visual companion to <a href="03-nav2-architecture.html">03-nav2-architecture.md</a>.
+The goal is simple: make it obvious why <strong>NavFn</strong> and <strong>SmacPlanner</strong> are solving
+different planning problems, even when they are given the same map and the same goal.</p>
+<hr />
+<h2 id="1-navfn-search-over-a-2d-grid">1. NavFn: search over a 2D grid</h2>
+<p>NavFn thinks in terms of occupancy cells and traversal cost.</p>
+<p>It asks:</p>
+<blockquote>
+<p>&ldquo;Which sequence of free cells gets me from start to goal at minimum path cost?&rdquo;</p>
+</blockquote>
+<p>It does <strong>not</strong> directly reason about steering angle or minimum turning radius.</p>
+<div class="highlight"><pre><span></span><code>Top-down grid view
+
+####################
+# S . . . . . . .  #
+# . . . X X . . .  #
+# . . . X X . . G  #
+# . . . . . . . .  #
+####################
+
+NavFn state = (x, y)
+</code></pre></div>
+
+<p>The planner only needs to know where the robot is on the map. Heading is not part of the
+search state.</p>
+<h3 id="grid-search-intuition">Grid-search intuition</h3>
+<div class="mermaid">
+flowchart LR
+    A[Start cell] --> B[cell]
+    B --> C[cell]
+    C --> D[cell]
+    D --> E[Goal cell]
+</div>
+
+<p>This is why NavFn is fast and very reliable on warehouse maps, but it can produce a path
+that is geometrically valid while still being awkward for a car-like robot to follow.</p>
+<hr />
+<h2 id="2-smacplanner-search-over-position-plus-heading">2. SmacPlanner: search over position plus heading</h2>
+<p>SmacPlanner Hybrid-A* thinks in a richer state space.</p>
+<p>It asks:</p>
+<blockquote>
+<p>&ldquo;Which sequence of feasible position-and-heading states gets me to the goal while
+respecting the robot&rsquo;s turning constraints?&rdquo;</p>
+</blockquote>
+<div class="highlight"><pre><span></span><code>Smac state = (x, y, theta)
+</code></pre></div>
+
+<p>That means two states at the same map location can still be different if the robot is
+facing different directions.</p>
+<div class="highlight"><pre><span></span><code>Same position, different states:
+
+Cell A, heading east   -&gt; (x, y, 0°)
+Cell A, heading north  -&gt; (x, y, 90°)
+Cell A, heading west   -&gt; (x, y, 180°)
+</code></pre></div>
+
+<h3 id="pose-lattice-intuition">Pose-lattice intuition</h3>
+<div class="mermaid">
+flowchart TD
+    A[(x1, y1, 0°)] --> B[(x2, y2, 15°)]
+    B --> C[(x3, y3, 30°)]
+    C --> D[(x4, y4, 45°)]
+    D --> E[(x5, y5, 60°)]
+</div>
+
+<p>The search is effectively moving through a <strong>lattice of feasible vehicle poses</strong>, not
+just a floor grid.</p>
+<hr />
+<h2 id="3-why-minimum-turning-radius-changes-the-answer">3. Why minimum turning radius changes the answer</h2>
+<p>Suppose the map allows a sharp corner.</p>
+<p>NavFn may happily route through that corner because the cells are free.</p>
+<div class="highlight"><pre><span></span><code>NavFn sees:
+
+....
+...G
+..X.
+S...
+</code></pre></div>
+
+<p>But a car-like robot with a large minimum turning radius may not be able to rotate into
+that corner tightly enough.</p>
+<p>SmacPlanner accounts for that by searching curved motions that obey the configured
+turning radius.</p>
+<div class="mermaid">
+flowchart LR
+    S[Start] --> A[Arc left]
+    A --> B[Straight]
+    B --> C[Arc right]
+    C --> G[Goal]
+</div>
+
+<p>This is the key difference:</p>
+<ul>
+<li><strong>NavFn:</strong> shortest path in the costmap</li>
+<li><strong>Smac:</strong> shortest feasible path for the vehicle model</li>
+</ul>
+<hr />
+<h2 id="4-why-reverse-motion-changes-the-search-space-again">4. Why reverse motion changes the search space again</h2>
+<p>When Smac uses <code>motion_model_for_search: DUBIN</code>, it only explores forward-feasible
+motions.</p>
+<p>When it uses <code>motion_model_for_search: REEDS_SHEPP</code>, it can also explore reverse
+maneuvers.</p>
+<div class="highlight"><pre><span></span><code>Dubin search:        Reeds-Shepp search:
+
+forward only         forward + reverse
+arc / straight       arc / straight / reverse arc / reverse straight
+</code></pre></div>
+
+<p>That makes the search space larger, but it often makes the solution much shorter in
+tight spaces such as docking, parking, and forklift alignment.</p>
+<hr />
+<h2 id="5-engineering-takeaway">5. Engineering takeaway</h2>
+<p>Use <strong>NavFn</strong> when:</p>
+<ul>
+<li>the robot is effectively well-approximated as a point or diff-drive platform on a grid</li>
+<li>the environment is open enough that geometric feasibility is rarely the bottleneck</li>
+<li>you care most about planner simplicity and speed</li>
+</ul>
+<p>Use <strong>SmacPlanner</strong> when:</p>
+<ul>
+<li>the robot is non-holonomic in a way that matters operationally</li>
+<li>turning radius is a real constraint</li>
+<li>the goal pose requires orientation-sensitive approach behavior</li>
+<li>reverse motion policy changes what should count as a valid path</li>
+</ul>
+<hr />
+<h2 id="one-line-summary">One-line summary</h2>
+<p>NavFn searches <strong>where the robot can fit on the map</strong>.
+Smac searches <strong>how the robot can actually drive there</strong>.</p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+    <script>
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+</body>
+</html>

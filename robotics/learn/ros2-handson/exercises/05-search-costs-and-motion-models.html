@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exercise05 — Search Costs and Motion Models - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        .md-content .mermaid { margin: 1.5rem 0; overflow-x: auto; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Back to ROS 2 Hands-on</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="exercise05-search-costs-and-motion-models">Exercise05 — Search Costs and Motion Models</h1>
+<h2 id="companion-exercises-for-03-nav2-architecturemd">Companion exercises for <code>03-nav2-architecture.md</code></h2>
+<p><strong>Estimated time:</strong> 35 minutes<br />
+<strong>Prerequisite:</strong> <a href="../03-nav2-architecture.html">03-nav2-architecture.md</a></p>
+<p><strong>Self-assessment guide:</strong> If you can explain why a planner chose a path using
+<code>g(n)</code>, <code>h(n)</code>, and the selected motion model, you are no longer memorizing Nav2 terms —
+you are reasoning like the planner.</p>
+<hr />
+<h2 id="overview">Overview</h2>
+<p>This exercise set builds intuition for two separate but easy-to-mix ideas:</p>
+<ol>
+<li><strong>Search cost functions</strong> — why Dijkstra and A* expand different nodes</li>
+<li><strong>Motion models</strong> — why Dubins and Reeds-Shepp produce different feasible paths</li>
+</ol>
+<p>In practice, field debugging gets easier once you stop asking only &ldquo;Did the planner find
+a path?&rdquo; and start asking:</p>
+<ul>
+<li>What state space was it searching?</li>
+<li>What cost function pushed it toward that path?</li>
+<li>Was reverse motion allowed?</li>
+</ul>
+<hr />
+<h2 id="section-a-dijkstra-vs-a">Section A — Dijkstra vs A*</h2>
+<p>Use this tiny grid for the first two questions:</p>
+<div class="highlight"><pre><span></span><code>S . . .
+. X . .
+. X . G
+. . . .
+</code></pre></div>
+
+<p>Movement is 4-connected: up, down, left, right. Each move costs 1.</p>
+<hr />
+<h3 id="question-1-what-does-dijkstra-optimize">Question 1 — What does Dijkstra optimize?</h3>
+<ol>
+<li>Write the scoring function used by Dijkstra.</li>
+<li>Why does it expand outward like a ripple instead of moving directly toward the goal?</li>
+<li>In what situation is that still useful?</li>
+</ol>
+<h3 id="question-1-answer">Question 1 Answer</h3>
+<ul>
+<li>Dijkstra uses:</li>
+</ul>
+<p>$$
+f(n) = g(n)
+$$</p>
+<ul>
+<li>
+<p>It only cares about the exact cost from the start to the current node. It has no
+   goal-directed heuristic, so every node at cost 2 is considered before any node at cost
+   3, regardless of whether it points toward or away from the goal.</p>
+</li>
+<li>
+<p>It is useful when you want the true shortest-path cost field over the whole map, or
+   when you have no good admissible heuristic.</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h3 id="question-2-why-does-a-usually-get-there-faster">Question 2 — Why does A* usually get there faster?</h3>
+<ol>
+<li>Write the A* scoring function.</li>
+<li>If you use Manhattan distance on this grid, what is the heuristic at the start cell
+   if <code>S = (0,0)</code> and <code>G = (3,2)</code> using <code>(x, y) = (column, row)</code>?</li>
+<li>Why can A* still return the optimal path when the heuristic is admissible?</li>
+</ol>
+<h3 id="question-2-answer">Question 2 Answer</h3>
+<ul>
+<li>A* uses:</li>
+</ul>
+<p>$$
+f(n) = g(n) + h(n)
+$$</p>
+<ul>
+<li>Manhattan distance:</li>
+</ul>
+<p>$$
+h(S) = |0 - 3| + |0 - 2| = 5
+$$</p>
+<ul>
+<li>
+<p>If the heuristic never overestimates the true remaining path cost, A* never becomes
+   over-optimistic in a way that would skip a cheaper valid solution. It stays both
+   goal-directed and optimal.</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h2 id="section-b-choosing-the-motion-model">Section B — Choosing the Motion Model</h2>
+<h3 id="question-3-dubins-or-reeds-shepp">Question 3 — Dubins or Reeds-Shepp?</h3>
+<p>For each platform, choose the better motion model and explain why.</p>
+<ol>
+<li>A small fixed-wing UAV that must keep moving forward</li>
+<li>A forklift placing a pallet in a tight bay</li>
+<li>A car-like tugger that is allowed to reverse but mostly operates in wide aisles</li>
+</ol>
+<h3 id="question-3-answer">Question 3 Answer</h3>
+<ul>
+<li><strong>Dubins</strong> — forward-only motion matches the platform constraint.</li>
+<li><strong>Reeds-Shepp</strong> — tight maneuvering with reversing is exactly what the model adds.</li>
+<li>
+<p><strong>Usually Reeds-Shepp</strong>, if reverse maneuvers are operationally allowed. Even if most
+   motion is forward, the ability to back up can shorten or rescue tight maneuvers.
+   If policy forbids reversing during normal operation, then Dubins is the correct model
+   even though the platform could reverse physically.</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h3 id="question-4-why-can-reeds-shepp-find-shorter-paths">Question 4 — Why can Reeds-Shepp find shorter paths?</h3>
+<p>Answer all three:</p>
+<ol>
+<li>What new capability does Reeds-Shepp add relative to Dubins?</li>
+<li>What is a <strong>cusp</strong> in this context?</li>
+<li>Why does allowing reverse motion often reduce the total path length in tight spaces?</li>
+</ol>
+<h3 id="question-4-answer">Question 4 Answer</h3>
+<ul>
+<li>Reverse motion.</li>
+<li>A cusp is a point where the vehicle changes travel direction, for example from forward
+   to reverse.</li>
+<li>
+<p>Because the robot does not need to commit to a wide forward-only turning maneuver. It
+   can back up, reorient, and continue, which often creates a shorter feasible path than
+   any purely forward alternative.</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h2 id="section-c-nav2-configuration-reasoning">Section C — Nav2 Configuration Reasoning</h2>
+<h3 id="scenario-1-tight-parking-stall">Scenario 1 — Tight Parking Stall</h3>
+<p>You are tuning SmacPlanner for a robot that must enter a narrow charging bay by backing
+in. Current settings:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">motion_model_for_search</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DUBIN</span>
+<span class="nt">minimum_turning_radius</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.2</span>
+</code></pre></div>
+
+<p><strong>Questions:</strong></p>
+<ol>
+<li>What is the likely planning limitation here?</li>
+<li>Which parameter should change first?</li>
+<li>Why might the robot fail even if the goal pose is reachable in the real world?</li>
+</ol>
+<h3 id="scenario-1-answer">Scenario 1 Answer</h3>
+<ul>
+<li>The planner is restricted to forward-only maneuvers, so it cannot search backing-in
+   trajectories.</li>
+<li>Change <code>motion_model_for_search</code> from <code>DUBIN</code> to <code>REEDS_SHEPP</code>.</li>
+<li>
+<p>Because the search space excludes valid reverse maneuvers. The planner may report no
+   path or return an awkward long path even though a human driver would simply reverse
+   into the bay.</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h3 id="scenario-2-planner-is-too-slow">Scenario 2 — Planner Is Too Slow</h3>
+<p>A warehouse robot operates in wide, simple corridors. Reverse is disabled by policy.
+SmacPlanner with <code>REEDS_SHEPP</code> works, but planning latency is high.</p>
+<p><strong>Questions:</strong></p>
+<ol>
+<li>What simpler search choice could reduce planner complexity while matching policy?</li>
+<li>What is the tradeoff?</li>
+<li>When would you keep Reeds-Shepp anyway?</li>
+</ol>
+<h3 id="scenario-2-answer">Scenario 2 Answer</h3>
+<ul>
+<li>Use <code>DUBIN</code> instead of <code>REEDS_SHEPP</code>.</li>
+<li>You reduce the search space by removing reverse maneuvers, which can improve planning
+   speed, but you also lose the ability to exploit reverse motion when it would rescue a
+   tight situation.</li>
+<li>
+<p>Keep Reeds-Shepp if reverse motion may be needed for recovery, docking, or confined
+   goal poses even if the nominal task is mostly forward.</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h2 id="stretch-exercise">Stretch Exercise</h2>
+<p>Write a short answer to this prompt in 5 sentences or fewer:</p>
+<blockquote>
+<p>&ldquo;NavFn with A* and Smac with Reeds-Shepp are both path planners. Why are they not
+interchangeable?&rdquo;</p>
+</blockquote>
+<p><strong>Target answer shape:</strong> mention grid vs kinematic state space, heuristic search,
+turn-radius constraints, and reverse motion.</p>
+<ul>
+<li>[ ] Done</li>
+</ul>
+<hr />
+<h2 id="practical-takeaway">Practical Takeaway</h2>
+<p>When a Nav2 path looks strange, diagnose it in this order:</p>
+<ol>
+<li><strong>Search space:</strong> 2D grid or SE2 kinematic search?</li>
+<li><strong>Scoring rule:</strong> Dijkstra-style or A*-style?</li>
+<li><strong>Motion model:</strong> Dubins or Reeds-Shepp?</li>
+<li><strong>Robot limits:</strong> does <code>minimum_turning_radius</code> reflect reality?</li>
+<li><strong>Operational policy:</strong> is reverse motion allowed in the actual deployment?</li>
+</ol>
+<p>That checklist usually gets you to the root cause faster than staring at the path alone.</p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+    <script>
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+</body>
+</html>

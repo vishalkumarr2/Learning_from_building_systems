@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exercise06 — Hybrid-A* and Minimum Turning Radius - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        .md-content .mermaid { margin: 1.5rem 0; overflow-x: auto; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Back to ROS 2 Hands-on</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="exercise06-hybrid-a-and-minimum-turning-radius">Exercise06 — Hybrid-A* and Minimum Turning Radius</h1>
+<h2 id="companion-exercises-for-03-nav2-architecturemd-and-04-navfn-vs-smac-search-spacesmd">Companion exercises for <code>03-nav2-architecture.md</code> and <code>04-navfn-vs-smac-search-spaces.md</code></h2>
+<p><strong>Estimated time:</strong> 30 minutes<br />
+<strong>Prerequisite:</strong> <a href="../03-nav2-architecture.html">03-nav2-architecture.md</a>, <a href="../04-navfn-vs-smac-search-spaces.html">04-navfn-vs-smac-search-spaces.md</a></p>
+<p><strong>Self-assessment guide:</strong> If you can look at a path, a corridor width, and a
+<code>minimum_turning_radius</code> value and predict whether Smac will struggle, you are thinking in
+vehicle kinematics rather than only in grid cells.</p>
+<hr />
+<h2 id="overview">Overview</h2>
+<p>This exercise focuses on one idea only:</p>
+<blockquote>
+<p>A path can be free in the map and still be infeasible for the robot.</p>
+</blockquote>
+<p>Hybrid-A* exists to close exactly that gap.</p>
+<hr />
+<h2 id="section-a-state-space-reasoning">Section A — State-Space Reasoning</h2>
+<h3 id="question-1-why-isnt-x-y-enough">Question 1 — Why isn&rsquo;t <code>(x, y)</code> enough?</h3>
+<p>Answer in your own words:</p>
+<ol>
+<li>Why can two states at the same map location still be different for a car-like robot?</li>
+<li>Why does heading matter near narrow turns or docking goals?</li>
+<li>Why is this less critical for simple grid planning?</li>
+</ol>
+<h3 id="question-1-answer">Question 1 Answer</h3>
+<ul>
+<li>Because a car-like robot also has orientation, so <code>(x, y, 0°)</code> and <code>(x, y, 180°)</code> are
+  different physical situations.</li>
+<li>Heading matters because the robot cannot instantly rotate into any direction while
+  moving; it must approach with a feasible curvature.</li>
+<li>
+<p>In plain grid planning, the planner only cares whether cells are traversable, not
+  whether the robot&rsquo;s steering geometry can realize that path smoothly.</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h2 id="section-b-turning-radius-intuition">Section B — Turning Radius Intuition</h2>
+<h3 id="question-2-what-does-minimum_turning_radius-really-mean">Question 2 — What does <code>minimum_turning_radius</code> really mean?</h3>
+<p>Explain these three points:</p>
+<ol>
+<li>What physical robot limitation does <code>minimum_turning_radius</code> represent?</li>
+<li>What happens if you set it too small in SmacPlanner?</li>
+<li>What happens if you set it too large?</li>
+</ol>
+<h3 id="question-2-answer">Question 2 Answer</h3>
+<ul>
+<li>It represents the tightest circle the robot can physically follow while steering.</li>
+<li>If it is too small, the planner may return paths that look executable in simulation but
+  ask the real robot to turn more sharply than it actually can.</li>
+<li>
+<p>If it is too large, the planner becomes overly conservative and may reject feasible
+  maneuvers or produce unnecessarily long detours.</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h2 id="section-c-corridor-scenario">Section C — Corridor Scenario</h2>
+<h3 id="scenario-1-narrow-aisle-turn">Scenario 1 — Narrow aisle turn</h3>
+<p>A car-like AMR must turn into a charging bay from a corridor.</p>
+<ul>
+<li>corridor width: <code>2.4 m</code></li>
+<li>charging bay entrance offset: sharp right turn</li>
+<li>robot minimum turning radius in reality: <code>1.1 m</code></li>
+<li>SmacPlanner configured <code>minimum_turning_radius: 0.5</code></li>
+</ul>
+<p><strong>Questions:</strong></p>
+<ol>
+<li>What planning mistake is likely here?</li>
+<li>Why might simulation look better than reality?</li>
+<li>What should you fix first?</li>
+</ol>
+<h3 id="scenario-1-answer">Scenario 1 Answer</h3>
+<ul>
+<li>The planner is assuming the robot can turn much tighter than it really can.</li>
+<li>Simulation may appear fine because the path is geometrically possible in the planner&rsquo;s
+  model, even though the real vehicle cannot physically achieve that curvature.</li>
+<li>
+<p>Fix <code>minimum_turning_radius</code> first so the planner&rsquo;s search space matches the robot&rsquo;s
+  actual steering limits.</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h3 id="scenario-2-planner-says-no-path-operator-can-drive-it">Scenario 2 — Planner says no path, operator can drive it</h3>
+<p>Same robot, new configuration:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">motion_model_for_search</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DUBIN</span>
+<span class="nt">minimum_turning_radius</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2.0</span>
+</code></pre></div>
+
+<p>The operator says the robot can make the maneuver with a short reverse correction, but
+Smac reports no path.</p>
+<p><strong>Questions:</strong></p>
+<ol>
+<li>What two reasons could explain the planner failure?</li>
+<li>Which parameter reflects the missing operational behavior most directly?</li>
+<li>What does this teach you about policy vs physics?</li>
+</ol>
+<h3 id="scenario-2-answer">Scenario 2 Answer</h3>
+<ul>
+<li>The turning radius may be configured too conservatively, and the planner is also limited
+  to forward-only motion.</li>
+<li><code>motion_model_for_search</code>; changing from <code>DUBIN</code> to <code>REEDS_SHEPP</code> adds reverse
+  maneuvers to the search.</li>
+<li>
+<p>A robot can be physically capable of a maneuver that the current planning policy still
+  forbids. You must model both the hardware limits and the allowed behavior.</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h2 id="section-d-hybrid-a-interview-questions">Section D — <code>Hybrid-A*</code> interview questions</h2>
+<h3 id="question-3-short-interview-answers">Question 3 — Short interview answers</h3>
+<p>Answer each in 1 to 3 sentences.</p>
+<ol>
+<li>Why is <code>Hybrid-A*</code> more expensive than plain A*?</li>
+<li>Why is it often still worth using?</li>
+<li>What kind of bug do you get if <code>minimum_turning_radius</code> is wrong?</li>
+</ol>
+<h3 id="question-3-answer">Question 3 Answer</h3>
+<ul>
+<li><code>Hybrid-A*</code> searches over position plus heading, often with motion primitives, so the
+  state space is much larger than a plain <code>(x, y)</code> grid.</li>
+<li>It is worth using because it returns paths that are far closer to what a real
+  non-holonomic robot can actually follow.</li>
+<li>
+<p>You usually get a model mismatch: either the planner returns infeasible turns, or it
+  becomes too conservative and rejects maneuvers the robot could really do.</p>
+</li>
+<li>
+<p>[ ] Done</p>
+</li>
+</ul>
+<hr />
+<h2 id="practical-takeaway">Practical Takeaway</h2>
+<p>When tuning SmacPlanner, check these in order:</p>
+<ol>
+<li>Is the robot model forward-only or forward-and-reverse?</li>
+<li>Is <code>minimum_turning_radius</code> measured from the actual platform, not guessed?</li>
+<li>Does the goal require approach orientation, not just goal position?</li>
+<li>Is the map free but the maneuver still kinematically impossible?</li>
+</ol>
+<p>That is the quickest way to diagnose why NavFn succeeds on paper while Smac rejects the
+same route.</p>
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+    <script>
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+</body>
+</html>
