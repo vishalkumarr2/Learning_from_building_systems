@@ -35,6 +35,8 @@
   - [01 — Nodes, Topics, Actions](ros2-handson/01-nodes-topics-actions.md)
   - [02 — TF2, Time & QoS](ros2-handson/02-tf2-time-qos.md)
   - [03 — Nav2 Architecture](ros2-handson/03-nav2-architecture.md)
+  - [04 — NavFn vs Smac Search Spaces](ros2-handson/04-navfn-vs-smac-search-spaces.md)
+  - [05 — Holonomic vs Non-Holonomic vs Underactuated](ros2-handson/05-holonomic-vs-non-holonomic.md)
 
 - **Electronics**
   - [Learning Plan](electronics/00-learning-plan.md)
