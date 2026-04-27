@@ -16,9 +16,10 @@ electronics/    (hardware theory)   navigation-estimator/  ← COMPLETED ✅
 zephyr/         (firmware)          ros2-handson/           ← COMPLETED ✅
 cpp-advanced/   (C++ depth)         python-oks/             ← COMPLETED ✅
 navigation-estimator/ (EKF/odom)    control-systems/        ← COMPLETED ✅
-ros2-handson/   (ROS2 practice)     zephyr/deep-dive/       ← MEDIUM (stub only)
-python-oks/     (scripting)         linux-rt/               ← LOW (cpp-advanced/03 partial)
-control-systems/ (PID→advanced)
+ros2-handson/   (ROS2 practice)     optimization/           ← COMPLETED ✅
+python-oks/     (scripting)         zephyr/deep-dive/       ← MEDIUM (stub only)
+control-systems/ (PID→advanced)     linux-rt/               ← LOW (cpp-advanced/03 partial)
+optimization/   (solvers/MPC/SLAM)
 ```
 
 ---
@@ -172,6 +173,49 @@ Not a separate track — extend cpp-advanced/03 instead.
 
 ---
 
+## Track 7: Optimization
+**Priority: MEDIUM-HIGH**
+**Status:** ✅ **COMPLETED**
+**Folder:** `learn/optimization/`
+
+7 core lessons covering the optimization stack used in robotics — from gradient
+fundamentals through least-squares (Ceres), constrained/convex optimization (MPC/QP),
+graph-based SLAM backends, and numerical methods for debugging ill-conditioned problems.
+6 exercise sets with Python implementations, Ceres C++ patterns, and OKS-specific
+debugging scenarios.
+
+| Week | Topic | OKS Relevance |
+|------|-------|---------------|
+| 1 | Gradients, Hessians, Taylor expansions, convexity | Foundation for everything below |
+| 2 | Gradient descent, Newton's method, line search | Understanding solver internals |
+| 3 | Nonlinear least squares, Gauss-Newton, LM, Ceres Solver | Estimator uses Ceres (LM) for calibration |
+| 4 | KKT conditions, penalty/barrier methods, LP/QP/NLP | Controller constraint handling |
+| 5 | Convex optimization, QP solvers, SOCP, OSQP, MPC | MPC velocity/acceleration planning |
+| 6 | Pose graphs, factor graphs, g2o/GTSAM, sparsity | SLAM backends, loop closure |
+| 7 | Conditioning, finite differences, sparse solvers, debugging | Diagnosing numerical failures in production |
+
+**Files:**
+```
+optimization/
+├── 00-learning-plan.md            ← dependency graph, study order, milestones
+├── 01-foundations.md              ← gradients, Hessians, Taylor, convexity
+├── 02-unconstrained-optimization.md ← GD, Newton, BFGS, line search, trust region
+├── 03-least-squares.md            ← NLS, Gauss-Newton, LM, Ceres API
+├── 04-constrained-optimization.md ← KKT, penalty, barrier, LP/QP/NLP taxonomy
+├── 05-convex-optimization.md      ← convex sets/functions, QP, SOCP, SDP, OSQP, MPC
+├── 06-graph-optimization.md       ← pose graphs, factor graphs, g2o, GTSAM, sparsity
+├── 07-numerical-methods.md        ← conditioning, finite diff, sparse factorization
+└── exercises/
+    ├── 01-gradients-convexity.md  ← gradient/Hessian computation, Rosenbrock, Newton vs GD
+    ├── 02-least-squares-ceres.md  ← circle fitting LM, Huber loss, Ceres cost functors
+    ├── 03-constrained-optimization.md ← penalty method, LP resource allocation, KKT
+    ├── 04-convex-mpc.md           ← CVXPY MPC, 1D/2D, obstacle avoidance, OSQP
+    ├── 05-graph-slam.md           ← 1D/2D pose graph from scratch, loop closure
+    └── 06-numerical-debugging.md  ← gradient checking, condition number, EKF debugging
+```
+
+---
+
 ## Recommended Study Order
 
 ```
@@ -192,6 +236,10 @@ IN 6–8 WEEKS
 │
 ├── ros2-handson/           ← after navigation-estimator (builds on the theory)
 ├── python-oks/             ← can start in parallel with navigation-estimator
+├── optimization/           ← after navigation-estimator + control-systems
+│   Week 1-3: Foundations → least-squares (unlocks Ceres understanding)
+│   Week 4-5: Constrained + convex (unlocks MPC reasoning)
+│   Week 6-7: Graph optimization + numerical methods (unlocks SLAM debugging)
 │
 WHEN HARDWARE ARRIVES
 │

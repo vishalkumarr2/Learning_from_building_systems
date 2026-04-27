@@ -110,3 +110,39 @@ Curated external references for the OKS learning curriculum.
 ### [PREEMPT_RT wiki](https://wiki.linuxfoundation.org/reallinux/start) {#preempt-rt}
 `linux-rt` `reference-manual` `deep-dive` `when-debugging`
 > RT patch internals, latency tuning, cyclictest interpretation. Use when `07-nanopb-rt-ekf.md` cyclictest results look wrong.
+
+---
+
+## Optimization
+
+### [Boyd & Vandenberghe — Convex Optimization](https://web.stanford.edu/~boyd/cvxbook/) {#cvxbook}
+`optimization` `book` `comprehensive` `theory-only` `intermediate`
+> The canonical convex optimization textbook. Free PDF + lecture slides. Chapters 1-5 cover theory (convex sets, functions, duality); Chapters 6-11 cover algorithms. Essential foundation before tackling MPC formulations or understanding why QP solvers work.
+
+### [ebrahimpichka/awesome-optimization](https://github.com/ebrahimpichka/awesome-optimization) {#awesome-optimization}
+`optimization` `repo` `quickref` `before-implementation` `all-levels`
+> Curated list of optimization courses, textbooks, software, and tutorials across convex, nonlinear, combinatorial, and stochastic optimization. Good starting point for finding resources at any depth level.
+
+### [Ceres Solver Documentation](http://ceres-solver.org/tutorial.html) {#ceres-docs}
+`optimization` `reference-manual` `deep-dive` `when-debugging` `intermediate`
+> Official Ceres tutorial and API reference. Covers cost functions, loss functions, local parameterizations, and solver options. Direct relevance: OKS estimator uses Ceres with Levenberg-Marquardt for sensor calibration and nonlinear least-squares.
+
+### [OSQP — Operator Splitting QP Solver](https://osqp.org/) {#osqp}
+`optimization` `reference-manual` `hands-on` `when-implementing` `intermediate`
+> First-order QP solver used in real-time MPC and embedded control. Documentation covers problem formulation, warm starting, and parameter tuning. Python/C/C++ interfaces. Relevant to OKS MPC velocity planning.
+
+### [CVXPY Documentation](https://www.cvxpy.org/) {#cvxpy}
+`optimization` `reference-manual` `hands-on` `when-implementing` `beginner`
+> Pythonic domain-specific language for convex optimization. Express QP/SOCP/SDP problems in natural math syntax and solve with OSQP/SCS/MOSEK backends. Best tool for rapid prototyping before moving to C++ solvers.
+
+### [g2o — General Graph Optimization](https://github.com/RainerKuemmerle/g2o) {#g2o}
+`optimization` `navigation` `repo` `deep-dive` `theory-only` `expert-only`
+> C++ framework for graph-based nonlinear optimization. Backbone of many SLAM systems (Cartographer, ORB-SLAM2). Implements Gauss-Newton and Levenberg-Marquardt on sparse factor graphs. 3k ★.
+
+### [GTSAM — Georgia Tech Smoothing and Mapping](https://gtsam.org/) {#gtsam}
+`optimization` `navigation` `repo` `deep-dive` `when-implementing` `expert-only`
+> Factor graph library for SLAM, SFM, and sensor fusion. More modern API than g2o with iSAM2 incremental solver. Extensive documentation and SLAM tutorial. 2.8k ★.
+
+### [Nocedal & Wright — Numerical Optimization](https://link.springer.com/book/10.1007/978-0-387-40065-5) {#nocedal-wright}
+`optimization` `book` `comprehensive` `theory-only` `expert-only`
+> Graduate-level reference covering line search, trust region, conjugate gradient, quasi-Newton, constrained optimization, and penalty methods. Deeper algorithmic detail than Boyd. Use when you need to understand why a solver diverges or how to tune step-size strategies.
