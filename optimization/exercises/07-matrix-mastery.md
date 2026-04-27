@@ -174,6 +174,41 @@ where $H_{cc}$ is the camera-camera block ($6c \times 6c$) and $H_{ll}$ is the l
 
 This is the "Schur trick" that makes BA tractable for thousands of landmarks. Ceres Solver's `SPARSE_SCHUR` and `ITERATIVE_SCHUR` implement this.
 
+**Physical interpretation:** Eliminating landmarks via the Schur complement has a clear
+geometric meaning — it marginalizes out all landmark positions, leaving a reduced system
+that operates purely on camera poses. The Schur complement $S$ is the **marginal
+information matrix** for cameras. PD of $S$ guarantees the camera-only system is
+well-posed (no unobservable directions). $H_{ll}$ being block-diagonal reflects the
+crucial structural fact that each landmark connects only to the cameras that observe it,
+never directly to other landmarks.
+
+</details>
+
+**B5.** ⭐ Check diagonal dominance for each matrix. Is it strictly diagonally dominant?
+Is it PD? Comment on the relationship.
+
+$$D_1 = \begin{pmatrix} 5 & 1 & 1 \\ 1 & 4 & 1 \\ 1 & 1 & 6 \end{pmatrix}, \qquad
+D_2 = \begin{pmatrix} 2 & -1 & 0 \\ -1 & 2 & -1 \\ 0 & -1 & 2 \end{pmatrix}, \qquad
+D_3 = \begin{pmatrix} 1 & 2 \\ 2 & 1 \end{pmatrix}$$
+
+<details><summary>Answer</summary>
+
+**Diagonal dominance check** — is $|a_{ii}| > \sum_{j \neq i} |a_{ij}|$ for each row?
+
+**$D_1$:** Row 1: $5 > 1+1=2$ ✓ | Row 2: $4 > 1+1=2$ ✓ | Row 3: $6 > 1+1=2$ ✓
+→ **Strictly diagonally dominant.** By the Gershgorin + symmetry argument → PD. ✓
+
+**$D_2$:** Row 1: $2 > 1+0=1$ ✓ | Row 2: $2 > 1+1=2$? NO (equality, not strict) | Row 3: $2 > 0+1=1$ ✓
+→ **NOT strictly diagonally dominant.** But eigenvalues are $2-\sqrt{2}, 2, 2+\sqrt{2}$ — all positive → **still PD**. ✓
+
+**$D_3$:** Row 1: $1 > 2$? NO | Row 2: $1 > 2$? NO
+→ **NOT diagonally dominant.** Eigenvalues: $3, -1$ → **NOT PD (indefinite).**
+
+**Key takeaway:** Strict diagonal dominance is **sufficient** for PD (for symmetric matrices
+with positive diagonal), but **not necessary**. $D_2$ shows a matrix can fail the diagonal
+dominance test yet still be PD — other tests (eigenvalues, Cholesky, Sylvester) are needed
+to confirm.
+
 </details>
 
 ---
@@ -227,6 +262,19 @@ $$A = \begin{pmatrix} 1 & 0 \\ 0 & 1 \end{pmatrix} \begin{pmatrix} \sqrt{2} & 0 
 - **Row space** $C(A^T) = \text{span}(v_1) = \text{span}\{(1, 1)^T / \sqrt{2}\}$
 - **Null space** $N(A) = \text{span}(v_2) = \text{span}\{(1, -1)^T / \sqrt{2}\}$
 - **Left null space** $N(A^T) = \text{span}(u_2) = \text{span}\{(0, 1)^T\}$
+
+**Python verification:**
+```python
+import numpy as np
+A = np.array([[1, 1], [0, 0]])
+U, s, Vt = np.linalg.svd(A)
+print(f"σ = {s}")         # [1.414..., 0.]
+print(f"U =\n{U}")        # [[1, 0], [0, 1]] (or sign-flipped)
+print(f"V^T =\n{Vt}")     # [[0.707, 0.707], [0.707, -0.707]]
+print(f"Rank = {np.sum(s > 1e-10)}")  # 1
+# Verify: null space is V[:, 1:]
+print(f"Null space basis: {Vt[1, :]}")  # [0.707, -0.707] → span{(1,-1)}
+```
 
 </details>
 
@@ -513,7 +561,51 @@ Since $R^TR = I$, both singular values equal 1. $\kappa = 1/1 = 1$. ✓
 
 </details>
 
-**F2.** ⭐⭐ A 2D pose-graph SLAM problem has 4 poses in a loop. The information matrix (graph Laplacian) is:
+**F2.** ⭐⭐ Using Rodrigues' rotation formula, compute the 3D rotation matrix for axis
+$\hat{\omega} = (0, 0, 1)^T$ (z-axis) and angle $\theta = \pi/3$ (60°). Then verify:
+1. $R^TR = I_3$
+2. $\det(R) = +1$
+3. The rotation acts correctly on the vector $p = (1, 0, 0)^T$
+
+<details><summary>Answer</summary>
+
+**Rodrigues' formula:** $R = I + (\sin\theta)[\hat{\omega}]_\times + (1-\cos\theta)[\hat{\omega}]_\times^2$
+
+**Skew-symmetric matrix:** $[\hat{\omega}]_\times = \begin{pmatrix} 0 & -1 & 0 \\ 1 & 0 & 0 \\ 0 & 0 & 0 \end{pmatrix}$
+
+$[\hat{\omega}]_\times^2 = \begin{pmatrix} -1 & 0 & 0 \\ 0 & -1 & 0 \\ 0 & 0 & 0 \end{pmatrix}$
+
+With $\theta = \pi/3$: $\sin(\pi/3) = \sqrt{3}/2$, $\cos(\pi/3) = 1/2$:
+
+$$R = \begin{pmatrix}1&0&0\\0&1&0\\0&0&1\end{pmatrix} + \frac{\sqrt{3}}{2}\begin{pmatrix}0&-1&0\\1&0&0\\0&0&0\end{pmatrix} + \frac{1}{2}\begin{pmatrix}-1&0&0\\0&-1&0\\0&0&0\end{pmatrix}$$
+
+$$R = \begin{pmatrix} 1/2 & -\sqrt{3}/2 & 0 \\ \sqrt{3}/2 & 1/2 & 0 \\ 0 & 0 & 1 \end{pmatrix}$$
+
+**1. Orthogonality:**
+$R^TR$: Row/column dot products give $I_3$ since each row has unit norm
+($1/4 + 3/4 = 1$) and rows are orthogonal ($1 \cdot \sqrt{3}/4 - \sqrt{3} \cdot 1/4 = 0$). ✓
+
+**2. Determinant:**
+$\det(R) = 1 \cdot (1/4 + 3/4) = 1$ (expanding along the third row). ✓
+
+**3. Action on $p = (1,0,0)^T$:**
+$Rp = (1/2, \sqrt{3}/2, 0)^T$ — a 60° rotation in the $xy$-plane as expected. ✓
+
+**Python verification:**
+```python
+import numpy as np
+theta = np.pi / 3
+omega_hat = np.array([0, 0, 1.0])
+K = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 0.0]])  # skew-symmetric
+R = np.eye(3) + np.sin(theta) * K + (1 - np.cos(theta)) * K @ K
+print(f"R^T R = I? {np.allclose(R.T @ R, np.eye(3))}")  # True
+print(f"det(R) = {np.linalg.det(R):.6f}")                # 1.000000
+print(f"R @ [1,0,0] = {R @ [1,0,0]}")                    # [0.5, 0.866, 0]
+```
+
+</details>
+
+**F3.** ⭐⭐ A 2D pose-graph SLAM problem has 4 poses in a loop. The information matrix (graph Laplacian) is:
 
 $$\Lambda = \begin{pmatrix} 2 & -1 & 0 & -1 \\ -1 & 2 & -1 & 0 \\ 0 & -1 & 2 & -1 \\ -1 & 0 & -1 & 2 \end{pmatrix}$$
 
@@ -546,7 +638,7 @@ So eigenvalues: $\{0, 2, 2, 4\}$. **One zero eigenvalue**, corresponding to eige
 
 </details>
 
-**F3.** ⭐⭐⭐ The Jacobian of a 2D robot observing a landmark at relative position $(r, \theta)$ is:
+**F4.** ⭐⭐⭐ The Jacobian of a 2D robot observing a landmark at relative position $(r, \theta)$ is:
 
 $$J = \begin{pmatrix} \frac{\partial r}{\partial x} & \frac{\partial r}{\partial y} & \frac{\partial r}{\partial \phi} \\ \frac{\partial \theta}{\partial x} & \frac{\partial \theta}{\partial y} & \frac{\partial \theta}{\partial \phi} \end{pmatrix} = \begin{pmatrix} \cos\alpha & \sin\alpha & 0 \\ -\sin\alpha / d & \cos\alpha / d & -1 \end{pmatrix}$$
 
@@ -829,6 +921,85 @@ np.random.seed(42)
 A = np.random.randn(10, 5) @ np.random.randn(5, 6)  # rank ≤ 5
 result = svd_analysis(A)
 ```
+
+</details>
+
+---
+
+## Section G2 — Matrix Calculus
+
+**G5.** ⭐⭐ Derive the gradient of the least-squares cost $f(x) = \|Ax - b\|^2$ from first principles.
+
+*Hint:* Expand the squared norm as $(Ax-b)^T(Ax-b)$, distribute, then differentiate each term with respect to $x$.
+
+<details><summary>Answer</summary>
+
+**Expand:**
+$$f(x) = (Ax - b)^T(Ax - b) = x^T A^T A x - 2b^T A x + b^T b$$
+
+**Differentiate term by term** using matrix calculus identities:
+- $\nabla_x (x^T A^T A x) = 2 A^T A x$ (since $A^T A$ is symmetric)
+- $\nabla_x (-2 b^T A x) = -2 A^T b$
+- $\nabla_x (b^T b) = 0$
+
+$$\boxed{\nabla_x f = 2 A^T A x - 2 A^T b = 2 A^T(Ax - b)}$$
+
+Setting $\nabla_x f = 0$ gives the normal equations: $A^T A x = A^T b$.
+
+**Key identities used:**
+- $\nabla_x (x^T M x) = (M + M^T)x = 2Mx$ when $M$ is symmetric
+- $\nabla_x (c^T x) = c$
+
+**Python verification:**
+```python
+import numpy as np
+A = np.random.randn(5, 3); b = np.random.randn(5)
+x = np.random.randn(3)
+# Analytical gradient
+grad_analytical = 2 * A.T @ (A @ x - b)
+# Numerical gradient (finite differences)
+eps = 1e-7
+grad_numerical = np.zeros(3)
+for i in range(3):
+    x_plus = x.copy(); x_plus[i] += eps
+    x_minus = x.copy(); x_minus[i] -= eps
+    grad_numerical[i] = (np.linalg.norm(A @ x_plus - b)**2 
+                        - np.linalg.norm(A @ x_minus - b)**2) / (2*eps)
+print(f"Match: {np.allclose(grad_analytical, grad_numerical)}")  # True
+```
+
+</details>
+
+**G6.** ⭐⭐ In Gauss-Newton optimization, the cost is $f(x) = \frac{1}{2}\|r(x)\|^2$ where
+$r(x)$ is a vector of residuals. Using the chain rule:
+
+1. Show that $\nabla f = J^T r$ where $J = \partial r / \partial x$.
+2. Show that the Gauss-Newton approximation to the Hessian is $H_{GN} = J^T J$.
+3. Why is $J^T J$ always PSD? Under what condition is it PD?
+
+<details><summary>Answer</summary>
+
+**1. Gradient via chain rule:**
+$$f(x) = \frac{1}{2} r(x)^T r(x)$$
+$$\nabla_x f = \frac{\partial r}{\partial x}^T r(x) = J^T r$$
+
+This follows from the chain rule: $\frac{\partial f}{\partial x_i} = \sum_k r_k \frac{\partial r_k}{\partial x_i}$, which in matrix form is $J^T r$.
+
+**2. Gauss-Newton Hessian:**
+The exact Hessian is: $H = J^T J + \sum_k r_k \nabla^2 r_k$
+
+The Gauss-Newton approximation **drops the second-order term** $\sum_k r_k \nabla^2 r_k$,
+giving $H_{GN} = J^T J$. This is valid when:
+- Residuals $r_k$ are small (near the solution), or
+- Residuals are nearly linear (so $\nabla^2 r_k \approx 0$)
+
+**3. PSD/PD of $J^TJ$:**
+For any $v \neq 0$: $v^T J^T J v = \|Jv\|^2 \geq 0$. So $J^T J \succeq 0$ (PSD). ✓
+
+$J^T J \succ 0$ (PD) iff $\|Jv\|^2 > 0$ for all $v \neq 0$, i.e., $N(J) = \{0\}$,
+i.e., $J$ has **full column rank**. If $J$ is rank-deficient, $J^T J$ is singular and the
+Gauss-Newton step $\Delta x = -(J^T J)^{-1} J^T r$ doesn't exist — this is exactly when
+Levenberg-Marquardt adds damping: $(J^T J + \lambda I)\Delta x = -J^T r$.
 
 </details>
 

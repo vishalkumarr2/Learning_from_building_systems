@@ -396,8 +396,11 @@ def matrix_doctor(A, verbose=True):
     report = {"shape": (m, n), "square": is_square}
 
     report["symmetric"] = is_square and np.allclose(A, A.T, atol=1e-12)
+    report["skew_symmetric"] = is_square and np.allclose(A, -A.T, atol=1e-12)
     report["orthogonal"] = is_square and np.allclose(A.T @ A, np.eye(n), atol=1e-10) if is_square else False
     report["diagonal"] = is_square and np.allclose(A, np.diag(np.diag(A)), atol=1e-12)
+    report["upper_triangular"] = np.allclose(A, np.triu(A), atol=1e-12)
+    report["lower_triangular"] = np.allclose(A, np.tril(A), atol=1e-12)
 
     nnz = np.count_nonzero(np.abs(A) > 1e-15)
     report["sparsity"] = 1 - nnz / (m * n)
@@ -409,6 +412,14 @@ def matrix_doctor(A, verbose=True):
     report["rank"] = r
     report["full_rank"] = r == min(m, n)
     report["condition_number"] = s[0] / s[r - 1] if r > 0 else np.inf
+
+    # Energy-based effective rank
+    total_energy = np.sum(s ** 2)
+    if total_energy > 0:
+        cumulative = np.cumsum(s ** 2) / total_energy
+        report["rank_for_99pct_energy"] = int(np.searchsorted(cumulative, 0.99) + 1)
+    else:
+        report["rank_for_99pct_energy"] = 0
 
     if report["symmetric"]:
         eigvals = np.linalg.eigvalsh(A)
@@ -452,11 +463,12 @@ def matrix_doctor(A, verbose=True):
         print("=" * 60)
         print("MATRIX DOCTOR REPORT")
         print("=" * 60)
-        tags = [k for k in ("symmetric", "orthogonal", "diagonal", "sparse") if report.get(k)]
+        tags = [k for k in ("symmetric", "skew_symmetric", "orthogonal", "diagonal",
+                             "upper_triangular", "lower_triangular", "sparse") if report.get(k)]
         print(f"Shape: {m}×{n} | Properties: {', '.join(tags) or 'general'}")
         if "definiteness" in report:
             print(f"Definiteness: {report['definiteness']}")
-        print(f"Rank: {r}/{min(m, n)} | κ = {kappa:.2e}")
+        print(f"Rank: {r}/{min(m, n)} | κ = {kappa:.2e} | 99% energy rank: {report['rank_for_99pct_energy']}")
         for w in warnings:
             print(f"  ⚠ {w}")
         print(f"→ Recommended solver: {solver}")

@@ -114,7 +114,28 @@ Key inequalities:
 **Optimization relevance:** Semidefinite programming (SDP) optimizes over the PSD cone.
 The constraint "$H \succeq 0$" is convex, enabling efficient algorithms.
 
-### 2.4 Schur Complement Criterion
+### 2.4 Cholesky Factorization — How It Works
+
+Cholesky decomposes a PD matrix into $A = LL^T$ where $L$ is lower triangular with
+positive diagonal entries. The formulas follow directly from matching entries:
+
+$$L_{jj} = \sqrt{A_{jj} - \sum_{k=1}^{j-1} L_{jk}^2}, \qquad L_{ij} = \frac{1}{L_{jj}}\left(A_{ij} - \sum_{k=1}^{j-1} L_{ik}L_{jk}\right) \quad (i > j)$$
+
+**Worked example:** For $A = \begin{pmatrix} 4 & 2 & 1 \\ 2 & 5 & 3 \\ 1 & 3 & 6 \end{pmatrix}$:
+
+1. $L_{11} = \sqrt{4} = 2$
+2. $L_{21} = 2/2 = 1$, $L_{31} = 1/2 = 0.5$
+3. $L_{22} = \sqrt{5 - 1^2} = \sqrt{4} = 2$
+4. $L_{32} = (3 - 0.5 \cdot 1)/2 = 2.5/2 = 1.25$
+5. $L_{33} = \sqrt{6 - 0.5^2 - 1.25^2} = \sqrt{6 - 0.25 - 1.5625} = \sqrt{4.1875} \approx 2.046$
+
+$$L = \begin{pmatrix} 2 & 0 & 0 \\ 1 & 2 & 0 \\ 0.5 & 1.25 & 2.046 \end{pmatrix}$$
+
+**Why Cholesky is preferred:** Half the flops of LU ($n^3/3$ vs $2n^3/3$), and it's
+numerically stable without pivoting. If the factorization fails (negative value under
+the square root at step $j$), the matrix is not PD — this *is* the PD test.
+
+### 2.5 Schur Complement Criterion
 
 For a block matrix $M = \begin{pmatrix} A & B \\ B^T & C \end{pmatrix}$:
 
@@ -151,6 +172,10 @@ adding $\lambda I$, or modified Cholesky) makes the search direction a descent d
 The Singular Value Decomposition is the most important matrix factorization.
 It applies to *any* matrix (no restrictions on shape or symmetry) and reveals
 rank, range, null space, condition number, and best low-rank approximation.
+
+> **Notation:** We use $\Sigma$ for both the SVD diagonal matrix and covariance matrices —
+> the meaning is always clear from context. Some authors write $S$ or $D$ for the SVD
+> diagonal to avoid ambiguity.
 
 ### 3.1 Full Derivation
 
@@ -287,6 +312,11 @@ For any consistent matrix norm: $\|AB\| \leq \|A\| \cdot \|B\|$.
 - **Spectral norm** → measures worst-case amplification; determines condition number
 - **Nuclear norm** → convex relaxation of rank; used in matrix completion / low-rank recovery
 - **$\ell_1$ on singular values** = nuclear norm → promotes low rank (like $\ell_1$ promotes sparsity)
+
+**Motivating example (nuclear norm):** In the Netflix Prize, the user-movie ratings matrix
+is mostly missing entries. The nuclear norm $\|X\|_*$ serves as a convex proxy for rank:
+minimizing $\|X\|_*$ subject to matching known ratings recovers a low-rank completion —
+meaning users' preferences lie in a low-dimensional space of "taste profiles."
 
 ---
 
@@ -533,6 +563,6 @@ Is H symmetric?
 
 ## Exercises
 
-See [Exercise Set 7: Matrix Mastery](exercises/07-matrix-mastery.md) for 26 graded problems
+See [Exercise Set 7: Matrix Mastery](exercises/07-matrix-mastery.md) for 30 graded problems
 covering all topics in this guide — from hand computation through Python implementation
 to real-world robotics scenarios.
