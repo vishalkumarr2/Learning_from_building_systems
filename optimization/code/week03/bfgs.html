@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bfgs - Optimization - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary (Expert Challenges) */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../../index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Optimization</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+
+<h1>Bfgs</h1>
+<p class='text-gray-600 mb-4'>Day 19: Quasi-Newton — BFGS and L-BFGS — Companion Code</p>
+<p class="text-sm text-gray-500 mb-4">
+    <a href="bfgs.py" download class="text-cyan-600 hover:text-cyan-800">⬇ Download bfgs.py</a>
+</p>
+<pre><code class="language-python">"""
+Day 19: Quasi-Newton — BFGS and L-BFGS — Companion Code
+Phase II, Week 3
+
+Run: python bfgs.py
+"""
+
+import numpy as np
+from collections import deque
+import time
+
+
+# =============================================================================
+# Test Functions
+# =============================================================================
+
+def rosenbrock(x):
+    """Rosenbrock function value."""
+    return sum(100*(x[i+1] - x[i]**2)**2 + (1-x[i])**2
+               for i in range(len(x)-1))
+
+
+def rosenbrock_grad(x):
+    """Rosenbrock gradient."""
+    n = len(x)
+    g = np.zeros(n)
+    for i in range(n-1):
+        g[i] += -2*(1-x[i]) + 200*(x[i+1]-x[i]**2)*(-2*x[i])
+        g[i+1] += 200*(x[i+1]-x[i]**2)
+    return g
+
+
+# =============================================================================
+# Wolfe Line Search
+# =============================================================================
+
+def wolfe_line_search(f, grad, x, d, c1=1e-4, c2=0.9, max_iter=25):
+    """Strong Wolfe line search.
+
+    Returns alpha satisfying:
+      f(x + alpha*d) &lt;= f(x) + c1*alpha*g'd   (Armijo)
+      |g(x+alpha*d)'d| &lt;= c2*|g(x)'d|          (curvature)
+    """
+    alpha = 1.0
+    alpha_lo, alpha_hi = 0.0, float('inf')
+    f0 = f(x)
+    g0 = grad(x)
+    dg0 = g0 @ d
+
+    if dg0 &gt;= 0:
+        return 1e-4  # Not a descent direction, use tiny step
+
+    for _ in range(max_iter):
+        x_new = x + alpha * d
+        f_new = f(x_new)
+
+        # Armijo check
+        if f_new &gt; f0 + c1 * alpha * dg0:
+            alpha_hi = alpha
+            alpha = 0.5 * (alpha_lo + alpha_hi)
+            continue
+
+        g_new = grad(x_new)
+        dg_new = g_new @ d
+
+        # Strong Wolfe curvature check
+        if abs(dg_new) &lt;= c2 * abs(dg0):
+            return alpha
+
+        if dg_new &gt; 0:
+            alpha_hi = alpha
+        else:
+            alpha_lo = alpha
+
+        if alpha_hi &lt; float('inf'):
+            alpha = 0.5 * (alpha_lo + alpha_hi)
+        else:
+            alpha *= 2.0
+
+    return alpha
+
+
+# =============================================================================
+# Exercise 1: Full BFGS
+# =============================================================================
+
+def bfgs(f, grad, x0, max_iter=1000, tol=1e-8):
+    """Full BFGS with inverse Hessian update.
+
+    Stores the full n×n inverse Hessian approximation.
+    """
+    n = len(x0)
+    x = x0.copy().astype(float)
+    H = np.eye(n)  # Initial inverse Hessian approximation
+    g = grad(x)
+
+    history = {"f": [], "grad_norm": [], "n_evals": 0}
+
+    for k in range(max_iter):
+        fval = f(x)
+        gnorm = np.linalg.norm(g)
+        history["f"].append(fval)
+        history["grad_norm"].append(gnorm)
+
+        if gnorm &lt; tol:
+            break
+
+        # Search direction
+        d = -H @ g
+
+        # Wolfe line search
+        alpha = wolfe_line_search(f, grad, x, d)
+        history["n_evals"] += 1
+
+        # Step
+        s = alpha * d
+        x_new = x + s
+        g_new = grad(x_new)
+        y = g_new - g
+
+        # BFGS inverse Hessian update
+        sy = s @ y
+        if sy &gt; 1e-10:
+            rho = 1.0 / sy
+            I = np.eye(n)
+            V = I - rho * np.outer(s, y)
+            H = V @ H @ V.T + rho * np.outer(s, s)
+
+        x = x_new
+        g = g_new
+
+    return x, history
+
+
+# =============================================================================
+# Exercise 2: L-BFGS Two-Loop Recursion
+# =============================================================================
+
+def lbfgs(f, grad, x0, m=10, max_iter=1000, tol=1e-8):
+    """L-BFGS with two-loop recursion.
+
+    Stores only the last m (s, y) pairs — O(mn) memory.
+    """
+    x = x0.copy().astype(float)
+    g = grad(x)
+
+    s_history = deque(maxlen=m)
+    y_history = deque(maxlen=m)
+    rho_history = deque(maxlen=m)
+
+    history = {"f": [], "grad_norm": [], "n_evals": 0}
+
+    for k in range(max_iter):
+        fval = f(x)
+        gnorm = np.linalg.norm(g)
+        history["f"].append(fval)
+        history["grad_norm"].append(gnorm)
+
+        if gnorm &lt; tol:
+            break
+
+        # Two-loop recursion to compute H_k @ g
+        q = g.copy()
+        alphas = []
+
+        # First loop (backward)
+        for i in range(len(s_history) - 1, -1, -1):
+            alpha_i = rho_history[i] * (s_history[i] @ q)
+            alphas.insert(0, alpha_i)
+            q = q - alpha_i * y_history[i]
+
+        # Initial scaling
+        if len(s_history) &gt; 0:
+            s_last = s_history[-1]
+            y_last = y_history[-1]
+            gamma = (s_last @ y_last) / (y_last @ y_last)
+        else:
+            gamma = 1.0
+        r = gamma * q
+
+        # Second loop (forward)
+        for i in range(len(s_history)):
+            beta = rho_history[i] * (y_history[i] @ r)
+            r = r + s_history[i] * (alphas[i] - beta)
+
+        d = -r  # Search direction
+
+        # Wolfe line search
+        alpha = wolfe_line_search(f, grad, x, d)
+        history["n_evals"] += 1
+
+        # Update
+        s = alpha * d
+        x_new = x + s
+        g_new = grad(x_new)
+        y = g_new - g
+
+        sy = s @ y
+        if sy &gt; 1e-10:
+            s_history.append(s.copy())
+            y_history.append(y.copy())
+            rho_history.append(1.0 / sy)
+
+        x = x_new
+        g = g_new
+
+    return x, history
+
+
+# =============================================================================
+# Exercise 3: Comparison Shootout
+# =============================================================================
+
+def gradient_descent(f, grad, x0, max_iter=50000, tol=1e-8):
+    """Simple GD with backtracking."""
+    x = x0.copy()
+    history = {"f": [], "grad_norm": []}
+
+    for k in range(max_iter):
+        fval = f(x)
+        g = grad(x)
+        gnorm = np.linalg.norm(g)
+        history["f"].append(fval)
+        history["grad_norm"].append(gnorm)
+
+        if gnorm &lt; tol:
+            break
+
+        # Backtracking
+        alpha = 1.0
+        d = -g
+        for _ in range(30):
+            if f(x + alpha * d) &lt;= fval + 1e-4 * alpha * (g @ d):
+                break
+            alpha *= 0.5
+
+        x = x + alpha * d
+
+    return x, history
+
+
+def shootout():
+    """Compare GD, BFGS, L-BFGS on 2D Rosenbrock."""
+    print("=== Exercise 3: Method Shootout (2D Rosenbrock) ===")
+    x0 = np.array([-1.0, 1.0])
+    x_star = np.array([1.0, 1.0])
+
+    methods = {
+        "GD": lambda: gradient_descent(rosenbrock, rosenbrock_grad, x0),
+        "BFGS": lambda: bfgs(rosenbrock, rosenbrock_grad, x0),
+        "L-BFGS (m=10)": lambda: lbfgs(rosenbrock, rosenbrock_grad, x0, m=10),
+        "L-BFGS (m=3)": lambda: lbfgs(rosenbrock, rosenbrock_grad, x0, m=3),
+    }
+
+    print(f"  {'Method':&lt;15}  {'Iters':&gt;6}  {'Error':&gt;10}  {'Time (ms)':&gt;10}")
+    for name, method in methods.items():
+        t0 = time.perf_counter()
+        x, hist = method()
+        elapsed = (time.perf_counter() - t0) * 1000
+        err = np.linalg.norm(x - x_star)
+        iters = len(hist["f"])
+        print(f"  {name:&lt;15}  {iters:&gt;6}  {err:&gt;10.2e}  {elapsed:&gt;10.2f}")
+
+
+# =============================================================================
+# Exercise 4: High-Dimensional L-BFGS
+# =============================================================================
+
+def high_dimensional_test():
+    """Test L-BFGS on n=1000 extended Rosenbrock."""
+    print("\n=== Exercise 4: High-Dimensional (n=1000) ===")
+    n = 1000
+    x0 = -np.ones(n)
+    x_star = np.ones(n)
+
+    # L-BFGS should handle this easily
+    t0 = time.perf_counter()
+    x_lbfgs, hist_lbfgs = lbfgs(rosenbrock, rosenbrock_grad, x0, m=10,
+                                  max_iter=2000, tol=1e-6)
+    t_lbfgs = (time.perf_counter() - t0) * 1000
+    err_lbfgs = np.linalg.norm(x_lbfgs - x_star)
+
+    print(f"  L-BFGS (m=10): {len(hist_lbfgs['f']):&gt;5} iters, "
+          f"err = {err_lbfgs:.2e}, time = {t_lbfgs:.0f} ms")
+    print(f"  Memory: L-BFGS = {2*10*n*8 / 1024:.0f} KB "
+          f"vs BFGS = {n*n*8 / (1024*1024):.0f} MB")
+
+
+# =============================================================================
+# Memory comparison
+# =============================================================================
+
+def memory_comparison():
+    """Show the memory advantage of L-BFGS."""
+    print("\n=== Memory Comparison ===")
+    print(f"  {'n':&gt;8}  {'BFGS (MB)':&gt;12}  {'L-BFGS m=10 (KB)':&gt;18}")
+    for n in [100, 1000, 10000, 100000]:
+        bfgs_mb = n * n * 8 / (1024 * 1024)
+        lbfgs_kb = 2 * 10 * n * 8 / 1024
+        print(f"  {n:&gt;8}  {bfgs_mb:&gt;12.1f}  {lbfgs_kb:&gt;18.0f}")
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+if __name__ == "__main__":
+    shootout()
+    high_dimensional_test()
+    memory_comparison()
+</code></pre>
+
+            </div>
+        </div>
+
+        
+    </div>
+</body>
+</html>

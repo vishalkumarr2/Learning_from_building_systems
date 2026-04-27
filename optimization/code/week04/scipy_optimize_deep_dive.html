@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scipy Optimize Deep Dive - Optimization - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary (Expert Challenges) */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../../index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Optimization</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+
+<h1>Scipy Optimize Deep Dive</h1>
+<p class='text-gray-600 mb-4'>Day 27: scipy.optimize Deep Dive — Companion Code</p>
+<p class="text-sm text-gray-500 mb-4">
+    <a href="scipy_optimize_deep_dive.py" download class="text-cyan-600 hover:text-cyan-800">⬇ Download scipy_optimize_deep_dive.py</a>
+</p>
+<pre><code class="language-python">"""
+Day 27: scipy.optimize Deep Dive — Companion Code
+Phase II, Week 4
+
+Run: python scipy_optimize_deep_dive.py
+"""
+
+import numpy as np
+import time
+
+try:
+    from scipy.optimize import minimize, least_squares, rosen, rosen_der
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+
+
+# =============================================================================
+# Test Functions
+# =============================================================================
+
+def rosenbrock(x):
+    """Rosenbrock function. Global min = 0 at (1, 1, ..., 1)."""
+    return sum(100 * (x[i+1] - x[i]**2)**2 + (1 - x[i])**2
+               for i in range(len(x) - 1))
+
+def rosenbrock_grad(x):
+    """Analytic gradient of Rosenbrock."""
+    n = len(x)
+    g = np.zeros(n)
+    for i in range(n - 1):
+        g[i] += -400 * x[i] * (x[i+1] - x[i]**2) - 2 * (1 - x[i])
+        g[i+1] += 200 * (x[i+1] - x[i]**2)
+    return g
+
+def rosenbrock_hess(x):
+    """Analytic Hessian of Rosenbrock."""
+    n = len(x)
+    H = np.zeros((n, n))
+    for i in range(n - 1):
+        H[i, i] += -400 * (x[i+1] - 3 * x[i]**2) + 2 + 800 * x[i]**2
+        H[i, i+1] += -400 * x[i]
+        H[i+1, i] += -400 * x[i]
+        H[i+1, i+1] += 200
+    # Fix: first element
+    H[0, 0] = -400 * (x[1] - 3 * x[0]**2) + 2 + 800 * x[0]**2
+    return H
+
+def ill_conditioned_quad(x, kappa=1e4):
+    """Quadratic with condition number kappa."""
+    n = len(x)
+    diag = np.logspace(0, np.log10(kappa), n)
+    return 0.5 * np.sum(diag * x**2)
+
+def ill_conditioned_quad_grad(x, kappa=1e4):
+    n = len(x)
+    diag = np.logspace(0, np.log10(kappa), n)
+    return diag * x
+
+
+# =============================================================================
+# Exercise 1: Every Method Comparison
+# =============================================================================
+
+def exercise_1():
+    """Compare all scipy methods on Rosenbrock."""
+    if not HAS_SCIPY:
+        print("=== Exercise 1: Skipped (scipy not available) ===")
+        return
+
+    print("=== Exercise 1: Method Comparison on Rosenbrock 10D ===")
+    n = 10
+    x0 = np.zeros(n)
+
+    methods_no_hess = ['Nelder-Mead', 'Powell', 'CG', 'BFGS', 'L-BFGS-B']
+    methods_hess = ['Newton-CG', 'trust-ncg', 'dogleg', 'trust-exact',
+                    'trust-krylov']
+
+    print(f"  {'Method':&gt;15}  {'f(x*)':&gt;12}  {'nit':&gt;6}  "
+          f"{'nfev':&gt;6}  {'time(s)':&gt;8}  {'ok?':&gt;4}")
+    print("  " + "-" * 65)
+
+    for method in methods_no_hess:
+        try:
+            t0 = time.time()
+            if method in ['CG', 'BFGS', 'L-BFGS-B']:
+                res = minimize(rosenbrock, x0, method=method,
+                              jac=rosenbrock_grad,
+                              options={'maxiter': 10000})
+            else:
+                res = minimize(rosenbrock, x0, method=method,
+                              options={'maxiter': 10000})
+            elapsed = time.time() - t0
+            print(f"  {method:&gt;15}  {res.fun:&gt;12.6e}  {res.nit:&gt;6}  "
+                  f"{res.nfev:&gt;6}  {elapsed:&gt;8.3f}  "
+                  f"{'✓' if res.success else '✗':&gt;4}")
+        except Exception as e:
+            print(f"  {method:&gt;15}  ERROR: {e}")
+
+    for method in methods_hess:
+        try:
+            t0 = time.time()
+            res = minimize(rosenbrock, x0, method=method,
+                          jac=rosenbrock_grad, hess=rosenbrock_hess,
+                          options={'maxiter': 10000})
+            elapsed = time.time() - t0
+            print(f"  {method:&gt;15}  {res.fun:&gt;12.6e}  {res.nit:&gt;6}  "
+                  f"{res.nfev:&gt;6}  {elapsed:&gt;8.3f}  "
+                  f"{'✓' if res.success else '✗':&gt;4}")
+        except Exception as e:
+            print(f"  {method:&gt;15}  ERROR: {str(e)[:40]}")
+
+
+# =============================================================================
+# Exercise 2: Callback Logging
+# =============================================================================
+
+def exercise_2():
+    """Callback-based convergence logging."""
+    if not HAS_SCIPY:
+        print("\n=== Exercise 2: Skipped (scipy not available) ===")
+        return
+
+    print("\n=== Exercise 2: Callback Convergence Logging ===")
+    n = 5
+    x0 = np.zeros(n)
+    x_star = np.ones(n)
+
+    for method in ['CG', 'BFGS', 'Newton-CG']:
+        history = {'f': [], 'dist': [], 'grad_norm': []}
+
+        def callback(xk):
+            f_val = rosenbrock(xk)
+            dist = np.linalg.norm(xk - x_star)
+            grad = rosenbrock_grad(xk)
+            history['f'].append(f_val)
+            history['dist'].append(dist)
+            history['grad_norm'].append(np.linalg.norm(grad))
+
+        kwargs = {'jac': rosenbrock_grad, 'callback': callback,
+                  'options': {'maxiter': 5000}}
+        if method == 'Newton-CG':
+            kwargs['hess'] = rosenbrock_hess
+
+        res = minimize(rosenbrock, x0, method=method, **kwargs)
+        print(f"  {method:&gt;12}: iters={len(history['f']):&gt;5}  "
+              f"f_final={history['f'][-1] if history['f'] else 'N/A':&gt;10.2e}  "
+              f"dist_final={history['dist'][-1] if history['dist'] else 'N/A':&gt;10.2e}")
+
+
+# =============================================================================
+# Exercise 3: Bounds and Scaling
+# =============================================================================
+
+def exercise_3():
+    """Variable scaling for BFGS."""
+    if not HAS_SCIPY:
+        print("\n=== Exercise 3: Skipped (scipy not available) ===")
+        return
+
+    print("\n=== Exercise 3: Bounds and Variable Scaling ===")
+
+    # Badly scaled: x1 ∈ [0, 1], x2 ∈ [0, 10000]
+    # f(x) = (x1 - 0.5)^2 + (x2 - 5000)^2
+    def f_unscaled(x):
+        return (x[0] - 0.5)**2 + (x[1] - 5000)**2
+
+    def f_unscaled_grad(x):
+        return np.array([2*(x[0] - 0.5), 2*(x[1] - 5000)])
+
+    x0 = np.array([0.0, 0.0])
+    bounds = [(0, 1), (0, 10000)]
+
+    # Unscaled
+    res_unscaled = minimize(f_unscaled, x0, method='L-BFGS-B',
+                           jac=f_unscaled_grad, bounds=bounds)
+
+    # Scaled: normalize to [0, 1] each
+    def f_scaled(z):
+        x1 = z[0]  # already [0, 1]
+        x2 = z[1] * 10000  # [0, 1] → [0, 10000]
+        return (x1 - 0.5)**2 + (x2 - 5000)**2
+
+    def f_scaled_grad(z):
+        x1 = z[0]
+        x2 = z[1] * 10000
+        return np.array([2*(x1 - 0.5), 2*(x2 - 5000) * 10000])
+
+    z0 = np.array([0.0, 0.0])
+    bounds_scaled = [(0, 1), (0, 1)]
+    res_scaled = minimize(f_scaled, z0, method='L-BFGS-B',
+                         jac=f_scaled_grad, bounds=bounds_scaled)
+
+    print(f"  Unscaled: nit={res_unscaled.nit}, nfev={res_unscaled.nfev}, "
+          f"x={res_unscaled.x}")
+    x_from_scaled = np.array([res_scaled.x[0], res_scaled.x[1] * 10000])
+    print(f"  Scaled:   nit={res_scaled.nit}, nfev={res_scaled.nfev}, "
+          f"x={x_from_scaled}")
+
+
+# =============================================================================
+# Exercise 4: Analytic Derivatives Speedup
+# =============================================================================
+
+def exercise_4():
+    """Compare finite-difference vs analytic gradient."""
+    if not HAS_SCIPY:
+        print("\n=== Exercise 4: Skipped (scipy not available) ===")
+        return
+
+    print("\n=== Exercise 4: Derivative Supply Comparison (Rosenbrock 20D) ===")
+    n = 20
+    x0 = np.zeros(n)
+
+    configs = [
+        ("No jac (2-point FD)", {'method': 'BFGS'}),
+        ("jac='3-point'", {'method': 'BFGS', 'jac': '3-point'}),
+        ("Analytic jac", {'method': 'BFGS', 'jac': rosenbrock_grad}),
+        ("Analytic jac+hess", {'method': 'Newton-CG',
+                               'jac': rosenbrock_grad,
+                               'hess': rosenbrock_hess}),
+    ]
+
+    print(f"  {'Config':&gt;25}  {'f(x*)':&gt;10}  {'nfev':&gt;6}  "
+          f"{'njev':&gt;6}  {'time(s)':&gt;8}")
+    for name, kwargs in configs:
+        t0 = time.time()
+        res = minimize(rosenbrock, x0, options={'maxiter': 10000}, **kwargs)
+        elapsed = time.time() - t0
+        njev = getattr(res, 'njev', 'N/A')
+        print(f"  {name:&gt;25}  {res.fun:&gt;10.2e}  {res.nfev:&gt;6}  "
+              f"{str(njev):&gt;6}  {elapsed:&gt;8.3f}")
+
+
+# =============================================================================
+# Exercise 5: Custom Optimizer Wrapping
+# =============================================================================
+
+def bfgs_custom(f, x0, grad_f, max_iter=1000, tol=1e-8):
+    """Our BFGS from Week 3, simplified."""
+    n = len(x0)
+    x = x0.copy()
+    H = np.eye(n)
+
+    for k in range(max_iter):
+        g = grad_f(x)
+        if np.linalg.norm(g) &lt; tol:
+            break
+
+        d = -H @ g
+
+        # Backtracking line search
+        alpha = 1.0
+        c1 = 1e-4
+        fx = f(x)
+        while f(x + alpha * d) &gt; fx + c1 * alpha * g.dot(d):
+            alpha *= 0.5
+            if alpha &lt; 1e-16:
+                break
+
+        s = alpha * d
+        x_new = x + s
+        g_new = grad_f(x_new)
+        y = g_new - g
+
+        sy = s.dot(y)
+        if sy &gt; 1e-10:
+            rho = 1.0 / sy
+            V = np.eye(n) - rho * np.outer(s, y)
+            H = V @ H @ V.T + rho * np.outer(s, s)
+
+        x = x_new
+
+    return x, f(x), k
+
+
+def exercise_5():
+    """Compare custom BFGS with scipy BFGS."""
+    print("\n=== Exercise 5: Custom BFGS vs scipy BFGS ===")
+    n = 10
+    x0 = np.zeros(n)
+
+    # Custom
+    t0 = time.time()
+    x_cust, f_cust, iters_cust = bfgs_custom(
+        rosenbrock, x0, rosenbrock_grad)
+    t_cust = time.time() - t0
+
+    print(f"  Custom BFGS: f={f_cust:.6e}, iters={iters_cust}, "
+          f"time={t_cust:.3f}s")
+
+    # scipy
+    if HAS_SCIPY:
+        t0 = time.time()
+        res = minimize(rosenbrock, x0, method='BFGS', jac=rosenbrock_grad)
+        t_scipy = time.time() - t0
+        print(f"  scipy BFGS:  f={res.fun:.6e}, iters={res.nit}, "
+              f"time={t_scipy:.3f}s")
+
+
+# =============================================================================
+# Exercise 6: Wheel Radius Calibration
+# =============================================================================
+
+def exercise_6():
+    """Wheel radius calibration with least_squares."""
+    print("\n=== Exercise 6: Wheel Radius Calibration ===")
+    rng = np.random.RandomState(42)
+
+    # True params: [wheel_radius, wheelbase]
+    params_true = np.array([0.075, 0.42])  # 7.5cm radius, 42cm base
+
+    # Generate data: encoder ticks → measured displacement
+    n_data = 50
+    ticks_left = rng.randint(100, 1000, n_data).astype(float)
+    ticks_right = rng.randint(100, 1000, n_data).astype(float)
+    ticks_per_rev = 360.0
+
+    # Forward model: d = r * ticks * 2π / ticks_per_rev
+    def forward_model(params, ticks_l, ticks_r):
+        r, b = params
+        dl = r * ticks_l * 2 * np.pi / ticks_per_rev
+        dr = r * ticks_r * 2 * np.pi / ticks_per_rev
+        linear = (dl + dr) / 2
+        angular = (dr - dl) / b
+        return np.column_stack([linear, angular])
+
+    # "True" measurements with noise
+    true_disp = forward_model(params_true, ticks_left, ticks_right)
+    noise = 0.002 * rng.randn(*true_disp.shape)
+    measured_disp = true_disp + noise
+
+    # Residual function for least_squares
+    def residuals(params):
+        pred = forward_model(params, ticks_left, ticks_right)
+        return (pred - measured_disp).ravel()
+
+    # Initial guess (deliberately off)
+    x0 = np.array([0.08, 0.45])
+
+    if HAS_SCIPY:
+        # least_squares
+        t0 = time.time()
+        res_ls = least_squares(residuals, x0, method='trf',
+                              bounds=([0.05, 0.3], [0.15, 0.6]))
+        t_ls = time.time() - t0
+
+        # minimize (for comparison)
+        def objective(params):
+            r = residuals(params)
+            return 0.5 * np.sum(r**2)
+
+        t0 = time.time()
+        res_min = minimize(objective, x0, method='L-BFGS-B',
+                          bounds=[(0.05, 0.15), (0.3, 0.6)])
+        t_min = time.time() - t0
+
+        print(f"  True params:     r={params_true[0]:.4f}, "
+              f"b={params_true[1]:.4f}")
+        print(f"  least_squares:   r={res_ls.x[0]:.4f}, "
+              f"b={res_ls.x[1]:.4f}  "
+              f"(nfev={res_ls.nfev}, time={t_ls:.4f}s)")
+        print(f"  minimize(L-BFGS): r={res_min.x[0]:.4f}, "
+              f"b={res_min.x[1]:.4f}  "
+              f"(nfev={res_min.nfev}, time={t_min:.4f}s)")
+    else:
+        print("  (scipy not available)")
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+if __name__ == "__main__":
+    exercise_1()
+    exercise_2()
+    exercise_3()
+    exercise_4()
+    exercise_5()
+    exercise_6()
+</code></pre>
+
+            </div>
+        </div>
+
+        
+    </div>
+</body>
+</html>

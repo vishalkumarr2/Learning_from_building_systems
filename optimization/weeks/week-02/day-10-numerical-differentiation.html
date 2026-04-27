@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10: Numerical Differentiation Deep Dive - Optimization - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary (Expert Challenges) */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../../weeks/index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Week 2: Numerical Computing & First-Order Methods</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-10-numerical-differentiation-deep-dive">Day 10: Numerical Differentiation Deep Dive</h1>
+<blockquote>
+<p><strong>Phase I — Mathematical Foundations | Week 2 | 2.5 hours</strong>
+<em>Trust but verify: every hand-derived Jacobian should be checked numerically.</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-09-sparse-schur.html">Day 9: Sparse Matrices &amp; Schur Complement</a></li>
+<li><strong>Next:</strong> <a href="day-11-automatic-differentiation.html">Day 11: Automatic Differentiation</a></li>
+<li><strong>Week:</strong> <a href="../README.html">Week 2 Overview</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">CURRICULUM.md</a></li>
+</ul>
+<h2 id="oks-relevance">OKS Relevance</h2>
+<p>Ceres provides <code>NumericDiffCostFunction</code> as a fallback when analytic or auto-diff Jacobians aren't available. Understanding the accuracy limits of numerical differentiation tells you why Ceres auto-diff is almost always preferred, and why the numerical Jacobian checker is indispensable for debugging.</p>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="101-forward-difference">10.1 Forward Difference</h3>
+<p>$$f'(x) \approx \frac{f(x+h) - f(x)}{h} + O(h)$$</p>
+<p>First-order accurate. Error has two components:
+- <strong>Truncation error:</strong> $O(h)$ — decreases as $h \to 0$
+- <strong>Rounding error:</strong> $O(\epsilon_{\text{mach}} / h)$ — increases as $h \to 0$</p>
+<h3 id="102-central-difference">10.2 Central Difference</h3>
+<p>$$f'(x) \approx \frac{f(x+h) - f(x-h)}{2h} + O(h^2)$$</p>
+<p>Second-order accurate. Two function evaluations per component.</p>
+<h3 id="103-complex-step-derivative">10.3 Complex-Step Derivative</h3>
+<p>$$f'(x) = \frac{\text{Im}(f(x + ih))}{h} + O(h^2)$$</p>
+<p><strong>No cancellation error!</strong> Works because $f(x+ih) = f(x) + ihf'(x) - \frac{h^2}{2}f''(x) + \ldots$</p>
+<p>The imaginary part gives $hf'(x) + O(h^3)$. Since there's no subtraction of nearly-equal numbers, $h$ can be tiny ($10^{-30}$) without rounding problems.</p>
+<p><strong>Limitation:</strong> Requires $f$ to be implementable with complex arithmetic (no <code>abs</code>, <code>max</code>, boolean branches on values).</p>
+<h3 id="104-optimal-step-size">10.4 Optimal Step Size</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Optimal $h$</th>
+<th>Achievable error</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Forward</td>
+<td>$\sqrt{\epsilon_{\text{mach}}} \approx 10^{-8}$</td>
+<td>$\sqrt{\epsilon} \approx 10^{-8}$</td>
+</tr>
+<tr>
+<td>Central</td>
+<td>$\epsilon^{1/3} \approx 10^{-5.3}$</td>
+<td>$\epsilon^{2/3} \approx 10^{-10.7}$</td>
+</tr>
+<tr>
+<td>Complex-step</td>
+<td>As small as you want ($10^{-30}$)</td>
+<td>Machine precision $\approx 10^{-16}$</td>
+</tr>
+</tbody>
+</table>
+<h3 id="105-jacobian-computation">10.5 Jacobian Computation</h3>
+<p>For $f: \mathbb{R}^n \to \mathbb{R}^m$, the Jacobian $J \in \mathbb{R}^{m \times n}$ requires:
+- <strong>Forward/central:</strong> $n$ (or $2n$) function evaluations (perturb each input dimension)
+- <strong>Cost:</strong> $O(mn)$ per function evaluation → total $O(mn^2)$</p>
+<p>This is why AD (Day 11) is preferred for large $n$.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="exercise-1-error-vs-step-size">Exercise 1: Error vs Step Size</h3>
+<pre><code class="language-python"># See: code/week02/numerical_differentiation.py
+</code></pre>
+<p>Plot error vs $h$ for forward, central, and complex-step on $f(x) = \sin(x)$. Show the V-shaped error curve.</p>
+<h3 id="exercise-2-find-optimal-latexinlineblock22endlatex-experimentally">Exercise 2: Find Optimal $h$ Experimentally</h3>
+<p>For each method, sweep $h$ from $10^{-1}$ to $10^{-16}$ and find the $h$ that minimizes error.</p>
+<h3 id="exercise-3-complex-step-jacobian">Exercise 3: Complex-Step Jacobian</h3>
+<p>Implement a complex-step Jacobian for vector functions $f: \mathbb{R}^n \to \mathbb{R}^m$.</p>
+<h3 id="exercise-4-when-rounding-dominates">Exercise 4: When Rounding Dominates</h3>
+<p>Test all three methods on $f(x) = x + 10^{-12}$ near $x=1$. The gradient is 1, but numerical methods struggle when $f(x)$ values are very close.</p>
+<hr />
+<h2 id="practice-45-min">Practice (45 min)</h2>
+<ol>
+<li>Derive the truncation error for the central difference formula using Taylor expansion.</li>
+<li>Why can't you use $h = 10^{-100}$ with forward differences but you can with complex-step?</li>
+<li>What is the cost of computing a numerical Jacobian for $f: \mathbb{R}^{1000} \to \mathbb{R}^{50}$ using central differences?</li>
+<li>Ceres <code>NumericDiffCostFunction</code> uses central differences by default. What step size does it use?</li>
+<li>You derived a Jacobian by hand and want to verify it. Write the pseudocode for a gradient checker.</li>
+<li>Why does the complex-step method fail on $f(x) = |x|$?</li>
+<li>For a function that takes 1 second to evaluate with 500 parameters, how long would a numerical Jacobian take?</li>
+<li>Higher-order finite differences: derive the 4th-order central difference formula. What's its optimal $h$?</li>
+</ol>
+<hr />
+<h2 id="expert-challenges">Expert Challenges</h2>
+<details>
+<summary>🎯 Challenge 1: Automatic step size selection</summary>
+
+**Problem:** Implement a gradient checker that automatically selects the optimal step size $h$ for each component by monitoring the error vs $h$ curve. Start with $h = 10^{-1}$ and halve until the error starts increasing (rounding regime).
+
+**Solution:** For each component $i$: compute forward differences with $h, h/2, h/4, \ldots$. The sequence of derivative estimates converges, then diverges as rounding takes over. The optimal $h$ is where the Richardson extrapolation error estimate $|D(h) - D(h/2)|$ is minimized. In practice, starting with $h = |x_i| \cdot 10^{-4}$ (or $10^{-4}$ if $x_i = 0$) and using central differences works well. Ceres uses `epsilon = sqrt(machine_epsilon) * max(abs(x_i), 1)`.
+</details>
+
+<details>
+<summary>🎯 Challenge 2: Second derivatives via finite differences</summary>
+
+**Problem:** Compute the Hessian numerically. (a) Use the formula $H_{ij} \approx \frac{f(x+h e_i+h e_j)-f(x+h e_i)-f(x+h e_j)+f(x)}{h^2}$. (b) What is its error order? (c) How many function evaluations for the full Hessian? (d) Can you use the complex-step trick?
+
+**Solution:** (a) This is the second-order forward difference for mixed partials. (b) Error is $O(h)$ — first-order only. For $O(h^2)$, use the central formula: $\frac{f(x+h e_i+h e_j)-f(x+h e_i-h e_j)-f(x-h e_i+h e_j)+f(x-h e_i-h e_j)}{4h^2}$. (c) Forward: $n(n+1)/2 + 1$ evaluations. Central: $2n(n+1)$ evaluations. (d) Complex-step can compute the Hessian using a "hyper-dual" number approach or by applying complex-step to the gradient (which itself can be computed analytically).
+</details>
+
+<details>
+<summary>🎯 Challenge 3: Verifying a Ceres cost function Jacobian</summary>
+
+**Problem:** You've written a Ceres cost function with an analytic Jacobian. Before deploying, you want to verify it. Design a test that: (1) evaluates the analytic Jacobian, (2) computes a numerical Jacobian, (3) reports the maximum relative error, (4) flags components where the error exceeds a threshold.
+
+**Solution:** In Ceres, use `ceres::GradientChecker` which does exactly this. In Python, the pattern is: for each parameter block, perturb each element by $h = \sqrt{\epsilon} \cdot \max(|x_i|, 1)$, compute central differences, compare to the analytic Jacobian. Report per-element relative errors $|J_a - J_n| / \max(|J_a|, |J_n|, 1)$. Flag if any exceed $10^{-4}$ (for central differences). This is the single most important debugging tool for optimization — a wrong Jacobian is the #1 cause of solver failure.
+</details>
+
+<hr />
+<h2 id="self-assessment-checklist">Self-Assessment Checklist</h2>
+<ul>
+<li>[ ] I can implement forward, central, and complex-step derivatives</li>
+<li>[ ] I understand the truncation vs rounding tradeoff and optimal $h$</li>
+<li>[ ] I can implement a gradient checker for vector functions</li>
+<li>[ ] I know when numerical differentiation fails and why AD is preferred</li>
+</ul>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Central difference</strong> ($O(h^2)$) is the workhorse — used by Ceres for gradient checking.</li>
+<li><strong>Complex-step</strong> eliminates cancellation error — use it when the function supports complex inputs.</li>
+<li><strong>Optimal $h$</strong> exists because of the truncation-rounding tradeoff — $10^{-8}$ for forward, $10^{-5}$ for central.</li>
+<li><strong>Always verify analytic Jacobians numerically</strong> — this catches more bugs than any other practice.</li>
+</ol>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-09-sparse-schur.html" class="text-cyan-600 hover:text-cyan-800">&larr; Day 9: Sparse Systems & Schur Complement</a>
+            <a href="day-11-automatic-differentiation.html" class="text-cyan-600 hover:text-cyan-800">Day 11: Automatic Differentiation &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

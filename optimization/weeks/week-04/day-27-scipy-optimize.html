@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 27: scipy.optimize Deep Dive - Optimization - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary (Expert Challenges) */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../../weeks/index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Week 4: Constrained Optimization</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-27-scipyoptimize-deep-dive">Day 27: scipy.optimize Deep Dive</h1>
+<blockquote>
+<p><strong>Phase II — Unconstrained Optimization | Week 4 | 2.5 hours</strong>
+<em>Mastering the Swiss Army knife of scientific optimization in Python.</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-26-global-optimization.html">Day 26: Global Optimization</a></li>
+<li><strong>Next:</strong> <a href="day-28-week-review.html">Day 28: Week 4 Review &amp; Capstone</a></li>
+<li><strong>Week:</strong> <a href="../README.html">Week 4 Overview</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">CURRICULUM.md</a></li>
+</ul>
+<h2 id="oks-relevance">OKS Relevance</h2>
+<p><code>scipy.optimize</code> is the default Python solver for quick prototyping and offline analysis at Rapyuta. When analyzing OKS logs, you'll minimize residuals with <code>least_squares</code>, calibrate sensor models with <code>minimize</code>, and fit distributions with <code>curve_fit</code>. For production, Ceres/OSQP are preferred — but scipy is where you prototype, validate, and debug. Knowing every method and when to use each saves hours of trial and error.</p>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="271-the-minimize-interface">27.1 The <code>minimize</code> Interface</h3>
+<pre><code class="language-python">scipy.optimize.minimize(fun, x0, method=..., jac=..., hess=...,
+                        bounds=..., constraints=..., callback=..., options=...)
+</code></pre>
+<p>Returns <code>OptimizeResult</code> with <code>.x</code>, <code>.fun</code>, <code>.success</code>, <code>.nfev</code>, <code>.nit</code>, <code>.jac</code>, <code>.hess_inv</code>.</p>
+<h3 id="272-method-taxonomy">27.2 Method Taxonomy</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Order</th>
+<th>Gradient?</th>
+<th>Hessian?</th>
+<th>Bounds?</th>
+<th>Best for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Nelder-Mead</code></td>
+<td>0</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>Small $n$, noisy, no derivatives</td>
+</tr>
+<tr>
+<td><code>Powell</code></td>
+<td>0</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>Moderate $n$, no derivatives</td>
+</tr>
+<tr>
+<td><code>CG</code></td>
+<td>1</td>
+<td>Yes</td>
+<td>No</td>
+<td>No</td>
+<td>Large $n$, smooth</td>
+</tr>
+<tr>
+<td><code>BFGS</code></td>
+<td>quasi-2</td>
+<td>Yes</td>
+<td>No</td>
+<td>No</td>
+<td>General purpose, $n < 1000$</td>
+</tr>
+<tr>
+<td><code>L-BFGS-B</code></td>
+<td>quasi-2</td>
+<td>Yes</td>
+<td>No</td>
+<td><strong>Yes</strong></td>
+<td>Large $n$ with bounds</td>
+</tr>
+<tr>
+<td><code>TNC</code></td>
+<td>quasi-2</td>
+<td>Yes</td>
+<td>No</td>
+<td><strong>Yes</strong></td>
+<td>Large $n$ with bounds</td>
+</tr>
+<tr>
+<td><code>Newton-CG</code></td>
+<td>2</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>No</td>
+<td>Accurate Hessian available</td>
+</tr>
+<tr>
+<td><code>trust-constr</code></td>
+<td>2</td>
+<td>Yes</td>
+<td>Optional</td>
+<td><strong>Yes</strong></td>
+<td>Constraints + bounds</td>
+</tr>
+<tr>
+<td><code>trust-ncg</code></td>
+<td>2</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>No</td>
+<td>Sparse Hessian, positive definite</td>
+</tr>
+<tr>
+<td><code>trust-krylov</code></td>
+<td>2</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>No</td>
+<td>Very large $n$</td>
+</tr>
+<tr>
+<td><code>dogleg</code></td>
+<td>2</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>No</td>
+<td>Small $n$, positive definite Hessian</td>
+</tr>
+</tbody>
+</table>
+<h3 id="273-choosing-the-right-method">27.3 Choosing the Right Method</h3>
+<p><strong>Decision tree:</strong>
+1. Can you compute gradients? → No: <code>Nelder-Mead</code> (small $n$) or <code>Powell</code>
+2. Can you compute Hessians? → No: <code>BFGS</code> or <code>L-BFGS-B</code>
+3. Need bounds? → <code>L-BFGS-B</code> or <code>TNC</code>
+4. Need constraints? → <code>trust-constr</code> or <code>SLSQP</code>
+5. Very large $n$ ($>10^4$)? → <code>L-BFGS-B</code> (memory-limited)
+6. Least-squares structure? → Use <code>least_squares</code> instead</p>
+<h3 id="274-supplying-derivatives">27.4 Supplying Derivatives</h3>
+<p>Three options:
+1. <strong>Analytic Jacobian:</strong> <code>jac=my_gradient_function</code> — fastest, most accurate
+2. <strong>Finite differences:</strong> <code>jac='2-point'</code> or <code>'3-point'</code> — automatic, $O(n)$ extra evaluations
+3. <strong>Automatic differentiation:</strong> Use JAX's <code>jax.grad</code> then pass to scipy</p>
+<p><strong>Hessian options:</strong> <code>hess=callable</code>, <code>hessp=callable</code> (Hessian-vector product), or BFGS approximation.</p>
+<h3 id="275-callbacks-and-monitoring">27.5 Callbacks and Monitoring</h3>
+<pre><code class="language-python">def callback(xk):
+    &quot;&quot;&quot;Called at each iteration with current x.&quot;&quot;&quot;
+    print(f&quot;  x = {xk}, f(x) = {fun(xk)}&quot;)
+</code></pre>
+<p>Useful for: logging convergence, implementing early stopping, saving intermediate results.</p>
+<h3 id="276-least-squares-preview">27.6 Least Squares Preview</h3>
+<p><code>scipy.optimize.least_squares(fun, x0, method='trf', jac=..., bounds=...)</code></p>
+<p>Solves: $\min \sum r_i(x)^2$ — exploits the least-squares structure (Gauss-Newton internally).</p>
+<p>Methods:
+- <code>'trf'</code> (Trust Region Reflective) — handles bounds, default
+- <code>'dogbox'</code> — handles rectangular bounds efficiently
+- <code>'lm'</code> — Levenberg-Marquardt, no bounds but fastest</p>
+<p><strong>Week 5 goes deep on this.</strong> Today: just know when to use <code>least_squares</code> vs <code>minimize</code>.</p>
+<h3 id="277-common-pitfalls">27.7 Common Pitfalls</h3>
+<ol>
+<li><strong>Not supplying gradients</strong> when available — 10× slower</li>
+<li><strong>Using <code>Nelder-Mead</code> for $n > 20$</strong> — scales terribly</li>
+<li><strong>Ignoring <code>success</code> flag</strong> — always check <code>result.success</code></li>
+<li><strong>Not scaling variables</strong> — different magnitudes → poor conditioning</li>
+<li><strong>Forgetting bounds</strong> — using <code>L-BFGS-B</code> without bounds when needed</li>
+</ol>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="exercise-1-every-method-comparison">Exercise 1: Every Method Comparison</h3>
+<pre><code class="language-python"># See: code/week04/scipy_optimize_deep_dive.py
+</code></pre>
+<p>Run all applicable scipy methods on the Rosenbrock function. Compare iterations, function evaluations, and time.</p>
+<h3 id="exercise-2-callback-logging">Exercise 2: Callback Logging</h3>
+<p>Implement a callback that logs $f(x_k)$, $\|x_k - x^*\|$, and $\|\nabla f(x_k)\|$ at each iteration. Plot convergence curves for BFGS vs CG vs Newton-CG.</p>
+<h3 id="exercise-3-bounds-and-scaling">Exercise 3: Bounds and Scaling</h3>
+<p>Solve a problem where variables have different scales ($x_1 \in [0, 1]$, $x_2 \in [0, 10000]$). Show that without scaling, BFGS converges slowly. With proper scaling, convergence is fast.</p>
+<h3 id="exercise-4-analytic-derivatives-speedup">Exercise 4: Analytic Derivatives Speedup</h3>
+<p>Compare <code>jac=None</code> (finite differences), <code>jac='3-point'</code>, and <code>jac=analytic</code> for Rosenbrock. Measure total function evaluations and wall time.</p>
+<h3 id="exercise-5-custom-optimizer-wrapping">Exercise 5: Custom Optimizer Wrapping</h3>
+<p>Wrap your Week 3 BFGS implementation in a scipy-compatible interface. Compare with scipy's built-in BFGS on the same problem.</p>
+<h3 id="exercise-6-wheel-radius-calibration">Exercise 6: Wheel Radius Calibration</h3>
+<p>Practical: estimate wheel radius from encoder ticks and measured distances. Use <code>least_squares</code> for best results. Compare with <code>minimize</code> on the same problem.</p>
+<hr />
+<h2 id="practice-45-min">Practice (45 min)</h2>
+<ol>
+<li>What is the difference between <code>BFGS</code> and <code>L-BFGS-B</code>? When would you choose each?</li>
+<li>For a 50-dimensional problem with analytic gradients and no bounds, which method would you try first? Second?</li>
+<li><code>Nelder-Mead</code> is derivative-free. Why is it still useful despite being slow?</li>
+<li>What does <code>OptimizeResult.nfev</code> tell you that <code>.nit</code> doesn't?</li>
+<li>If <code>result.success == False</code>, what should you do? (List 3 concrete steps.)</li>
+<li>When should you use <code>least_squares</code> instead of <code>minimize</code>? What's the advantage?</li>
+<li>How does <code>trust-constr</code> handle both equality and inequality constraints?</li>
+<li>What is the memory advantage of L-BFGS-B? How does the <code>m</code> parameter (history size) affect it?</li>
+<li>For the OKS sensor calibration problem with 6 parameters and 100 measurements, which scipy method would you use?</li>
+<li>Why does scipy's <code>minimize</code> default to BFGS when gradients are provided?</li>
+</ol>
+<hr />
+<h2 id="expert-challenges">Expert Challenges</h2>
+<details>
+<summary>🎯 Challenge 1: Benchmarking suite</summary>
+
+**Problem:** Build a benchmarking function that tests all applicable scipy methods on a given problem and returns a comparison table: method name, final $f$, iterations, function evaluations, gradient evaluations, time, and success status. Run it on: (a) Rosenbrock 10D, (b) Styblinski-Tang 10D, (c) a quadratic with condition number $10^4$.
+
+**Solution:** The suite should auto-detect which methods are applicable (e.g., skip methods requiring Hessian if not provided). Key insight: BFGS wins on smooth, moderate-dimensional problems. L-BFGS-B wins for $n > 100$. Nelder-Mead wins on noisy/non-smooth problems. For ill-conditioned quadratics, Newton-CG with exact Hessian beats everything.
+</details>
+
+<details>
+<summary>🎯 Challenge 2: JAX + scipy hybrid</summary>
+
+**Problem:** Use JAX's automatic differentiation with scipy's minimize. Write a function that: (a) defines the objective in JAX, (b) uses `jax.grad` for the Jacobian and `jax.hessian` for the Hessian, (c) passes these to `scipy.optimize.minimize(method='Newton-CG')`. Show the speedup over finite-difference Jacobians on Rosenbrock 50D.
+
+**Solution:** `jax.grad(f)` returns a function. Wrap it to convert jax arrays to numpy for scipy compatibility. For Rosenbrock 50D: analytic gradient via JAX → 50× fewer function evaluations than '2-point' finite differences. With Hessian: Newton-CG converges in ~30 iterations vs BFGS's ~200.
+</details>
+
+<details>
+<summary>🎯 Challenge 3: Constrained optimization preview</summary>
+
+**Problem:** Use `trust-constr` to solve a constrained calibration problem: minimize calibration error subject to physical constraints (wheel radius between 5 and 15 cm, wheelbase between 30 and 60 cm). Compare with unconstrained BFGS followed by clipping, and show that `trust-constr` gives better results because it respects constraints during optimization, not just at the end.
+
+**Solution:** `trust-constr` with `LinearConstraint` or `NonlinearConstraint` objects. The key difference: constrained optimization follows the constraint boundary when the unconstrained optimum is infeasible, finding the best feasible point. Clipping after BFGS gives a suboptimal feasible point because it doesn't explore along the constraint surface.
+</details>
+
+<hr />
+<h2 id="self-assessment-checklist">Self-Assessment Checklist</h2>
+<ul>
+<li>[ ] I know which scipy method to use for a given problem type</li>
+<li>[ ] I can supply analytic derivatives and measure the speedup</li>
+<li>[ ] I can use callbacks to monitor and debug optimization runs</li>
+<li>[ ] I understand when <code>least_squares</code> is better than <code>minimize</code></li>
+</ul>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong><code>L-BFGS-B</code></strong> is the default workhorse — bounded, memory-efficient, gradient-based.</li>
+<li><strong>Always supply gradients</strong> when available — finite differences waste evaluations.</li>
+<li><strong>Always check <code>result.success</code></strong> — silent failures are the most dangerous.</li>
+<li><strong><code>least_squares</code></strong> exploits problem structure — use it when you have residuals.</li>
+</ol>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-26-global-optimization.html" class="text-cyan-600 hover:text-cyan-800">&larr; Day 26: Global Optimization</a>
+            <a href="day-28-week-review.html" class="text-cyan-600 hover:text-cyan-800">Day 28: Week 4 Review &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

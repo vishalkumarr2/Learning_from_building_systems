@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>03 — Least Squares and the Ceres Solver - Optimization - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary (Expert Challenges) */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Optimization</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="03-least-squares-and-the-ceres-solver">03 — Least Squares and the Ceres Solver</h1>
+<blockquote>
+<p><strong>Goal:</strong> Master the most important optimization structure in robotics — least squares — from normal equations through Gauss-Newton and Levenberg-Marquardt to the Ceres Solver API.</p>
+<p><strong>This is the highest-value chapter for OKS work.</strong> Every sensorbar fit, every calibration, every SLAM backend runs a nonlinear least-squares solver.</p>
+</blockquote>
+<hr />
+<h2 id="1-linear-least-squares">1. Linear Least Squares</h2>
+<h3 id="problem">Problem</h3>
+<p>Given $A \in \mathbb{R}^{m \times n}$ ($m > n$, overdetermined) and $b \in \mathbb{R}^m$:</p>
+<p>$$\min_x \|Ax - b\|_2^2 = \min_x \sum_{i=1}^m (a_i^T x - b_i)^2$$</p>
+<p>There are more equations ($m$) than unknowns ($n$), so no exact solution exists. We find the $x$ that minimizes the sum of squared residuals.</p>
+<h3 id="normal-equations">Normal Equations</h3>
+<p>Setting the gradient to zero:</p>
+<p>$$\nabla_x \|Ax - b\|^2 = 2A^T(Ax - b) = 0$$</p>
+<p>$$\boxed{A^T A x^* = A^T b}$$</p>
+<p>This is the <strong>normal equation</strong>. The solution: $x^* = (A^TA)^{-1}A^Tb$.</p>
+<h3 id="geometric-interpretation">Geometric Interpretation</h3>
+<p>$Ax^*$ is the <strong>orthogonal projection</strong> of $b$ onto the column space of $A$. The residual $r = b - Ax^*$ is orthogonal to every column of $A$: $A^T r = 0$.</p>
+<h3 id="solving-methods">Solving Methods</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Cost</th>
+<th>Numerical stability</th>
+<th>When to use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Normal equations ($A^TAx = A^Tb$)</td>
+<td>$O(mn^2 + n^3)$</td>
+<td>Poor for ill-conditioned $A$</td>
+<td>Quick-and-dirty, small problems</td>
+</tr>
+<tr>
+<td>QR factorization ($A = QR$)</td>
+<td>$O(mn^2)$</td>
+<td>Good</td>
+<td>Default choice</td>
+</tr>
+<tr>
+<td>SVD ($A = U\Sigma V^T$)</td>
+<td>$O(mn^2)$</td>
+<td>Best</td>
+<td>Rank-deficient or near-singular</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-python">import numpy as np
+
+# All three methods — same result, different stability
+# Method 1: Normal equations
+x_ne = np.linalg.solve(A.T @ A, A.T @ b)
+
+# Method 2: QR (what np.linalg.lstsq uses internally)
+x_qr, residuals, rank, sv = np.linalg.lstsq(A, b, rcond=None)
+
+# Method 3: SVD
+U, s, Vt = np.linalg.svd(A, full_matrices=False)
+x_svd = Vt.T @ np.diag(1/s) @ U.T @ b
+</code></pre>
+<hr />
+<h2 id="2-weighted-least-squares">2. Weighted Least Squares</h2>
+<h3 id="problem_1">Problem</h3>
+<p>Different measurements have different reliability. Weight them:</p>
+<p>$$\min_x \sum_{i=1}^m w_i (a_i^T x - b_i)^2 = \min_x \|W^{1/2}(Ax - b)\|^2$$</p>
+<p>where $W = \text{diag}(w_1, \ldots, w_m)$.</p>
+<p>Normal equations become: $A^T W A x = A^T W b$.</p>
+<p><strong>OKS relevance:</strong> The EKF measurement update is exactly a weighted least-squares problem. The weights are the inverse measurement covariance: $W = R^{-1}$. Sensorbar measurements with high uncertainty get low weight.</p>
+<hr />
+<h2 id="3-nonlinear-least-squares-nlls">3. Nonlinear Least Squares (NLLS)</h2>
+<h3 id="problem_2">Problem</h3>
+<p>When the model is nonlinear in the parameters:</p>
+<p>$$\min_x \sum_{i=1}^m r_i(x)^2 = \min_x \|r(x)\|^2$$</p>
+<p>where $r : \mathbb{R}^n \to \mathbb{R}^m$ is the vector of <strong>residuals</strong>.</p>
+<p><strong>Example:</strong> Fitting a sensorbar measurement model $f(\theta, d; p)$ where the residuals are:</p>
+<p>$$r_i(p) = \text{measured}_i - f(\theta_i, d_i; p)$$</p>
+<p>Cannot solve with normal equations because $r(x)$ is nonlinear. Need iterative methods.</p>
+<hr />
+<h2 id="4-gauss-newton-method">4. Gauss-Newton Method</h2>
+<h3 id="key-insight">Key Insight</h3>
+<p>Linearize each residual around the current estimate $x_k$:</p>
+<p>$$r(x_k + \Delta x) \approx r(x_k) + J_k \Delta x$$</p>
+<p>where $J_k = \frac{\partial r}{\partial x}\bigg|_{x_k}$ is the Jacobian of residuals.</p>
+<p>Substitute into the cost:</p>
+<p>$$\|r(x_k) + J_k \Delta x\|^2$$</p>
+<p>This is now a <strong>linear</strong> least-squares problem in $\Delta x$! The normal equations give:</p>
+<p>$$\boxed{J_k^T J_k \Delta x = -J_k^T r_k}$$</p>
+<h3 id="algorithm">Algorithm</h3>
+<pre><code class="language-python">def gauss_newton(residual_fn, jacobian_fn, x0, tol=1e-8, max_iter=50):
+    x = x0.copy()
+    for k in range(max_iter):
+        r = residual_fn(x)
+        J = jacobian_fn(x)
+        # Solve normal equations: (J^T J) Δx = -J^T r
+        dx = np.linalg.solve(J.T @ J, -J.T @ r)
+        x = x + dx
+        if np.linalg.norm(dx) &lt; tol:
+            break
+    return x, k
+</code></pre>
+<h3 id="connection-to-newtons-method">Connection to Newton's Method</h3>
+<p>For $f(x) = \frac{1}{2}\|r(x)\|^2$:</p>
+<ul>
+<li>Gradient: $\nabla f = J^T r$</li>
+<li>Hessian: $\nabla^2 f = J^T J + \sum_i r_i \nabla^2 r_i$</li>
+</ul>
+<p>Gauss-Newton <strong>drops the second term</strong> $\sum_i r_i \nabla^2 r_i$, approximating:</p>
+<p>$$H \approx J^T J$$</p>
+<p>This is valid when:
+- Residuals $r_i$ are small at the solution (good fit)
+- Or the problem is "nearly linear" (second derivatives of $r_i$ are small)</p>
+<p><strong>When it fails:</strong> Large residuals → $J^TJ$ is a poor Hessian approximation → oscillation or divergence.</p>
+<hr />
+<h2 id="5-levenberg-marquardt-lm">5. Levenberg-Marquardt (LM)</h2>
+<h3 id="the-fix">The Fix</h3>
+<p>Add a damping term to the Gauss-Newton normal equations:</p>
+<p>$$\boxed{(J_k^T J_k + \lambda_k I) \Delta x = -J_k^T r_k}$$</p>
+<h3 id="what-latexinlineblock36endlatex-does">What $\lambda$ Does</h3>
+<table>
+<thead>
+<tr>
+<th>$\lambda$</th>
+<th>Step behaviour</th>
+<th>Equivalent to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>$\lambda \to 0$</td>
+<td>Gauss-Newton step</td>
+<td>Fast but risky</td>
+</tr>
+<tr>
+<td>$\lambda \to \infty$</td>
+<td>$\Delta x \approx -\frac{1}{\lambda} J^T r$ = gradient descent</td>
+<td>Safe but slow</td>
+</tr>
+<tr>
+<td>Moderate $\lambda$</td>
+<td>Blend</td>
+<td>Best of both worlds</td>
+</tr>
+</tbody>
+</table>
+<h3 id="adaptive-latexinlineblock42endlatex-strategy">Adaptive $\lambda$ Strategy</h3>
+<pre><code>1. Compute trial step Δx from (J^T J + λI) Δx = -J^T r
+2. Compute gain ratio: ρ = (‖r(x)‖² - ‖r(x + Δx)‖²) / predicted_reduction
+3. If ρ &gt; threshold (e.g., 0.25):
+   - Accept step: x ← x + Δx
+   - Decrease λ (more Gauss-Newton-like)
+4. If ρ &lt; threshold:
+   - Reject step: keep x
+   - Increase λ (more gradient-descent-like)
+</code></pre>
+<h3 id="trust-region-interpretation">Trust Region Interpretation</h3>
+<p>LM is equivalent to solving:</p>
+<p>$$\min_{\Delta x} \|J_k \Delta x + r_k\|^2 \quad \text{s.t.} \quad \|\Delta x\| \leq \Delta_k$$</p>
+<p>The Lagrange multiplier for the constraint is $\lambda_k$. Large $\lambda$ = small trust region.</p>
+<hr />
+<h2 id="6-robust-estimation-loss-functions">6. Robust Estimation: Loss Functions</h2>
+<h3 id="problem-with-latexinlineblock45endlatex">Problem with $\ell_2$</h3>
+<p>Squared error $r_i^2$ gives outliers <strong>quadratic</strong> influence. A single bad measurement can ruin the fit.</p>
+<h3 id="robust-loss-functions">Robust Loss Functions</h3>
+<p>Replace $\frac{1}{2}r^2$ with $\rho(r)$:</p>
+<table>
+<thead>
+<tr>
+<th>Loss</th>
+<th>$\rho(r)$</th>
+<th>Influence $\rho'(r)$</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Squared ($\ell_2$)</td>
+<td>$\frac{1}{2}r^2$</td>
+<td>$r$</td>
+<td>Unbounded — outliers dominate</td>
+</tr>
+<tr>
+<td>Huber</td>
+<td>$\begin{cases} \frac{1}{2}r^2 & |r| \leq \delta \\ \delta|r| - \frac{1}{2}\delta^2 & |r| > \delta \end{cases}$</td>
+<td>Capped at $\pm\delta$</td>
+<td>Linear growth for outliers</td>
+</tr>
+<tr>
+<td>Cauchy</td>
+<td>$\frac{c^2}{2}\log(1 + (r/c)^2)$</td>
+<td>$\frac{r}{1 + (r/c)^2}$</td>
+<td>Logarithmic growth → strong outlier rejection</td>
+</tr>
+<tr>
+<td>Tukey</td>
+<td>$\begin{cases} \frac{c^2}{6}[1-(1-(r/c)^2)^3] & |r| \leq c \\ \frac{c^2}{6} & |r| > c \end{cases}$</td>
+<td>Zero beyond $c$</td>
+<td>Completely ignores outliers</td>
+</tr>
+</tbody>
+</table>
+<h3 id="in-ceres">In Ceres</h3>
+<pre><code class="language-cpp">// Standard squared error
+problem.AddResidualBlock(cost_fn, nullptr, params);
+
+// Cauchy loss with c = 40.0 (used in OKS sensorbar)
+problem.AddResidualBlock(cost_fn, new ceres::CauchyLoss(40.0), params);
+
+// Huber loss with δ = 1.0
+problem.AddResidualBlock(cost_fn, new ceres::HuberLoss(1.0), params);
+</code></pre>
+<p><strong>OKS sensorbar uses <code>CauchyLoss(c=40.0)</code>:</strong> This means measurements with residual $|r| \gg 40$ have their influence heavily down-weighted. This is critical because sensorbar readings can have large outliers from reflective floor markings or partial occlusions.</p>
+<h3 id="iteratively-reweighted-least-squares-irls">Iteratively Reweighted Least Squares (IRLS)</h3>
+<p>Robust estimation can be converted to weighted least squares by iterating:</p>
+<ol>
+<li>Solve WLS with current weights</li>
+<li>Update weights: $w_i = \rho'(r_i) / r_i$</li>
+<li>Repeat until convergence</li>
+</ol>
+<p>Ceres handles this internally through its <code>LossFunction</code> mechanism.</p>
+<hr />
+<h2 id="7-the-ceres-solver-architecture-and-api">7. The Ceres Solver — Architecture and API</h2>
+<h3 id="core-concepts">Core Concepts</h3>
+<pre><code>Problem
+├── ParameterBlock(s)    ← the unknowns: x, y, θ, ...
+├── ResidualBlock(s)     ← one per measurement/constraint
+│   ├── CostFunction     ← computes r(x) and optionally J
+│   └── LossFunction     ← ρ(r) — null means squared error
+└── Solver::Options      ← algorithm choice, convergence criteria
+</code></pre>
+<h3 id="costfunction">CostFunction</h3>
+<p>Computes residuals and Jacobians:</p>
+<pre><code class="language-cpp">struct SensorbarCostFunctor {
+    SensorbarCostFunctor(double measured_y, double line_x)
+        : measured_y_(measured_y), line_x_(line_x) {}
+
+    template &lt;typename T&gt;
+    bool operator()(const T* const params, T* residual) const {
+        // params[0] = theta, params[1] = offset
+        T predicted_y = params[1] + T(line_x_) * ceres::tan(params[0]);
+        residual[0] = T(measured_y_) - predicted_y;
+        return true;
+    }
+
+    double measured_y_;
+    double line_x_;
+};
+
+// Auto-differentiation — Ceres computes Jacobians for you
+ceres::CostFunction* cost =
+    new ceres::AutoDiffCostFunction&lt;SensorbarCostFunctor, 1, 2&gt;(
+        new SensorbarCostFunctor(measurement, x_position));
+</code></pre>
+<h3 id="solver-options">Solver Options</h3>
+<pre><code class="language-cpp">ceres::Solver::Options options;
+options.linear_solver_type = ceres::DENSE_QR;           // Small problems
+// options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY; // Large sparse
+// options.linear_solver_type = ceres::ITERATIVE_SCHUR;  // SLAM problems
+
+options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;  // Default
+// options.trust_region_strategy_type = ceres::DOGLEG;
+
+options.max_num_iterations = 50;
+options.function_tolerance = 1e-6;
+options.gradient_tolerance = 1e-10;
+options.parameter_tolerance = 1e-8;
+</code></pre>
+<h3 id="solver-output">Solver Output</h3>
+<pre><code class="language-cpp">ceres::Solver::Summary summary;
+ceres::Solve(options, &amp;problem, &amp;summary);
+
+// Key fields for debugging:
+summary.initial_cost        // Cost before optimization
+summary.final_cost          // Cost after optimization
+summary.iterations          // How many LM steps
+summary.termination_type    // CONVERGENCE, NO_CONVERGENCE, FAILURE
+summary.message             // Human-readable status
+</code></pre>
+<h3 id="linear-solver-selection-guide">Linear Solver Selection Guide</h3>
+<table>
+<thead>
+<tr>
+<th>Solver</th>
+<th>Problem structure</th>
+<th>Typical use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DENSE_QR</code></td>
+<td>Small ($n < 100$), dense</td>
+<td>Sensorbar fit, calibration</td>
+</tr>
+<tr>
+<td><code>DENSE_NORMAL_CHOLESKY</code></td>
+<td>Small, normal equations OK</td>
+<td>Fast for small dense NLLS</td>
+</tr>
+<tr>
+<td><code>SPARSE_NORMAL_CHOLESKY</code></td>
+<td>Large, sparse Jacobian</td>
+<td>Bundle adjustment</td>
+</tr>
+<tr>
+<td><code>CGNR</code></td>
+<td>Large, sparse, iterative</td>
+<td>When factorization is too expensive</td>
+</tr>
+<tr>
+<td><code>ITERATIVE_SCHUR</code></td>
+<td>BA / SLAM structure</td>
+<td>Exploits graph sparsity pattern</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8-automatic-differentiation">8. Automatic Differentiation</h2>
+<h3 id="the-problem">The Problem</h3>
+<p>Computing Jacobians by hand is:
+- Error-prone (especially for complex residuals)
+- Tedious to maintain as the model changes</p>
+<h3 id="three-approaches">Three Approaches</h3>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th>How</th>
+<th>Accuracy</th>
+<th>Speed</th>
+<th>Ceres support</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Analytic</td>
+<td>Derive $\frac{\partial r}{\partial x}$ by hand</td>
+<td>Exact</td>
+<td>Fastest</td>
+<td><code>SizedCostFunction</code></td>
+</tr>
+<tr>
+<td>Numeric</td>
+<td>Finite differences: $\frac{f(x+h)-f(x)}{h}$</td>
+<td>~$O(h)$</td>
+<td>Slow ($2n$ evaluations)</td>
+<td><code>NumericDiffCostFunction</code></td>
+</tr>
+<tr>
+<td>Automatic</td>
+<td>Dual numbers / operator overloading</td>
+<td>Exact (to machine precision)</td>
+<td>~2–5× cost function</td>
+<td><code>AutoDiffCostFunction</code> ✅</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Always prefer <code>AutoDiffCostFunction</code></strong> — exact Jacobians with minimal effort. Use <code>NumericDiffCostFunction</code> only for black-box functions you can't template.</p>
+<h3 id="how-auto-diff-works-dual-numbers">How Auto-Diff Works (Dual Numbers)</h3>
+<p>A dual number: $a + b\epsilon$ where $\epsilon^2 = 0$.</p>
+<p>$$f(a + \epsilon) = f(a) + f'(a)\epsilon$$</p>
+<p>Evaluate $f$ once with dual numbers → get both $f(a)$ and $f'(a)$ for free. Ceres extends this to arbitrary dimensions via <code>Jet&lt;T, N&gt;</code>.</p>
+<hr />
+<h2 id="9-debugging-ceres-common-oks-failure-modes">9. Debugging Ceres: Common OKS Failure Modes</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>What to check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>NO_CONVERGENCE</code> after max iterations</td>
+<td>Poor initial guess or ill-conditioned</td>
+<td>Increase <code>max_num_iterations</code>, check initial parameter values</td>
+</tr>
+<tr>
+<td><code>NUMERICAL_FAILURE</code></td>
+<td>Jacobian has NaN/Inf</td>
+<td>Check for division by zero in cost function, <code>tan()</code> at ±π/2</td>
+</tr>
+<tr>
+<td><code>final_cost ≈ initial_cost</code></td>
+<td>Solver didn't move</td>
+<td>Gradient near zero at start (local min) or <code>parameter_tolerance</code> too tight</td>
+</tr>
+<tr>
+<td>Cost decreasing but slowly</td>
+<td>High condition number</td>
+<td>Try different <code>linear_solver_type</code>, add regularization</td>
+</tr>
+<tr>
+<td>Oscillating cost</td>
+<td>Trust region too large/small</td>
+<td>Check <code>min_lm_diagonal</code>, <code>max_lm_diagonal</code></td>
+</tr>
+<tr>
+<td>Good fit but wrong parameters</td>
+<td>Multiple local minima</td>
+<td>Non-convex problem — try different initial guesses</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="summary-what-to-carry-forward">Summary: What to Carry Forward</h2>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>Where it's used next</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Normal equations $A^TAx = A^Tb$</td>
+<td>07 (conditioning), 06 (pose-graph normal equations)</td>
+</tr>
+<tr>
+<td>Gauss-Newton as approximate Newton</td>
+<td>06 (graph optimization uses GN on the pose-graph cost)</td>
+</tr>
+<tr>
+<td>LM damping ($\lambda$)</td>
+<td>06 (robust pose-graph optimization)</td>
+</tr>
+<tr>
+<td>Robust loss functions</td>
+<td>06 (outlier loop closures in SLAM)</td>
+</tr>
+<tr>
+<td>Ceres API</td>
+<td>06 (Ceres as a graph optimizer), ongoing RCA work</td>
+</tr>
+<tr>
+<td>Auto-differentiation</td>
+<td>Any new cost function you write</td>
+</tr>
+</tbody>
+</table>
+            </div>
+        </div>
+
+        
+    </div>
+</body>
+</html>
