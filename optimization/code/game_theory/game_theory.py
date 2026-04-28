@@ -1016,11 +1016,6 @@ def congestion_game_equilibrium(num_players, routes, cost_functions,
 
     # Estimate social optimum by brute force (if small enough)
     if num_players <= 8 and n_routes <= 5:
-        best_social = np.inf
-        _search_social(0, num_players, n_routes, assignment.copy(),
-                       routes, cost_functions, [best_social],
-                       _edge_loads)
-        # Actually do it properly
         best_social = _brute_social_opt(num_players, n_routes, routes,
                                         cost_functions)
         poa_estimate = total_cost / best_social if best_social > 0 else 1.0
@@ -1051,11 +1046,6 @@ def _brute_social_opt(num_players, n_routes, routes, cost_functions):
 
     _recurse(0)
     return best[0]
-
-
-def _search_social(*args):
-    """Placeholder used by congestion solver; real work in _brute_social_opt."""
-    pass
 
 
 def braess_paradox_demo():
