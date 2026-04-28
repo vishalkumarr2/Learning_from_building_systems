@@ -25,7 +25,11 @@ import matplotlib.pyplot as plt
 import sys
 from itertools import combinations
 from math import factorial
-from scipy.optimize import linprog
+
+def _get_linprog():
+    """Lazy import — scipy only needed for LP-based zero-sum solver."""
+    from scipy.optimize import linprog
+    return linprog
 
 
 # ============================================================
@@ -544,7 +548,7 @@ def solve_zero_sum_lp(A):
     # Bounds: p_i >= 0, v is free
     bounds = [(0, None)] * m + [(None, None)]
 
-    result = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq,
+    result = _get_linprog()(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq,
                      bounds=bounds, method="highs")
     if not result.success:
         raise RuntimeError(f"LP failed: {result.message}")
@@ -572,7 +576,7 @@ def solve_zero_sum_lp(A):
 
     bounds2 = [(0, None)] * n + [(None, None)]
 
-    result2 = linprog(c2, A_ub=A_ub2, b_ub=b_ub2, A_eq=A_eq2, b_eq=b_eq2,
+    result2 = _get_linprog()(c2, A_ub=A_ub2, b_ub=b_ub2, A_eq=A_eq2, b_eq=b_eq2,
                       bounds=bounds2, method="highs")
     if not result2.success:
         raise RuntimeError(f"LP (dual) failed: {result2.message}")
