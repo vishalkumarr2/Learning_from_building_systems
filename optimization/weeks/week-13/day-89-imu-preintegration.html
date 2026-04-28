@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 89: IMU Preintegration - Optimization - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary (Expert Challenges) */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../../weeks/index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Week 13: Manifold Optimization & Capstone</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-89-imu-preintegration">Day 89: IMU Preintegration</h1>
+<blockquote>
+<p><strong>Phase VI — Lie Groups &amp; Manifold Optimization | Week 13 | 2.5 hours</strong>
+<em>Preintegrate hundreds of IMU samples into a single factor — the key to efficient visual-inertial odometry.</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-88-ceres-gtsam-manifold.html">Day 88: Ceres &amp; GTSAM for Manifold Optimization</a></li>
+<li><strong>Next:</strong> <a href="day-90-calibration-interpolation.html">Day 90: Calibration + Trajectory Interpolation</a></li>
+<li><strong>Week:</strong> <a href="../README.html">Week 13 Overview</a></li>
+<li><strong>Chapter:</strong> <a href="../../09-lie-groups.html">Chapter 09: Lie Groups Reference</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">CURRICULUM.md</a></li>
+</ul>
+<h2 id="oks-relevance">OKS Relevance</h2>
+<p>The OKS robot fuses wheel odometry with IMU data for state estimation. Between visual keyframes (or sensorbar readings), the IMU fires at 200+ Hz. Preintegration compresses all those samples into a single constraint between keyframe states, avoiding re-integration when the bias estimate changes — a crucial efficiency for real-time operation.</p>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="891-imu-measurement-model">89.1 IMU Measurement Model</h3>
+<p>An IMU provides two measurements at high rate ($\ge 200$ Hz):</p>
+<p><strong>Accelerometer</strong> (specific force in body frame):</p>
+<p>$$\tilde{a}_t = R_t^T(a_t - g) + b_a + \eta_a$$</p>
+<p><strong>Gyroscope</strong> (angular velocity in body frame):</p>
+<p>$$\tilde{\omega}_t = \omega_t + b_g + \eta_g$$</p>
+<p>where $R_t \in \text{SO}(3)$ is body orientation, $g$ is gravity, $b_a, b_g$ are slowly-varying biases, and $\eta_a, \eta_g$ are white noise.</p>
+<h3 id="892-direct-integration-naive-approach">89.2 Direct Integration (Naive Approach)</h3>
+<p>Between keyframes $i$ and $j$ (times $t_i$ to $t_j$), integrate:</p>
+<p>$$R_j = R_i \prod_{k=i}^{j-1} \text{Exp}\!\left((\tilde{\omega}_k - b_g)\Delta t\right)$$</p>
+<p>$$v_j = v_i + g \Delta t_{ij} + \sum_{k=i}^{j-1} R_k (\tilde{a}_k - b_a) \Delta t$$</p>
+<p>$$p_j = p_i + v_i \Delta t_{ij} + \tfrac{1}{2}g\Delta t_{ij}^2 + \sum_{k=i}^{j-1}\left[R_k(\tilde{a}_k - b_a)\tfrac{\Delta t^2}{2}\right]$$</p>
+<p><strong>Problem</strong>: when the optimizer updates $R_i, v_i, b_a, b_g$, we must re-integrate everything. With 200 Hz IMU and 10 Hz keyframes, that's 20 re-integrations per iteration per edge.</p>
+<h3 id="893-preintegrated-measurements-forster-et-al-2017">89.3 Preintegrated Measurements (Forster et al., 2017)</h3>
+<p>The key insight: factor out the <strong>initial state</strong> by defining quantities relative to frame $i$:</p>
+<p>$$\Delta R_{ij} = R_i^T R_j = \prod_{k=i}^{j-1} \text{Exp}\!\left((\tilde{\omega}_k - b_g)\Delta t\right)$$</p>
+<p>$$\Delta v_{ij} = R_i^T(v_j - v_i - g\Delta t_{ij}) = \sum_{k=i}^{j-1} \Delta R_{ik}(\tilde{a}_k - b_a)\Delta t$$</p>
+<p>$$\Delta p_{ij} = R_i^T(p_j - p_i - v_i\Delta t_{ij} - \tfrac{1}{2}g\Delta t_{ij}^2) = \sum_{k=i}^{j-1}\left[\Delta v_{ik}\Delta t + \Delta R_{ik}(\tilde{a}_k - b_a)\tfrac{\Delta t^2}{2}\right]$$</p>
+<p>These depend only on IMU measurements and biases — <strong>not</strong> on $R_i, v_i, p_i$. They can be precomputed once.</p>
+<h3 id="894-bias-correction-via-first-order-update">89.4 Bias Correction via First-Order Update</h3>
+<p>When the bias estimate changes from $\bar{b}$ to $\bar{b} + \delta b$, instead of re-integrating, use a first-order correction:</p>
+<p>$$\Delta R_{ij}(\bar{b}_g + \delta b_g) \approx \Delta R_{ij}(\bar{b}_g) \cdot \text{Exp}\!\left(\frac{\partial \Delta R_{ij}}{\partial b_g}\delta b_g\right)$$</p>
+<p>$$\Delta v_{ij}(\bar{b} + \delta b) \approx \Delta v_{ij}(\bar{b}) + \frac{\partial \Delta v_{ij}}{\partial b_g}\delta b_g + \frac{\partial \Delta v_{ij}}{\partial b_a}\delta b_a$$</p>
+<p>$$\Delta p_{ij}(\bar{b} + \delta b) \approx \Delta p_{ij}(\bar{b}) + \frac{\partial \Delta p_{ij}}{\partial b_g}\delta b_g + \frac{\partial \Delta p_{ij}}{\partial b_a}\delta b_a$$</p>
+<p>The Jacobians $\frac{\partial \Delta R}{\partial b_g}$, etc., are accumulated during preintegration.</p>
+<h3 id="895-preintegration-factor">89.5 Preintegration Factor</h3>
+<p>The preintegration factor connects states $\mathcal{X}_i = (R_i, v_i, p_i, b_i)$ and $\mathcal{X}_j$. The residual:</p>
+<p>$$r_{ij} = \begin{pmatrix} \text{Log}(\Delta\tilde{R}_{ij}^T \cdot R_i^T R_j) \\ R_i^T(v_j - v_i - g\Delta t) - \Delta\tilde{v}_{ij} \\ R_i^T(p_j - p_i - v_i\Delta t - \tfrac{1}{2}g\Delta t^2) - \Delta\tilde{p}_{ij} \end{pmatrix} \in \mathbb{R}^9$$</p>
+<p>This 9D residual is a single factor in the graph — independent of the number of IMU samples.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<pre><code class="language-python">&quot;&quot;&quot;IMU Preintegration (Forster et al., 2017).&quot;&quot;&quot;
+import numpy as np
+
+def skew(v):
+    return np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]])
+
+def so3_exp(phi):
+    a = np.linalg.norm(phi)
+    if a &lt; 1e-10: return np.eye(3) + skew(phi)
+    K = skew(phi/a)
+    return np.eye(3) + np.sin(a)*K + (1-np.cos(a))*(K@K)
+
+def so3_log(R):
+    ca = np.clip((np.trace(R)-1)/2, -1, 1)
+    a = np.arccos(ca)
+    if a &lt; 1e-10: return np.array([R[2,1]-R[1,2], R[0,2]-R[2,0], R[1,0]-R[0,1]])/2
+    return a/(2*np.sin(a))*np.array([R[2,1]-R[1,2], R[0,2]-R[2,0], R[1,0]-R[0,1]])
+
+def right_jacobian_so3(phi):
+    a = np.linalg.norm(phi)
+    if a &lt; 1e-10: return np.eye(3) - 0.5*skew(phi)
+    K = skew(phi/a)
+    return np.eye(3) - (1-np.cos(a))/a**2*K + (a-np.sin(a))/a**3*(K@K)
+
+class IMUPreintegrator:
+    &quot;&quot;&quot;Preintegrate IMU measurements between two keyframes.&quot;&quot;&quot;
+
+    def __init__(self, bias_a=np.zeros(3), bias_g=np.zeros(3)):
+        self.delta_R = np.eye(3)
+        self.delta_v = np.zeros(3)
+        self.delta_p = np.zeros(3)
+        self.dt_total = 0.0
+        self.bias_a = bias_a.copy()
+        self.bias_g = bias_g.copy()
+        # Jacobians for bias correction
+        self.dR_dbg = np.zeros((3, 3))
+        self.dv_dba = np.zeros((3, 3))
+        self.dv_dbg = np.zeros((3, 3))
+        self.dp_dba = np.zeros((3, 3))
+        self.dp_dbg = np.zeros((3, 3))
+
+    def integrate(self, accel, gyro, dt):
+        &quot;&quot;&quot;Add one IMU measurement.&quot;&quot;&quot;
+        a_unbiased = accel - self.bias_a
+        w_unbiased = gyro - self.bias_g
+
+        dR_k = so3_exp(w_unbiased * dt)
+        Jr_k = right_jacobian_so3(w_unbiased * dt)
+
+        # Update bias Jacobians (before updating delta quantities)
+        self.dp_dba += self.dv_dba * dt - 0.5 * self.delta_R @ np.eye(3) * dt**2
+        self.dp_dbg += self.dv_dbg * dt - 0.5 * self.delta_R @ skew(a_unbiased) @ self.dR_dbg * dt**2
+
+        self.dv_dba += -self.delta_R * dt
+        self.dv_dbg += -self.delta_R @ skew(a_unbiased) @ self.dR_dbg * dt
+
+        # Update preintegrated quantities
+        self.delta_p += self.delta_v * dt + 0.5 * self.delta_R @ a_unbiased * dt**2
+        self.delta_v += self.delta_R @ a_unbiased * dt
+
+        # Update rotation bias Jacobian before rotation
+        self.dR_dbg = dR_k.T @ self.dR_dbg - Jr_k * dt
+
+        self.delta_R = self.delta_R @ dR_k
+        self.dt_total += dt
+
+    def correct_bias(self, new_ba, new_bg):
+        &quot;&quot;&quot;First-order bias correction without re-integration.&quot;&quot;&quot;
+        dba = new_ba - self.bias_a
+        dbg = new_bg - self.bias_g
+        delta_R_corrected = self.delta_R @ so3_exp(self.dR_dbg @ dbg)
+        delta_v_corrected = self.delta_v + self.dv_dba @ dba + self.dv_dbg @ dbg
+        delta_p_corrected = self.delta_p + self.dp_dba @ dba + self.dp_dbg @ dbg
+        return delta_R_corrected, delta_v_corrected, delta_p_corrected
+
+    def residual(self, Ri, vi, pi, Rj, vj, pj, gravity):
+        &quot;&quot;&quot;Compute 9D preintegration residual.&quot;&quot;&quot;
+        dt = self.dt_total
+        r_R = so3_log(self.delta_R.T @ Ri.T @ Rj)
+        r_v = Ri.T @ (vj - vi - gravity * dt) - self.delta_v
+        r_p = Ri.T @ (pj - pi - vi * dt - 0.5 * gravity * dt**2) - self.delta_p
+        return np.concatenate([r_R, r_v, r_p])
+
+# --- Synthetic IMU sequence ---
+np.random.seed(42)
+gravity = np.array([0, 0, -9.81])
+dt_imu = 0.005  # 200 Hz
+n_samples = 100  # 0.5 seconds between keyframes
+
+# True trajectory: constant velocity + rotation
+R_true = np.eye(3)
+v_true = np.array([1.0, 0.0, 0.0])  # 1 m/s forward
+omega_true = np.array([0.0, 0.0, 0.1])  # yaw rate
+bias_a_true = np.array([0.02, -0.01, 0.03])
+bias_g_true = np.array([0.001, -0.002, 0.001])
+sigma_a, sigma_g = 0.1, 0.01
+
+# Preintegrate
+preint = IMUPreintegrator(bias_a=bias_a_true, bias_g=bias_g_true)
+R_k = R_true.copy()
+for k in range(n_samples):
+    a_world = np.array([0, 0, 0])  # no acceleration in world frame
+    a_body = R_k.T @ (a_world - gravity) + bias_a_true + np.random.randn(3)*sigma_a
+    g_body = omega_true + bias_g_true + np.random.randn(3)*sigma_g
+    preint.integrate(a_body, g_body, dt_imu)
+    R_k = R_k @ so3_exp(omega_true * dt_imu)
+
+# Compute true final state
+dt_total = n_samples * dt_imu
+R_final = R_true @ so3_exp(omega_true * dt_total)
+v_final = v_true  # constant velocity, no acceleration
+p_final = v_true * dt_total
+
+# Residual should be near zero
+r = preint.residual(R_true, v_true, np.zeros(3), R_final, v_final, p_final, gravity)
+print(f&quot;Preintegration residual norm: {np.linalg.norm(r):.6f}&quot;)
+print(f&quot;  Rotation residual:    {np.linalg.norm(r[:3]):.6f}&quot;)
+print(f&quot;  Velocity residual:    {np.linalg.norm(r[3:6]):.6f}&quot;)
+print(f&quot;  Position residual:    {np.linalg.norm(r[6:9]):.6f}&quot;)
+print(f&quot;Total preintegrated time: {preint.dt_total:.3f}s ({n_samples} samples)&quot;)
+</code></pre>
+<hr />
+<h2 id="practice-problems-45-min">Practice Problems (45 min)</h2>
+<h3 id="problem-1-preintegration-vs-direct-integration">Problem 1: Preintegration vs Direct Integration</h3>
+<p>Integrate the same IMU sequence directly (propagating full state) and via preintegration. Compare final states. When does preintegration save computation?</p>
+<details><summary>Answer</summary>
+
+Both produce identical results for a fixed bias. Preintegration saves computation during optimization: if $R_i, v_i$ change, direct integration must re-process all $N$ IMU samples. Preintegration only needs to recompute the 9D residual from precomputed $\Delta R, \Delta v, \Delta p$ — $O(1)$ vs $O(N)$ per optimization iteration.
+</details>
+
+<h3 id="problem-2-bias-correction-test">Problem 2: Bias Correction Test</h3>
+<p>Perturb the bias by $\delta b_g = [0.01, 0, 0]^T$. Compare the first-order corrected $\Delta R$ with full re-integration at the new bias. What is the approximation error?</p>
+<details><summary>Answer</summary>
+
+For small bias perturbations ($\|\delta b\| < 0.05$ rad/s), the first-order correction matches re-integration to within $\sim 10^{-4}$ rad. Error grows quadratically with $\|\delta b\|$. When bias changes significantly (e.g., after a long period without updates), re-integration may be necessary.
+</details>
+
+<h3 id="problem-3-noise-propagation">Problem 3: Noise Propagation</h3>
+<p>Derive the covariance of the preintegrated measurements $(\Delta R, \Delta v, \Delta p)$ given noise parameters $\sigma_a, \sigma_g$. How does uncertainty grow with the number of samples?</p>
+<details><summary>Answer</summary>
+
+Covariance propagates as $\Sigma_{k+1} = F_k \Sigma_k F_k^T + G_k Q G_k^T$ where $F_k$ is the discrete-time state transition and $Q = \text{diag}(\sigma_g^2 I_3, \sigma_a^2 I_3)\Delta t$. Rotation covariance grows linearly with $N$; velocity covariance grows as $O(N)$; position covariance grows as $O(N^2)$. This is why long preintegration intervals have high uncertainty.
+</details>
+
+<hr />
+<h2 id="expert-challenges">Expert Challenges</h2>
+<h3 id="challenge-1-second-order-bias-correction">Challenge 1: Second-Order Bias Correction</h3>
+<p>Implement second-order bias correction by including the Hessian term. When does this significantly outperform first-order?</p>
+<details><summary>Answer</summary>
+
+Second-order: $\Delta R \approx \Delta R_0 \cdot \text{Exp}(J_1 \delta b + \frac{1}{2} J_2 [\delta b \otimes \delta b])$. Significant improvement when $\|\delta b\| > 0.05$ rad/s or preintegration interval > 1s. Computing $J_2$ requires accumulating second-order Jacobians during preintegration, roughly tripling storage.
+</details>
+
+<h3 id="challenge-2-gravity-direction-estimation">Challenge 2: Gravity Direction Estimation</h3>
+<p>Treat gravity direction as an optimization variable $g = g_0 \cdot R_g \hat{z}$ where $R_g \in \text{SO}(3)$ with 2 DOF (gravity magnitude is known). How does this change the preintegration factor?</p>
+<details><summary>Answer</summary>
+
+Parameterize gravity on $S^2$ (the 2-sphere) with 2D tangent-space perturbation. The preintegration residual gains additional Jacobians w.r.t. $\delta g$. The rotation component $r_R$ is unchanged; velocity and position residuals gain terms proportional to $\Delta t$ and $\Delta t^2$ times the gravity perturbation. This is used in VIO initialization when gravity direction is unknown.
+</details>
+
+<h3 id="challenge-3-discrete-time-integration-schemes">Challenge 3: Discrete-Time Integration Schemes</h3>
+<p>Compare Euler, midpoint, and RK4 integration for the preintegration step. How does integration order affect drift over 1 second at 200 Hz?</p>
+<details><summary>Answer</summary>
+
+At 200 Hz ($\Delta t = 5$ms) with moderate dynamics: Euler error $\sim O(\Delta t) \sim 0.5\%$, midpoint $\sim O(\Delta t^2) \sim 0.0025\%$, RK4 $\sim O(\Delta t^4) \sim 10^{-8}\%$. For typical robotics, Euler is sufficient at $\ge 200$ Hz. Midpoint is standard in GTSAM. RK4 is overkill except for very high dynamics (drone acrobatics).
+</details>
+
+<hr />
+<h2 id="connections">Connections</h2>
+<ul>
+<li><strong>Prerequisites</strong>: Day 80 (Exp/Log on SO(3)), Day 85 (manifold optimization), Day 88 (factor graphs)</li>
+<li><strong>Forward</strong>: Day 91 capstone combines IMU preintegration with visual factors in a VIO system</li>
+<li><strong>OKS</strong>: IMU preintegration enables efficient wheel-IMU fusion in the navigation estimator</li>
+</ul>
+<h2 id="self-check">Self-Check</h2>
+<ul>
+<li>[ ] I can explain why preintegration avoids recomputation during optimization</li>
+<li>[ ] I can implement the preintegration equations for $\Delta R$, $\Delta v$, $\Delta p$</li>
+<li>[ ] I understand first-order bias correction and when it breaks down</li>
+<li>[ ] I can compute the 9D preintegration residual connecting two keyframe states</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-88-ceres-gtsam-manifold.html" class="text-cyan-600 hover:text-cyan-800">&larr; Day 88: Ceres & GTSAM for Manifolds</a>
+            <a href="day-90-calibration-interpolation.html" class="text-cyan-600 hover:text-cyan-800">Day 90: Calibration & Interpolation &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

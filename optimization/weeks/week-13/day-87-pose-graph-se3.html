@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 87: Pose-Graph SLAM on SE(3) - Optimization - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary (Expert Challenges) */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../../weeks/index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Week 13: Manifold Optimization & Capstone</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-87-pose-graph-slam-on-se3">Day 87: Pose-Graph SLAM on SE(3)</h1>
+<blockquote>
+<p><strong>Phase VI — Lie Groups &amp; Manifold Optimization | Week 13 | 2.5 hours</strong>
+<em>Extend pose-graph optimization to 3D with robust kernels for outlier resilience.</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-86-pose-graph-se2.html">Day 86: Pose-Graph SLAM on SE(2)</a></li>
+<li><strong>Next:</strong> <a href="day-88-ceres-gtsam-manifold.html">Day 88: Ceres &amp; GTSAM for Manifold Optimization</a></li>
+<li><strong>Week:</strong> <a href="../README.html">Week 13 Overview</a></li>
+<li><strong>Chapter:</strong> <a href="../../09-lie-groups.html">Chapter 09: Lie Groups Reference</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">CURRICULUM.md</a></li>
+</ul>
+<h2 id="oks-relevance">OKS Relevance</h2>
+<p>While OKS AMRs primarily operate in 2D, 3D pose-graph SLAM becomes critical for multi-floor warehouses with ramps/elevators, or when fusing lidar point clouds that capture 3D structure. Robust kernels protect against spurious loop closures — a real problem when perceptual aliasing causes false place matches in repetitive warehouse aisles.</p>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="871-se3-edge-error">87.1 SE(3) Edge Error</h3>
+<p>For poses $T_i, T_j \in \text{SE}(3)$ and measurement $Z_{ij} \in \text{SE}(3)$:</p>
+<p>$$e_{ij} = \text{Log}\!\left(Z_{ij}^{-1} \cdot T_i^{-1} \cdot T_j\right) \in \mathbb{R}^6$$</p>
+<p>The 6-vector $e_{ij}$ contains 3 rotation and 3 translation components. The cost for a single edge:</p>
+<p>$$c_{ij} = e_{ij}^T \, \Omega_{ij} \, e_{ij}$$</p>
+<p>where $\Omega_{ij} \in \mathbb{R}^{6 \times 6}$ is the information matrix encoding measurement confidence for all 6 DOF.</p>
+<h3 id="872-information-matrices-in-6d">87.2 Information Matrices in 6D</h3>
+<p>A typical structure for $\Omega_{ij}$:</p>
+<p>$$\Omega_{ij} = \begin{pmatrix} \Omega_R & 0 \\ 0 & \Omega_t \end{pmatrix}, \quad \Omega_R = \sigma_R^{-2} I_3, \quad \Omega_t = \sigma_t^{-2} I_3$$</p>
+<p>Rotation and translation uncertainties are often decoupled. Lidar-based edges have high translational confidence ($\sigma_t \sim 0.01$m) but lower rotational confidence. IMU-based edges have the opposite pattern.</p>
+<h3 id="873-robust-kernels">87.3 Robust Kernels</h3>
+<p>Outlier edges (false loop closures) cause catastrophic failure with squared costs. Robust kernels replace $c_{ij}$ with $\rho(c_{ij})$ where $\rho$ grows sub-quadratically:</p>
+<table>
+<thead>
+<tr>
+<th>Kernel</th>
+<th>$\rho(s)$</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Huber</strong></td>
+<td>$s$ if $s \le k^2$; $2k\sqrt{s} - k^2$ otherwise</td>
+<td>Linear beyond $k$</td>
+</tr>
+<tr>
+<td><strong>Cauchy</strong></td>
+<td>$k^2 \log(1 + s/k^2)$</td>
+<td>Logarithmic growth</td>
+</tr>
+<tr>
+<td><strong>Tukey</strong></td>
+<td>$k^2(1-(1-s/k^2)^3)/6$ if $s \le k^2$; $k^2/6$</td>
+<td>Hard rejection beyond $k$</td>
+</tr>
+</tbody>
+</table>
+<p>The <strong>weighted residual</strong> becomes $w_{ij} \cdot e_{ij}$ where $w_{ij} = \sqrt{\rho'(c_{ij})}$.</p>
+<h3 id="874-manifold-levenberg-marquardt">87.4 Manifold Levenberg-Marquardt</h3>
+<p>Combine robust kernels with damping for reliable convergence:</p>
+<p>$$(H + \lambda \text{diag}(H)) \, \delta = -b$$</p>
+<p>where $H$ and $b$ incorporate the robust weights. Adaptive $\lambda$: decrease on successful steps, increase on rejected steps. The gain ratio $\varrho = (\text{actual decrease}) / (\text{predicted decrease})$ guides the adaptation.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<pre><code class="language-python">&quot;&quot;&quot;SE(3) Pose-Graph SLAM with Robust Kernels.&quot;&quot;&quot;
+import numpy as np
+
+# --- SO(3) / SE(3) helpers ---
+def so3_exp(phi):
+    angle = np.linalg.norm(phi)
+    if angle &lt; 1e-10:
+        return np.eye(3) + skew(phi)
+    axis = phi / angle
+    K = skew(axis)
+    return np.eye(3) + np.sin(angle)*K + (1 - np.cos(angle))*(K @ K)
+
+def so3_log(R):
+    cos_a = np.clip((np.trace(R) - 1) / 2, -1, 1)
+    angle = np.arccos(cos_a)
+    if angle &lt; 1e-10:
+        return np.array([R[2,1]-R[1,2], R[0,2]-R[2,0], R[1,0]-R[0,1]]) / 2
+    return angle / (2 * np.sin(angle)) * np.array([R[2,1]-R[1,2], R[0,2]-R[2,0], R[1,0]-R[0,1]])
+
+def skew(v):
+    return np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+
+def se3_exp(xi):
+    rho, phi = xi[:3], xi[3:]
+    R = so3_exp(phi)
+    angle = np.linalg.norm(phi)
+    if angle &lt; 1e-10:
+        V = np.eye(3)
+    else:
+        K = skew(phi / angle)
+        V = np.eye(3) + (1-np.cos(angle))/angle**2 * K + (angle-np.sin(angle))/angle**3 * (K@K)
+    T = np.eye(4); T[:3,:3] = R; T[:3,3] = V @ rho
+    return T
+
+def se3_log(T):
+    R, t = T[:3,:3], T[:3,3]
+    phi = so3_log(R)
+    angle = np.linalg.norm(phi)
+    if angle &lt; 1e-10:
+        V_inv = np.eye(3)
+    else:
+        K = skew(phi / angle)
+        half = angle / 2
+        V_inv = np.eye(3) - 0.5*skew(phi) + (1 - half/np.tan(half))/angle**2 * (skew(phi) @ skew(phi))
+    rho = V_inv @ t
+    return np.concatenate([rho, phi])
+
+def se3_inv(T):
+    Ti = np.eye(4); Ti[:3,:3] = T[:3,:3].T; Ti[:3,3] = -T[:3,:3].T @ T[:3,3]
+    return Ti
+
+# --- Robust kernels ---
+def huber_weight(sq_err, k=1.0):
+    if sq_err &lt;= k**2:
+        return 1.0
+    return k / np.sqrt(sq_err)
+
+def cauchy_weight(sq_err, k=1.0):
+    return 1.0 / (1.0 + sq_err / k**2)
+
+# --- Pose-graph optimizer ---
+def se3_pose_graph(poses_init, edges, z_list, omega_list,
+                   kernel='none', k_param=1.0, max_iter=30, tol=1e-8):
+    n = len(poses_init)
+    poses = [T.copy() for T in poses_init]
+    dim = 6
+    costs = []
+
+    for it in range(max_iter):
+        N = dim * n
+        H = np.zeros((N, N))
+        b = np.zeros(N)
+        cost = 0.0
+
+        for (i, j), z_ij, omega in zip(edges, z_list, omega_list):
+            e = se3_log(se3_inv(z_ij) @ se3_inv(poses[i]) @ poses[j])
+            sq = e @ omega @ e
+            cost += sq
+
+            # Robust weight
+            if kernel == 'huber':
+                w = huber_weight(sq, k_param)
+            elif kernel == 'cauchy':
+                w = cauchy_weight(sq, k_param)
+            else:
+                w = 1.0
+
+            A, B = -np.eye(dim), np.eye(dim)
+            w_omega = w * omega
+            ii, jj = dim*i, dim*j
+            H[ii:ii+dim, ii:ii+dim] += A.T @ w_omega @ A
+            H[ii:ii+dim, jj:jj+dim] += A.T @ w_omega @ B
+            H[jj:jj+dim, ii:ii+dim] += B.T @ w_omega @ A
+            H[jj:jj+dim, jj:jj+dim] += B.T @ w_omega @ B
+            b[ii:ii+dim] += A.T @ w_omega @ e
+            b[jj:jj+dim] += B.T @ w_omega @ e
+
+        costs.append(cost)
+        # Anchor pose 0
+        H[:dim, :] = 0; H[:, :dim] = 0
+        H[:dim, :dim] = np.eye(dim) * 1e8
+        b[:dim] = 0
+
+        delta = np.linalg.solve(H + 1e-4*np.eye(N), -b)
+        if np.linalg.norm(delta) &lt; tol:
+            break
+        for k in range(n):
+            poses[k] = poses[k] @ se3_exp(delta[dim*k:dim*k+dim])
+
+    return poses, costs
+
+# --- Demo: 6-pose loop with one outlier ---
+np.random.seed(42)
+n = 6
+true_poses = [np.eye(4)]
+for i in range(n - 1):
+    dT = se3_exp(np.array([0.5, 0, 0, 0, 0, np.pi/3]))
+    true_poses.append(true_poses[-1] @ dT)
+
+edges, z_list, omega_list = [], [], []
+omega = np.diag([100]*3 + [400]*3)
+for i in range(n - 1):
+    z = se3_inv(true_poses[i]) @ true_poses[i+1]
+    noise = np.random.randn(6) * 0.02
+    z_noisy = z @ se3_exp(noise)
+    edges.append((i, i+1)); z_list.append(z_noisy); omega_list.append(omega)
+
+# Loop closure (clean)
+z_lc = se3_inv(true_poses[-1]) @ true_poses[0]
+edges.append((n-1, 0)); z_list.append(z_lc @ se3_exp(np.random.randn(6)*0.02)); omega_list.append(omega)
+
+# Outlier edge (corrupted)
+z_outlier = se3_exp(np.random.randn(6) * 2.0)
+edges.append((1, 4)); z_list.append(z_outlier); omega_list.append(omega)
+
+init_poses = [np.eye(4)]
+for i in range(n - 1):
+    init_poses.append(init_poses[-1] @ z_list[i])
+
+# Compare no kernel vs Huber
+_, costs_none = se3_pose_graph(init_poses, edges, z_list, omega_list, kernel='none')
+_, costs_huber = se3_pose_graph(init_poses, edges, z_list, omega_list, kernel='huber', k_param=1.0)
+
+print(f&quot;No kernel  — final cost: {costs_none[-1]:.4f}&quot;)
+print(f&quot;Huber k=1  — final cost: {costs_huber[-1]:.4f}&quot;)
+</code></pre>
+<hr />
+<h2 id="practice-problems-45-min">Practice Problems (45 min)</h2>
+<h3 id="problem-1-se3-error-derivation">Problem 1: SE(3) Error Derivation</h3>
+<p>Derive the error $e_{ij} = \text{Log}(Z_{ij}^{-1} T_i^{-1} T_j)$ and show that $e_{ij} = 0$ iff $T_j = T_i \cdot Z_{ij}$.</p>
+<details><summary>Answer</summary>
+
+If $T_j = T_i Z_{ij}$, then $T_i^{-1} T_j = Z_{ij}$, so $Z_{ij}^{-1} T_i^{-1} T_j = I_4$, and $\text{Log}(I) = 0_6$. Conversely, $e_{ij} = 0 \Rightarrow Z_{ij}^{-1} T_i^{-1} T_j = I \Rightarrow T_j = T_i Z_{ij}$.
+</details>
+
+<h3 id="problem-2-robust-kernel-comparison">Problem 2: Robust Kernel Comparison</h3>
+<p>Add a Cauchy kernel to the optimizer. On the outlier dataset, compare Huber (k=1.0), Cauchy (k=0.5), and no kernel. Which best rejects the outlier?</p>
+<details><summary>Answer</summary>
+
+Cauchy with small $k$ most aggressively down-weights outliers. Ranking: Cauchy < Huber < none for final cost on the inlier edges. However, Cauchy can be too aggressive — if $k$ is too small, it also down-weights legitimate measurements with moderate noise.
+</details>
+
+<h3 id="problem-3-66-information-design">Problem 3: 6×6 Information Design</h3>
+<p>Design an information matrix for a lidar-based loop closure with σ_t = 0.02m and σ_R = 0.5°. What does the condition number of $\Omega$ tell you?</p>
+<details><summary>Answer</summary>
+
+$\Omega = \text{diag}(1/0.02^2, 1/0.02^2, 1/0.02^2, 1/(0.5\pi/180)^2, 1/(0.5\pi/180)^2, 1/(0.5\pi/180)^2) = \text{diag}(2500, 2500, 2500, 13132, 13132, 13132)$. Condition number ≈ 5.3, well-conditioned. High condition numbers cause GN to under-update poorly constrained DOFs.
+</details>
+
+<hr />
+<h2 id="expert-challenges">Expert Challenges</h2>
+<h3 id="challenge-1-switchable-constraints">Challenge 1: Switchable Constraints</h3>
+<p>Implement switchable constraints (Sünderhauf &amp; Protzel, 2012): augment each loop closure with a switch variable $s_{ij} \in [0,1]$ that scales the information matrix. The optimizer learns to set $s \to 0$ for outliers.</p>
+<details><summary>Answer</summary>
+
+Add variable $s_{ij}$ per loop closure. Modified cost: $s_{ij}^2 \, e_{ij}^T \Omega e_{ij} + \Omega_s (s_{ij} - 1)^2$. The prior $\Omega_s$ penalizes deviation from $s=1$. During optimization, outlier edges drive $s_{ij} \to 0$, effectively removing them. Joint optimization over poses and switches.
+</details>
+
+<h3 id="challenge-2-se3-manifold-lm">Challenge 2: SE(3) Manifold LM</h3>
+<p>Implement full Levenberg-Marquardt with adaptive $\lambda$ using gain ratio $\varrho$. Test convergence from poor initialization.</p>
+<details><summary>Answer</summary>
+
+Gain ratio: $\varrho = (F(x_k) - F(x_k \oplus \delta)) / (\delta^T(\lambda\delta - b))$. If $\varrho > 0.75$: $\lambda \leftarrow \lambda/3$. If $\varrho < 0.25$: $\lambda \leftarrow 2\lambda$. Accept step only if $\varrho > 0$. This provides robust convergence even when initialization is far from optimal.
+</details>
+
+<h3 id="challenge-3-covariance-propagation">Challenge 3: Covariance Propagation</h3>
+<p>After optimizing, compute the marginal covariance of the relative transform $T_i^{-1} T_j$ for any pair $(i,j)$.</p>
+<details><summary>Answer</summary>
+
+Marginal covariance of relative transform: $\Sigma_{ij}^{\text{rel}} = F_{ij} \Sigma F_{ij}^T$ where $F_{ij} = [-\text{Ad}(T_j^{-1}T_i) \;\; I_6]$ selects and transforms the relevant blocks from the joint covariance $\Sigma = H^{-1}$. In practice, extract blocks $\Sigma_{ii}, \Sigma_{ij}, \Sigma_{jj}$ without inverting the full Hessian using sparse methods.
+</details>
+
+<hr />
+<h2 id="connections">Connections</h2>
+<ul>
+<li><strong>Prerequisites</strong>: Day 86 (SE(2) pose graph), Day 79 (SE(3) basics), Day 80 (Exp/Log)</li>
+<li><strong>Forward</strong>: Day 88 connects to production solvers (Ceres, GTSAM) that implement all of this</li>
+<li><strong>OKS</strong>: 3D SLAM backend for lidar-based warehouse mapping, robust to perceptual aliasing</li>
+</ul>
+<h2 id="self-check">Self-Check</h2>
+<ul>
+<li>[ ] I can write the SE(3) edge error from memory</li>
+<li>[ ] I can explain why robust kernels are needed and compare Huber vs Cauchy</li>
+<li>[ ] I can implement SE(3) pose-graph optimization with robust weighting</li>
+<li>[ ] I understand the 6×6 information matrix structure and its physical meaning</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-86-pose-graph-se2.html" class="text-cyan-600 hover:text-cyan-800">&larr; Day 86: Pose-Graph SLAM SE(2)</a>
+            <a href="day-88-ceres-gtsam-manifold.html" class="text-cyan-600 hover:text-cyan-800">Day 88: Ceres & GTSAM for Manifolds &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

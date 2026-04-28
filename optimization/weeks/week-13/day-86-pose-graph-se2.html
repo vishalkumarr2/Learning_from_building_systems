@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 86: Pose-Graph SLAM on SE(2) - Optimization - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary (Expert Challenges) */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../../weeks/index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Week 13: Manifold Optimization & Capstone</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-86-pose-graph-slam-on-se2">Day 86: Pose-Graph SLAM on SE(2)</h1>
+<blockquote>
+<p><strong>Phase VI — Lie Groups &amp; Manifold Optimization | Week 13 | 2.5 hours</strong>
+<em>Turn odometry and loop closures into a graph and optimize all poses simultaneously.</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-85-manifold-gauss-newton.html">Day 85: Manifold Gauss-Newton</a></li>
+<li><strong>Next:</strong> <a href="day-87-pose-graph-se3.html">Day 87: Pose-Graph SLAM on SE(3)</a></li>
+<li><strong>Week:</strong> <a href="../README.html">Week 13 Overview</a></li>
+<li><strong>Chapter:</strong> <a href="../../09-lie-groups.html">Chapter 09: Lie Groups Reference</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">CURRICULUM.md</a></li>
+</ul>
+<h2 id="oks-relevance">OKS Relevance</h2>
+<p>OKS AMRs build a map of the warehouse floor by accumulating odometry and detecting loop closures (revisiting known locations). Pose-graph optimization on SE(2) corrects the accumulated drift, producing a globally consistent map. This is the foundation of 2D SLAM used in the OKS mapping pipeline.</p>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="861-graph-based-slam-formulation">86.1 Graph-Based SLAM Formulation</h3>
+<p>A <strong>pose graph</strong> consists of:
+- <strong>Nodes</strong> $x_i \in \text{SE}(2)$: robot poses at discrete times
+- <strong>Edges</strong> $(i, j)$ with measurement $z_{ij} \in \text{SE}(2)$: relative transform between poses $i$ and $j$</p>
+<p>Edges come from two sources:
+- <strong>Odometry edges</strong>: sequential measurements $z_{i,i+1}$ from wheel encoders
+- <strong>Loop-closure edges</strong>: non-sequential measurements $z_{i,j}$ from place recognition</p>
+<h3 id="862-error-function-on-se2">86.2 Error Function on SE(2)</h3>
+<p>The error for edge $(i, j)$ measures how well poses $x_i, x_j$ agree with measurement $z_{ij}$:</p>
+<p>$$e_{ij} = \text{Log}\!\left(z_{ij}^{-1} \cdot x_i^{-1} \cdot x_j\right) \in \mathbb{R}^3$$</p>
+<p>This is zero when $x_i^{-1} x_j = z_{ij}$ exactly. The full cost function:</p>
+<p>$$F(\mathbf{x}) = \sum_{(i,j)} e_{ij}^T \, \Omega_{ij} \, e_{ij}$$</p>
+<p>where $\Omega_{ij} \in \mathbb{R}^{3\times 3}$ is the <strong>information matrix</strong> (inverse covariance) of the measurement.</p>
+<h3 id="863-information-matrices-and-sparsity">86.3 Information Matrices and Sparsity</h3>
+<p>Each edge contributes a $3 \times 3$ block to the Hessian at positions $(i,i)$, $(i,j)$, $(j,i)$, $(j,j)$. The full Hessian $H \in \mathbb{R}^{3n \times 3n}$ is <strong>sparse</strong>: only connected nodes have non-zero blocks. For a chain of $n$ poses with a few loop closures, $H$ is nearly tridiagonal.</p>
+<h3 id="864-anchoring-the-first-node">86.4 Anchoring the First Node</h3>
+<p>The pose graph has a gauge freedom — translating/rotating all poses simultaneously does not change edge errors. We fix this by <strong>anchoring</strong> $x_0$: either hold it constant (remove its variables) or add a strong prior $e_0 = \text{Log}(x_0^{-1} \cdot x_{\text{prior}})$ with large $\Omega_0$.</p>
+<h3 id="865-jacobians-of-the-edge-error">86.5 Jacobians of the Edge Error</h3>
+<p>Perturbing $x_i \to x_i \cdot \text{Exp}(\delta_i)$ and $x_j \to x_j \cdot \text{Exp}(\delta_j)$:</p>
+<p>$$\frac{\partial e_{ij}}{\partial \delta_i} \approx -J_r^{-1}(e_{ij}) \cdot \text{Ad}(x_j^{-1} x_i), \qquad \frac{\partial e_{ij}}{\partial \delta_j} \approx J_r^{-1}(e_{ij})$$</p>
+<p>For small errors, $J_r^{-1} \approx I$, giving the approximate Jacobians $A_{ij} \approx -\text{Ad}(\cdot)$ and $B_{ij} \approx I$.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<pre><code class="language-python">&quot;&quot;&quot;Pose-Graph SLAM on SE(2) — 10-node loop.&quot;&quot;&quot;
+import numpy as np
+
+def se2_exp(xi):
+    dx, dy, dth = xi
+    c, s = np.cos(dth), np.sin(dth)
+    if abs(dth) &lt; 1e-10:
+        return np.array([[1, 0, dx], [0, 1, dy], [0, 0, 1]])
+    V = np.array([[s/dth, -(1-c)/dth], [(1-c)/dth, s/dth]])
+    t = V @ np.array([dx, dy])
+    return np.array([[c, -s, t[0]], [s, c, t[1]], [0, 0, 1]])
+
+def se2_log(T):
+    th = np.arctan2(T[1, 0], T[0, 0])
+    if abs(th) &lt; 1e-10:
+        return np.array([T[0, 2], T[1, 2], th])
+    half = th / 2
+    V_inv = np.eye(2) * (half / np.tan(half))
+    V_inv += np.array([[0, half], [-half, 0]])
+    rho = V_inv @ T[:2, 2]
+    return np.array([rho[0], rho[1], th])
+
+def se2_inv(T):
+    R = T[:2, :2]; t = T[:2, 2]
+    Ti = np.eye(3); Ti[:2, :2] = R.T; Ti[:2, 2] = -R.T @ t
+    return Ti
+
+# --- Build ground-truth poses in a loop ---
+def build_loop_poses(n, step=1.0):
+    &quot;&quot;&quot;n poses forming a closed polygon.&quot;&quot;&quot;
+    poses = [np.eye(3)]
+    dth = 2 * np.pi / n
+    for i in range(n - 1):
+        dT = se2_exp(np.array([step, 0, dth]))
+        poses.append(poses[-1] @ dT)
+    return poses
+
+def add_noise_se2(T, sigma_t=0.05, sigma_r=0.02):
+    noise = np.array([np.random.randn()*sigma_t, np.random.randn()*sigma_t,
+                      np.random.randn()*sigma_r])
+    return T @ se2_exp(noise)
+
+# --- Pose graph optimization ---
+def pose_graph_optimize(poses_init, edges, measurements, omegas,
+                        anchor=0, max_iter=30, tol=1e-8):
+    n = len(poses_init)
+    poses = [T.copy() for T in poses_init]
+    dim = 3
+    costs = []
+
+    for it in range(max_iter):
+        total_dim = dim * n
+        H = np.zeros((total_dim, total_dim))
+        b = np.zeros(total_dim)
+        cost = 0.0
+
+        for (i, j), z_ij, omega in zip(edges, measurements, omegas):
+            e_ij = se2_log(se2_inv(z_ij) @ se2_inv(poses[i]) @ poses[j])
+            cost += e_ij @ omega @ e_ij
+
+            # Approximate Jacobians (small-error regime)
+            A_ij = -np.eye(dim)  # d e / d delta_i
+            B_ij = np.eye(dim)   # d e / d delta_j
+
+            # Accumulate into H and b
+            ii, jj = dim*i, dim*j
+            H[ii:ii+dim, ii:ii+dim] += A_ij.T @ omega @ A_ij
+            H[ii:ii+dim, jj:jj+dim] += A_ij.T @ omega @ B_ij
+            H[jj:jj+dim, ii:ii+dim] += B_ij.T @ omega @ A_ij
+            H[jj:jj+dim, jj:jj+dim] += B_ij.T @ omega @ B_ij
+            b[ii:ii+dim] += A_ij.T @ omega @ e_ij
+            b[jj:jj+dim] += B_ij.T @ omega @ e_ij
+
+        costs.append(cost)
+
+        # Anchor: fix first pose by zeroing its rows/cols
+        ai = dim * anchor
+        H[ai:ai+dim, :] = 0; H[:, ai:ai+dim] = 0
+        H[ai:ai+dim, ai:ai+dim] = np.eye(dim) * 1e6
+        b[ai:ai+dim] = 0
+
+        delta = np.linalg.solve(H, -b)
+        if np.linalg.norm(delta) &lt; tol:
+            break
+        for k in range(n):
+            poses[k] = poses[k] @ se2_exp(delta[dim*k:dim*k+dim])
+
+    return poses, costs
+
+# --- Build problem ---
+np.random.seed(42)
+n = 10
+true_poses = build_loop_poses(n, step=1.0)
+
+# Odometry edges (sequential)
+edges, measurements, omegas = [], [], []
+odom_omega = np.diag([100, 100, 400])
+for i in range(n - 1):
+    z = se2_inv(true_poses[i]) @ true_poses[i+1]
+    z_noisy = add_noise_se2(z, 0.05, 0.02)
+    edges.append((i, i+1)); measurements.append(z_noisy); omegas.append(odom_omega)
+
+# Loop closure: last -&gt; first
+z_lc = se2_inv(true_poses[-1]) @ true_poses[0]
+z_lc_noisy = add_noise_se2(z_lc, 0.05, 0.02)
+edges.append((n-1, 0)); measurements.append(z_lc_noisy); omegas.append(odom_omega)
+
+# Noisy initial poses (odometry only, no loop closure)
+init_poses = [np.eye(3)]
+for i in range(n - 1):
+    init_poses.append(init_poses[-1] @ measurements[i])
+
+optimized, costs = pose_graph_optimize(init_poses, edges, measurements, omegas)
+
+print(f&quot;Iterations: {len(costs)}&quot;)
+print(f&quot;Cost: {costs[0]:.4f} -&gt; {costs[-1]:.6f}&quot;)
+for i in range(n):
+    err = np.linalg.norm(se2_log(se2_inv(true_poses[i]) @ optimized[i]))
+    print(f&quot;  Pose {i}: error = {err:.4f}&quot;)
+</code></pre>
+<hr />
+<h2 id="practice-problems-45-min">Practice Problems (45 min)</h2>
+<h3 id="problem-1-build-a-pose-graph">Problem 1: Build a Pose Graph</h3>
+<p>Given odometry $\Delta T_{01}, \Delta T_{12}, \Delta T_{23}$ and a loop closure $z_{30}$, write out the full cost function with edge errors and information matrices.</p>
+<details><summary>Answer</summary>
+
+$F = \sum_{k=0}^{2} e_{k,k+1}^T \Omega_{\text{odom}} e_{k,k+1} + e_{30}^T \Omega_{\text{lc}} e_{30}$ where $e_{ij} = \text{Log}(z_{ij}^{-1} x_i^{-1} x_j)$. The loop closure typically has lower information (higher uncertainty) than odometry: $\Omega_{\text{lc}} \preceq \Omega_{\text{odom}}$.
+</details>
+
+<h3 id="problem-2-analyze-sparsity">Problem 2: Analyze Sparsity</h3>
+<p>For a 100-pose chain with 3 loop closures, how many non-zero $3\times3$ blocks does the Hessian $H$ have? What fraction of $H$ is non-zero?</p>
+<details><summary>Answer</summary>
+
+Each odometry edge contributes 4 blocks (ii, ij, ji, jj). 99 odometry edges → 396 blocks. 3 loop closures → 12 blocks. Total: 408 blocks out of $100^2 = 10000$ possible, so ~4.1% non-zero. A sparse solver exploits this structure for $O(n)$ cost on chain-like graphs.
+</details>
+
+<h3 id="problem-3-effect-of-loop-closures">Problem 3: Effect of Loop Closures</h3>
+<p>Run the pose graph with and without the loop closure edge. Compare final pose errors. How much does a single loop closure reduce drift?</p>
+<details><summary>Answer</summary>
+
+Without loop closure, accumulated drift grows linearly — the last pose has the largest error (~0.5m for 10 poses at σ=0.05m). With a single loop closure connecting last to first, drift is distributed across all poses, reducing maximum error by roughly $\sqrt{n}$ factor.
+</details>
+
+<hr />
+<h2 id="expert-challenges">Expert Challenges</h2>
+<h3 id="challenge-1-sparse-solver">Challenge 1: Sparse Solver</h3>
+<p>Replace <code>np.linalg.solve</code> with a sparse Cholesky solver using <code>scipy.sparse</code>. Benchmark on a 500-pose graph.</p>
+<details><summary>Answer</summary>
+
+Use `scipy.sparse.csc_matrix` for $H$ and `scipy.sparse.linalg.spsolve` for the linear system. For a 500-pose chain, sparse solve is ~50× faster than dense. Ordering (AMD/RCM) further reduces fill-in.
+</details>
+
+<h3 id="challenge-2-covariance-recovery">Challenge 2: Covariance Recovery</h3>
+<p>After optimization, the inverse of the Hessian $H^{-1}$ gives the marginal covariances. Extract the $3\times3$ block for each pose and visualize uncertainty ellipses.</p>
+<details><summary>Answer</summary>
+
+$\Sigma = H^{-1}$. The $(i,i)$ diagonal block $\Sigma_{ii}$ gives the marginal covariance of pose $i$. Poses near the anchor have small uncertainty; poses far from anchor (or between loop closures) have larger uncertainty. Visualize as 2σ ellipses from the $(x,y)$ subblock of $\Sigma_{ii}$.
+</details>
+
+<h3 id="challenge-3-incremental-slam">Challenge 3: Incremental SLAM</h3>
+<p>Instead of batch optimization, implement incremental updates: add one pose + edges at a time and re-optimize. Compare convergence with batch.</p>
+<details><summary>Answer</summary>
+
+Incremental: after adding pose $x_k$ with edge $(k-1, k)$, initialize $x_k = x_{k-1} \cdot z_{k-1,k}$ and run 1–3 GN iterations on the full graph. This amortizes computation and converges faster than re-optimizing from scratch each time, since previous poses are already near-optimal.
+</details>
+
+<hr />
+<h2 id="connections">Connections</h2>
+<ul>
+<li><strong>Prerequisites</strong>: Day 85 (Manifold GN), Day 78 (SE(2) basics)</li>
+<li><strong>Forward</strong>: Day 87 extends this to SE(3) with robust kernels</li>
+<li><strong>OKS</strong>: 2D pose-graph optimization is the backend of warehouse floor mapping</li>
+</ul>
+<h2 id="self-check">Self-Check</h2>
+<ul>
+<li>[ ] I can formulate the pose-graph SLAM cost function on SE(2)</li>
+<li>[ ] I can explain anchoring and why it is necessary</li>
+<li>[ ] I can implement and run a 10-node pose graph optimizer</li>
+<li>[ ] I understand the sparsity structure of the Hessian</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-85-manifold-gauss-newton.html" class="text-cyan-600 hover:text-cyan-800">&larr; Day 85: Manifold Gauss-Newton</a>
+            <a href="day-87-pose-graph-se3.html" class="text-cyan-600 hover:text-cyan-800">Day 87: Pose-Graph SLAM SE(3) &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

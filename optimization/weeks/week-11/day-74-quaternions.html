@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 74: Quaternions for Rotation - Optimization - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary (Expert Challenges) */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../../weeks/index.html" class="text-cyan-600 hover:text-cyan-800 mb-4 inline-block">&larr; Back to Week 11: Group Theory & Rotations</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-74-quaternions-for-rotation">Day 74: Quaternions for Rotation</h1>
+<blockquote>
+<p><strong>Phase VI — Lie Groups &amp; Manifold Optimization | Week 11 | 2.5 hours</strong>
+<em>Four numbers, zero gimbal lock, double the coverage.</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-73-so3-rodrigues.html">Day 73: SO(3) — Rodrigues' Formula</a></li>
+<li><strong>Next:</strong> <a href="day-75-quaternion-operations.html">Day 75: Quaternion Interpolation and Averaging</a></li>
+<li><strong>Week:</strong> <a href="../README.html">Week 11 Overview</a></li>
+<li><strong>Chapter:</strong> <a href="../../09-lie-groups.html">Chapter 09: Lie Groups Reference</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">CURRICULUM.md</a></li>
+</ul>
+<h2 id="oks-relevance">OKS Relevance</h2>
+<p>ROS <code>tf2</code> represents all orientations as quaternions <code>[x, y, z, w]</code>. The OKS IMU publishes orientation in quaternion form. Every <code>geometry_msgs/Quaternion</code> in the navigation stack is a unit quaternion. Understanding the double-cover property explains why <code>q</code> and <code>-q</code> represent the same rotation — a frequent source of sign-flip bugs in sensor fusion.</p>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="741-hamiltons-quaternions">74.1 Hamilton's Quaternions</h3>
+<p>A quaternion is $q = w + xi + yj + zk$ where $i, j, k$ satisfy:</p>
+<p>$$i^2 = j^2 = k^2 = ijk = -1$$</p>
+<p>From which: $ij = k$, $jk = i$, $ki = j$, and $ji = -k$, $kj = -i$, $ik = -j$.</p>
+<p>We write $q = (w, \mathbf{v})$ with scalar part $w$ and vector part $\mathbf{v} = (x, y, z)$.</p>
+<p><strong>Quaternion multiplication:</strong></p>
+<p>$$(w_1, \mathbf{v}_1)(w_2, \mathbf{v}_2) = (w_1 w_2 - \mathbf{v}_1 \cdot \mathbf{v}_2,\; w_1\mathbf{v}_2 + w_2\mathbf{v}_1 + \mathbf{v}_1 \times \mathbf{v}_2)$$</p>
+<p>Note: multiplication is <strong>non-commutative</strong> (due to the cross product term).</p>
+<h3 id="742-unit-quaternions-and-rotations">74.2 Unit Quaternions and Rotations</h3>
+<p>A <strong>unit quaternion</strong> has $\|q\| = \sqrt{w^2 + x^2 + y^2 + z^2} = 1$.</p>
+<p>For axis $\hat{n}$ and angle $\theta$:</p>
+<p>$$q = \left(\cos\frac{\theta}{2},\; \sin\frac{\theta}{2}\,\hat{n}\right)$$</p>
+<p>The rotation of vector $\mathbf{p}$ is: $\mathbf{p}' = q \mathbf{p} q^*$ (sandwich product), where $q^* = (w, -\mathbf{v})$ is the conjugate.</p>
+<h3 id="743-double-cover">74.3 Double Cover</h3>
+<p>Both $q$ and $-q$ represent the <strong>same rotation</strong>:</p>
+<p>$$q \mathbf{p} q^* = (-q) \mathbf{p} (-q)^*$$</p>
+<p>This means unit quaternions form a <strong>double cover</strong> of SO(3): the map $\phi: S^3 \to \text{SO}(3)$ is 2-to-1. Topologically, SO(3) $\cong$ $S^3 / \{q \sim -q\} \cong \mathbb{RP}^3$.</p>
+<h3 id="744-quaternion-tofrom-rotation-matrix">74.4 Quaternion to/from Rotation Matrix</h3>
+<p><strong>Quaternion → matrix:</strong></p>
+<p>$$R = \begin{pmatrix} 1-2(y^2+z^2) & 2(xy-wz) & 2(xz+wy) \\ 2(xy+wz) & 1-2(x^2+z^2) & 2(yz-wx) \\ 2(xz-wy) & 2(yz+wx) & 1-2(x^2+y^2) \end{pmatrix}$$</p>
+<p><strong>Matrix → quaternion</strong> (Shepperd's method): compute from the trace and diagonal entries, choosing the numerically stable branch.</p>
+<h3 id="745-advantages-over-euler-angles">74.5 Advantages over Euler Angles</h3>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Euler Angles</th>
+<th>Quaternions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Parameters</td>
+<td>3</td>
+<td>4 (with 1 constraint)</td>
+</tr>
+<tr>
+<td>Singularities</td>
+<td>Gimbal lock at $\pm 90°$ pitch</td>
+<td>None</td>
+</tr>
+<tr>
+<td>Composition</td>
+<td>Trig functions</td>
+<td>Simple multiply</td>
+</tr>
+<tr>
+<td>Interpolation</td>
+<td>Non-trivial</td>
+<td>SLERP (geodesic)</td>
+</tr>
+<tr>
+<td>Normalization</td>
+<td>N/A</td>
+<td>Normalize to unit length</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<pre><code class="language-python">import numpy as np
+from code.lie_groups.lie_groups import (
+    angle_axis_to_quaternion, quaternion_to_rotation,
+    so3_exp, so3_log
+)
+
+def quaternion_multiply(q1, q2):
+    &quot;&quot;&quot;Multiply two quaternions [w, x, y, z].&quot;&quot;&quot;
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    return np.array([
+        w1*w2 - x1*x2 - y1*y2 - z1*z2,
+        w1*x2 + x1*w2 + y1*z2 - z1*y2,
+        w1*y2 - x1*z2 + y1*w2 + z1*x2,
+        w1*z2 + x1*y2 - y1*x2 + z1*w2
+    ])
+
+def quaternion_conjugate(q):
+    &quot;&quot;&quot;Conjugate: (w, -v).&quot;&quot;&quot;
+    return np.array([q[0], -q[1], -q[2], -q[3]])
+
+def quaternion_rotate_vector(q, v):
+    &quot;&quot;&quot;Rotate vector v by unit quaternion q: q v q*.&quot;&quot;&quot;
+    p = np.array([0.0, v[0], v[1], v[2]])
+    result = quaternion_multiply(quaternion_multiply(q, p), quaternion_conjugate(q))
+    return result[1:]
+
+def rotation_matrix_to_quaternion(R):
+    &quot;&quot;&quot;Shepperd's method: SO(3) → unit quaternion [w,x,y,z].&quot;&quot;&quot;
+    tr = np.trace(R)
+    if tr &gt; 0:
+        s = 2.0 * np.sqrt(tr + 1.0)
+        w = 0.25 * s
+        x = (R[2,1] - R[1,2]) / s
+        y = (R[0,2] - R[2,0]) / s
+        z = (R[1,0] - R[0,1]) / s
+    elif R[0,0] &gt; R[1,1] and R[0,0] &gt; R[2,2]:
+        s = 2.0 * np.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2])
+        w = (R[2,1] - R[1,2]) / s
+        x = 0.25 * s
+        y = (R[0,1] + R[1,0]) / s
+        z = (R[0,2] + R[2,0]) / s
+    elif R[1,1] &gt; R[2,2]:
+        s = 2.0 * np.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2])
+        w = (R[0,2] - R[2,0]) / s
+        x = (R[0,1] + R[1,0]) / s
+        y = 0.25 * s
+        z = (R[1,2] + R[2,1]) / s
+    else:
+        s = 2.0 * np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1])
+        w = (R[1,0] - R[0,1]) / s
+        x = (R[0,2] + R[2,0]) / s
+        y = (R[1,2] + R[2,1]) / s
+        z = 0.25 * s
+    q = np.array([w, x, y, z])
+    return q / np.linalg.norm(q)
+
+# --- Basic quaternion operations ---
+omega_z = np.array([0, 0, np.pi / 2])  # 90° around z
+q = angle_axis_to_quaternion(omega_z)
+print(&quot;=== Axis-angle → Quaternion ===&quot;)
+print(f&quot;ω = [0, 0, π/2] → q = [{q[0]:.4f}, {q[1]:.4f}, {q[2]:.4f}, {q[3]:.4f}]&quot;)
+print(f&quot;Expected: [cos(π/4), 0, 0, sin(π/4)] = [{np.cos(np.pi/4):.4f}, 0, 0, {np.sin(np.pi/4):.4f}]&quot;)
+
+# --- Quaternion rotation of a vector ---
+v = np.array([1.0, 0.0, 0.0])
+v_rot = quaternion_rotate_vector(q, v)
+print(f&quot;\n=== Rotating [1,0,0] by 90° around z ===&quot;)
+print(f&quot;Result: {np.round(v_rot, 4)} (expected: [0, 1, 0])&quot;)
+
+# --- Double cover demonstration ---
+q_neg = -q
+R_pos = quaternion_to_rotation(q)
+R_neg = quaternion_to_rotation(q_neg)
+print(f&quot;\n=== Double Cover ===&quot;)
+print(f&quot;q and -q give same R? {np.allclose(R_pos, R_neg)}&quot;)
+
+# --- Composition via quaternion multiply ---
+q1 = angle_axis_to_quaternion([np.pi/4, 0, 0])  # 45° around x
+q2 = angle_axis_to_quaternion([0, np.pi/4, 0])  # 45° around y
+q12 = quaternion_multiply(q1, q2)
+R12 = quaternion_to_rotation(q12)
+R_direct = so3_exp([np.pi/4, 0, 0]) @ so3_exp([0, np.pi/4, 0])
+print(f&quot;\n=== Composition ===&quot;)
+print(f&quot;Quaternion multiply matches matrix multiply? {np.allclose(R12, R_direct)}&quot;)
+
+# --- Roundtrip: R → q → R ---
+R_test = so3_exp([0.3, -0.7, 1.2])
+q_test = rotation_matrix_to_quaternion(R_test)
+R_back = quaternion_to_rotation(q_test)
+print(f&quot;\n=== Roundtrip R → q → R ===&quot;)
+print(f&quot;Max error: {np.max(np.abs(R_test - R_back)):.2e}&quot;)
+</code></pre>
+<hr />
+<h2 id="practice-problems-45-min">Practice Problems (45 min)</h2>
+<p><strong>Problem 1:</strong> Convert a $180°$ rotation around the axis $(1, 0, 0)$ to a quaternion. What is $q$? What is $-q$? Verify both give the same rotation matrix.</p>
+<details><summary>Answer</summary>
+
+$\theta = \pi$, $\hat{n} = (1,0,0)$. $q = (\cos(\pi/2), \sin(\pi/2)(1,0,0)) = (0, 1, 0, 0)$. $-q = (0, -1, 0, 0)$.
+
+Both yield $R = \text{diag}(1, -1, -1)$. ✓
+</details>
+
+<p><strong>Problem 2:</strong> Compute the quaternion product of $q_1 = (\frac{\sqrt2}{2}, \frac{\sqrt2}{2}, 0, 0)$ and $q_2 = (\frac{\sqrt2}{2}, 0, \frac{\sqrt2}{2}, 0)$ by hand.</p>
+<details><summary>Answer</summary>
+
+Using the formula: $w = \frac{1}{2} - 0 - 0 - 0 = \frac{1}{2}$, $x = 0 + \frac{1}{2} + 0 - 0 = \frac{1}{2}$, $y = 0 - 0 + \frac{1}{2} + 0 = \frac{1}{2}$, $z = 0 + 0 - 0 + \frac{1}{2} = \frac{1}{2}$.
+
+$q_1 q_2 = (\frac{1}{2}, \frac{1}{2}, \frac{1}{2}, \frac{1}{2})$. This is a $120°$ rotation around axis $(1,1,1)/\sqrt{3}$.
+</details>
+
+<p><strong>Problem 3:</strong> Why does ROS use the convention <code>[x, y, z, w]</code> while most math textbooks use <code>[w, x, y, z]</code>? Does it affect any computation?</p>
+<details><summary>Answer</summary>
+
+It is purely a storage convention. ROS uses `[x,y,z,w]` for consistency with `geometry_msgs` (vector part first). All quaternion math is identical — you just need to keep track of which index holds $w$. Bugs arise when mixing conventions without conversion.
+</details>
+
+<hr />
+<h2 id="expert-challenges">Expert Challenges</h2>
+<p><strong>Challenge 1:</strong> Prove that the set of unit quaternions $S^3$ with quaternion multiplication forms a group.</p>
+<details><summary>Answer</summary>
+
+Closure: $\|q_1 q_2\| = \|q_1\|\|q_2\| = 1$ (quaternion norm is multiplicative). Associativity: inherited from quaternion algebra. Identity: $(1, 0, 0, 0)$. Inverse: $q^{-1} = q^*/\|q\|^2 = q^*$ for unit quaternions. ✓
+</details>
+
+<p><strong>Challenge 2:</strong> Derive the quaternion-to-rotation-matrix formula from the sandwich product $q \mathbf{p} q^*$.</p>
+<details><summary>Answer</summary>
+
+Expand $q p q^*$ with $p = (0, \mathbf{v})$ and collect terms by $v_1, v_2, v_3$. The coefficient of each $v_i$ in the output gives column $i$ of $R$. After algebraic expansion: $R_{11} = 1 - 2(y^2+z^2)$, $R_{12} = 2(xy - wz)$, etc.
+</details>
+
+<p><strong>Challenge 3:</strong> The quaternion group and SO(3) have different topologies. Explain why a continuous path from $q$ to $-q$ on $S^3$ corresponds to a loop in SO(3) (the "plate trick" or "belt trick").</p>
+<details><summary>Answer</summary>
+
+A path from $q$ to $-q$ on $S^3$ maps to a closed loop in SO(3) (since $q$ and $-q$ map to the same rotation). This loop is **not contractible** — SO(3) has fundamental group $\pi_1(\text{SO}(3)) = \mathbb{Z}/2$. However, going from $q$ to $-q$ and back (a $4\pi$ rotation) *is* contractible. This is the mathematical basis of the Dirac belt trick.
+</details>
+
+<hr />
+<h2 id="connections">Connections</h2>
+<ul>
+<li><strong>Prerequisites:</strong> <a href="day-73-so3-rodrigues.html">Day 73</a> — axis-angle representation and Rodrigues' formula</li>
+<li><strong>Forward:</strong> <a href="day-75-quaternion-operations.html">Day 75</a> — SLERP and averaging; <a href="day-76-rotation-representations.html">Day 76</a> — comparison of all representations</li>
+<li><strong>OKS:</strong> Every <code>tf2::Quaternion</code> in the OKS stack is a unit quaternion; IMU drivers publish orientations as quaternions</li>
+</ul>
+<h2 id="self-check">Self-Check</h2>
+<ul>
+<li>[ ] I can convert between axis-angle and quaternion representations in both directions</li>
+<li>[ ] I understand the double-cover property and why <code>q</code> and <code>-q</code> encode the same rotation</li>
+<li>[ ] I can multiply quaternions and know why the result represents composition</li>
+<li>[ ] I can implement Shepperd's method for numerically stable matrix-to-quaternion conversion</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-73-so3-rodrigues.html" class="text-cyan-600 hover:text-cyan-800">&larr; Day 73: SO(3) & Rodrigues</a>
+            <a href="day-75-quaternion-operations.html" class="text-cyan-600 hover:text-cyan-800">Day 75: Quaternion Operations &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>
