@@ -14,7 +14,7 @@
 | **Next** | [Day 3: CUDA Programming Basics →](day-03-cuda-programming-basics.md) |
 | **Week** | Week 1: GPU Architecture & CUDA |
 | **Phase** | Phase I: Hardware & Compute Foundations |
-| **Curriculum** | [Full Curriculum](../../CURRICULUM.md) |
+| **Curriculum** | [Full Curriculum](../../curriculum.html) |
 
 ---
 
