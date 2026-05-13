@@ -634,7 +634,105 @@ Session 7:  Tasks 4.1–4.7                      (Week 7)
 Session 8:  Tasks 4.8–4.14                     (Week 8)
 Session 9:  Tasks 5.1–5.7                      (Week 9)
 Session 10: Tasks 5.8–5.13 + Task 6.*          (Week 10 + index)
+Session 11: Tasks 7.1–7.7                      (Week 11 — Lie Groups: Rotations)
+Session 12: Tasks 7.8–7.14                     (Week 12 — Lie Groups: Lie Algebra)
+Session 13: Tasks 7.15–7.21                    (Week 13 — Lie Groups: Manifold Opt + Capstone)
+Session 14: Tasks 8.1–8.7                      (Week 14 — Game Theory: Normal Form)
+Session 15: Tasks 8.8–8.14                     (Week 15 — Game Theory: Cooperative + Dynamic)
+Session 16: Tasks 8.15–8.21                    (Week 16 — Game Theory: Algorithmic + Capstone)
 ```
+
+---
+
+## Batch 7: Phase VI — Lie Groups & Manifold Optimization (Weeks 11–13)
+
+**Status: ✅ COMPLETE**
+
+### Reference + Code + Exercises
+| Task | File | Status |
+|------|------|--------|
+| 7.0a | `09-lie-groups.md` — reference guide (~830 lines) | ✅ |
+| 7.0b | `code/lie_groups/lie_groups.py` — full implementation (~1328 lines) | ✅ |
+| 7.0c | `exercises/08-lie-groups.md` — 30 exercises | ✅ |
+
+### Week 11 — Group Theory & Rotations (Days 71–77)
+| Task | File | Status |
+|------|------|--------|
+| 7.1 | `day-71-group-axioms.md` | ✅ |
+| 7.2 | `day-72-so2-rotations.md` | ✅ |
+| 7.3 | `day-73-so3-rodrigues.md` | ✅ |
+| 7.4 | `day-74-quaternions.md` | ✅ |
+| 7.5 | `day-75-quaternion-operations.md` | ✅ |
+| 7.6 | `day-76-rotation-representations.md` | ✅ |
+| 7.7 | `day-77-week11-review.md` | ✅ |
+
+### Week 12 — Rigid Motions & Lie Algebra (Days 78–84)
+| Task | File | Status |
+|------|------|--------|
+| 7.8 | `day-78-se2-rigid-motions.md` | ✅ |
+| 7.9 | `day-79-se3-rigid-body.md` | ✅ |
+| 7.10 | `day-80-exponential-map.md` | ✅ |
+| 7.11 | `day-81-lie-algebra.md` | ✅ |
+| 7.12 | `day-82-adjoint-bch.md` | ✅ |
+| 7.13 | `day-83-jacobians.md` | ✅ |
+| 7.14 | `day-84-week12-review.md` | ✅ |
+
+### Week 13 — Manifold Optimization + Capstone (Days 85–91)
+| Task | File | Status |
+|------|------|--------|
+| 7.15 | `day-85-manifold-gauss-newton.md` | ✅ |
+| 7.16 | `day-86-pose-graph-se2.md` | ✅ |
+| 7.17 | `day-87-pose-graph-se3.md` | ✅ |
+| 7.18 | `day-88-ceres-gtsam-manifold.md` | ✅ |
+| 7.19 | `day-89-imu-preintegration.md` | ✅ |
+| 7.20 | `day-90-calibration-interpolation.md` | ✅ |
+| 7.21 | `day-91-week13-capstone.md` — Mini VIO | ✅ |
+
+---
+
+## Batch 8: Phase VII — Game Theory for Optimization & Robotics (Weeks 14–16)
+
+**Status: ✅ COMPLETE**
+
+### Reference + Code + Exercises
+| Task | File | Status |
+|------|------|--------|
+| 8.0a | `10-game-theory.md` — reference guide (~1089 lines) | ✅ |
+| 8.0b | `code/game_theory/game_theory.py` — full implementation (~1500 lines) | ✅ |
+| 8.0c | `exercises/09-game-theory.md` — 30 exercises | ✅ |
+
+### Week 14 — Normal Form & Zero-Sum Games (Days 92–98)
+| Task | File | Status |
+|------|------|--------|
+| 8.1 | `day-92-normal-form-games.md` | ✅ |
+| 8.2 | `day-93-pure-nash.md` | ✅ |
+| 8.3 | `day-94-mixed-nash.md` | ✅ |
+| 8.4 | `day-95-equilibrium-selection.md` | ✅ |
+| 8.5 | `day-96-zero-sum-minimax.md` | ✅ |
+| 8.6 | `day-97-zero-sum-lp.md` | ✅ |
+| 8.7 | `day-98-week14-review.md` | ✅ |
+
+### Week 15 — Cooperative & Dynamic Games (Days 99–105)
+| Task | File | Status |
+|------|------|--------|
+| 8.8 | `day-99-cooperative-core.md` | ✅ |
+| 8.9 | `day-100-shapley-value.md` | ✅ |
+| 8.10 | `day-101-bargaining.md` | ✅ |
+| 8.11 | `day-102-dynamic-games.md` | ✅ |
+| 8.12 | `day-103-repeated-games.md` | ✅ |
+| 8.13 | `day-104-mechanism-design.md` | ✅ |
+| 8.14 | `day-105-week15-review.md` | ✅ |
+
+### Week 16 — Algorithmic GT + Capstone (Days 106–112)
+| Task | File | Status |
+|------|------|--------|
+| 8.15 | `day-106-computing-nash.md` | ✅ |
+| 8.16 | `day-107-fictitious-play.md` | ✅ |
+| 8.17 | `day-108-no-regret.md` | ✅ |
+| 8.18 | `day-109-congestion-games.md` | ✅ |
+| 8.19 | `day-110-multi-robot-adversarial.md` | ✅ |
+| 8.20 | `day-111-robust-optimization.md` | ✅ |
+| 8.21 | `day-112-week16-capstone.md` — Multi-Robot Delivery | ✅ |
 
 ---
 

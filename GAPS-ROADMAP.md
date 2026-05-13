@@ -17,9 +17,9 @@ zephyr/         (firmware)          ros2-handson/           ← COMPLETED ✅
 cpp-advanced/   (C++ depth)         python-oks/             ← COMPLETED ✅
 navigation-estimator/ (EKF/odom)    control-systems/        ← COMPLETED ✅
 ros2-handson/   (ROS2 practice)     optimization/           ← COMPLETED ✅
-python-oks/     (scripting)         zephyr/deep-dive/       ← MEDIUM (stub only)
-control-systems/ (PID→advanced)     linux-rt/               ← LOW (cpp-advanced/03 partial)
-optimization/   (solvers/MPC/SLAM)
+python-oks/     (scripting)         llm-to-vla/             ← NEW (planned)
+control-systems/ (PID→advanced)     zephyr/deep-dive/       ← MEDIUM (stub only)
+optimization/   (solvers/MPC/SLAM)  linux-rt/               ← LOW (cpp-advanced/03 partial)
 ```
 
 ---
@@ -216,6 +216,43 @@ optimization/
 
 ---
 
+## Track 8: LLM → VLA (Attention to Robot Intelligence)
+**Priority: HIGH — NEXT FRONTIER**
+**Status:** 📋 **CURRICULUM PLANNED** — study notes to be created
+**Folder:** `learn/llm-to-vla/`
+
+From attention mechanism through LLMs, vision transformers, vision-language models, to
+Vision-Language-Action models for robotics. Bridges everything you've learned (control,
+estimation, ROS) with the AI revolution transforming robotics.
+
+**Prerequisites:** ML basics (backprop, CNNs, optimization), Python + PyTorch, all
+existing tracks recommended (especially optimization/ and control-systems/).
+
+| Phase | Weeks | Topic | OKS Relevance |
+|-------|-------|-------|---------------|
+| I | 1–2 | DL refresh + sequence models | Foundation for all that follows |
+| II | 3–5 | Attention → Transformers → BERT/GPT | Core architecture of all modern AI |
+| III | 6–8 | LLM training, alignment, engineering | Understand the tools you use daily |
+| IV | 9–10 | Vision Transformers (ViT, DINO, MAE) | Image understanding for robots |
+| V | 11–12 | Vision-Language Models (CLIP, LLaVA) | Multimodal scene understanding |
+| VI | 13–14 | Diffusion policy, robot learning, VLAs | Direct robot action generation |
+| VII | 15–16 | Deployment, hybrid systems, capstone | VLA + classical control on real robots |
+
+**Files:**
+```
+llm-to-vla/
+├── CURRICULUM.md              ← Full 16-week curriculum with daily schedule
+├── 00-learning-plan.md        ← Dependency graph, study order, agent guide
+├── study-notes/               ← 14 study note files (to be created)
+│   ├── 01-deep-learning-refresh.md → 14-deployment-frontiers.md
+├── exercises/                 ← 10 exercise sets (to be created)
+│   ├── 01-rnn-lstm.md → 10-vla-evaluation.md
+└── projects/                  ← 7 milestone projects (to be created)
+    ├── 01-annotated-transformer/ → 07-vla-capstone/
+```
+
+---
+
 ## Recommended Study Order
 
 ```
@@ -240,6 +277,17 @@ IN 6–8 WEEKS
 │   Week 1-3: Foundations → least-squares (unlocks Ceres understanding)
 │   Week 4-5: Constrained + convex (unlocks MPC reasoning)
 │   Week 6-7: Graph optimization + numerical methods (unlocks SLAM debugging)
+│
+NEXT FRONTIER
+│
+├── llm-to-vla/             ← after optimization; bridges classical → learned robotics
+│   Week 1-2:   DL refresh + sequence models
+│   Week 3-5:   Attention → transformers → LLMs
+│   Week 6-8:   LLM training, alignment, engineering
+│   Week 9-10:  Vision transformers
+│   Week 11-12: Vision-Language models
+│   Week 13-14: Diffusion, robot learning, VLAs
+│   Week 15-16: Deployment, frontiers, capstone
 │
 WHEN HARDWARE ARRIVES
 │

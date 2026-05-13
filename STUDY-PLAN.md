@@ -53,21 +53,28 @@ learn/
 │       ├── 06-i2c.md                         I2C protocol exercises
 │       └── 07-can-bus.md                     CAN bus exercises
 │
-└── zephyr/                                ← Week 3–8
-    ├── 00-mastery-plan.md                    11-project hardware plan
-    ├── 01-17 source docs                     Reference material
-    ├── study-notes/
-    │   ├── 01-foundations.md                  Zephyr basics (915 lines)
-    │   ├── 02-sensors.md                      I2C/CAN/UART Zephyr APIs (866 lines)
-    │   ├── 03-zbus-nanopb.md                  Pub/sub + protobuf (1289 lines)
-    │   ├── 04-spi-slave-dma.md                DMA double-buffer (1231 lines)
-    │   └── 05-jetson-ros2.md                  spidev + ROS2 + EKF (1524 lines)
-    └── exercises/
-        ├── 01-foundations.md                  (1152 lines)
-        ├── 02-sensors.md                      (1119 lines)
-        ├── 03-zbus-nanopb.md                  (910 lines)
-        ├── 04-spi-slave-dma.md                (633 lines)
-        └── 05-jetson-ros2.md                  (649 lines)
+├── zephyr/                                ← Week 3–8
+│   ├── 00-mastery-plan.md                    11-project hardware plan
+│   ├── 01-17 source docs                     Reference material
+│   ├── study-notes/
+│   │   ├── 01-foundations.md                  Zephyr basics (915 lines)
+│   │   ├── 02-sensors.md                      I2C/CAN/UART Zephyr APIs (866 lines)
+│   │   ├── 03-zbus-nanopb.md                  Pub/sub + protobuf (1289 lines)
+│   │   ├── 04-spi-slave-dma.md                DMA double-buffer (1231 lines)
+│   │   └── 05-jetson-ros2.md                  spidev + ROS2 + EKF (1524 lines)
+│   └── exercises/
+│       ├── 01-foundations.md                  (1152 lines)
+│       ├── 02-sensors.md                      (1119 lines)
+│       ├── 03-zbus-nanopb.md                  (910 lines)
+│       ├── 04-spi-slave-dma.md                (633 lines)
+│       └── 05-jetson-ros2.md                  (649 lines)
+│
+└── llm-to-vla/                            ← NEW: AI/ML frontier (16 weeks)
+    ├── CURRICULUM.md                         Full 16-week daily curriculum
+    ├── 00-learning-plan.md                   Dependency graph, agent guide
+    ├── study-notes/                          14 study notes (to be created)
+    ├── exercises/                            10 exercise sets (to be created)
+    └── projects/                             7 milestone projects (to be created)
 ```
 
 **Total content: ~19,000+ lines across 27 files.**

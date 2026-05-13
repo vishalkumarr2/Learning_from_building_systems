@@ -1,6 +1,6 @@
 # Curriculum Plan: Lie Groups & Game Theory
 ### Two new modules under the Optimization Mastery track
-### Draft v1 — April 2026
+### Draft v2 — April 2026 (expanded to 6 weeks)
 
 ---
 
@@ -17,10 +17,12 @@ New module placement:
   exercises/09-game-theory.md
   code/lie_groups/            ← Python implementations
   code/game_theory/           ← Python implementations
-  weeks/week-11/              ← Daily: Lie Groups (7 days)
-  weeks/week-12/              ← Daily: Lie Groups Advanced + Applications (7 days)
-  weeks/week-13/              ← Daily: Game Theory Foundations (7 days)
-  weeks/week-14/              ← Daily: Game Theory Advanced + Applications (7 days)
+  weeks/week-11/              ← Daily: Lie Groups — Group Theory + SO(2)/SO(3) (7 days)
+  weeks/week-12/              ← Daily: Lie Groups — SE(2)/SE(3) + Lie Algebra Deep Dive (7 days)
+  weeks/week-13/              ← Daily: Lie Groups — Manifold Optimization + Applications (7 days)
+  weeks/week-14/              ← Daily: Game Theory — Foundations + Nash + Zero-Sum (7 days)
+  weeks/week-15/              ← Daily: Game Theory — Cooperative + Dynamic + Mechanism Design (7 days)
+  weeks/week-16/              ← Daily: Game Theory — Algorithms + Applications + Capstone (7 days)
 ```
 
 **Prerequisites:**
@@ -42,7 +44,7 @@ New module placement:
 | Visual odometry | Frame-to-frame SE(3) estimation |
 | Control (MPC) | Orientation tracking requires manifold-aware error |
 
-**Current gap:** Day 41 in the 10-week curriculum covers Lie groups in 2.5 hours — enough for a taste, not for fluency. This module gives 2 full weeks (~35 hours) from group theory basics to production-level manifold optimization.
+**Current gap:** Day 41 in the 10-week curriculum covers Lie groups in 2.5 hours — enough for a taste, not for fluency. This module gives 3 full weeks (~52.5 hours) from group theory basics to production-level manifold optimization — enough time for derivations by hand, debugging manifold code, and building real applications.
 
 ---
 
@@ -253,31 +255,43 @@ Planned functions/classes:
 
 ---
 
-## Weekly Lessons: `weeks/week-11/` and `weeks/week-12/`
+## Weekly Lessons: `weeks/week-11/`, `weeks/week-12/`, and `weeks/week-13/`
 
-### Week 11 — Lie Groups: Foundations to Core (2.5 hrs/day × 7 = 17.5 hrs)
-
-| Day | Topic | Theory | Implementation | Practice |
-|-----|-------|--------|----------------|----------|
-| **Day 71** | Groups, Manifolds, and Why Rotations Are Special | Group axioms, matrix groups, manifold intuition, tangent space | Verify SO(2)/SO(3) group axioms in code | 8 classification problems |
-| **Day 72** | SO(2) and SO(3) — Rotations in 2D and 3D | Rotation matrix, angle-axis, quaternions, Rodrigues' formula | Implement SO2/SO3 classes with exp/log | 10 rotation computation problems |
-| **Day 73** | Quaternions Deep Dive | Unit quaternion algebra, Hamilton product, SLERP, double cover | Implement quaternion class, SLERP, conversion to/from matrix | Quaternion chain puzzles |
-| **Day 74** | SE(2) and SE(3) — Rigid Body Motions | Homogeneous coordinates, twist coordinates, composition | Implement SE2/SE3 classes, transform point clouds | 8 pose composition problems |
-| **Day 75** | Lie Algebra, Exp/Log, and the Hat Operator | Generators, matrix exponential, BCH formula, adjoint | BCH numerical verification, adjoint computation | Derive exp maps by hand |
-| **Day 76** | Jacobians on Manifolds | Left/right perturbation, chain rule through exp, left Jacobian | Implement left_jacobian_so3, numerical Jacobian checker | 6 Jacobian derivation problems |
-| **Day 77** | Week 11 Review + Comprehensive Exercises | Flashcard drill, cheat sheet completion | Rotation averaging from scratch | Exercise Set 8 (first half) |
-
-### Week 12 — Lie Groups: Optimization & Applications (2.5 hrs/day × 7 = 17.5 hrs)
+### Week 11 — Group Theory + SO(2)/SO(3) + Quaternions (2.5 hrs/day × 7 = 17.5 hrs)
 
 | Day | Topic | Theory | Implementation | Practice |
 |-----|-------|--------|----------------|----------|
-| **Day 78** | Manifold Gauss-Newton and Levenberg-Marquardt | Retraction, tangent-space linearization, normal equations on manifold | Implement manifold GN solver, compare with Euclidean GN | 4 optimization problems on SO(3) |
-| **Day 79** | Pose-Graph Optimization on SE(2) | Pose-graph structure, SE(2) edges, information matrix, Jacobians | Build a 10-pose 2D pose-graph optimizer from scratch | Compare with g2o output |
-| **Day 80** | Ceres & GTSAM Manifold Support | Ceres SetManifold, GTSAM manifold traits, g2o vertex types | Rewrite Day 79 problem in Ceres C++ and GTSAM | Benchmark: hand-rolled vs library |
-| **Day 81** | SE(3) Optimization and 3D SLAM | 3D pose-graph, quaternion parameterization, Schur complement | 3D pose-graph optimizer (20 poses, loop closures) | Visualize trajectory correction |
-| **Day 82** | IMU Preintegration on Manifolds | Gyroscope integration on SO(3), preintegration theory, bias correction | Implement preintegration from IMU data, compare with gt | Bias sensitivity analysis |
-| **Day 83** | Calibration and Trajectory Interpolation | Hand-eye calibration AX=XB, SE(3) B-splines, covariance on manifolds | Camera-lidar calibration optimizer, cubic SE(3) spline | Uncertainty ellipsoid visualization |
-| **Day 84** | Week 12 Review + Capstone | Full exercise set review, capstone selection | **Capstone:** Mini visual-inertial odometry with manifold optimization | Exercise Set 8 (second half) |
+| **Day 71** | Why Rotations Break Euclidean Math | The "add delta" failure, gimbal lock, angle wrapping, motivation for manifolds | Plot: Euler angle interpolation fails vs SLERP | 6 "what goes wrong" thought experiments |
+| **Day 72** | Group Theory Crash Course | Group axioms, subgroups, homomorphisms, matrix groups GL/O/SO | Verify SO(2) and SO(3) satisfy all group axioms in code | 8 group classification exercises |
+| **Day 73** | SO(2) — 2D Rotations and the Circle Group | Matrix form, Lie algebra so(2), exp/log maps, composition | Implement SO2 class: exp, log, compose, inverse | 10 rotation computation problems |
+| **Day 74** | SO(3) — Rotation Matrices and Rodrigues' Formula | Rotation matrix properties, angle-axis, Rodrigues' formula, log map | Implement SO3 class: exp (Rodrigues), log, compose, inverse | Verify exp(log(R)) = R for 50 random rotations |
+| **Day 75** | Quaternions Deep Dive | Unit quaternion algebra, Hamilton product, double cover, conversions | Implement quaternion class: multiply, to/from matrix, to/from angle-axis | 8 quaternion chain puzzles |
+| **Day 76** | SLERP and Rotation Interpolation | Spherical interpolation, SLERP derivation, squad interpolation | Implement SLERP, compare with naive interpolation, plot trajectories | Interpolation between 5 orientations |
+| **Day 77** | Week 11 Review: From Groups to Rotations | Flashcard drill, concept map, representation comparison table | Complete SO2/SO3 self-test suite (20+ tests) | Exercise Set 8 Section A+B |
+
+### Week 12 — SE(2)/SE(3) + Lie Algebra Deep Dive + Jacobians (2.5 hrs/day × 7 = 17.5 hrs)
+
+| Day | Topic | Theory | Implementation | Practice |
+|-----|-------|--------|----------------|----------|
+| **Day 78** | Manifolds and Tangent Spaces | Topological space → smooth manifold, charts, atlases, tangent space, Riemannian metric | Visualize tangent planes on S², implement chart/atlas for SO(3) | 6 manifold classification problems |
+| **Day 79** | SE(2) — 2D Rigid Body Motions | Homogeneous coordinates, Lie algebra se(2), exp/log closed-form, composition | Implement SE2 class: exp, log, compose, inverse, transform_point | Robot path: drive + turn sequences |
+| **Day 80** | SE(3) — 3D Rigid Body Transformations | 4×4 homogeneous matrix, twist coordinates ξ, exp via Rodrigues + V matrix | Implement SE3 class: exp, log, compose, inverse, adjoint | Transform point clouds between frames |
+| **Day 81** | Sim(3) and the Full Lie Group Zoo | Sim(3) for monocular SLAM, comparative anatomy of all groups, cheat sheet | Implement Sim3 exp/log, build complete cheat sheet table | 6 "which group?" classification problems |
+| **Day 82** | Lie Algebra, BCH Formula, and Adjoint | Generators, matrix exponential derivation, BCH to 2nd order, adjoint representation | BCH numerical verification, adjoint_se3() implementation | Hand-derive BCH for so(3) |
+| **Day 83** | Jacobians on Lie Groups | Left/right perturbation models, chain rule through exp, left/right Jacobian of SO(3) | Implement left_jacobian_so3, right_jacobian_so3, numerical checker | 6 Jacobian derivation problems (by hand + verify) |
+| **Day 84** | Week 12 Review: From SE to Jacobians | Left vs right convention comparison, adjoint properties drill | Complete SE2/SE3/adjoint self-test suite | Exercise Set 8 Section C+D |
+
+### Week 13 — Manifold Optimization + Applications + Capstone (2.5 hrs/day × 7 = 17.5 hrs)
+
+| Day | Topic | Theory | Implementation | Practice |
+|-----|-------|--------|----------------|----------|
+| **Day 85** | Manifold Gauss-Newton | Retraction, tangent-space linearization, normal equations on manifold, update rule | Implement manifold_gauss_newton solver, test on SO(3) rotation averaging | 4 optimization problems: rotation averaging, pose fitting |
+| **Day 86** | Manifold Levenberg-Marquardt + Convergence | Damping on manifolds, trust region, convergence analysis, Euclidean vs manifold comparison | Implement manifold LM, compare convergence with/without damping | Singularity demo: Euler angles fail, manifold succeeds |
+| **Day 87** | Pose-Graph Optimization on SE(2) | Pose-graph structure, odometry + loop closure edges, information matrix, SE(2) Jacobians | Build a 10-pose 2D pose-graph optimizer from scratch | Compare output with g2o reference |
+| **Day 88** | SE(3) Optimization and 3D SLAM | 3D pose-graph, quaternion parameterization, Schur complement for efficiency | 3D pose-graph optimizer (20 poses + loop closures) | Visualize trajectory before/after correction |
+| **Day 89** | Ceres, g2o, and GTSAM Manifold APIs | Ceres SetManifold, GTSAM retract/localCoordinates, g2o vertex types, manif library | Rewrite Day 87 in Ceres C++ or GTSAM, benchmark vs hand-rolled | Library comparison report |
+| **Day 90** | IMU Preintegration + Calibration + Splines | Gyro integration on SO(3), preintegration theory, bias correction, hand-eye AX=XB, SE(3) B-splines | Implement preintegration from IMU data, camera-lidar calibration, cubic SE(3) spline | Covariance propagation + uncertainty ellipsoid visualization |
+| **Day 91** | Week 13 Capstone: Mini Visual-Inertial Odometry | Full pipeline: SE(3) frame estimation, IMU preintegration, manifold optimization, trajectory output | **Capstone:** Build mini VIO system combining PnP + IMU + manifold GN | Exercise Set 8 Section E+F completion |
 
 ---
 
@@ -295,7 +309,7 @@ Planned functions/classes:
 | Machine learning | GANs (min-max), adversarial training, multi-agent RL |
 | Economics of engineering | Pricing, market equilibria, contract theory |
 
-**Connection to optimization:** Game theory is optimization with multiple competing objective functions. Nash equilibrium is a fixed point of coupled optimization problems. Minimax and saddle points connect directly to duality theory (Chapter 04-05).
+**Connection to optimization:** Game theory is optimization with multiple competing objective functions. Nash equilibrium is a fixed point of coupled optimization problems. Minimax and saddle points connect directly to duality theory (Chapter 04-05). This module gives 3 full weeks (~52.5 hours) from normal-form games to multi-robot coordination and adversarial ML.
 
 ---
 
@@ -483,31 +497,43 @@ Planned functions/classes:
 
 ---
 
-## Weekly Lessons: `weeks/week-13/` and `weeks/week-14/`
+## Weekly Lessons: `weeks/week-14/`, `weeks/week-15/`, and `weeks/week-16/`
 
-### Week 13 — Game Theory: Foundations (2.5 hrs/day × 7 = 17.5 hrs)
-
-| Day | Topic | Theory | Implementation | Practice |
-|-----|-------|--------|----------------|----------|
-| **Day 85** | Normal-Form Games and Dominance | Players, strategies, payoffs, dominant/dominated strategies, IESDS | Implement NormalFormGame class, dominance checking | Solve 6 classic games by hand |
-| **Day 86** | Nash Equilibrium — Pure and Mixed | Best response, pure NE, indifference principle, Nash's theorem | Implement find_pure_nash, find_mixed_nash_2x2 | 8 NE computation problems |
-| **Day 87** | Zero-Sum Games and the Minimax Theorem | Minimax, saddle points, LP formulation, von Neumann's theorem | Solve zero-sum games via LP, graphical method | Connect to duality theory |
-| **Day 88** | Cooperative Games and Shapley Value | Coalitional games, core, Shapley value, bargaining | Implement shapley_value, is_in_core | Cost sharing problems |
-| **Day 89** | Dynamic Games and Backward Induction | Extensive form, information sets, SPE, Stackelberg | Implement backward_induction, game tree solver | Sequential decision problems |
-| **Day 90** | Mechanism Design and Auctions | Incentive compatibility, VCG, auction types, revenue equivalence | Implement vickrey_auction, vcg_mechanism | Design 2 auction mechanisms |
-| **Day 91** | Week 13 Review + Exercises | Flashcard drill, concept map linking GT to optimization | Support enumeration for 3×3 game | Exercise Set 9 (first half) |
-
-### Week 14 — Game Theory: Algorithms & Applications (2.5 hrs/day × 7 = 17.5 hrs)
+### Week 14 — Game Theory: Normal Form + Nash + Zero-Sum (2.5 hrs/day × 7 = 17.5 hrs)
 
 | Day | Topic | Theory | Implementation | Practice |
 |-----|-------|--------|----------------|----------|
-| **Day 92** | Algorithmic Game Theory | Computing NE, Lemke-Howson, PPAD complexity | Support enumeration implementation | Complexity analysis |
-| **Day 93** | Learning in Games | Fictitious play, regret matching, no-regret learning, bandit connection | Implement fictitious_play, regret_matching, convergence plots | Compare learning dynamics |
-| **Day 94** | Potential Games and Congestion | Potential functions, congestion games, Braess's paradox, Price of Anarchy | Implement congestion game, find Wardrop equilibrium | Traffic routing scenario |
-| **Day 95** | Multi-Robot Coordination as Games | Task allocation via auctions, formation games, pursuit-evasion | Auction-based task allocator for 4 robots/6 tasks | Multi-robot simulation |
-| **Day 96** | Adversarial ML and GANs as Games | GAN training as minimax, adversarial robustness, evasion attacks | Toy 1D GAN with zero-sum dynamics visualization | Training stability analysis |
-| **Day 97** | Robust Optimization as Games Against Nature | Minimax control, robust MPC, worst-case optimization | Robust QP: $\min_x \max_\delta f(x,\delta)$ via duality | Compare robust vs nominal |
-| **Day 98** | Week 14 Review + Capstone | Full exercise set, connections map | **Capstone:** Multi-robot delivery game — auction-based allocation + congestion-aware routing | Exercise Set 9 (second half) |
+| **Day 92** | What Is a Game? Normal Form and Dominance | Players, strategies, payoffs, dominant/dominated strategies, IESDS | Implement NormalFormGame class with dominance checking | Solve 6 classic games (PD, BoS, Chicken, Stag Hunt) by hand |
+| **Day 93** | Pure-Strategy Nash Equilibrium | Best response analysis, pure NE, best response correspondence | Implement find_pure_nash, best_response functions | 8 pure NE problems on 2×2, 3×3 games |
+| **Day 94** | Mixed-Strategy Nash Equilibrium | Indifference principle, Nash's existence theorem, support enumeration | Implement find_mixed_nash_2x2, support_enumeration | Graphical: plot best response polyhedra for 2×3 game |
+| **Day 95** | Equilibrium Selection and Multiple Equilibria | Pareto dominance, risk dominance, focal points (Schelling), correlated equilibrium | Implement equilibrium ranker (Pareto, risk), analyze games with 3+ NE | Model real scenarios as games: parking, traffic merge |
+| **Day 96** | Zero-Sum Games and the Minimax Theorem | Minimax strategy, saddle points, von Neumann's theorem, graphical method | Implement minimax_value, solve_zero_sum_graphical | Solve 3 zero-sum games by graphical method |
+| **Day 97** | Zero-Sum Games via LP and Duality | LP formulation of zero-sum games, dual gives opponent's strategy, connection to saddle points | Implement solve_zero_sum_lp using scipy.optimize.linprog | 4 problems: LP ↔ duality ↔ minimax connection |
+| **Day 98** | Week 14 Review: Foundations Consolidated | Flashcard drill, concept map (dominance → NE → minimax → LP duality) | Support enumeration for 3×3 game from scratch | Exercise Set 9 Section A+B+C |
+
+### Week 15 — Cooperative + Dynamic Games + Mechanism Design (2.5 hrs/day × 7 = 17.5 hrs)
+
+| Day | Topic | Theory | Implementation | Practice |
+|-----|-------|--------|----------------|----------|
+| **Day 99** | Cooperative Games and the Core | Coalitional games, characteristic function v(S), the core, stability | Implement is_in_core, visualize core for 3-player games | 4 core membership problems |
+| **Day 100** | Shapley Value and Fair Division | Shapley axioms, formula, marginal contribution, connection to SHAP in ML | Implement shapley_value for arbitrary characteristic functions | Cost sharing: 3 towns + water pipeline |
+| **Day 101** | Bargaining Theory | Nash bargaining solution, Kalai-Smorodinsky, alternating offers (Rubinstein) | Implement Nash bargaining solver, compare with Kalai-Smorodinsky | Contract negotiation scenario |
+| **Day 102** | Dynamic Games and Backward Induction | Extensive form, game trees, information sets, subgame perfect equilibrium | Implement backward_induction, game tree solver and visualizer | Solve centipede game, ultimatum game |
+| **Day 103** | Repeated Games and the Folk Theorem | Iterated Prisoner's Dilemma, tit-for-tat, grim trigger, folk theorem, discount factor | Implement strategy tournament: TFT, grim, random, pavlov, etc. | Axelrod tournament reproduction |
+| **Day 104** | Mechanism Design and Auctions | Incentive compatibility, revelation principle, VCG, auction types, revenue equivalence | Implement vickrey_auction, vcg_mechanism, first_price_auction | Design 2 mechanisms: truthful task auction |
+| **Day 105** | Week 15 Review: Cooperation to Mechanism Design | Stackelberg game deep dive (leader-follower), stochastic games intro | Stackelberg pricing optimization, connect to bilevel programming | Exercise Set 9 Section D+E |
+
+### Week 16 — Algorithmic GT + Applications + Capstone (2.5 hrs/day × 7 = 17.5 hrs)
+
+| Day | Topic | Theory | Implementation | Practice |
+|-----|-------|--------|----------------|----------|
+| **Day 106** | Computing Nash Equilibria | Lemke-Howson algorithm, PPAD complexity, support enumeration revisited | Implement Lemke-Howson for 2-player games | Complexity analysis: why NE is PPAD-complete |
+| **Day 107** | Learning in Games (Day 1) | Fictitious play, convergence properties, best response dynamics | Implement fictitious_play, plot convergence to NE over 1000 iterations | Compare convergence speed across game types |
+| **Day 108** | Learning in Games (Day 2) — No-Regret | Regret matching, multiplicative weights, external vs internal regret, bandit connection | Implement regret_matching, multiplicative_weights, convergence plots | Regret matching vs fictitious play tournament |
+| **Day 109** | Potential Games, Congestion, and Price of Anarchy | Potential functions, congestion games, Wardrop equilibrium, Braess's paradox, PoA | Implement congestion_game, find equilibrium, demonstrate Braess's paradox | Traffic routing: 3 routes, 100 drivers |
+| **Day 110** | Multi-Robot Coordination and Adversarial ML | Task allocation via auctions, pursuit-evasion as minimax, GANs as zero-sum games | Auction-based multi-robot allocator (4 robots, 6 tasks), toy 1D GAN | GAN training dynamics visualization |
+| **Day 111** | Robust Optimization as Games Against Nature | Minimax control, robust MPC, worst-case QP, connection to H-infinity control | Robust QP: $\min_x \max_\delta f(x,\delta)$ via duality, compare robust vs nominal | Robust portfolio optimization |
+| **Day 112** | Week 16 Capstone: Multi-Robot Delivery Game | Full pipeline: auction-based task allocation + congestion-aware routing + robustness to failures | **Capstone:** 6-robot warehouse delivery — auction allocation, congestion game for routing, robust rerouting on failure | Exercise Set 9 Section F completion |
 
 ---
 
@@ -521,19 +547,21 @@ Planned functions/classes:
 | `10-game-theory.md` | 1 reference guide | ~700 |
 | `exercises/08-lie-groups.md` | 1 exercise set (30 problems) | ~600 |
 | `exercises/09-game-theory.md` | 1 exercise set (30 problems) | ~600 |
-| `code/lie_groups/lie_groups.py` | Core Python + tests | ~600 |
+| `code/lie_groups/lie_groups.py` | Core Python + tests | ~700 |
 | `code/lie_groups/__init__.py` | Module init | ~5 |
-| `code/game_theory/game_theory.py` | Core Python + tests | ~500 |
+| `code/game_theory/game_theory.py` | Core Python + tests | ~600 |
 | `code/game_theory/__init__.py` | Module init | ~5 |
-| `weeks/week-11/` (7 daily files) | Lie Groups foundations | ~2500 |
-| `weeks/week-12/` (7 daily files) | Lie Groups advanced | ~2500 |
-| `weeks/week-13/` (7 daily files) | Game Theory foundations | ~2500 |
-| `weeks/week-14/` (7 daily files) | Game Theory advanced | ~2500 |
-| **Total** | **~32 files** | **~13,000 lines** |
+| `weeks/week-11/` (7 daily files) | Lie Groups: groups + SO(2)/SO(3) | ~2800 |
+| `weeks/week-12/` (7 daily files) | Lie Groups: SE + Lie algebra | ~2800 |
+| `weeks/week-13/` (7 daily files) | Lie Groups: manifold opt + capstone | ~2800 |
+| `weeks/week-14/` (7 daily files) | Game Theory: foundations + Nash | ~2800 |
+| `weeks/week-15/` (7 daily files) | Game Theory: cooperative + dynamic | ~2800 |
+| `weeks/week-16/` (7 daily files) | Game Theory: algorithms + capstone | ~2800 |
+| **Total** | **~46 files** | **~19,800 lines** |
 
 ## Updates to Existing Files
-- `00-learning-plan.md` — add Weeks 11-14 to schedule
-- `CURRICULUM.md` — add Phase VI
+- `00-learning-plan.md` — add Weeks 11-16 to schedule
+- `CURRICULUM.md` — add Phase VI (Lie Groups) and Phase VII (Game Theory)
 - `CONTENT-PLAN.md` — add the new creation tasks
 - Converter script — add new pages/code dirs
 
@@ -541,9 +569,23 @@ Planned functions/classes:
 1. Reference guides first (09, 10) — establishes the content
 2. Exercise sets (08, 09) — graded problems with answers
 3. Python code modules — standalone implementations with self-tests
-4. Weekly daily lessons — expand into 2.5 hr/day format
+4. Weekly daily lessons — expand into 2.5 hr/day format (6 weeks)
 5. Update learning plan, curriculum, converter
 6. Convert to HTML and push
+
+## Pacing Rationale (v2)
+
+The original 4-week plan (v1) crammed too much into Weeks 12 and 14:
+- Week 12 packed manifold GN, pose-graph, 3D SLAM, IMU preintegration, calibration, AND trajectory interpolation
+- Week 14 packed algorithmic GT, 2 days of learning dynamics, congestion, multi-robot, adversarial ML, robust opt, AND capstone
+
+Expanding to 6 weeks (3 + 3) provides:
+- **Dedicated days for derivations** — BCH formula, Jacobians, Shapley formula deserve pen-and-paper time
+- **Debugging room** — manifold optimization code has subtle sign/convention bugs that need full days to find
+- **Richer capstones** — mini VIO (Lie Groups) and multi-robot delivery game (Game Theory) each get a full day
+- **2 days for learning dynamics** — fictitious play and regret matching each get their own day instead of being crammed
+- **Separate SE/Lie algebra week** — SE(3) adjoint + Jacobians were rushed; now they get proper breathing room
+- **Total: 105 hours** (vs 70 hours in v1) for 42 daily lessons
 
 ---
 

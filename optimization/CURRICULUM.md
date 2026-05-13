@@ -1,7 +1,7 @@
-# Optimization Mastery: Zero to Expert in 10 Weeks
+# Optimization Mastery: Zero to Expert in 16 Weeks
 
-### 2.5 hours/day × 7 days/week × 10 weeks = ~175 hours
-### From "what is a gradient?" to "I can debug a production SLAM backend"
+### 2.5 hours/day × 7 days/week × 16 weeks = ~280 hours
+### From "what is a gradient?" to "I can debug a production SLAM backend and design multi-robot coordination"
 
 ---
 
@@ -46,6 +46,8 @@ This curriculum was reviewed by a panel of 10 specialists. Key improvements inco
 | **III** | 5–6 | Nonlinear Least Squares + Ceres | 35 | Can formulate and solve NLS problems in Python and Ceres C++ |
 | **IV** | 7–8 | Constrained + Convex Optimization | 35 | Can formulate QP/LP, understand KKT, use CVXPY and OSQP |
 | **V** | 9–10 | Robotics Applications (SLAM, MPC, Calibration) | 35 | Can build pose-graph SLAM, MPC controller, calibration pipeline |
+| **VI** | 11–13 | Lie Groups & Manifold Optimization | 52.5 | SO(3)/SE(3) exp/log, manifold GN, pose-graph SLAM, IMU preintegration, mini VIO |
+| **VII** | 14–16 | Game Theory for Optimization & Robotics | 52.5 | Nash equilibria, zero-sum LP, cooperative games, mechanism design, no-regret learning, congestion games |
 
 ---
 
@@ -2189,4 +2191,10 @@ If not, spend 3-5 days on a crash course before Day 1.
 | 8 | Convex + MPC | ☐ | 17.5 | |
 | 9 | SLAM | ☐ | 17.5 | |
 | 10 | Applications + Capstone | ☐ | 17.5 | |
-| **Total** | | | **175** | |
+| 11 | Lie Groups: Group Theory & Rotations | ☐ | 17.5 | Phase VI |
+| 12 | Lie Groups: Rigid Motions & Lie Algebra | ☐ | 17.5 | |
+| 13 | Lie Groups: Manifold Optimization + Capstone | ☐ | 17.5 | |
+| 14 | Game Theory: Normal Form & Zero-Sum | ☐ | 17.5 | Phase VII |
+| 15 | Game Theory: Cooperative & Dynamic | ☐ | 17.5 | |
+| 16 | Game Theory: Algorithmic GT + Capstone | ☐ | 17.5 | |
+| **Total** | | | **280** | |
