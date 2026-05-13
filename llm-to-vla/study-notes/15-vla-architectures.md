@@ -506,7 +506,7 @@ a **flow matching action head** that outputs continuous action chunks.
 
 ### 4.3 Flow Matching Refresher
 
-Flow matching (from Note 14 on Diffusion Policy) learns a velocity field that
+Flow matching (from Note 12 on Diffusion & Flow Matching) learns a velocity field that
 transforms noise into actions:
 
 $$
@@ -1322,24 +1322,24 @@ $$
 ```
 The Full Compression Journey:
 
-  Note 1:  Backprop          → learn ANY differentiable function
-  Note 2:  Optimizers        → learn it EFFICIENTLY
-  Note 3:  Regularization    → learn it ROBUSTLY
-  Note 4:  CNNs              → compress SPATIAL patterns
-  Note 5:  RNNs/Attention    → compress TEMPORAL patterns
-  Note 6:  Transformers      → compress EVERYTHING with attention
-  Note 7:  LLM Pretraining   → compress ALL OF LANGUAGE
-  Note 8:  Fine-tuning       → compress to YOUR task
-  Note 9:  RLHF              → compress HUMAN preferences
-  Note 10: VLMs              → compress VISION + LANGUAGE
-  Note 11: Reinforcement     → compress REWARD-seeking behavior
-  Note 12: Robot Learning    → compress PHYSICAL interaction
-  Note 13: Imitation         → compress DEMONSTRATED behavior
-  Note 14: Diffusion Policy  → compress MULTI-MODAL action distributions
+  Note 01: DL Foundations     → learn ANY differentiable function (backprop, CNNs, RNNs, info theory)
+  Note 02: Attention          → learn WHICH inputs matter
+  Note 03: Transformer Arch   → compress EVERYTHING with self-attention
+  Note 04: Variants           → compress EFFICIENTLY (Flash Attention, MoE, tokenization)
+  Note 05: GPT & Scaling      → compress ALL OF LANGUAGE, and scale it
+  Note 06: Training & RLHF    → compress HUMAN preferences (SFT → RLHF → DPO)
+  Note 07: LLM Engineering    → compress to YOUR deployment (quantization, RAG, robotics)
+  Note 08: Vision Transformers → compress IMAGES with the same architecture (ViT, DINO, MAE)
+  Note 09: 3D & Video         → compress DEPTH, TIME, and SPACE
+  Note 10: VLMs               → compress VISION + LANGUAGE together (CLIP, LLaVA)
+  Note 11: RL Foundations      → compress REWARD-seeking behavior
+  Note 12: Diffusion & Flow   → compress MULTI-MODAL distributions
+  Note 13: Imitation Learning  → compress DEMONSTRATED behavior
+  Note 14: Robot Data & Eval   → compress PHYSICAL interaction into datasets
   
-  ★ Note 15: VLAs            → compress VISION + LANGUAGE + ACTIONS
-                                into ONE model that can SEE, UNDERSTAND,
-                                and ACT.
+  ★ Note 15: VLAs             → compress VISION + LANGUAGE + ACTIONS
+                                 into ONE model that can SEE, UNDERSTAND,
+                                 and ACT.
 ```
 
 VLAs are the **grand unification** of this curriculum. They show that the

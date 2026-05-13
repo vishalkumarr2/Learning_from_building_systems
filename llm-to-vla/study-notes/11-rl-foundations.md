@@ -337,6 +337,100 @@ a valid demonstration for reaching that location."
 
 ---
 
+## Hands-On: REINFORCE on CartPole
+
+Let's implement the core RL algorithm from scratch:
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+
+try:
+    import gymnasium as gym
+except ImportError:
+    import gym
+
+class PolicyNetwork(nn.Module):
+    """Simple 2-layer policy for CartPole."""
+    def __init__(self, obs_dim=4, act_dim=2, hidden=128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(obs_dim, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, act_dim),
+        )
+    
+    def forward(self, x):
+        return torch.softmax(self.net(x), dim=-1)
+
+def reinforce(env_name="CartPole-v1", episodes=500, gamma=0.99, lr=1e-3):
+    """REINFORCE with baseline (mean return)."""
+    env = gym.make(env_name)
+    policy = PolicyNetwork()
+    optimizer = optim.Adam(policy.parameters(), lr=lr)
+    
+    all_returns = []
+    
+    for ep in range(episodes):
+        obs, _ = env.reset()
+        log_probs, rewards = [], []
+        
+        done = False
+        while not done:
+            obs_t = torch.FloatTensor(obs)
+            probs = policy(obs_t)
+            dist = torch.distributions.Categorical(probs)
+            action = dist.sample()
+            log_probs.append(dist.log_prob(action))
+            
+            obs, reward, terminated, truncated, _ = env.step(action.item())
+            rewards.append(reward)
+            done = terminated or truncated
+        
+        # Compute discounted returns
+        returns = []
+        G = 0
+        for r in reversed(rewards):
+            G = r + gamma * G
+            returns.insert(0, G)
+        returns = torch.tensor(returns)
+        
+        # Baseline: subtract mean return for variance reduction
+        returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+        
+        # Policy gradient loss
+        loss = -sum(lp * G for lp, G in zip(log_probs, returns))
+        
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        
+        ep_return = sum(rewards)
+        all_returns.append(ep_return)
+        if (ep + 1) % 50 == 0:
+            mean_ret = np.mean(all_returns[-50:])
+            print(f"Episode {ep+1:4d} | Mean Return (last 50): {mean_ret:.1f}")
+    
+    env.close()
+    return policy, all_returns
+
+# Run it
+policy, returns = reinforce(episodes=300)
+# CartPole is "solved" at 195+ average return over 100 episodes
+print(f"\nFinal 100-episode average: {np.mean(returns[-100:]):.1f}")
+```
+
+> **Key insight**: The entire REINFORCE algorithm is just:
+> 1. Sample a trajectory using the current policy
+> 2. Compute returns (discounted sum of rewards)
+> 3. Push gradients in the direction of actions that led to high returns
+>
+> This is the foundation that PPO, TRPO, and ultimately RLHF all build upon.
+
+---
+
 ## Key Equations Reference
 
 ### MDP & Value Functions

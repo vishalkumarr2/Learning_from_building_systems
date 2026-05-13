@@ -47,6 +47,42 @@ Build and compare two character-level language models to empirically demonstrate
 - [ ] Generated text samples (500 chars each)
 - [ ] 1-paragraph "Why attention wins" analysis
 
+## Pass Threshold
+To pass this project, you must achieve **all** of the following:
+- Both models train to convergence (loss plateaus)
+- BPC for attention model is lower than LSTM on at least 3/4 sequence lengths
+- Generated samples are recognizable English (not random characters)
+- Written analysis correctly identifies at least 2 reasons attention outperforms RNNs
+- Total rubric score ≥ 70/100
+
+## Directory Structure
+```
+01-rnn-vs-attention/
+├── README.md              ← this file
+├── rnn_vs_attention.ipynb ← main notebook (all code + plots + analysis)
+├── models/
+│   ├── lstm_charlm.py     ← optional: factor out model definitions
+│   └── attention_charlm.py
+├── data/
+│   └── shakespeare.txt    ← auto-downloaded by notebook
+├── checkpoints/           ← saved model weights
+└── figures/               ← exported plots for report
+```
+
+## Getting Started
+```bash
+# From the project directory
+mkdir -p models data checkpoints figures
+
+# Download Shakespeare corpus (same as Exercise 01)
+python -c "
+import urllib.request
+url = 'https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt'
+urllib.request.urlretrieve(url, 'data/shakespeare.txt')
+print(f'Downloaded {len(open(\"data/shakespeare.txt\").read()):,} characters')
+"
+```
+
 ## Suggested Approach
 1. Start from your Day 3 LSTM code
 2. Build a minimal self-attention block (just Q, K, V with causal mask)
@@ -54,7 +90,15 @@ Build and compare two character-level language models to empirically demonstrate
 4. Run all 5 experiments
 5. Write analysis
 
+## Tips
+- Use the **same** character vocabulary for both models — don't let tokenization differences confound results
+- Log gradient norms per layer with `torch.nn.utils.clip_grad_norm_` (set max_norm high to observe, not clip)
+- For BPC: `bpc = loss / math.log(2)` — this is bits per character
+- The attention model should clearly win on longer sequences (200+) — if it doesn't, check your causal mask
+- Keep batch size and learning rate identical; only the model architecture should differ
+
 ## Stretch Goals
 - Add a GRU model as Model C
 - Test on code (Python) vs natural language — does the gap change?
 - Implement beam search decoding for both models
+- Plot attention weights to visualize what the attention model learns

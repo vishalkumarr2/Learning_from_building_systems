@@ -904,17 +904,17 @@ Phase I   (Notes 1-3):   Foundations
 Phase II  (Notes 4-5):   Architectures
   "How to process structured data" — CNNs for space, RNNs/attention for time
 
-Phase III (Notes 6-7):   Language
-  "How to compress all of language" — transformers, pretraining
+Phase III (Notes 5-7):   Language Models
+  "How to compress all of language" — GPT, scaling, training, alignment, engineering
 
-Phase IV  (Notes 8-9):   Alignment
-  "How to make models useful" — fine-tuning, RLHF
+Phase IV  (Notes 8-9):   Vision
+  "How to see" — ViT, DINO, MAE, 3D vision, video understanding
 
 Phase V   (Note 10):     Vision-Language
-  "How to see AND speak" — CLIP, VLMs, multi-modal transformers
+  "How to see AND speak" — CLIP, SigLIP, LLaVA, Flamingo
 
 Phase VI  (Notes 11-14): Robot Learning
-  "How to move" — RL, imitation, diffusion policy
+  "How to move" — RL, diffusion, imitation learning, robot data
 
 Phase VII (Notes 15-16): VLA & Deployment
   "How to see, speak, AND move" — the grand unification
@@ -1042,25 +1042,25 @@ Track D: Infrastructure
 ```
 The Compression Thread — Complete Map
 
-  Note 1:  Backprop         ─── learn to compress error signals
-  Note 2:  Optimizers       ─── compress search over weight space
-  Note 3:  Regularization   ─── compress model complexity
-  Note 4:  CNNs             ─── compress spatial patterns
-  Note 5:  Sequences        ─── compress temporal patterns
-  Note 6:  Transformers     ─── compress arbitrary relations
-  Note 7:  Pretraining      ─── compress all of language
-  Note 8:  Fine-tuning      ─── compress to specific tasks
-  Note 9:  RLHF             ─── compress human preferences
-  Note 10: VLMs             ─── compress vision + language
-  Note 11: RL               ─── compress reward-seeking behavior
-  Note 12: Robot Learning   ─── compress physical interaction
-  Note 13: Imitation        ─── compress demonstrated behavior
-  Note 14: Diffusion        ─── compress multi-modal distributions
-  Note 15: VLAs             ─── compress vision + language + action
+  Note 01: DL Foundations    ─── learn to compress error signals (backprop, CNNs, RNNs)
+  Note 02: Attention         ─── compress WHICH inputs matter
+  Note 03: Transformer Arch  ─── compress arbitrary relations via self-attention
+  Note 04: Variants          ─── compress efficiently (Flash Attention, MoE, tokenization)
+  Note 05: GPT & Scaling     ─── compress all of language, and scale it
+  Note 06: Training & RLHF   ─── compress human preferences (SFT → DPO)
+  Note 07: LLM Engineering   ─── compress to deployment (quantization, RAG, robotics)
+  Note 08: Vision Transformers ── compress images with the same architecture
+  Note 09: 3D & Video        ─── compress depth, time, and space
+  Note 10: VLMs              ─── compress vision + language (CLIP, LLaVA)
+  Note 11: RL Foundations     ─── compress reward-seeking behavior
+  Note 12: Diffusion & Flow  ─── compress multi-modal distributions
+  Note 13: Imitation Learning ── compress demonstrated behavior
+  Note 14: Robot Data & Eval ─── compress physical interaction into datasets
+  Note 15: VLAs              ─── compress vision + language + action
   
-  ★ Note 16: Deployment     ─── compress research into REALITY
-                                The final compression:
-                                from papers to working robots.
+  ★ Note 16: Deployment      ─── compress research into REALITY
+                                  The final compression:
+                                  from papers to working robots.
 ```
 
 The ultimate lesson of this curriculum:

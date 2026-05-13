@@ -1032,7 +1032,10 @@ If you fail any of these: spend 2 days on Karpathy's "micrograd" video first.
 
 **Phase VI Checkpoint (answer without notes):**
 - [ ] Explain PPO's clipped objective. Why is it used for RLHF?
+- [ ] What is the REINFORCE policy gradient? Write the loss formula.
 - [ ] How does Diffusion Policy generate robot actions? Why is it better than BC for multimodal actions?
+- [ ] Explain the forward (noising) and reverse (denoising) process in DDPM. What does the model predict?
+- [ ] What is flow matching and how does it differ from diffusion? Why is it faster at inference?
 - [ ] What is action tokenization? How does RT-2 convert continuous actions to tokens?
 - [ ] Explain ACT: what is action chunking and why does it help?
 - [ ] What makes a good robot demonstration dataset? Name 4 criteria.

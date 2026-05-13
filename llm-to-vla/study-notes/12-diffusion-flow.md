@@ -424,6 +424,112 @@ increasingly popular for robotics applications.
 
 ---
 
+## Hands-On: Minimal 2D Diffusion Model
+
+Let's implement the core of DDPM — the forward noising and reverse denoising:
+
+```python
+import torch
+import torch.nn as nn
+import numpy as np
+
+class SimpleDenoisingNet(nn.Module):
+    """Predicts noise ε given noisy input x_t and timestep t."""
+    def __init__(self, data_dim=2, hidden=256, T=100):
+        super().__init__()
+        self.time_embed = nn.Embedding(T, hidden)
+        self.net = nn.Sequential(
+            nn.Linear(data_dim + hidden, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, data_dim),
+        )
+    
+    def forward(self, x_t, t):
+        t_emb = self.time_embed(t)
+        return self.net(torch.cat([x_t, t_emb], dim=-1))
+
+class SimpleDDPM:
+    """Minimal DDPM for 2D data."""
+    def __init__(self, T=100, beta_start=1e-4, beta_end=0.02):
+        self.T = T
+        self.betas = torch.linspace(beta_start, beta_end, T)
+        self.alphas = 1.0 - self.betas
+        self.alpha_bars = torch.cumprod(self.alphas, dim=0)
+        
+        self.model = SimpleDenoisingNet(T=T)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-3)
+    
+    def forward_process(self, x_0, t):
+        """q(x_t | x_0) = N(sqrt(ᾱ_t) * x_0, (1-ᾱ_t) * I)"""
+        alpha_bar_t = self.alpha_bars[t].unsqueeze(-1)
+        noise = torch.randn_like(x_0)
+        x_t = torch.sqrt(alpha_bar_t) * x_0 + torch.sqrt(1 - alpha_bar_t) * noise
+        return x_t, noise
+    
+    def train_step(self, x_0):
+        """One training step: predict the noise that was added."""
+        t = torch.randint(0, self.T, (x_0.shape[0],))
+        x_t, noise = self.forward_process(x_0, t)
+        noise_pred = self.model(x_t, t)
+        loss = nn.functional.mse_loss(noise_pred, noise)
+        
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return loss.item()
+    
+    @torch.no_grad()
+    def sample(self, n_samples=200):
+        """Reverse process: start from noise, iteratively denoise."""
+        x = torch.randn(n_samples, 2)
+        for t in reversed(range(self.T)):
+            t_batch = torch.full((n_samples,), t, dtype=torch.long)
+            noise_pred = self.model(x, t_batch)
+            
+            beta_t = self.betas[t]
+            alpha_t = self.alphas[t]
+            alpha_bar_t = self.alpha_bars[t]
+            
+            # DDPM sampling formula
+            x = (1 / torch.sqrt(alpha_t)) * (
+                x - (beta_t / torch.sqrt(1 - alpha_bar_t)) * noise_pred
+            )
+            if t > 0:
+                x += torch.sqrt(beta_t) * torch.randn_like(x)
+        return x
+
+# Generate training data: mixture of 4 Gaussians (a simple 2D distribution)
+def make_moons_data(n=1000):
+    """2D crescent moon dataset."""
+    from sklearn.datasets import make_moons
+    X, _ = make_moons(n_samples=n, noise=0.05)
+    return torch.FloatTensor(X)
+
+# Train
+ddpm = SimpleDDPM(T=100)
+data = make_moons_data(2000)
+
+for epoch in range(200):
+    idx = torch.randperm(len(data))[:256]
+    loss = ddpm.train_step(data[idx])
+    if (epoch + 1) % 50 == 0:
+        print(f"Epoch {epoch+1:3d} | Loss: {loss:.4f}")
+
+# Sample from the learned distribution
+samples = ddpm.sample(500)
+print(f"Generated {len(samples)} samples, shape: {samples.shape}")
+# To visualize: plt.scatter(samples[:,0], samples[:,1], alpha=0.5)
+```
+
+> **Key insight**: The diffusion model learns to reverse a *known* noising process.
+> Training = predict the noise ε that was added. Sampling = iteratively subtract
+> predicted noise. This same principle, applied to robot actions instead of 2D
+> points, gives us **Diffusion Policy** (Note 13-14).
+
+---
+
 ## Key Equations Reference
 
 ### DDPM Forward Process

@@ -200,6 +200,31 @@ compare_depth_models(get_warehouse_image())
 
 ## Exercise 2: Video Understanding (1.5 hours)
 
+### Video Setup
+
+> **Note**: Exercises below reference video files. Use this helper to generate a synthetic video
+> if you don't have real robot footage. Requires `opencv-python` (`pip install opencv-python`).
+
+```python
+import cv2
+
+def get_sample_video(filename="sample_video.mp4", n_frames=30):
+    """Generate a synthetic video for exercise purposes."""
+    import cv2
+    import numpy as np
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(filename, fourcc, 10, (320, 240))
+    for i in range(n_frames):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        # Moving circle simulates a robot arm
+        cx = int(160 + 100 * np.sin(2 * np.pi * i / n_frames))
+        cy = int(120 + 60 * np.cos(2 * np.pi * i / n_frames))
+        cv2.circle(frame, (cx, cy), 20, (0, 255, 0), -1)
+        out.write(frame)
+    out.release()
+    return filename
+```
+
 ### 2.1 Frame Extraction and Temporal Analysis
 
 ```python
@@ -221,7 +246,7 @@ def extract_and_analyze_frames(video_path, sample_rate=5):
     """
     pass
 
-# extract_and_analyze_frames("robot_operation.mp4")
+# extract_and_analyze_frames(get_sample_video("robot_operation.mp4"))
 ```
 
 ### 2.2 Simple Motion Detection
@@ -245,7 +270,7 @@ def motion_detection(video_path, threshold=30):
     """
     pass
 
-# motion_detection("robot_operation.mp4")
+# motion_detection(get_sample_video("robot_operation.mp4"))
 ```
 
 ### 2.3 DINOv2 Temporal Feature Analysis
@@ -290,7 +315,7 @@ def run_video_mae(video_path, n_frames=16):
     """
     pass
 
-# run_video_mae("robot_picking.mp4")
+# run_video_mae(get_sample_video("robot_picking.mp4", n_frames=16))
 ```
 
 ---

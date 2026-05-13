@@ -67,7 +67,7 @@ print("✓ All packages installed")
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
-MODEL_NAME = "meta-llama/Llama-3.2-1B"  # or "TinyLlama/TinyLlama-1.1B-step-50K-105b"
+MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"  # Ungated model - no HF approval needed. For Llama-3.2-1B, request access at huggingface.co/meta-llama
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForCausalLM.from_pretrained(
@@ -287,6 +287,8 @@ for prompt in test_prompts:
 
 ### 3.1 Create Preference Pairs
 
+> **Note**: This is a mechanics demonstration with toy data. Real DPO training requires thousands of preference pairs. The goal here is to understand the training loop, not to achieve meaningful alignment.
+
 ```python
 # Create synthetic preference pairs
 # In practice, use human-annotated data or AI-generated preferences
@@ -412,7 +414,7 @@ import time
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-MODEL_NAME = "meta-llama/Llama-3.2-1B"
+MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"  # Ungated model - no HF approval needed. For Llama-3.2-1B, request access at huggingface.co/meta-llama
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token

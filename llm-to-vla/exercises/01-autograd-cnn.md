@@ -1029,7 +1029,7 @@ def experiment_fp16_no_scaling():
         optimizer.step()
 
     monitor.plot('Failure: FP16 No Loss Scaling')
-    print(f"\nFix: Use torch.cuda.amp.GradScaler()")
+    print(f"\nFix: Use torch.amp.GradScaler('cuda')")
     return monitor
 ```
 
@@ -1057,7 +1057,7 @@ def experiment_proper_training():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = ResNet(use_residuals=True).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.01)
-    scaler = torch.cuda.amp.GradScaler()  # FP16 loss scaling
+    scaler = torch.amp.GradScaler('cuda')  # FP16 loss scaling
     criterion = nn.CrossEntropyLoss()
     monitor = TrainingMonitor()
 
@@ -1082,7 +1082,7 @@ def experiment_proper_training():
         inputs, targets = inputs.to(device), targets.to(device)
 
         optimizer.zero_grad()
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast('cuda'):
             outputs = model(inputs)
             loss = criterion(outputs, targets)
 
@@ -1106,7 +1106,7 @@ def experiment_proper_training():
 □ Learning rate warmup (linear, 5-10% of total steps)
 □ Cosine or linear decay schedule
 □ Gradient clipping (max_norm=1.0)
-□ Loss scaling for FP16 (torch.cuda.amp.GradScaler)
+□ Loss scaling for FP16 (torch.amp.GradScaler)
 □ Weight decay (AdamW, not Adam with L2)
 □ Gradient accumulation for effective large batch
 □ Monitor gradient norms every N steps
