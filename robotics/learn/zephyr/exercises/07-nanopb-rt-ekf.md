@@ -148,7 +148,7 @@ of elements controls:
 For a 6-DOF IMU (accelerometer + gyroscope, no magnetometer), which elements should be `true`?
 Write the complete `imu0_config` line.
 
-> **Hint for AMR context:** Enabling accelerometer fusion on a flat-floor AMR is a known
+> **Hint for OKS context:** Enabling accelerometer fusion on a flat-floor AMR is a known
 > footgun. Explain why a Z-axis accelerometer reading from a robot crossing a tile gap can
 > trigger `COLLISION_DETECTED`, and whether this means accel fusion should be enabled or
 > disabled in `imu0_config` for a ground robot.

@@ -61,6 +61,11 @@ Meanwhile, an interrupt takes:
 - Plus your ISR code execution time
 - Plus DMA arm time
 
+> **Latency layers:** There are two distinct latencies here:
+> - **Bare-metal IRQ latency** (DMA TC interrupt → first ISR instruction): ~25–500 ns on Cortex-M7 at 480 MHz (12 cycles minimum; cache miss on vector fetch can add ~300 ns).
+> - **Zephyr thread wake latency** (ISR posts semaphore → packer thread runs): ~5–50 µs, depending on scheduler load and context switch overhead.
+> The timing diagram above shows the IRQ layer (~1.5 µs is a realistic worst case including vector fetch). The "1–10 µs" figure in the text refers to the combined Zephyr scheduling layer. The DMA pre-arm approach sidesteps both by having data ready before CS asserts.
+
 **The math for why you cannot arm DMA in the CS interrupt:**
 
 ```
@@ -531,7 +536,7 @@ Layer 3: Sequence number — count dropped frames
   Handles: Performance monitoring, helps distinguish "Jetson missing frames" from "STM32 not sending"
 ```
 
-**The sequence number is critical for the robot debugging.** When the Jetson's navigation stack misbehaves, you want to know: "Is the IMU data arriving intact?" A seq counter lets you answer "we dropped 0 frames" or "we dropped 3 frames per second" — immediately distinguishing SPI transport problems from nav algorithm problems.
+**The sequence number is critical for OKS debugging.** When the Jetson's navigation stack misbehaves, you want to know: "Is the IMU data arriving intact?" A seq counter lets you answer "we dropped 0 frames" or "we dropped 3 frames per second" — immediately distinguishing SPI transport problems from nav algorithm problems.
 
 ---
 

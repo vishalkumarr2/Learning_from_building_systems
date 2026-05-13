@@ -7,7 +7,7 @@
 
 **A1.** Explain why you use an interrupt-driven ring buffer (`uart_irq_callback_user_data_set`) instead
 of polling `uart_fifo_read()` in a tight loop for GPS reception. What happens to your 100Hz
-line-sensor DMA if you poll UART?
+sensorbar DMA if you poll UART?
 
 <details><summary>Answer</summary>
 

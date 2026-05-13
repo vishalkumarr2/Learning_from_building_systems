@@ -332,12 +332,12 @@ auto above_ground = points
     | views::transform(&Point::z);
 ```
 
-### Line-Sensor Data
+### Sensorbar Data
 
 ```cpp
-// Process only reliable line-sensor frames
+// Process only reliable sensorbar frames
 auto reliable_frames = all_frames
-    | views::filter(&Line-SensorFrame::is_reliable)
+    | views::filter(&SensorbarFrame::is_reliable)
     | views::transform([](const auto& f) { return f.reflectance; });
 ```
 

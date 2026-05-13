@@ -758,152 +758,16 @@ Trajectory Critics:
 
 Key parameters:
   max_vel_x: 0.5         # max forward speed (m/s)
-  max_vel_theta: 1.0     # max rotation speed (rad/s)
-  sim_time: 1.7          # seconds to roll out each sampled trajectory
-  vx_samples: 20         # how many forward-speed samples
-  vtheta_samples: 20     # how many rotation-speed samples
+  min_vel_x: -0.1        # allows slight backward motion
+  max_vel_theta: 1.0     # max angular velocity (rad/s)
+  vx_samples: 20         # number of vx samples → affects CPU
+  vtheta_samples: 20     # number of vθ samples
 ```
 
-If `sim_time` is too low, the controller can't see far enough ahead — it may choose a trajectory that looks safe in the next 0.5s but collides 0.6s later.
-
-If `sim_time` is too high, the controller becomes over-conservative — every trajectory appears risky because it extrapolates too far.
-
-### RPP (Regulated Pure Pursuit)
-
-RPP picks a lookahead point on the path and steers toward it. It is:
-- smoother than DWB
-- simpler to tune
-- often better for Ackermann or high-speed robots
-
-Key idea: closer lookahead = sharper path following but more oscillation; farther lookahead = smoother path but cuts corners.
-
----
-
-## 4.3 Common Controller Failure Patterns
-
-```
-Robot oscillates left-right in corridor:
-  → PathAlign weight too high, or sim_time too low
-
-Robot cuts corners and clips obstacles:
-  → lookahead too large (RPP), obstacle critic too weak (DWB)
-
-Robot gets stuck rotating in place:
-  → goal tolerance too strict, local costmap sees obstacle at goal pose
-```
-
----
-
-## 4.4 Goal Tolerances
-
-```yaml
-xy_goal_tolerance: 0.25   # meters
-yaw_goal_tolerance: 0.25  # radians (~14°)
-```
-
-If these are too tight, the robot may endlessly re-approach the goal because it can't physically settle within the tolerance.
-
-**Symptom:** robot reaches goal area, then does micro-corrections forever.
-
----
-
-# PART 5 — HOW LOCALIZATION FEEDS NAV2
-
----
-
-## 5.1 `robot_localization` vs `amcl`
-
-```
-AMCL:
-  Input: map + laser scan
-  Output: pose in map frame → /amcl_pose, map → odom TF
-  Purpose: global localization on known map
-
-robot_localization EKF:
-  Input: wheel odom + IMU (+ GPS or other sensors)
-  Output: filtered odom in odom frame → /odometry/filtered
-  Purpose: smooth local motion estimate
-```
-
-Nav2 needs both:
-- **global pose** in `map` frame for planning
-- **smooth local velocity / odom** for the controller
-
-If AMCL is wrong, the planner plans from the wrong place.
-If EKF odom is noisy, the controller can't track smoothly.
-
----
-
-## 5.2 TF Chain Required by Nav2
-
-```
-map → odom → base_link → laser_frame
-```
-
-If any link in that chain is missing or delayed, Nav2 will fail with TF lookup timeouts.
-
-Common failure:
-```bash
-[bt_navigator] Timed out waiting for transform from base_link to map
-```
-
-**Interpretation:** either AMCL not publishing `map → odom`, or timestamps are too old.
-
----
-
-# PART 6 — FIELD DEBUGGING CHECKLIST
-
----
-
-When a navigation failure occurs, inspect in this order:
-
-1. **TF is valid?**
-   ```bash
-   ros2 run tf2_tools view_frames
-   ros2 topic echo /tf
-   ```
-
-2. **Global costmap initialized?**
-   ```bash
-   ros2 topic echo /global_costmap/costmap
-   ```
-
-3. **Planner producing path?**
-   ```bash
-   ros2 topic echo /plan
-   ```
-
-4. **Controller publishing `/cmd_vel`?**
-   ```bash
-   ros2 topic echo /cmd_vel
-   ```
-
-5. **Recovery loop active?**
-   Look for repeated `Spin`, `BackUp`, `ClearEntireCostmap` in logs.
-
-This sequence isolates the failed layer in under 2 minutes.
-
----
-
-## Summary
-
-- **BehaviorTree** decides what to try next
-- **Planner** finds a global path through the global costmap
-- **Controller** turns that path into velocity commands using the local costmap
-- **Localization** supplies the pose and odom that make the rest of Nav2 meaningful
-
-If you understand those four layers, most Nav2 logs stop looking like noise.
-
----
-
-## Practice Exercises
-
-- [Exercise04 — Nav2 Diagnostics](exercises/04-nav2-diagnostics.md)
-- [Exercise05 — Search Costs and Motion Models](exercises/05-search-costs-and-motion-models.md)
-- [Exercise06 — Hybrid-A* and Minimum Turning Radius](exercises/06-hybrid-a-star-and-turning-radius.md)
-- [Exercise07 — Bellman-Ford, Dijkstra, and A* Interview Traps](exercises/07-bellman-ford-dijkstra-a-star-interview-traps.md)
-- [04 — NavFn vs Smac Search Spaces](04-navfn-vs-smac-search-spaces.md)
-- [05 — Holonomic vs Non-Holonomic vs Underactuated](05-holonomic-vs-non-holonomic.md)
+**DWB failure modes:**
+- Robot oscillates: `PathAlign` weight too high, fighting `PathDist`. Balance the weights.
+- Robot stops near obstacles: `ObstacleDist` too aggressive. Reduce `obstacle_scale`.
+- Robot can't rotate in place: `min_speed_xy` > 0. Set to 0.0 for diff-drive.
 
 ### RPP (Regulated Pure Pursuit)
 

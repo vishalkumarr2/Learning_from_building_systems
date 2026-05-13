@@ -1,23 +1,23 @@
 # 05 — Failure Mode Diagnosis
 ### Reading bags like an estimator detective
 
-**Prerequisite:** `01-dead-reckoning.md`, `02-kalman-filter.md`, `03-measurement-models.md`, `04-line-sensor-fusion.md` — you need to understand covariance, what makes it grow, and how line-sensor resets it before you can diagnose why it went wrong.
+**Prerequisite:** `01-dead-reckoning.md`, `02-kalman-filter.md`, `03-measurement-models.md`, `04-sensorbar-fusion.md` — you need to understand covariance, what makes it grow, and how sensorbar resets it before you can diagnose why it went wrong.
 **Unlocks:** The end-to-end RCA workflow. Once you can diagnose any failure mode from a bag alone, you are ready to write post-mortems without guessing.
 
 ---
 
-## Why Should I Care? (AMR Project Context)
+## Why Should I Care? (OKS Project Context)
 
-Every day, robots at Site-A, Site-B, and other sites produce incident bags. They all share a common anatomy: the robot was fine, then something changed, then the estimator status transitioned to something non-OK, then the robot stopped. The `ERROR_STATE_INVALID` error message appears in the ticket and someone has to find out why.
+Every day, robots at Hamamatsu, Sagamihara, and other sites produce incident bags. They all share a common anatomy: the robot was fine, then something changed, then the estimator status transitioned to something non-OK, then the robot stopped. The `ERROR_INVALID_STATE` error message appears in the ticket and someone has to find out why.
 
 Without this material, the investigation stalls at the symptom. You see `status=SLIPPED` and you write "the robot slipped" — but *why* did it slip? Wet floor? Motor driver fault? Bad odom message? Each of those has a completely different fix.
 
 This note gives you the **causal chain vocabulary** to go from the error code all the way back to the physical event.
 
 Specifically, after this note you can answer:
-- **"a bag incident shows ERROR_STATE_INVALID at 03:29. What actually happened?"** → Look for the cov_xx jump 50-100 ms before the stop. If it's sudden → SLIP. If it's gradual → DELOCALIZED. The error message is the same either way.
+- **"a bag incident shows ERROR_INVALID_STATE at 03:29. What actually happened?"** → Look for the cov_xx jump 50-100 ms before the stop. If it's sudden → SLIP. If it's gradual → DELOCALIZED. The error message is the same either way.
 - **"The robot stopped but there was no collision. Why is status=5?"** → EMI on IMU or power supply glitch causes a false gyro spike. Check the omega_z time series.
-- **"Line-Sensor topic is healthy but status=MISSED_LINE_UPDATES. How is that possible?"** → Every measurement is failing the 2-sigma gate. Or every sample has the same timestamp. Topic alive ≠ updates accepted.
+- **"Sensorbar topic is healthy but status=MISSED_LINE_UPDATES. How is that possible?"** → Every measurement is failing the 2-sigma gate. Or every sample has the same timestamp. Topic alive ≠ updates accepted.
 - **"Is status=DELOCALIZED dangerous?"** → No, the robot continues. Only COLLISION is truly terminal. Everything else either recovers or waits.
 
 The the navigation estimator is deliberately transparent about its failures. The status codes are a gift. Most RCA failures are not "the code is wrong" — they are "the sensor gave a bad signal" or "the floor is different from what was assumed."
@@ -38,7 +38,7 @@ When you open an incident bag, you are trying to answer exactly two questions:
               (Sensor fault? Environment? Software? Configuration?)
 ```
 
-Every other thing you observe — velocity profiles, line-sensor rates, log messages — is evidence for answering Question 2. The status code answers Question 1 automatically.
+Every other thing you observe — velocity profiles, sensorbar rates, log messages — is evidence for answering Question 2. The status code answers Question 1 automatically.
 
 > **Key insight:** The status code is an **effect**, not a cause. Writing "root cause: SLIPPED" in a post-mortem is like writing "root cause: the patient's blood pressure dropped." It describes the mechanism, not the trigger. The cause is the wet floor, or the motor driver fault, or the floor wax on Wednesday.
 
@@ -69,8 +69,14 @@ Every failure follows the same three-stage structure:
   │ SPI bus glitch     │ measurements rejected, │ status=8         │
   │ (SPI conflict)     │ no updates despite     │ cov growing      │
   │                    │ topic alive            │                  │
+  ├────────────────────┼────────────────────────┼──────────────────┤
+  │ Off-tape dispatch  │ cov_yy = 0 (constant), │ collision_imu    │
+  │ + sensorbar HW     │ Y drift 0.115m over    │ (no physical     │
+  │ fault (health=-1)  │ 1.26s dead reckoning   │ obstacle)        │
   └────────────────────┴────────────────────────┴──────────────────┘
 ```
+
+> **New failure class (2026-04-23, #105126)**: The last row is a **dead reckoning Y drift** pattern. It is NOT a slip event, NOT a collision in the usual sense, NOT a sensorbar cascade. The estimator's Y covariance is ZERO (not growing) because zero Y measurements arrive during the forward leg — the robot is simply off-tape with a pre-existing HW fault on one bar. After 1.26s of zero Y correction, the robot has drifted 0.115m laterally and triggers `collision_imu` from position deviation alone. See §7 below.
 
 You work **backwards**: from robot behaviour → estimator state → physical event.
 
@@ -93,7 +99,7 @@ Apply this for every failure bag. It takes about 90 seconds once you know what t
           ─────────────────────────────────────────
           a) Velocity:     did cmd_vel or odom/twist/linear.x spike or drop?
           b) Covariance:   did cov_xx / cov_yy jump suddenly or rise slowly?
-          c) Line-Sensor:    did the topic rate drop? did is_reliable flip?
+          c) Sensorbar:    did the topic rate drop? did is_reliable flip?
           d) Odom rate:    are messages still arriving at expected frequency?
 
   STEP 4: Identify the triggering event
@@ -101,7 +107,7 @@ Apply this for every failure bag. It takes about 90 seconds once you know what t
           Sudden velocity drop   → SLIP candidate
           Gyro omega_z spike     → COLLISION candidate
           Covariance slow rise   → DELOCALIZED / dead-reckoning too long
-          Line-Sensor rate drops   → NO_LINE or MISSED_LINE_UPDATES
+          Sensorbar rate drops   → NO_LINE or MISSED_LINE_UPDATES
           Odom messages stop     → MISSING_ODOM
 
   STEP 5: Find the ROOT CAUSE (sensor, environment, software)
@@ -183,7 +189,7 @@ When slip is detected, the estimator immediately sets covariance to effectively 
     cov_theta → INF  (heading completely unknown)
 ```
 
-This is correct: after a slip event, the estimator has no idea where the robot is. The dead-reckoning from the slip point forward is entirely invalid. The only way to recover is to cross a line-sensor line and get an absolute measurement.
+This is correct: after a slip event, the estimator has no idea where the robot is. The dead-reckoning from the slip point forward is entirely invalid. The only way to recover is to cross a sensorbar line and get an absolute measurement.
 
 ## 2.4 Bag Signature: What You See
 
@@ -198,7 +204,7 @@ This is correct: after a slip event, the estimator has no idea where the robot i
     10.10       0.00              INF       4
     10.12       0.00              INF       4
           ...robot stopped via isFinite() check...
-    10.14       ERROR_STATE_INVALID error logged
+    10.14       ERROR_INVALID_STATE error logged
 
     WHAT TO LOOK FOR:
     • Velocity spike THEN sudden drop within 50-100ms
@@ -211,7 +217,7 @@ This is correct: after a slip event, the estimator has no idea where the robot i
 
 SLIPPED is **not terminal**. The robot recovers automatically when:
 
-1. Robot crosses a line-sensor line with good measurement quality
+1. Robot crosses a sensorbar line with good measurement quality
 2. The line measurement provides an absolute position fix
 3. Covariance is reset to the post-measurement value
 4. Status returns to OK
@@ -295,14 +301,14 @@ COLLISION is the only **truly terminal** status. Unlike SLIPPED (which recovers 
 
     Status       Terminal?   Recovery mechanism
     ────────     ─────────   ──────────────────
-    1 DELOCAL.   No          Covariance decreases via line-sensor updates
+    1 DELOCAL.   No          Covariance decreases via sensorbar updates
     2 UNINIT.    No          Initial pose received from localization
     3 NO_LINE    No          Robot moves onto a line
-    4 SLIPPED    No          Crosses line-sensor line with good measurement
+    4 SLIPPED    No          Crosses sensorbar line with good measurement
     5 COLLISION  YES ★       Operator restart / supervised reset only
     6 INIT.ING   No          Initialization completes
     7 MISS.ODOM  No          Odom messages resume
-    8 MISS.UPDS  No          Valid line-sensor measurements resume
+    8 MISS.UPDS  No          Valid sensorbar measurements resume
 ```
 
 The reason COLLISION is terminal: the estimator cannot know the robot's state after an impact. The robot may have been knocked off its path. The floor may have changed. An autonomous recovery attempt without human verification would be dangerous.
@@ -325,10 +331,10 @@ The reason COLLISION is terminal: the estimator cannot know the robot's state af
     • status = 5 appears simultaneously with or within 1 sample of spike
     • cmd_vel goes to zero and stays zero
     • No covariance spike (collision doesn't set cov to INF)
-    • ERROR_STATE_INVALID does NOT fire (different stop path)
+    • ERROR_INVALID_STATE does NOT fire (different stop path)
 ```
 
-## 3.4 Collision vs ERROR_STATE_INVALID
+## 3.4 Collision vs ERROR_INVALID_STATE
 
 This is a common confusion point:
 
@@ -363,7 +369,7 @@ This is a common confusion point:
     isFinite() check fails (cov_xx = INF)
            │
            ▼
-    ERROR_STATE_INVALID logged
+    ERROR_INVALID_STATE logged
            │
            ▼
     Robot stops safely
@@ -424,7 +430,7 @@ DELOCALIZED occurs when the estimator's position uncertainty grows large enough 
 
 ## 4.2 Trigger: Slow Covariance Growth
 
-Unlike SLIPPED (sudden), DELOCALIZED is **gradual**. Covariance grows continuously during dead-reckoning (between line-sensor line crossings) because:
+Unlike SLIPPED (sudden), DELOCALIZED is **gradual**. Covariance grows continuously during dead-reckoning (between sensorbar line crossings) because:
 
 ```
     PREDICTION STEP (each odom sample):
@@ -435,7 +441,7 @@ Unlike SLIPPED (sudden), DELOCALIZED is **gradual**. Covariance grows continuous
                                    ↑
                     This term adds noise every step.
                     It never subtracts.
-                    Without line-sensor corrections, cov grows monotonically.
+                    Without sensorbar corrections, cov grows monotonically.
 
     TIME BETWEEN LINE CROSSINGS vs COVARIANCE:
     ═══════════════════════════════════════════
@@ -455,7 +461,7 @@ Unlike SLIPPED (sudden), DELOCALIZED is **gradual**. Covariance grows continuous
       0    2    4    6    8   10   12   14   16
 
     Each × = one odom sample adding motion noise.
-    Line-Sensor crossing would RESET cov back to small value.
+    Sensorbar crossing would RESET cov back to small value.
     Long gap between line crossings → monotonic growth → DELOCALIZED.
 ```
 
@@ -473,7 +479,7 @@ Unlike SLIPPED (sudden), DELOCALIZED is **gradual**. Covariance grows continuous
     Duration before  Many seconds (5-30s      Microseconds: velocity
     status change    typical)                 event → immediate status change
 
-    Recovery         Automatic: any line-sensor Same: needs line-sensor
+    Recovery         Automatic: any sensorbar Same: needs sensorbar
                      crossing fixes it        crossing
 
     Operation        Robot continues, reduced Robot stops via isFinite()
@@ -500,10 +506,10 @@ Unlike SLIPPED (sudden), DELOCALIZED is **gradual**. Covariance grows continuous
                                  Did line get removed from map? Was it
                                  never in the map?
 
-    Line-Sensor offline            is_reliable = False during the period.
-    (temporary failure)          Check line-sensor topic rate.
+    Sensorbar offline            is_reliable = False during the period.
+    (temporary failure)          Check sensorbar topic rate.
 
-    Lines not reflective         Line-Sensor detects nothing despite lines
+    Lines not reflective         Sensorbar detects nothing despite lines
     enough (dirty floor)         being present. is_reliable=True but
                                  no measurements arrive. → leads to
                                  MISSED_LINE_UPDATES first, then DELOCALIZED.
@@ -519,7 +525,7 @@ Unlike SLIPPED (sudden), DELOCALIZED is **gradual**. Covariance grows continuous
 
 ## 5.1 No_Line: Robot Cannot See Any Lines
 
-NO_LINE means the line-sensor is functioning but reporting that no floor lines are visible. This typically means:
+NO_LINE means the sensorbar is functioning but reporting that no floor lines are visible. This typically means:
 
 ```
     NO_LINE CAUSES AND GEOMETRIES
@@ -536,7 +542,7 @@ NO_LINE means the line-sensor is functioning but reporting that no floor lines a
 
                             ● ← robot is HERE (off path)
 
-    The line-sensor correctly reports no lines — there are none under it.
+    The sensorbar correctly reports no lines — there are none under it.
     This is NOT a sensor failure. It is a navigation failure upstream
     (robot drove off path, map was wrong, path planning error).
 
@@ -546,9 +552,9 @@ NO_LINE means the line-sensor is functioning but reporting that no floor lines a
     Line map doesn't cover this area. If the robot is supposed
     to be here, the map needs to be updated.
 
-    CAUSE 3: Line-Sensor height wrong / floor gap
+    CAUSE 3: Sensorbar height wrong / floor gap
     ──────────────────────────────────────────────────────────────
-    Floor dip or line-sensor mounting issue puts sensor too far
+    Floor dip or sensorbar mounting issue puts sensor too far
     from floor. Works normally except at this one location.
 ```
 
@@ -560,12 +566,12 @@ MISSED_LINE_UPDATES (status=8) is the most commonly misdiagnosed failure mode. T
     MISSED_LINE_UPDATES — WHAT MAKES IT HARD TO DIAGNOSE
     ══════════════════════════════════════════════════════
 
-    Symptom surface:  ERROR_STATE_INVALID (same as SLIPPED)
+    Symptom surface:  ERROR_INVALID_STATE (same as SLIPPED)
                       Covariance growing (same as DELOCALIZED)
 
     What's different:
     ┌──────────────────────────────────────────────────────────────┐
-    │  Topic: /line-sensor/detections                                │
+    │  Topic: /sensorbar/detections                                │
     │  Rate: 100 Hz (looks completely healthy)                     │
     │  is_reliable: True                                           │
     │                                                              │
@@ -587,7 +593,7 @@ The EKF measurement update includes an **innovation gate** (chi-squared test). A
     INNOVATION GATE CHECK
     ══════════════════════
 
-    For each line-sensor measurement z:
+    For each sensorbar measurement z:
         innovation = z - H × x_predicted
 
         Mahalanobis distance:
@@ -603,7 +609,7 @@ The EKF measurement update includes an **innovation gate** (chi-squared test). A
        - After slip, position is off by large amount
        - Every real measurement looks like an outlier
 
-    2. Line-Sensor reports wrong line positions:
+    2. Sensorbar reports wrong line positions:
        - SPI conflict producing corrupted measurements
        - Line coordinates systematically shifted
 
@@ -622,7 +628,7 @@ The EKF measurement update includes an **innovation gate** (chi-squared test). A
                 Start: status=8 or cov growing despite topic alive?
                               │
                               ▼
-              Is /line-sensor/detections publishing at normal rate?
+              Is /sensorbar/detections publishing at normal rate?
               ┌───────────────────────────────────────────────────┐
               │ YES (rate OK)                  NO (rate dropped)   │
               └───────────────────────────────────────────────────┘
@@ -630,18 +636,18 @@ The EKF measurement update includes an **innovation gate** (chi-squared test). A
                      ▼                                   ▼
          Is is_reliable = True?                  Status = NO_LINE (3)
               │                                  Physical: off path or
-              ▼                                  line-sensor mounting
+              ▼                                  sensorbar mounting
           YES → MISSED_LINE_UPDATES (8)
                 Check: SPI error logs?
                 Check: measurement timestamps duplicated?
                 Check: estimator position vs map (is it plausible?)
 
-          NO  → Line-Sensor temporarily offline
+          NO  → Sensorbar temporarily offline
                 Check: SPI bus conflict, cable, power
                 This leads to DELOCALIZED as cov grows
 ```
 
-> **Key insight:** The topic being alive (rate=100Hz, is_reliable=True) is **necessary but not sufficient** for updates to be accepted. You must also verify that measurements are passing the innovation gate. This requires looking at the estimator's internal logging, not just the line-sensor topic.
+> **Key insight:** The topic being alive (rate=100Hz, is_reliable=True) is **necessary but not sufficient** for updates to be accepted. You must also verify that measurements are passing the innovation gate. This requires looking at the estimator's internal logging, not just the sensorbar topic.
 
 ---
 
@@ -727,7 +733,7 @@ UNINITIALIZED (status=2) means the estimator has never received an initial pose.
 
 ---
 
-# PART 7 — ERROR_STATE_INVALID
+# PART 7 — ERROR_INVALID_STATE
 
 ## 7.1 Where It Comes From: Not the Estimator
 
@@ -735,7 +741,7 @@ This is the most important architectural fact in this entire document:
 
 ```
     ╔══════════════════════════════════════════════════════════╗
-    ║  ERROR_STATE_INVALID                          ║
+    ║  ERROR_INVALID_STATE                          ║
     ║  is logged by                          ║
     ║  NOT by                                     ║
     ║                                                          ║
@@ -764,7 +770,7 @@ In ``, the `executePoseGoal()` function (around ) contains:
                        && isFinite(estimated_state.cov_theta);
 
     if (!state_is_valid) {
-        log_error("ERROR_STATE_INVALID");
+        log_error("ERROR_INVALID_STATE");
         // stop robot, do not proceed
         return;
     }
@@ -789,14 +795,14 @@ In practice, from the estimator code:
     cov_yy          YES ★             When SLIPPED → set to INF explicitly
     cov_theta       YES ★             When SLIPPED → set to INF explicitly
 
-    The most common cause of ERROR_STATE_INVALID
+    The most common cause of ERROR_INVALID_STATE
     is SLIPPED + robot attempting next motion command.
 ```
 
 ## 7.4 The Causal Chain for the Most Common Case
 
 ```
-    MOST COMMON SEQUENCE LEADING TO ERROR_STATE_INVALID
+    MOST COMMON SEQUENCE LEADING TO ERROR_INVALID_STATE
     ════════════════════════════════════════════════════════════════
 
     T=0.00s   Robot driving normally, cov_xx=0.001
@@ -809,12 +815,12 @@ In practice, from the estimator code:
     T=0.10s   Planner sends next motion goal
     T=0.10s    calls executePoseGoal()
     T=0.10s   isFinite(cov_xx) returns FALSE      (INF fails isFinite)
-    T=0.10s   ERROR_STATE_INVALID logged
+    T=0.10s   ERROR_INVALID_STATE logged
     T=0.10s   Robot stops safely
 
     ROOT CAUSE: wet floor
     MECHANISM: slip → cov→INF → isFinite fails
-    ERROR MESSAGE: ERROR_STATE_INVALID
+    ERROR MESSAGE: ERROR_INVALID_STATE
     VISIBLE SYMPTOM: robot stopped
 ```
 
@@ -845,7 +851,7 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
     Outcome: SAFE STOP
 ```
 
-> **Key insight:** `ERROR_STATE_INVALID` is not a bug. It is the correct safety response to a corrupted estimator state. **The bug is what caused the state to become corrupted.** Your RCA must go one level deeper.
+> **Key insight:** `ERROR_INVALID_STATE` is not a bug. It is the correct safety response to a corrupted estimator state. **The bug is what caused the state to become corrupted.** Your RCA must go one level deeper.
 
 ---
 
@@ -859,7 +865,7 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
 
     □ 1. List all topics in the bag
          rosbag info <bagfile>
-         Look for: /estimated_state, /odom, /line-sensor/detections,
+         Look for: /estimated_state, /odom, /sensorbar/detections,
                    /cmd_vel, /imu/data, /rosout
 
     □ 2. Get time bounds
@@ -867,7 +873,7 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
          What is the delta?
 
     □ 3. Check topic rates (are any missing or slow?)
-         rostopic hz /line-sensor/detections  (expect ~100Hz)
+         rostopic hz /sensorbar/detections  (expect ~100Hz)
          rostopic hz /odom                  (expect ~50Hz)
          rostopic hz /imu/data              (expect ~100Hz)
 
@@ -900,7 +906,7 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
                               │ NO                        rate fast? → might be 8
                               ▼
               ┌───────────────────────────────┐
-              │  status = 3 (NO_LINE)?        │──YES──► Check line-sensor rate
+              │  status = 3 (NO_LINE)?        │──YES──► Check sensorbar rate
               └───────────────────────────────┘          rate=0? → off path
                               │ NO                        rate>0 with 0 detections
                               ▼                           → blank floor section
@@ -971,7 +977,7 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
 
 ---
 
-# PART 9 — AMR CODE CONNECTION
+# PART 9 — OKS CODE CONNECTION
 
 ## 9.1 Full Causal Chain Table
 
@@ -980,7 +986,7 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
 | SLIPPED (4) | ``<br>`odometryCallback()`  | Rolling velocity window check; decel > max_decel | `cov_xx = cov_yy = cov_theta = INF`<br>`status = 4` | ``<br>`executePoseGoal()` L~160<br>`isFinite()` fails |
 | COLLISION (5) | ``<br>`imuCallback()` | Gyro omega_z > threshold | `status = 5` (terminal) | Dedicated collision stop path (not isFinite) |
 | DELOCALIZED (1) | ``<br>Post-prediction | `cov_xx` or `cov_yy` > delocalized_threshold | `status = 1` | Robot continues; reduced capability |
-| NO_LINE (3) | ``<br>Line-Sensor callback | Line-Sensor reports 0 line detections | `status = 3` | No stop; continues dead-reckoning |
+| NO_LINE (3) | ``<br>Sensorbar callback | Sensorbar reports 0 line detections | `status = 3` | No stop; continues dead-reckoning |
 | MISSED_UPDATES (8) | ``<br>EKF update | All measurements rejected by innovation gate | `status = 8` | No stop; cov grows → may lead to DELOCALIZED |
 | MISSING_ODOM (7) | ``<br>Odom watchdog | No odom message for > timeout | `status = 7` | No stop unless cov crosses threshold |
 | NAV_NOT_FINITE | ``<br>`executePoseGoal()` L~160 | `isFinite()` check on any state field | — | **SAFE STOP** logged as error |
@@ -993,12 +999,12 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
         OK                   = 0,   // All systems normal
         DELOCALIZED          = 1,   // Covariance exceeded threshold
         UNINITIALIZED        = 2,   // No initial pose received
-        NO_LINE              = 3,   // Line-Sensor sees no lines
+        NO_LINE              = 3,   // Sensorbar sees no lines
         SLIPPED              = 4,   // Velocity window check failed → cov→INF
         COLLISION            = 5,   // IMU gyro spike detected (TERMINAL)
         INITIALIZING         = 6,   // Startup state, receiving first pose
         MISSING_ODOM         = 7,   // Odom topic silent > timeout
-        MISSED_LINE_UPDATES  = 8    // Line-Sensor alive but updates rejected
+        MISSED_LINE_UPDATES  = 8    // Sensorbar alive but updates rejected
     };
 ```
 
@@ -1018,7 +1024,7 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
             !std::isfinite(state.cov_xx)  ||
             !std::isfinite(state.cov_yy)  ||
             !std::isfinite(state.cov_theta)) {
-            ROS_ERROR("ERROR_STATE_INVALID");
+            ROS_ERROR("ERROR_INVALID_STATE");
             stopRobot();        // safe stop
             return;             // do NOT issue velocity command
         }
@@ -1051,12 +1057,12 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
     T=0.10s: executePoseGoal() called
     ────────────────────────────
     isFinite(P[0,0]) = isFinite(∞) = FALSE
-    → ERROR_STATE_INVALID
+    → ERROR_INVALID_STATE
     → robot stops
 
-    T=later: Robot crosses a line-sensor line
+    T=later: Robot crosses a sensorbar line
     ────────────────────────────────────────
-    Line-Sensor provides: z = measured_lateral_offset
+    Sensorbar provides: z = measured_lateral_offset
     EKF update: P_new = (I - K×H) × P_old + measurement_noise_term
     With P_old = INF: K is computed differently (large gain)
     After update: P_new = R (measurement covariance only)
@@ -1071,11 +1077,11 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
 | Status | Name | Cov Change | Terminal? | Recovery | Root Cause Hunt |
 |--------|------|-----------|-----------|----------|-----------------|
 | 0 | OK | Normal | — | — | No failure |
-| 1 | DELOCALIZED | Slow rise to threshold | No | Next line crossing | Long gap between lines; line-sensor offline |
+| 1 | DELOCALIZED | Slow rise to threshold | No | Next line crossing | Long gap between lines; sensorbar offline |
 | 2 | UNINITIALIZED | N/A | No | Receive initial pose | Node restart without re-init |
-| 3 | NO_LINE | Slow rise | No | Robot onto a line | Off-path; blank floor; line-sensor height |
+| 3 | NO_LINE | Slow rise | No | Robot onto a line | Off-path; blank floor; sensorbar height |
 | 4 | SLIPPED | **Jumps to INF** | No | Next line crossing | Wet floor; motor driver; corrupt odom |
-| 5 | COLLISION | Irrelevant | **YES** | Human restart | Real impact; EMI; power glitch; floor bump |
+| 5 | COLLISION | Irrelevant | **YES** | Human restart | Real impact; EMI; power glitch; floor bump; **dead reckoning Y drift (see §7b)** |
 | 6 | INITIALIZING | N/A | No | Init completes | Normal startup |
 | 7 | MISSING_ODOM | Slow rise (staleness) | No | Odom resumes | Motor ctrl crash; network; node death |
 | 8 | MISSED_UPDATES | Slow rise | No | Valid measurements | SPI conflict; innovation gate rejections; duplicate timestamps |
@@ -1083,7 +1089,7 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
 **The diagnostic mantra:**
 
 ```
-    ERROR_STATE_INVALID is never the root cause.
+    ERROR_INVALID_STATE is never the root cause.
     SLIPPED is rarely the root cause.
     The root cause is physical: floor, sensor, power, network.
     Work backwards: error → mechanism → physics.
@@ -1094,10 +1100,109 @@ The isFinite() check is an intentional **safety gate**. The philosophy:
 ```
     cov_xx value    Meaning
     ────────────    ────────────────────────────────────────
-    < 0.001         Well-localized (recent line-sensor update)
+    < 0.001         Well-localized (recent sensorbar update)
     0.001 – 0.01    Normal dead-reckoning drift
     0.01 – 0.05     Elevated, approaching DELOCALIZED threshold
     > 0.05          DELOCALIZED (threshold dependent on config)
     1e4 – 1e6       SLIPPED (set explicitly by odometryCallback())
     INF             SLIPPED (set explicitly by odometryCallback())
+    0.000           cov_yy = 0: dead reckoning with ZERO Y input  ← NEW
+                    (all sensorbars off-tape; see §7b below)
 ```
+
+---
+
+# §7b — Dead Reckoning Y Drift → collision_imu (No Obstacle)
+
+> **New failure class documented 2026-04-23 (ticket #105126)**. This is a `status=5` (COLLISION) incident with NO physical obstacle collision, NO slip event, and NO sensorbar cascade. The root cause is accumulated Y position error during zero-Y-constraint dead reckoning.
+
+## What Makes This Different
+
+Every failure mode above causes the estimator status to change first — then robot behaviour changes. In this pattern, the **estimator status stays OK** until `collision_imu` fires. The robot is navigating, odom is healthy, cmd_vel is fine. The silent failure is `cov_yy = 0` — meaning the Kalman filter is receiving ZERO Y measurements during the critical forward travel phase. The robot is on a floor area with no tape under any sensorbar.
+
+## Why cov_yy = 0 Is the Key Diagnostic
+
+In normal operation, `cov_yy` oscillates between:
+- High (~0.005–0.02): prediction phase — dead reckoning in Y
+- Low (~0.0001–0.001): update phase — sensorbar Y correction received
+
+When `cov_yy` is CONSTANT at zero for multiple consecutive samples during movement, there is only one explanation: the Kalman filter is not advancing the covariance estimate because it has frozen in an uninitialized or zero-measurement state. Combined with "Advancing without pose measurements" in rosout, this confirms: no Y measurement is arriving at all.
+
+```
+    NORMAL forward travel (tape under sensorbars):
+    ──────────────────────────────────────────────
+    cov_yy: 0.01 → 0.001 → 0.01 → 0.001 → 0.01 → 0.001  (oscillates)
+                   ↑update     ↑update     ↑update
+                   sensorbar Y correction accepted
+
+    DEAD RECKONING forward travel (no tape under sensorbars):
+    ──────────────────────────────────────────────────────────
+    cov_yy: 0.000e+00   0.000e+00   0.000e+00  (CONSTANT ZERO)
+            ← NO updates → ← NO updates → ← NO updates →
+
+    GROWING covariance (tape visible but Ceres rejecting):
+    ───────────────────────────────────────────────────────
+    cov_yy: 0.001 → 0.005 → 0.012 → 0.031  (slowly rising)
+                                            ← DIFFERENT from zero
+```
+
+The zero-constant pattern means: not "Ceres solved but rejected" — it means the Y-measurement callback was never invoked.
+
+## Required Conditions
+
+All three must be present:
+1. **Pre-existing sensorbar HW fault** — at least one bar has `health = -1` from bag start (not transient)
+2. **Off-tape dispatch** — robot started 1+ meters cross-track from nearest tape (RCS dispatched without checking position)
+3. **Two-leg nav task** — lateral correction leg (loses left/right bars) followed by forward leg (loses front/rear bars)
+
+## Bag Investigation Protocol
+
+```bash
+# 1. Check sensorbar health from bag start
+python3 scripts/analysis/timeline_extract.py <bag> \
+    --topic /robotN/sensorbars \
+    --fields health --window <start> <start+30> --sample-rate 2
+# EXPECT: health=-1 on at least one bar from the very first message
+
+# 2. Check cross-track deviation at nav start
+python3 scripts/analysis/timeline_extract.py <bag> \
+    --topic /robotN/estimated_state \
+    --fields pose.position.x pose.position.y \
+    --window <nav_start-1> <nav_start+0.5> --sample-rate 20
+# EXPECT: Y position significantly different from tape Y coordinate
+
+# 3. Check cov_yy during forward leg
+python3 scripts/analysis/timeline_extract.py <bag> \
+    --topic /robotN/estimated_state \
+    --fields pose.covariance[7] \
+    --window <forward_leg_start> <collision> --sample-rate 20
+# EXPECT: constant 0.000e+00 (not growing — distinguishes from Ceres rejection)
+
+# 4. Find sensorbar loss sequence in rosout
+python3 scripts/analysis/timeline_extract.py <bag> \
+    --topic /rosout \
+    --fields msg --window <nav_start> <collision> \
+    --grep "disabled\|without pose"
+# EXPECT: sequential "disabled N sensors on sensorbar_X" for left → front → rear
+#         and "Advancing without pose measurements" appearing 2+ times
+
+# 5. Confirm no fleet collision
+python3 scripts/analysis/timeline_extract.py <bag> \
+    --topic /robotN/obstacles \
+    --window <collision-5> <collision+1>
+# EXPECT: nearest robot > 2m at collision time
+```
+
+## What the Navigator Sees
+
+The navigator continues sending forward cmd_vel throughout — it has no visibility into `cov_yy`. Only `isFinite()` of covariance triggers a stop, and `cov_yy = 0` passes that check. The robot's Y position in the estimator is drifting from ground truth by ~65mm/s (mecanum lateral slip rate), but the estimator reports a Y covariance of zero — false confidence. After 1+ seconds, the physical robot is 0.1–0.12m off its estimated position.
+
+The collision is triggered by the IMU angular spike when the physically-drifted robot contacts a wall or fixture at low speed (≤0.3 m/s). From the navigator's perspective, this is unexpected — the estimated trajectory was clear.
+
+## Prevention
+
+- **Pre-dispatch health check**: Any robot with `sensorbar_X health = -1` on ANY bar must be pulled from dispatch queue until repaired
+- **Cross-track dispatch guard**: RCS should refuse to dispatch when robot position deviates > 0.5m from expected tape layout
+- **Diagnostic improvement**: Alert when `cov_yy = 0` persists for >500ms during a forward-travel leg (current system does not alarm on this)
+
+**Reference**: `memory/patterns/collision-from-localization-loss.md` §Variant B, `knowledge/cross-system-cascades.md` §1c, `knowledge/systems/oksbot/failure-modes.md` §Off-Tape Dispatch + Pre-Existing Sensorbar HW Fault

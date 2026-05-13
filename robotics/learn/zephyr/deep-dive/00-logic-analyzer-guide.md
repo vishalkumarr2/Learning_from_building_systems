@@ -179,7 +179,7 @@ stream. This is the primary signal for:
 ### 4.4 CAN Decoder Settings
 
 ```
-Bit rate: 500000 (500kbps typical for AMR) or 1000000
+Bit rate: 500000 (500kbps typical for OKS) or 1000000
 Sample point: 75% (default works for most cases)
 ```
 

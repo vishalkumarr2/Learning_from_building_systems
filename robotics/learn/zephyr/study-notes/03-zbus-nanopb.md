@@ -4,7 +4,7 @@
 
 > **Electronics prerequisite:** Understanding the SPI frame framing (header + length + CRC) assumes you've read:
 > - SPI protocol framing → `electronics/05-spi-deep-dive.md` (why raw SPI has no message boundaries)
-> - Serialization concept → `electronics/03-opamps-adc-sampling.md` § Serializer/Deserializer
+> - Serialization concept → Part 2 of this document covers nanopb proto3 encoding (no separate deep-dive yet)
 
 ---
 
@@ -102,6 +102,12 @@ The packer thread, the logger thread, and a new debug-visualizer thread can ALL 
 ```
 
 The IMU thread has zero dependencies on any downstream consumer. Add or remove consumers → zero changes to the publisher.
+
+> ⚠️ **Listener vs Subscriber — critical distinction:**
+> The "walks away immediately" description above applies to **subscribers** (`ZBUS_SUBSCRIBER_DEFINE`) and **message subscribers** (`ZBUS_MSG_SUBSCRIBER_DEFINE`), both of which are asynchronous.
+> If you instead use **`ZBUS_LISTENER_DEFINE`** (callback-based), the callback runs **synchronously inside `zbus_chan_pub()`** — the publisher blocks until every registered listener callback returns.
+> A slow listener in the packer thread **will make your 100Hz IMU thread miss its deadline**.
+> Rule of thumb: **listeners are for lightweight work only** (set a flag, post a semaphore). Any real processing belongs in a subscriber thread.
 
 ---
 
@@ -288,7 +294,7 @@ The last 64 bytes of the buffer are from the PREVIOUS transfer (DMA buffer was n
 The Jetson runs pb_decode on 128 bytes where only 64 are valid → garbage decoded fields.
 ```
 
-This is not a theoretical problem — it appeared in the floor sensor investigation (Case-G). Identical values across 3–4 consecutive 10ms windows is the symptom: the Jetson is reading stale bytes from the DMA buffer.
+This is not a theoretical problem — it appeared in the OKS sensorbar investigation (#98301). Identical values across 3–4 consecutive 10ms windows is the symptom: the Jetson is reading stale bytes from the DMA buffer.
 
 **The fix: explicit `payload_length`:**
 
@@ -484,7 +490,7 @@ t=60ms:  frame.seq=110, accel_x=1.31  ← seq jumped by 5
 
 The seq jump from 105 to 110 tells you 5 notifications were dropped. On the Jetson side if you're not looking at `seq`, you just see 3–4 identical accel_x values — which could look like the sensor is stuck, or like the robot stopped moving.
 
-This is exactly the line-sensor duplicate-reading pattern from incident Case-H: `is_reliable=True` on all readings, but byte-identical consecutive values at 30ms intervals instead of the expected 10ms. Identical values across 3–4 consecutive windows is the diagnostic signature of a dropped notification OR a stale DMA buffer.
+This is exactly the sensorbar duplicate-reading pattern from incident #99185: `is_reliable=True` on all readings, but byte-identical consecutive values at 30ms intervals instead of the expected 10ms. Identical values across 3–4 consecutive windows is the diagnostic signature of a dropped notification OR a stale DMA buffer.
 
 **Prevention:**
 - Size the subscriber queue for burst depth: `ZBUS_SUBSCRIBER_DEFINE(packer_sub, 10)` for 100ms burst tolerance

@@ -172,7 +172,7 @@ arm-zephyr-eabi-addr2line -e build/zephyr/zephyr.elf -f -p 0x08012abc
 
 Output:
 ```
-my_function() at ~/amr/firmware/src/sensor/imu_reader.c:127
+my_function() at ~/oks/firmware/src/sensor/imu_reader.c:127
 ```
 
 This is the exact source line. The `-f` flag shows the function name, `-p` formats it

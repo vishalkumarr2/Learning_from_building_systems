@@ -1,6 +1,6 @@
 # External Resources
 
-Curated external references for the robot learning curriculum.
+Curated external references for the OKS learning curriculum.
 
 **Tag axes** (one per entry):
 - **Domain:** `embedded` `zephyr` `ros2` `navigation` `llm` `electronics` `linux-rt` `python`
@@ -61,11 +61,11 @@ Curated external references for the robot learning curriculum.
 
 ### [nav2 documentation](https://navigation.ros.org/) {#nav2-docs}
 `ros2` `navigation` `reference-manual` `comprehensive` `before-hardware`
-> Nav2 stack: costmaps, planners, controllers, BT navigator. Read §Concepts before touching any AMR navigation code.
+> Nav2 stack: costmaps, planners, controllers, BT navigator. Read §Concepts before touching any OKS navigation code.
 
 ### [AtsushiSakai/PythonRobotics](https://github.com/AtsushiSakai/PythonRobotics) {#python-robotics}
 `robotics` `navigation` `python` `repo` `comprehensive` `hands-on` `intermediate`
-> Python code + textbook for robotics algorithms: EKF, Particle Filter, FastSLAM, A*, RRT, MPC, and more (29 k ★). Run the simulations to build intuition for the same algorithms used in the robot navigation stack before reading estimator source code.
+> Python code + textbook for robotics algorithms: EKF, Particle Filter, FastSLAM, A*, RRT, MPC, and more (29 k ★). Run the simulations to build intuition for the same algorithms used in the OKS navigation stack before reading estimator source code.
 
 ### [MichaelGrupp/evo](https://github.com/MichaelGrupp/evo) {#evo}
 `ros2` `navigation` `python` `repo` `deep-dive` `when-debugging` `intermediate`
@@ -73,7 +73,7 @@ Curated external references for the robot learning curriculum.
 
 ### [henki-robotics/robotics_essentials_ros2](https://github.com/henki-robotics/robotics_essentials_ros2) {#robotics-essentials-ros2}
 `ros2` `course` `comprehensive` `hands-on` `beginner`
-> Hands-on ROS2 + Gazebo course covering SLAM, navigation, and odometry with lab exercises. Good companion or prerequisite for the robot navigation-estimator track.
+> Hands-on ROS2 + Gazebo course covering SLAM, navigation, and odometry with lab exercises. Good companion or prerequisite for the OKS navigation-estimator track.
 
 ### [fkromer/awesome-ros2](https://github.com/fkromer/awesome-ros2) {#awesome-ros2}
 `ros2` `repo` `quickref` `before-hardware` `all-levels`
@@ -81,15 +81,15 @@ Curated external references for the robot learning curriculum.
 
 ### [Kiloreux/awesome-robotics](https://github.com/Kiloreux/awesome-robotics) {#awesome-robotics}
 `robotics` `repo` `quickref` `before-hardware` `all-levels`
-> Aggregated list of robotics courses, textbooks, simulators, competitions, and software libraries (6.4 k ★). Use to map the wider robotics landscape or find learning resources beyond the robot curriculum.
+> Aggregated list of robotics courses, textbooks, simulators, competitions, and software libraries (6.4 k ★). Use to map the wider robotics landscape or find learning resources beyond the OKS curriculum.
 
 ### [mithi/robotics-coursework](https://github.com/mithi/robotics-coursework) {#robotics-coursework}
 `robotics` `course` `comprehensive` `before-hardware` `intermediate`
-> Curated list of robotics course series (Coursera, EdX, university lecture playlists) covering kinematics, dynamics, SLAM, motion planning, and computer vision. Use to find a structured study path before tackling AMR navigation theory. 4.5k ★
+> Curated list of robotics course series (Coursera, EdX, university lecture playlists) covering kinematics, dynamics, SLAM, motion planning, and computer vision. Use to find a structured study path before tackling OKS navigation theory. 4.5k ★
 
 ### [ai-winter/ros_motion_planning](https://github.com/ai-winter/ros_motion_planning) {#ros-motion-planning}
 `navigation` `cpp` `repo` `hands-on` `intermediate`
-> ROS implementations of 20+ path-planning algorithms (A*, JPS, D*, RRT, RRT*, DWA, MPC, TEB, Pure Pursuit) with animated demos. Use to build hands-on intuition for the planners and local controllers before reading AMR navigation source. (ROS1/Noetic) 3.5k ★
+> ROS implementations of 20+ path-planning algorithms (A*, JPS, D*, RRT, RRT*, DWA, MPC, TEB, Pure Pursuit) with animated demos. Use to build hands-on intuition for the planners and local controllers before reading OKS navigation source. (ROS1/Noetic) 3.5k ★
 
 ### [cartographer-project/cartographer](https://github.com/cartographer-project/cartographer) {#cartographer}
 `ros2` `navigation` `repo` `deep-dive` `theory-only` `expert-only`
@@ -110,3 +110,39 @@ Curated external references for the robot learning curriculum.
 ### [PREEMPT_RT wiki](https://wiki.linuxfoundation.org/reallinux/start) {#preempt-rt}
 `linux-rt` `reference-manual` `deep-dive` `when-debugging`
 > RT patch internals, latency tuning, cyclictest interpretation. Use when `07-nanopb-rt-ekf.md` cyclictest results look wrong.
+
+---
+
+## Optimization
+
+### [Boyd & Vandenberghe — Convex Optimization](https://web.stanford.edu/~boyd/cvxbook/) {#cvxbook}
+`optimization` `book` `comprehensive` `theory-only` `intermediate`
+> The canonical convex optimization textbook. Free PDF + lecture slides. Chapters 1-5 cover theory (convex sets, functions, duality); Chapters 6-11 cover algorithms. Essential foundation before tackling MPC formulations or understanding why QP solvers work.
+
+### [ebrahimpichka/awesome-optimization](https://github.com/ebrahimpichka/awesome-optimization) {#awesome-optimization}
+`optimization` `repo` `quickref` `before-implementation` `all-levels`
+> Curated list of optimization courses, textbooks, software, and tutorials across convex, nonlinear, combinatorial, and stochastic optimization. Good starting point for finding resources at any depth level.
+
+### [Ceres Solver Documentation](http://ceres-solver.org/tutorial.html) {#ceres-docs}
+`optimization` `reference-manual` `deep-dive` `when-debugging` `intermediate`
+> Official Ceres tutorial and API reference. Covers cost functions, loss functions, local parameterizations, and solver options. Direct relevance: OKS estimator uses Ceres with Levenberg-Marquardt for sensor calibration and nonlinear least-squares.
+
+### [OSQP — Operator Splitting QP Solver](https://osqp.org/) {#osqp}
+`optimization` `reference-manual` `hands-on` `when-implementing` `intermediate`
+> First-order QP solver used in real-time MPC and embedded control. Documentation covers problem formulation, warm starting, and parameter tuning. Python/C/C++ interfaces. Relevant to OKS MPC velocity planning.
+
+### [CVXPY Documentation](https://www.cvxpy.org/) {#cvxpy}
+`optimization` `reference-manual` `hands-on` `when-implementing` `beginner`
+> Pythonic domain-specific language for convex optimization. Express QP/SOCP/SDP problems in natural math syntax and solve with OSQP/SCS/MOSEK backends. Best tool for rapid prototyping before moving to C++ solvers.
+
+### [g2o — General Graph Optimization](https://github.com/RainerKuemmerle/g2o) {#g2o}
+`optimization` `navigation` `repo` `deep-dive` `theory-only` `expert-only`
+> C++ framework for graph-based nonlinear optimization. Backbone of many SLAM systems (Cartographer, ORB-SLAM2). Implements Gauss-Newton and Levenberg-Marquardt on sparse factor graphs. 3k ★.
+
+### [GTSAM — Georgia Tech Smoothing and Mapping](https://gtsam.org/) {#gtsam}
+`optimization` `navigation` `repo` `deep-dive` `when-implementing` `expert-only`
+> Factor graph library for SLAM, SFM, and sensor fusion. More modern API than g2o with iSAM2 incremental solver. Extensive documentation and SLAM tutorial. 2.8k ★.
+
+### [Nocedal & Wright — Numerical Optimization](https://link.springer.com/book/10.1007/978-0-387-40065-5) {#nocedal-wright}
+`optimization` `book` `comprehensive` `theory-only` `expert-only`
+> Graduate-level reference covering line search, trust region, conjugate gradient, quasi-Newton, constrained optimization, and penalty methods. Deeper algorithmic detail than Boyd. Use when you need to understand why a solver diverges or how to tune step-size strategies.

@@ -218,7 +218,7 @@ Data bytes: `F4 01 0C FE 39 30 00 00`
 - timestamp: bytes [4,7] = 0x39, 0x30, 0x00, 0x00 → uint32 LE = 0x00003039 = **12345 ms**
 
 The robot is spinning in place (left wheel forward, right wheel backward at equal speed).
-A typical AMR AMR maximum speed is ≈ 2000 mm/s; 500 mm/s is a normal operating speed.
+A typical OKS AMR maximum speed is ≈ 2000 mm/s; 500 mm/s is a normal operating speed.
 
 </details>
 

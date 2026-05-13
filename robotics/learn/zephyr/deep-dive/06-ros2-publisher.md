@@ -295,10 +295,10 @@ when you physically rotate the board.
 ## Pre-Read for Session 7
 
 Before `07-estimator-replay.md`:
-1. Review the STUDY-PLAN notes on AMR estimator architecture
-2. Read `knowledge/systems/amr-estimator.md` (if it exists)
+1. Review the STUDY-PLAN notes on OKS estimator architecture
+2. Read `knowledge/systems/oks-estimator.md` (if it exists)
 3. Look at `scripts/analysis/` — what estimator analysis scripts exist?
-4. Review any past RCA in `docs/rca/` mentioning `ESTIMATOR_STATE_INVALID`
+4. Review any past RCA in `docs/rca/` mentioning `NAV_ESTIMATED_STATE_NOT_FINITE`
 
 ---
 
