@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 102: Dynamic Games and Backward Induction](day-102-dynamic-games.md)
 - **Next:** [Day 104: Mechanism Design and Auctions](day-104-mechanism-design.md)
-- [Week 15 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 15 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 Robots in a warehouse interact repeatedly at shared corridors, intersections, and charging stations. A robot that aggressively cuts off others gains short-term speed but faces retaliation tomorrow. The folk theorem guarantees that cooperative norms (yield at intersections, share corridors) can be sustained as equilibria when robots value future interactions — exactly the regime of a permanent fleet.

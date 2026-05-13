@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 97: Zero-Sum Games via LP and Duality](day-97-zero-sum-lp.md)
 - **Next:** [Day 99: Cooperative Games and the Core](../week-15/day-99-cooperative-core.md)
-- [Week 14 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 14 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 This week's tools model every multi-robot interaction as a game: intersection coordination (Day 92), charging station selection (Day 93), stochastic patrol (Day 94), fleet protocols (Day 95), adversarial planning (Day 96), and robust control via LP (Day 97). The complete solver below handles arbitrary $m \times n$ games — the computational backbone for game-theoretic fleet management.

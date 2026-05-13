@@ -990,8 +990,8 @@ VLMs are **multimodal compression engines**. The model compresses vision and lan
 
 The path to VLAs is now clear: take a VLM, add action tokens projected into the same space, train on robot demonstration data, and the transformer's modality-agnostic attention handles the rest.
 
-**Next**: [11-robot-learning-foundations.md](11-robot-learning-foundations.md) — Phase VI begins.
+**Next**: [11-rl-foundations.md](11-rl-foundations.md) — Phase VI begins.
 
 ---
 
-*Previous: [09-detection-segmentation.md](09-detection-segmentation.md) · Next: [11-robot-learning-foundations.md](11-robot-learning-foundations.md)*
+*Previous: [09-3d-video-detection.md](09-3d-video-detection.md) · Next: [11-rl-foundations.md](11-rl-foundations.md)*

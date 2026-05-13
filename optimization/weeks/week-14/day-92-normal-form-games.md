@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 91: Week 13 Capstone](../week-13/day-91-week13-capstone.md)
 - **Next:** [Day 93: Pure-Strategy Nash Equilibrium](day-93-pure-nash.md)
-- [Week 14 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 14 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 Two OKS robots approaching the same intersection must decide: yield or proceed. Each robot's best action depends on the other's choice. This is a coordination game in normal form. Understanding dominance lets the fleet controller prune clearly bad strategies before computing equilibria — reducing the dimension of the decision space for real-time dispatch.

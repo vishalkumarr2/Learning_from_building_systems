@@ -690,3 +690,7 @@ This is a fundamentally different compression strategy:
 The transformer (next note) takes this insight to its logical conclusion: **replace recurrence entirely with attention**. If attention can selectively access any position, why bother with sequential processing at all?
 
 > 💡 **Key Insight**: Attention is the mechanism that makes the compression *selective*. The model doesn't just predict — it learns where to look for the information it needs to predict well. This is the key enabler for scaling to longer contexts and larger models.
+
+---
+
+*Previous: [01-dl-foundations.md](01-dl-foundations.md) · Next: [03-transformer-architecture.md](03-transformer-architecture.md)*

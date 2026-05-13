@@ -9,7 +9,7 @@
 
 | Previous | Up | Next |
 |----------|-----|------|
-| [14 — Diffusion Policy](14-diffusion-policy.md) | [Curriculum](../CURRICULUM.md) | [16 — Deployment & Hybrid](16-deployment-hybrid.md) |
+| [14 — Robot Data & Eval](14-robot-data-eval.md) | [Curriculum](../CURRICULUM.md) | [16 — Deployment & Hybrid](16-deployment-hybrid.md) |
 
 ---
 

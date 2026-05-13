@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 104: Mechanism Design and Auctions](day-104-mechanism-design.md)
 - **Next:** [Day 106: Computing Nash Equilibria](../week-16/day-106-computing-nash.md)
-- [Week 15 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 15 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 This week's tools complete the game-theoretic toolkit for fleet robotics: cooperative games model task coalitions (Day 99), Shapley ensures fair credit (Day 100), bargaining resolves bilateral disputes (Day 101), dynamic games handle sequential decisions (Day 102), repeated games enable cooperative norms (Day 103), and mechanism design creates truthful allocation protocols (Day 104). The review integrates these into a unified BEC scheduling model.

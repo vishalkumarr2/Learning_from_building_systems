@@ -732,4 +732,4 @@ then Phase V combines everything into VLAs (RT-2, OpenVLA, π₀).**
 
 *These notes are part of the LLM-to-VLA curriculum.*
 *Previous: [06 — LLM Training & Alignment](06-llm-training-alignment.md)*
-*Next: Phase IV — Multimodal Models*
+*Next: [08 — Vision Transformers](08-vision-transformers.md)*

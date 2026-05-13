@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 95: Equilibrium Selection](day-95-equilibrium-selection.md)
 - **Next:** [Day 97: Zero-Sum Games via LP and Duality](day-97-zero-sum-lp.md)
-- [Week 14 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 14 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 Adversarial path planning asks: what route should the robot take if nature (or an adversary) places obstacles in the worst-case position? This is a zero-sum game between the robot (maximizing progress) and the adversary (minimizing it). The minimax strategy gives the robot the best *guaranteed* performance — the foundation of robust control.

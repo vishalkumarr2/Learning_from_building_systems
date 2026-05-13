@@ -591,7 +591,7 @@ $$c_t = \sum_s \alpha_{t,s} \cdot h_s$$
 
 Instead of one context vector, we compute a **different** context vector for each decoder step — a weighted combination of ALL encoder states, where the weights are learned based on relevance.
 
-This is the bridge to Study Note 02 (Attention & Transformers).
+This is the bridge to [Study Note 02 (Attention Mechanism)](02-attention-mechanism.md).
 
 ### 4.6 What This Means for VLAs
 
@@ -1282,4 +1282,4 @@ But that's for next time.
 
 ---
 
-> **Navigation**: [← Curriculum Overview](../CURRICULUM.md) · **01 DL Foundations** · [02 Attention & Transformers →](02-attention-transformers.md)
+> **Navigation**: [← Curriculum Overview](../CURRICULUM.md) · **01 DL Foundations** · [02 Attention & Transformers →](02-attention-mechanism.md)

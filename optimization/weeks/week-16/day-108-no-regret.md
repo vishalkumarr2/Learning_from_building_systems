@@ -4,11 +4,11 @@
 > *Guarantee bounded regret regardless of what the environment (or opponents) do — the foundation of online decision-making.*
 
 ## Navigation
-- Previous: [Day 107: Learning in Games — Fictitious Play](day-107-fictitious-play.md)
-- Next: [Day 109: Potential Games and Congestion Games](day-109-congestion-games.md)
-- [Week 16 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Previous:** [Day 107: Learning in Games — Fictitious Play](day-107-fictitious-play.md)
+- **Next:** [Day 109: Potential Games and Congestion Games](day-109-congestion-games.md)
+- **Week:** [Week 16 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 OKS task allocation is an online problem: tasks arrive over time, and robots must choose which to accept without knowing future arrivals. No-regret algorithms guarantee that over time, no robot would have been better off following any fixed strategy — critical for fair, efficient fleet-wide task distribution without central planning.

@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 99: Cooperative Games and the Core](day-99-cooperative-core.md)
 - **Next:** [Day 101: Bargaining Theory](day-101-bargaining.md)
-- [Week 15 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 15 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 When three robots complete a multi-pick order, how much credit does each deserve? The Shapley value answers this: evaluate each robot's marginal contribution across every possible joining order. This same principle powers SHAP values in ML — explaining which sensor or subsystem contributed most to a prediction or fault diagnosis.

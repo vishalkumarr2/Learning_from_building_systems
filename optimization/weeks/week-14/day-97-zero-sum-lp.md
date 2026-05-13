@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 96: Zero-Sum Games and Minimax](day-96-zero-sum-minimax.md)
 - **Next:** [Day 98: Week 14 Review](day-98-week14-review.md)
-- [Week 14 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 14 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 Robust control for an AMR minimizes worst-case cost — a zero-sum game between the controller and disturbances. Casting this as an LP connects to the duality theory from Chapters 4–5: the dual variables are the adversary's optimal strategy, and strong duality guarantees that the robot's guarantee equals the adversary's threat. This is how real-time robust MPC is solved.

@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 92: Normal Form Games and Dominance](day-92-normal-form-games.md)
 - **Next:** [Day 94: Mixed-Strategy Nash Equilibrium](day-94-mixed-nash.md)
-- [Week 14 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 14 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 When multiple robots choose charging stations, a stable assignment is one where no single robot benefits by switching. This is a pure Nash equilibrium of the station-selection game. Finding it avoids oscillation in real-time scheduling — robots converge to a consistent plan without central coordination.

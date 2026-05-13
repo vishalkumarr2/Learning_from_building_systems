@@ -1143,4 +1143,4 @@ If the bitter lesson holds for robotics:
 
 ---
 
-*Next: [06-rlhf-alignment.md](06-rlhf-alignment.md) — RLHF, instruction tuning, and making models follow human intent*
+*Next: [06-llm-training-alignment.md](06-llm-training-alignment.md) — RLHF, instruction tuning, and making models follow human intent*

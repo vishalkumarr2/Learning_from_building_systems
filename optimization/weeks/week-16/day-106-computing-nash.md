@@ -4,11 +4,11 @@
 > *Finding equilibria is fundamentally hard — understanding why shapes how we design real-time robot decision systems.*
 
 ## Navigation
-- Previous: [Day 105: Week 15 Review](../week-15/day-105-week15-review.md)
-- Next: [Day 107: Learning in Games — Fictitious Play](day-107-fictitious-play.md)
-- [Week 16 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Previous:** [Day 105: Week 15 Review](../week-15/day-105-week15-review.md)
+- **Next:** [Day 107: Learning in Games — Fictitious Play](day-107-fictitious-play.md)
+- **Week:** [Week 16 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 When multiple AMRs must compute equilibrium strategies in real-time — for corridor negotiation, charging station allocation, or task bidding — the computational complexity of Nash equilibrium directly limits what's feasible onboard. Understanding PPAD-completeness explains why we rely on approximate or structured equilibria (potential games, zero-sum) rather than general NE computation.

@@ -4,11 +4,11 @@
 > *Synthesize everything: auctions, congestion, robustness, and learning dynamics in a full warehouse fleet simulation.*
 
 ## Navigation
-- Previous: [Day 111: Robust Optimization as Games Against Nature](day-111-robust-optimization.md)
-- Next: [Week 17 Overview](../../../CURRICULUM.md)
-- [Week 16 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Previous:** [Day 111: Robust Optimization as Games Against Nature](day-111-robust-optimization.md)
+- **Next:** End of curriculum
+- **Week:** [Week 16 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 This capstone IS the OKS fleet problem. Robots compete for aisle capacity while collaboratively completing pick-and-deliver orders. The simulation integrates: auction-based task allocation (Day 110), congestion-aware routing (Day 109), robust replanning when corridors are blocked (Day 111), and decentralized learning dynamics (Days 107-108). The Price of Anarchy directly measures the cost of decentralization in the OKS warehouse.

@@ -4,11 +4,11 @@
 > *When selfish agents optimize a shared potential function, decentralized behavior can be surprisingly efficient — or catastrophically wasteful.*
 
 ## Navigation
-- Previous: [Day 108: No-Regret Learning](day-108-no-regret.md)
-- Next: [Day 110: Multi-Robot Games + Adversarial ML](day-110-multi-robot-adversarial.md)
-- [Week 16 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Previous:** [Day 108: No-Regret Learning](day-108-no-regret.md)
+- **Next:** [Day 110: Multi-Robot Games + Adversarial ML](day-110-multi-robot-adversarial.md)
+- **Week:** [Week 16 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 Warehouse aisle routing is a textbook congestion game: each AMR chooses a path, and delay increases with the number of robots on each segment. The Price of Anarchy determines how much worse decentralized routing is compared to a centralized dispatcher. Understanding this gap drives OKS fleet architecture decisions — when to let robots self-route vs. when central coordination is worth the overhead.

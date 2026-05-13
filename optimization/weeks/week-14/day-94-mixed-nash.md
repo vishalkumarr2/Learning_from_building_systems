@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 93: Pure-Strategy Nash Equilibrium](day-93-pure-nash.md)
 - **Next:** [Day 95: Equilibrium Selection](day-95-equilibrium-selection.md)
-- [Week 14 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 14 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 Deterministic robot patrol routes are predictable and exploitable (by adversaries or by congestion). Mixed strategies assign randomized probabilities over routes, ensuring unpredictability. In warehouse pick optimization, stochastic task selection prevents bottlenecks at popular aisles — each robot randomizes according to a mixed NE.

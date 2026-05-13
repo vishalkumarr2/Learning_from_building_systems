@@ -5,7 +5,7 @@
 
 ## Navigation
 - **Previous:** [Day 90: Calibration + Trajectory Interpolation](day-90-calibration-interpolation.md)
-- **Next:** [Week 14 Overview](../README.md)
+- **Next:** [Day 92: Normal Form Games](../week-14/day-92-normal-form-games.md)
 - **Week:** [Week 13 Overview](../README.md)
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)

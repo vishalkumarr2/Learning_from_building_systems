@@ -825,6 +825,7 @@ class RobotPerceptionPipeline:
 
         # 4. Features
         for det in detections:
+            x1, y1, x2, y2 = det['bbox']
             crop = rgb_frame[y1:y2, x1:x2]
             det['features'] = self.feature_extractor(crop)
 

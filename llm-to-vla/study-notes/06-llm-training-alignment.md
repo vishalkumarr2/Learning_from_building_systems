@@ -574,7 +574,7 @@ $$\text{LoRA params} = r \times (d_{\text{in}} + d_{\text{out}})$$
 ### 5.4 LoRA Details
 
 **Initialization:**
-- $A$: Gaussian initialization
+- $A$: Random (Kaiming uniform) initialization
 - $B$: Zero initialization
 - At start: $\Delta W = BA = 0$ (model starts at pretrained weights)
 

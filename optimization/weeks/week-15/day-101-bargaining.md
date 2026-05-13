@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 100: Shapley Value and Fair Division](day-100-shapley-value.md)
 - **Next:** [Day 102: Dynamic Games and Backward Induction](day-102-dynamic-games.md)
-- [Week 15 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 15 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 A robot and the BEC scheduler negotiate over charging time: the robot wants a full charge (more uptime), the BEC wants to minimize station occupancy (serve more robots). Bargaining theory provides principled solutions that balance both objectives — Nash for product-fairness, Kalai-Smorodinsky for proportional fairness.

@@ -639,6 +639,7 @@ class MAE(nn.Module):
         decoded = self.decoder(full_sequence)
 
         # Loss: MSE only on masked patches
+        target_pixels = self.patchify(x)
         loss = F.mse_loss(decoded[mask == 1], target_pixels[mask == 1])
         return loss
 ```

@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 94: Mixed-Strategy Nash Equilibrium](day-94-mixed-nash.md)
 - **Next:** [Day 96: Zero-Sum Games and Minimax](day-96-zero-sum-minimax.md)
-- [Week 14 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 14 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 A warehouse fleet may have multiple stable task allocations (multiple NE). The fleet controller must pick one — the "equilibrium selection" problem. Risk-dominant solutions tolerate communication failures; Pareto-dominant ones maximize throughput. Correlated equilibrium uses a central dispatcher signal to coordinate robots beyond what decentralized NE can achieve.

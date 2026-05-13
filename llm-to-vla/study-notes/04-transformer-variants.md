@@ -905,4 +905,4 @@ The efficiency improvements in this note are all about the same thing: **achievi
 
 **The theme**: As we scale transformers, every layer of the stack must become more efficient at its compression task. This carries directly to VLAs, where real-time robot control demands both rich representations and fast inference.
 
-> Next: **05-language-modeling** — GPT, scaling laws, pretraining, and the emergence of capabilities
+> Next: [05-gpt-scaling](05-gpt-scaling.md) — GPT, scaling laws, pretraining, and the emergence of capabilities

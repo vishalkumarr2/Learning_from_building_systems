@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 101: Bargaining Theory](day-101-bargaining.md)
 - **Next:** [Day 103: Repeated Games and Folk Theorem](day-103-repeated-games.md)
-- [Week 15 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 15 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 Two robots approach an intersection. Robot A arrives first and decides: proceed or yield. Robot B observes A's choice and reacts. This sequential structure is an extensive-form game. Backward induction finds the subgame-perfect strategy — eliminating non-credible threats like "I'll crash into you if you don't yield," which no rational robot would execute.

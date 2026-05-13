@@ -8,7 +8,7 @@
 
 ## Navigation
 
-| Previous | [10-multimodal-vlms](10-multimodal-vlms.md) | Next | [12-diffusion-flow](12-diffusion-flow.md) |
+| Previous | [10-vision-language-models](10-vision-language-models.md) | Next | [12-diffusion-flow](12-diffusion-flow.md) |
 |----------|---------------------------------------------|------|-------------------------------------------|
 
 ---

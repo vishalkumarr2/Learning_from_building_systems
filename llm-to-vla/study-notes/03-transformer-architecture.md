@@ -837,4 +837,4 @@ The transformer architecture is an **information compression machine**:
 - Robot decision-making is selective retrieval: from all knowledge, retrieve the right action
 - Both are exactly what attention does
 
-> Next: **04-transformer-variants** — efficiency improvements, KV cache, MoE, BERT, and tokenization
+> Next: [04-transformer-variants](04-transformer-variants.md) — efficiency improvements, KV cache, MoE, BERT, and tokenization

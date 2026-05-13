@@ -4,11 +4,11 @@
 > *When computing equilibria is intractable, let agents learn their way there through repeated interaction.*
 
 ## Navigation
-- Previous: [Day 106: Computing Nash Equilibria](day-106-computing-nash.md)
-- Next: [Day 108: No-Regret Learning](day-108-no-regret.md)
-- [Week 16 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Previous:** [Day 106: Computing Nash Equilibria](day-106-computing-nash.md)
+- **Next:** [Day 108: No-Regret Learning](day-108-no-regret.md)
+- **Week:** [Week 16 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 OKS AMRs operate in a decentralized fleet where each robot makes local decisions about routing, task acceptance, and charging. Fictitious play models exactly this: each robot best-responds to the historical distribution of other robots' actions, without centralized coordination. Understanding when this converges (and when it cycles) determines whether decentralized fleet policies stabilize.

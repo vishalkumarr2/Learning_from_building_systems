@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 98: Week 14 Review](../week-14/day-98-week14-review.md)
 - **Next:** [Day 100: Shapley Value and Fair Division](day-100-shapley-value.md)
-- [Week 15 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 15 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 A fleet of OKS robots is a natural cooperative game. A coalition of 3 robots can handle a multi-pick order faster than any single robot. The core tells us which reward allocations are stable — no subset of robots has an incentive to break away and form its own team. This is the foundation for stable task-sharing protocols in warehouse robotics.

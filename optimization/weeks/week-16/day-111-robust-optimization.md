@@ -4,11 +4,11 @@
 > *When uncertainty is the adversary, minimax gives you the strategy that survives the worst case.*
 
 ## Navigation
-- Previous: [Day 110: Multi-Robot Games + Adversarial ML](day-110-multi-robot-adversarial.md)
-- Next: [Day 112: Capstone — Multi-Robot Delivery Game](day-112-week16-capstone.md)
-- [Week 16 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Previous:** [Day 110: Multi-Robot Games + Adversarial ML](day-110-multi-robot-adversarial.md)
+- **Next:** [Day 112: Capstone — Multi-Robot Delivery Game](day-112-week16-capstone.md)
+- **Week:** [Week 16 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 OKS AMRs face persistent uncertainty: obstacle positions shift, sensor readings drift, motor responses vary with battery level, and network latency fluctuates. Robust optimization frames the controller as a player against "nature" who picks the worst-case disturbance. This yields path plans that work even under worst-case obstacle motion and motor controllers that maintain stability despite parameter uncertainty — exactly the guarantees needed for 24/7 warehouse autonomy.

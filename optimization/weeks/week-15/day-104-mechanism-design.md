@@ -6,9 +6,9 @@
 ## Navigation
 - **Previous:** [Day 103: Repeated Games and Folk Theorem](day-103-repeated-games.md)
 - **Next:** [Day 105: Week 15 Review](day-105-week15-review.md)
-- [Week 15 Overview](../../../CURRICULUM.md)
-- [Chapter 10: Game Theory Reference](../../../10-game-theory.md)
-- [Full Curriculum](../../../00-learning-plan.md)
+- **Week:** [Week 15 Overview](../README.md)
+- **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
+- **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
 ## OKS Relevance
 The fleet controller must allocate tasks to robots — each robot privately knows its battery level, distance to task, and current load. Mechanism design provides auction-based allocation where truthful reporting is the dominant strategy. The VCG mechanism ensures efficient task assignment even when robots have private information.
