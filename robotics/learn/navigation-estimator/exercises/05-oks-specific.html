@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>05 — Exercises: Failure Mode Diagnosis - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']]
+            }
+        };
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        .md-content .mermaid { margin: 1.5rem 0; overflow-x: auto; }
+        .md-content .math-display { margin: 1.5rem 0; overflow-x: auto; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="../index.html" class="text-sky-600 hover:text-sky-800 mb-4 inline-block">&larr; Back to Nav Estimator</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1>Exercises: Failure Mode Diagnosis</h1>
+<h3>Chapter 05: Reading Bags Like an Estimator Detective</h3>
+<p><strong>Self-assessment guide:</strong> Work through each question before expanding the answer. Target: 80% correct without peeking &rarr; ready for real RCA work. For scenario questions, write down your three answers (status, root cause, next check) before opening.</p>
+<hr />
+
+<h2>Section A &mdash; Conceptual Questions</h2>
+
+<p><strong>A1.</strong> <code>ERROR_INVALID_STATE</code> appears in every OKS incident ticket involving slip. A new engineer says &ldquo;so the bug is in&rsquo;s isFinite() check &mdash; we should remove it so the robot can keep moving after a slip.&rdquo; Why is this wrong, and what would actually happen if isFinite() were removed?</p>
+
+<details><summary>Answer</summary>
+
+<p><strong>The isFinite() check is a safety gate, not a bug.</strong> Removing it would be dangerous.</p>
+
+<p><strong>What would happen without isFinite():</strong></p>
+
+<p>When SLIPPED is detected, <code>cov_xx = cov_yy = cov_theta = INF</code>. The estimator still holds a position estimate <code>(x, y, theta)</code> but with infinite uncertainty.</p>
+
+<p><code>executePoseGoal()</code> then computes a velocity command using that state. The PID controller or path-following algorithm would try to compute: &ldquo;how far am I from the goal?&rdquo; using <code>(goal.x - state.x)</code> and <code>(goal.y - state.y)</code>. Those are still finite. So far so good.</p>
+
+<p>But the Kalman gain computation uses <code>P</code> (the covariance matrix): $K = P \times H^T \times (H \times P \times H^T + R)^{-1}$. With <code>P = INF</code>, this produces $K = INF \times (INF + R)^{-1} = INF \times (1/INF) = NaN$ (not a number, because <code>INF/INF</code> is undefined). NaN propagates into the velocity command. The robot may issue a NaN velocity &mdash; the motor controller behaviour with a NaN command is undefined and platform-dependent. On some systems it would command full speed, on others zero, on others oscillate.</p>
+
+<p><strong>The correct mental model:</strong> After a slip, the robot genuinely does not know where it is. Allowing it to navigate with <code>cov=INF</code> is not &ldquo;keep moving&rdquo; &mdash; it is &ldquo;move blindly with no position knowledge.&rdquo; The safe response is to stop and wait for re-localization via sensorbar.</p>
+
+<p><strong>The fix is not to remove the check.</strong> The fix is to address the root cause of the slip (floor, motor driver, etc.) and ensure there is a sensorbar line nearby for the robot to cross and recover.</p>
+
+</details>
+
+<hr />
+
+<p><strong>A2.</strong> An incident bag shows <code>status=MISSED_LINE_UPDATES (8)</code> for 8 seconds, then <code>status=DELOCALIZED (1)</code> for 3 seconds, then the robot stops. During the entire 11 seconds, the sensorbar topic was publishing at 100 Hz with <code>is_reliable=True</code>. Explain the complete sequence of events in the estimator and why two different status codes appear.</p>
+
+<details><summary>Answer</summary>
+
+<p><strong>MISSED_LINE_UPDATES phase (0&ndash;8s):</strong></p>
+
+<p>The sensorbar was physically detecting lines and publishing measurements, but the EKF was rejecting every measurement via the innovation gate (chi-squared / Mahalanobis distance check). This can happen because:</p>
+<ul>
+<li>The estimator&rsquo;s position estimate diverged slightly and each sensorbar measurement looked like an outlier</li>
+<li>A SPI conflict caused measurements to have corrupted position values, all failing the gate</li>
+<li>All measurements had the same timestamp (SPI burst issue), so only the first was processed</li>
+</ul>
+
+<p>During this phase, the estimator kept running but received no useful sensorbar updates. The prediction step (<code>predict()</code>) continued adding motion noise each odom cycle, but no update step (<code>update()</code>) ran to reduce the covariance. So covariance grew monotonically.</p>
+
+<p><strong>Why status=8 and not DELOCALIZED immediately:</strong> The covariance had not yet crossed the DELOCALIZED threshold. Status=8 is reported as soon as sensorbar updates stop being accepted, which can happen with covariance still below the threshold.</p>
+
+<p><strong>DELOCALIZED phase (8&ndash;11s):</strong></p>
+
+<p>After 8 seconds without sensorbar corrections, the covariance finally crossed the <code>delocalized_threshold</code> (typically 0.03&ndash;0.1 depending on config). Status transitions to 1 (DELOCALIZED). The estimator continues running and reporting position but with lower confidence.</p>
+
+<p><strong>The robot stops:</strong></p>
+
+<p>Covariance has grown further, possibly to INF (if the DELOCALIZED phase is also accompanied by slip, or if this trajectory eventually leads to a <code>executePoseGoal()</code> call where <code>isFinite()</code> fails). Or the navigation planner refused to proceed with DELOCALIZED state.</p>
+
+<p><strong>The critical takeaway:</strong> Status=8 is a <strong>warning</strong> that DELOCALIZED is coming. If you see status=8 in a live system, investigate immediately &mdash; a stop is 8&ndash;30 seconds away unless the root cause is fixed.</p>
+
+</details>
+
+<hr />
+
+<p><strong>A3.</strong> Describe the exact observable differences in a ROS bag between these two scenarios:</p>
+
+<p>(a) Robot slips on a wet patch at T=30s, covariance goes to INF.<br />
+(b) Robot dead-reckons for 20s without sensorbar updates, covariance grows to 0.04 (DELOCALIZED threshold).</p>
+
+<p>Include: what <code>cov_xx</code> looks like over time, what <code>status</code> looks like, what the velocity signal looks like, and what happens when the robot next crosses a sensorbar line.</p>
+
+<details><summary>Answer</summary>
+
+<p><strong>(a) Slip scenario:</strong></p>
+
+<table>
+<thead>
+<tr><th>Signal</th><th>Before T=30s</th><th>At T=30s</th><th>After T=30s</th></tr>
+</thead>
+<tbody>
+<tr><td><code>cov_xx</code></td><td>0.001&ndash;0.010 (normal)</td><td><strong>Steps to 1e5 or INF</strong> in one sample</td><td>Stays at INF</td></tr>
+<tr><td><code>status</code></td><td>0 (OK)</td><td><strong>4 (SLIPPED)</strong></td><td>Stays at 4</td></tr>
+<tr><td>velocity</td><td>Normal (e.g. 0.4 m/s)</td><td><strong>Sudden drop to 0</strong> within 50&ndash;100ms</td><td>0 (robot stopped)</td></tr>
+<tr><td><code>cmd_vel</code></td><td>Normally commanded</td><td>Goes to 0 when NAV_NOT_FINITE fires</td><td>0</td></tr>
+</tbody>
+</table>
+
+<p>After sensorbar crossing: <code>cov_xx</code> <strong>drops sharply</strong> from INF back to the measurement quality (&asymp; sensorbar noise, e.g. 0.0001). Status &rarr; 0 (OK). This is an abrupt, large decrease.</p>
+
+<p><strong>Bag signature:</strong> <code>cov_xx</code> time series looks like a step function &mdash; flat, then vertical.</p>
+
+<hr />
+
+<p><strong>(b) Delocalized scenario:</strong></p>
+
+<table>
+<thead>
+<tr><th>Signal</th><th>0&ndash;20s</th><th>At threshold crossing</th><th>After</th></tr>
+</thead>
+<tbody>
+<tr><td><code>cov_xx</code></td><td>0.001, slowly rising: 0.003, 0.007, 0.015, 0.024, <strong>0.040</strong></td><td>0.040 (threshold)</td><td>Continues rising</td></tr>
+<tr><td><code>status</code></td><td>0 (OK) during rise</td><td><strong>1 (DELOCALIZED)</strong></td><td>Stays at 1</td></tr>
+<tr><td>velocity</td><td>Normal, commanded motion</td><td>Normal (robot NOT stopped)</td><td>Robot continues moving</td></tr>
+<tr><td><code>cmd_vel</code></td><td>Normal</td><td>Normal</td><td>Normal</td></tr>
+</tbody>
+</table>
+
+<p>After sensorbar crossing: <code>cov_xx</code> <strong>drops from ~0.04 to ~0.001</strong> in one update. Status &rarr; 0 (OK). A moderate, expected decrease.</p>
+
+<p><strong>Bag signature:</strong> <code>cov_xx</code> time series looks like a ramp &mdash; gradual, consistent slope.</p>
+
+<hr />
+
+<p><strong>Key distinguishing feature:</strong></p>
+
+<p>The <strong>slope and magnitude</strong> of the covariance change. A step from 0.001 to 1e5 in one sample is SLIP. A ramp from 0.001 to 0.04 over 20 seconds is DELOCALIZED. You do not need to read the status code &mdash; the covariance shape tells you.</p>
+
+</details>
+
+<hr />
+
+<p><strong>A4.</strong> COLLISION (status=5) is described as &ldquo;terminal&rdquo; while SLIPPED (status=4) is &ldquo;not terminal.&rdquo; Both stop the robot. What is the architectural reason for this difference? (Hint: think about whether autonomous recovery is safe for each.)</p>
+
+<details><summary>Answer</summary>
+
+<p><strong>The architectural reason is safety under uncertainty:</strong></p>
+
+<p><strong>SLIPPED:</strong> The estimator knows <em>exactly</em> what went wrong &mdash; the velocity window check failed. The robot is stopped in a known position (the last valid estimate before the slip). The floor is the same floor it was on. After stopping, the robot&rsquo;s geometry has not changed, no obstacles were struck, and the mechanical state is the same. The only unknown is the exact position, which can be resolved by crossing a sensorbar line. <strong>Autonomous recovery is safe</strong> because the situation is well-defined.</p>
+
+<p><strong>COLLISION:</strong> The estimator knows something hit the robot (gyro spike), but it does NOT know:</p>
+<ul>
+<li>What hit it (shelf, person, forklift?)</li>
+<li>Whether the robot moved (was pushed off path?)</li>
+<li>Whether the robot or what it hit sustained damage</li>
+<li>Whether the collision obstacle is still in the way</li>
+<li>Whether the robot&rsquo;s mechanical state is intact (wheels aligned, sensors undamaged?)</li>
+</ul>
+
+<p>Issuing an autonomous &ldquo;recover by driving forward&rdquo; command after a collision could:</p>
+<ul>
+<li>Drive into the obstacle again</li>
+<li>Move an injured person further</li>
+<li>Drive off an edge the collision pushed the robot near</li>
+<li>Send a mechanically damaged robot further into a facility</li>
+</ul>
+
+<p><strong>A human must assess the situation</strong> before the robot moves. The terminal state forces this verification. It is a deliberate safety design choice, not a limitation of the software.</p>
+
+<p><strong>Analogy:</strong> A car&rsquo;s airbag deployment (COLLISION) requires a mechanic to inspect and reset. Spinning wheels on ice (SLIP) is self-correcting once traction resumes. The severity and unknowns of the situation determine whether autonomous recovery is safe.</p>
+
+</details>
+
+<hr />
+
+<p><strong>A5.</strong> Two engineers are debugging separate incidents. Engineer A says: &ldquo;Status=8 means the SPI bus is broken.&rdquo; Engineer B says: &ldquo;Status=8 means the sensorbar is physically off the lines.&rdquo; Who is right, and what is the precise condition that sets status=8?</p>
+
+<details><summary>Answer</summary>
+
+<p><strong>Neither is fully right.</strong> Both are describing <em>causes</em> that can lead to status=8, but they have incorrectly equated the cause with the mechanism.</p>
+
+<p><strong>The precise condition for status=8 (MISSED_LINE_UPDATES):</strong></p>
+
+<p>Status is set to 8 when the estimator detects that a <strong>statistically expected sensorbar update has not been incorporated</strong> for longer than a threshold period. Specifically: the sensorbar topic is alive (messages arriving) but the EKF update step has not accepted any measurement.</p>
+
+<p>This can happen for multiple reasons:</p>
+<ol>
+<li><strong>SPI conflict (Engineer A&rsquo;s case):</strong> SPI bus issues cause all measurements to have the same timestamp or corrupted values &rarr; all measurements rejected by innovation gate or deduplication logic</li>
+<li><strong>Physical off-path (Engineer B&rsquo;s case):</strong> But this would typically set status=3 (NO_LINE), not status=8. Status=8 specifically requires measurements to be <em>present but rejected</em>, not absent.</li>
+<li><strong>Large estimator position error:</strong> If the estimated position diverged badly, real sensorbar measurements look like outliers and are rejected by the Mahalanobis gate</li>
+<li><strong>Dirty lines:</strong> Measurements are so noisy they all fail the gate</li>
+</ol>
+
+<p><strong>To distinguish the causes:</strong></p>
+<ul>
+<li>Check for SPI error messages in rosout &rarr; Engineer A&rsquo;s cause</li>
+<li>Check if sensorbar detections contain line position data or are empty &rarr; Engineer B&rsquo;s cause (empty = NO_LINE, not MISSED_UPDATES)</li>
+<li>Check if measurements have duplicate timestamps &rarr; SPI burst issue</li>
+<li>Check estimator position vs map &rarr; position divergence issue</li>
+</ul>
+
+<p>The <strong>status code is a mechanism</strong> (updates not accepted). The <strong>cause</strong> requires additional investigation.</p>
+
+</details>
+
+<hr />
+
+<h2>Section B &mdash; Scenario Analysis</h2>
+
+<p>For each scenario below, you will see a synthetic ROS bag extract (text representation). Identify: <strong>(1) which status code</strong> this represents, <strong>(2) the root cause</strong>, <strong>(3) what to check next</strong>.</p>
+
+<hr />
+
+<p><strong>B1. Log Extract: The Afternoon Stop</strong></p>
+
+<pre><code>[12:34:15.001] /estimated_state: status=0, x=45.23, y=12.44, cov_xx=0.0045
+[12:34:15.051] /estimated_state: status=0, x=45.31, y=12.44, cov_xx=0.0046
+[12:34:15.101] /odom: linear.x=0.401, angular.z=0.002
+[12:34:15.101] /estimated_state: status=0, x=45.39, y=12.44, cov_xx=0.0047
+[12:34:15.151] /odom: linear.x=0.392, angular.z=0.001
+[12:34:15.201] /odom: linear.x=0.380, angular.z=0.001
+[12:34:15.251] /odom: linear.x=0.028  &lt;══ velocity drop
+[12:34:15.261] /estimated_state: status=4, x=45.47, y=12.44, cov_xx=1e6
+[12:34:15.263] /rosout [ERROR]: ERROR_INVALID_STATE
+[12:34:15.263] /cmd_vel: linear.x=0.0  &lt;══ stop command
+[12:34:15.400] /sensorbar: rate=0Hz (no messages)</code></pre>
+
+<details><summary>Answer</summary>
+
+<p><strong>(1) Status:</strong> 4 &mdash; SLIPPED</p>
+
+<p><strong>Evidence:</strong></p>
+<ul>
+<li><code>cov_xx</code> jumps from 0.0047 to 1e6 in a single sample (not gradual)</li>
+<li><code>status</code> transitions to 4 simultaneously with the covariance jump</li>
+<li>Velocity drops from 0.380 to 0.028 within one odom sample (~50ms) &mdash; too fast for normal deceleration (max_decel check fails)</li>
+<li><code>ERROR_INVALID_STATE</code> follows immediately (isFinite(cov_xx=1e6) fails)</li>
+</ul>
+
+<p><strong>(2) Root cause candidates:</strong></p>
+<ul>
+<li><strong>Most likely:</strong> Floor surface change at this XY location (wet patch, tile type change, fresh wax)</li>
+<li><strong>Secondary:</strong> Motor driver fault causing erroneous velocity reading (false slip detection)</li>
+<li>The sensorbar going silent <em>after</em> the stop is a consequence, not a cause</li>
+</ul>
+
+<p><strong>(3) What to check next:</strong></p>
+<ul>
+<li>Check robot XY position at T=15.251 against the floor map &mdash; is there a known surface change here?</li>
+<li>Check maintenance logs &mdash; was floor cleaning scheduled for this area this afternoon?</li>
+<li>Check if other incidents have SLIPPED at the same XY coordinates (location-specific &rarr; floor issue)</li>
+<li>If no floor explanation: check motor driver health logs near this timestamp</li>
+<li>After fixing root cause: verify a sensorbar line is accessible for the robot to cross and recover</li>
+</ul>
+
+</details>
+
+<hr />
+
+<p><strong>B2. Log Extract: The Long Hallway</strong></p>
+
+<pre><code>[09:15:00.000] /estimated_state: status=0, cov_xx=0.0011, cov_yy=0.0012
+[09:15:05.000] /estimated_state: status=0, cov_xx=0.0065, cov_yy=0.0063
+[09:15:10.000] /estimated_state: status=0, cov_xx=0.0141, cov_yy=0.0138
+[09:15:15.000] /estimated_state: status=0, cov_xx=0.0217, cov_yy=0.0213
+[09:15:20.000] /estimated_state: status=0, cov_xx=0.0298, cov_yy=0.0291
+[09:15:25.000] /estimated_state: status=1, cov_xx=0.0381, cov_yy=0.0373
+                &uarr; status just changed!
+[09:15:25.000] /sensorbar: rate=98Hz, is_reliable=True, detections=[]
+[09:15:25.000] /odom: rate=49Hz (normal)
+[09:15:35.000] /estimated_state: status=1, cov_xx=0.0521, cov_yy=0.0508
+[09:15:37.800] /sensorbar: is_reliable=True, detections=[line_at_offset=-0.012]
+[09:15:37.810] /estimated_state: status=0, cov_xx=0.0014, cov_yy=0.0013</code></pre>
+
+<details><summary>Answer</summary>
+
+<p><strong>(1) Status:</strong> 1 &mdash; DELOCALIZED</p>
+
+<p><strong>Evidence:</strong></p>
+<ul>
+<li><code>cov_xx</code> rises smoothly and gradually over 25 seconds: 0.0011 &rarr; 0.0381</li>
+<li>The growth is linear/steady (approximately +0.0012/second), consistent with dead-reckoning noise accumulation</li>
+<li>Status changes to 1 when covariance crosses the DELOCALIZED threshold (~0.038 in this configuration)</li>
+<li>Robot does NOT stop &mdash; it continues moving (cmd_vel not zeroed)</li>
+<li>Covariance drops sharply back to 0.0014 when sensorbar crossing occurs at 09:15:37.8</li>
+</ul>
+
+<p><strong>(2) Root cause:</strong></p>
+<ul>
+<li><strong>Primary:</strong> Long path segment with no sensorbar line crossings &mdash; 25+ seconds of dead-reckoning</li>
+<li>The sensorbar was <em>alive and healthy</em> (<code>rate=98Hz, is_reliable=True</code>) but reporting empty detections (<code>detections=[]</code>) &mdash; this is NO_LINE during the segment, meaning the robot was on a section of floor with no lines, or the lines were not within the sensorbar detection range</li>
+<li>This is a <strong>map or route design issue</strong>: the route includes a floor segment without sufficient line density</li>
+</ul>
+
+<p><strong>(3) What to check next:</strong></p>
+<ul>
+<li>Overlay the robot XY trajectory for T=09:15:00 to 09:15:37 onto the floor line map</li>
+<li>Identify the segment with no line crossings &mdash; is this a hallway, loading area, or blank floor section?</li>
+<li>Compare with the map: are lines missing from the map, or are they genuinely absent from the floor?</li>
+<li>Check if this route was recently changed and the new segment lacks the line density of the old route</li>
+<li>Fix: add sensorbar lines to the floor segment, or reroute through a section with better line coverage</li>
+</ul>
+
+</details>
+
+<hr />
+
+<p><strong>B3. Log Extract: The Invisible Shelf</strong></p>
+
+<pre><code>[16:22:04.001] /estimated_state: status=0, cov_xx=0.0031
+[16:22:04.021] /imu/data: angular_velocity.z=0.012 rad/s  (normal)
+[16:22:04.041] /imu/data: angular_velocity.z=0.008 rad/s  (normal)
+[16:22:04.061] /imu/data: angular_velocity.z=2.847 rad/s  &lt;══ SPIKE
+[16:22:04.063] /estimated_state: status=5
+[16:22:04.063] /cmd_vel: linear.x=0.0  (stop)
+[16:22:04.081] /imu/data: angular_velocity.z=0.021 rad/s  (back to normal)
+[16:22:04.100] /estimated_state: status=5
+[16:22:30.000] /estimated_state: status=5  (still terminal, 26 seconds later)
+[16:22:30.000] /rosout [INFO]: Waiting for operator reset</code></pre>
+
+<details><summary>Answer</summary>
+
+<p><strong>(1) Status:</strong> 5 &mdash; COLLISION (terminal)</p>
+
+<p><strong>Evidence:</strong></p>
+<ul>
+<li><code>angular_velocity.z</code> spikes from ~0.010 rad/s (normal rotation) to 2.847 rad/s &mdash; this is approximately 163 degrees/second angular velocity, consistent with a physical impact</li>
+<li>The spike is <strong>impulsive</strong> (one sample at 2.847, then immediately back to 0.021) &mdash; not sinusoidal/oscillatory</li>
+<li><code>status</code> transitions to 5 simultaneously with the spike</li>
+<li>Robot stops immediately and <strong>does not recover</strong> &mdash; status=5 persists 26 seconds later</li>
+<li>Note: <strong><code>ERROR_INVALID_STATE</code> is NOT logged</strong> &mdash; this uses the collision stop path, not the isFinite() path</li>
+</ul>
+
+<p><strong>(2) Root cause:</strong></p>
+<ul>
+<li><strong>Most likely:</strong> Physical collision with an obstacle &mdash; shelf leg, person, forklift, barrier</li>
+<li>The impulsive, single-sample nature of the omega_z spike is consistent with a rigid body impact</li>
+<li>A vibration false positive would show oscillatory, repeating pattern; EMI would often show unusual spike shapes or coincide with power events</li>
+</ul>
+
+<p><strong>(3) What to check next:</strong></p>
+<ul>
+<li>Check camera footage or obstacle detection logs at T=16:22:04.061 &mdash; what was in the robot&rsquo;s path?</li>
+<li>Check the robot&rsquo;s XY position at the collision time against the obstacle map &mdash; was an obstacle added or moved without updating the map?</li>
+<li>Physically inspect the robot for damage: is the bumper intact? Any mechanical deformation?</li>
+<li>Check: was this a known blind spot in the robot&rsquo;s obstacle detection (e.g., low shelf legs below the scanner plane)?</li>
+<li>After investigation: requires <strong>human verification of area and robot integrity</strong> before any restart</li>
+</ul>
+
+</details>
+
+<hr />
+
+<p><strong>B4. Log Extract: The Healthy-Looking Failure</strong></p>
+
+<pre><code>[11:05:10.000] /estimated_state: status=0, cov_xx=0.0018
+[11:05:10.000] /sensorbar: rate=102Hz, is_reliable=True, detections=[line_at=-0.001]
+[11:05:15.000] /estimated_state: status=0, cov_xx=0.0072
+[11:05:15.000] /sensorbar: rate=99Hz, is_reliable=True, detections=[line_at=-0.002]
+[11:05:20.000] /estimated_state: status=8, cov_xx=0.0198
+[11:05:20.000] /sensorbar: rate=101Hz, is_reliable=True, detections=[line_at=-0.004]
+                &uarr; status=8 but sensorbar looks healthy!
+[11:05:25.000] /estimated_state: status=8, cov_xx=0.0312
+[11:05:25.000] /sensorbar: rate=100Hz, is_reliable=True, detections=[line_at=-0.004]
+                                                                      &uarr; same value as 5s ago?
+[11:05:30.000] /rosout [WARN]: SPI transaction timeout on sensorbar_controller
+[11:05:30.000] /sensorbar: rate=97Hz, is_reliable=True, detections=[line_at=-0.004]
+[11:05:35.000] /estimated_state: status=1, cov_xx=0.0401</code></pre>
+
+<details><summary>Answer</summary>
+
+<p><strong>(1) Status:</strong> 8 &mdash; MISSED_LINE_UPDATES (leading to DELOCALIZED)</p>
+
+<p><strong>Evidence:</strong></p>
+<ul>
+<li>Sensorbar topic appears healthy: rate=100Hz, <code>is_reliable=True</code></li>
+<li>But <code>status</code> transitions to 8 at T=11:05:20 &mdash; the estimator has stopped accepting updates despite the topic being alive</li>
+<li><strong>Critical observation:</strong> the <code>detections=[line_at=-0.004]</code> value is <strong>identical</strong> at T=11:05:20, T=11:05:25, and T=11:05:30 &mdash; over 10 seconds, the detected line offset never changed even slightly as the robot moved. This is the SPI duplicate timestamp signature: the SPI controller is sending the same measurement repeatedly with the same timestamp, and the estimator&rsquo;s duplicate detection discards all but the first.</li>
+<li>SPI warning at T=11:05:30 confirms: <code>SPI transaction timeout on sensorbar_controller</code></li>
+<li>Covariance grows slowly (not a slip step-jump) &rarr; eventually crosses DELOCALIZED threshold at T=11:05:35</li>
+</ul>
+
+<p><strong>(2) Root cause:</strong></p>
+<ul>
+<li><strong>SPI bus conflict or sensorbar controller fault</strong> causing the sensorbar to repeat the same measurement with the same timestamp</li>
+<li>The estimator correctly identifies that <code>timestamp(t) == timestamp(t-1)</code> and discards the duplicate, preventing false updates from being incorporated. But this means NO updates are accepted, leading to status=8.</li>
+<li>This matches the documented dual-SPI conflict failure mode in this codebase (see repo memory: <code>dual-spi-conflict-reproduction.md</code>)</li>
+</ul>
+
+<p><strong>(3) What to check next:</strong></p>
+<ul>
+<li>Check SPI error logs on the robot &mdash; is there a conflicting SPI device on the same bus as the sensorbar?</li>
+<li>Verify sensorbar measurement timestamps in the topic: <code>rostopic echo /sensorbar/detections | grep stamp</code> &mdash; are multiple consecutive messages reporting the same header.stamp?</li>
+<li>Check if the issue is intermittent or consistent (if SPI conflict, it may correlate with another SPI peripheral being active)</li>
+<li>Review <code>dual-spi-conflict-reproduction.md</code> in repo memory for the known reproduction steps</li>
+<li>Fix: resolve SPI bus conflict (device arbitration or physical bus separation); do not simply increase covariance thresholds</li>
+</ul>
+
+</details>
+
+<hr />
+
+<h2>Section C &mdash; &ldquo;Connect 3&rdquo; Challenge</h2>
+
+<p><strong>The scenario:</strong></p>
+
+<p>You are given a bag from an incident at Hamamatsu. The following time series was extracted:</p>
+
+<pre><code>    Time     cov_xx    status    sensorbar_rate    notes
+    ──────   ──────    ──────    ──────────────    ─────────────────────────
+    T=10.3s  0.0012    0 (OK)    100 Hz
+    T=10.4s  0.0012    0 (OK)    0 Hz              &larr; SENSORBAR GAP (1 sample)
+    T=10.5s  0.0013    0 (OK)    100 Hz            &larr; sensorbar resumes
+    T=11.0s  0.0045    0 (OK)    100 Hz
+    T=11.5s  0.0082    0 (OK)    100 Hz
+    T=12.0s  0.0145    0 (OK)    100 Hz
+    T=12.5s  0.0209    0 (OK)    100 Hz
+    T=12.6s  0.0234    1 (DELOCALIZED) 100 Hz      &larr; threshold crossed
+    T=12.8s  0.0004    0 (OK)    100 Hz            &larr; sensorbar crossing, cov reset</code></pre>
+
+<p>Note: sensorbar was not publishing for exactly 0.1 seconds (one sample) at T=10.4s.</p>
+
+<p><strong>Question C1:</strong> What happened at T=10.4s? Give a precise mechanistic explanation of why <code>cov_xx</code> is still 0.0012 at T=10.5s even though a sensorbar gap occurred.</p>
+
+<details><summary>Answer</summary>
+
+<p><strong>At T=10.4s:</strong> The sensorbar topic published no message for one sample period (0.1s gap). This could be caused by:</p>
+<ul>
+<li>A brief SPI timeout that missed one transmission cycle</li>
+<li>A packet drop on the internal ROS network</li>
+<li>A single-cycle CPU scheduling delay causing the sensorbar publisher to miss its deadline</li>
+</ul>
+
+<p><strong>Why cov_xx stays at 0.0012 at T=10.5s:</strong></p>
+
+<p>The covariance contribution from a missing sensorbar update is <strong>very small</strong> compared to the contribution from motion. During 0.1 seconds without a sensorbar update, the prediction step ran (with odom still arriving at 50Hz) and added motion noise. But the motion noise per prediction step is proportional to <code>delta_trans &times; k_trans_noise</code>. For a robot moving at ~0.3 m/s:</p>
+
+<pre><code>    delta_trans per step (50Hz) &asymp; 0.006 m
+    k_trans_noise    &asymp; 0.01 (typical)
+    noise added per step        &asymp; 0.006 &times; 0.01 = 0.00006
+
+    Over 5 prediction steps in 0.1s: &asymp; 0.0003
+    Starting cov_xx = 0.0012
+    Expected cov_xx at T=10.5 &asymp; 0.0015</code></pre>
+
+<p>This is below the display precision in the data extract (rounds to 0.0012 or would show as 0.0013). The sensorbar also resumed at T=10.5s and provided a correction that pulled <code>cov_xx</code> back down, masking the 0.1s gap entirely. A single 0.1s sensorbar gap is <strong>below the detection threshold</strong> for this measurement &mdash; it is absorbed into normal covariance fluctuation.</p>
+
+<p><strong>The key insight:</strong> The covariance increase from a 0.1s sensorbar gap is negligible. The covariance increase visible from T=10.5s to T=12.6s (roughly +0.002 per 0.5s increment) represents <strong>2.1 seconds of sustained dead-reckoning after T=10.5s</strong> &mdash; meaning sensorbar updates resumed but the robot was NOT crossing any sensorbar lines during this period (just the topic publishing at 100Hz with no line crossings under the sensor, i.e., traversing blank floor).</p>
+
+</details>
+
+<hr />
+
+<p><strong>Question C2:</strong> The sensorbar rate returned to 100Hz at T=10.5s. Yet status did NOT transition to <code>MISSED_LINE_UPDATES (8)</code>. Why not? What would need to be true for status=8 to appear here?</p>
+
+<details><summary>Answer</summary>
+
+<p><strong>Why status=8 did NOT appear:</strong></p>
+
+<p>Status=8 (MISSED_LINE_UPDATES) requires that the estimator is <strong>expecting</strong> sensorbar updates and not receiving them. Specifically, it tracks whether any updates have been <em>accepted</em> by the EKF over a time window.</p>
+
+<p>At T=10.5s, the sensorbar resumed publishing at 100Hz. However, the topic was publishing &mdash; it just had no <strong>line detections</strong> in the messages (the <code>detections=[]</code> list was empty). This is <strong>NO_LINE behaviour, not MISSED_LINE_UPDATES</strong>. The robot was traversing floor with no lines underneath the sensorbar, so the sensorbar correctly reported &ldquo;I see nothing.&rdquo; An empty detection is not a &ldquo;missed update&rdquo; &mdash; it is an accurate report.</p>
+
+<p>For status=8 to appear, the sensorbar would need to be <strong>reporting line detections</strong> (<code>detections=[line_at=xxx]</code>) but those detections would need to be <strong>rejected by the EKF</strong> (failing the innovation gate). In this scenario, the detections list appears to be empty during the T=10.5&ndash;12.6s window (inferred from the fact that covariance grows steadily without any corrections).</p>
+
+<p><strong>Formally:</strong> <code>MISSED_LINE_UPDATES = detections_available AND update_not_accepted</code>. In this scenario, <code>detections_available = False</code> (empty detections), so the condition for status=8 is not met.</p>
+
+<p><strong>What would need to be true for status=8 here:</strong></p>
+<ul>
+<li>The floor between T=10.5s and T=12.6s would need to have sensorbar lines painted on it</li>
+<li>The sensorbar would need to be detecting those lines (non-empty detections)</li>
+<li>But the EKF would need to be rejecting those measurements (innovation too large, or duplicate timestamps from SPI issue)</li>
+<li>This combination &rarr; status=8</li>
+</ul>
+
+</details>
+
+<hr />
+
+<p><strong>Question C3:</strong> If the sensorbar gap at T=10.4s had been <strong>20 seconds</strong> instead of 0.1 seconds (sensorbar offline from T=10.4s to T=30.4s), and the robot continued moving at the same speed, what would the failure sequence look like? Estimate:</p>
+<ul>
+<li>When would DELOCALIZED first appear?</li>
+<li>Would ERROR_INVALID_STATE fire? Under what condition?</li>
+<li>What is the earliest time at which the robot could recover?</li>
+</ul>
+
+<details><summary>Answer</summary>
+
+<p><strong>Estimating covariance growth during 20s sensorbar gap:</strong></p>
+
+<p>From the observed data, covariance grew from 0.0013 to 0.0234 over approximately 2.1 seconds of dead-reckoning (T=10.5 to T=12.6s), giving a growth rate of approximately:</p>
+
+<pre><code>    &Delta;cov_xx / &Delta;t &asymp; (0.0234 - 0.0013) / 2.1s &asymp; 0.0105 per second</code></pre>
+
+<p>Starting from T=10.4s with <code>cov_xx = 0.0012</code>:</p>
+
+<p><strong>When would DELOCALIZED first appear?</strong></p>
+
+<pre><code>    DELOCALIZED threshold &asymp; 0.024 (from the data: status changes at cov_xx=0.0234)
+
+    Time to threshold = (0.0234 - 0.0012) / 0.0105 &asymp; 2.1 seconds
+
+    DELOCALIZED would appear at approximately T=10.4 + 2.1 = T=12.5s
+    (much earlier than in the original scenario because there are no sensorbar
+    corrections to slow the growth at all during the 20s gap)</code></pre>
+
+<p><strong>Would ERROR_INVALID_STATE fire?</strong></p>
+
+<p>This depends on whether covariance reaches INF or whether SLIPPED is triggered separately. If the robot only dead-reckons (no slip event), <code>cov_xx</code> grows continuously but through the Kalman noise model, not through the explicit <code>cov = INF</code> assignment. The Kalman filter produces <strong>large but finite</strong> covariance values during extended dead-reckoning.</p>
+
+<p>ERROR_INVALID_STATE fires on <strong>non-finite</strong> (INF or NaN) values. Pure dead-reckoning covariance growth stays finite (just large). So NAV_NOT_FINITE would NOT fire from dead-reckoning alone, assuming no slip event.</p>
+
+<p><strong>However:</strong> If the robot then encounters a wet patch or motor issue during the 20s gap and the slip detector fires, <code>cov_xx</code> would be explicitly set to INF &rarr; NAV_NOT_FINITE would fire.</p>
+
+<p><strong>Earliest possible recovery time:</strong></p>
+
+<p>The robot can recover as soon as it crosses a sensorbar line AND the EKF accepts the measurement. With <code>cov_xx</code> now very large (but finite), the Kalman gain $K$ would be very large, meaning the sensorbar measurement would completely dominate (almost ignore the prior estimate). The recovery would happen in <strong>one sample</strong> of the sensorbar.</p>
+
+<pre><code>    Earliest recovery = T=30.4s + (time to first sensorbar line crossing)</code></pre>
+
+<p>If a sensorbar line was at the same location as in the original scenario (T=12.8s corresponds to approximately 2.4s of travel distance at 0.3 m/s = ~0.72m past the gap start), the robot would cross that line at T=30.4s + 2.4s (if it keeps moving) = approximately T=32.8s.</p>
+
+<p><strong>But:</strong> With DELOCALIZED status starting at T&asymp;12.5s, the navigation system may reduce speed or stop the robot before the line crossing. The recovery time depends on the planner&rsquo;s behaviour under DELOCALIZED status.</p>
+
+<p><strong>Summary:</strong></p>
+
+<pre><code>    Original scenario (0.1s gap):  DELOCALIZED at T=12.6s, recovery at T=12.8s
+    20s gap scenario:               DELOCALIZED at T&asymp;12.5s, robot stopped or
+                                    slowed, recovery only possible at T&ge;32.8s
+                                    (18+ seconds of degraded or no operation)</code></pre>
+
+<p>This illustrates why even brief sensorbar gaps matter when they happen at the start of a long blank-floor segment &mdash; the covariance trajectory is the same, but the time to recovery increases dramatically.</p>
+
+</details>
+
+            </div>
+        </div>
+
+        <footer class="text-center mt-16 py-6 border-t border-gray-300">
+            <p class="text-gray-500">Robotics Learning Resources</p>
+        </footer>
+    </div>
+    <script>
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+</body>
+</html>
