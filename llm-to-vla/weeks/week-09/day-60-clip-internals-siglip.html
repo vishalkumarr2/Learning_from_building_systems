@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 60: CLIP Internals + SigLIP - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 9: VLMs — CLIP to LLaVA</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-60-clip-internals-siglip">Day 60: CLIP Internals + SigLIP</h1>
+<blockquote>
+<p><strong>Phase V — Vision-Language Models | Week 9 | 2.5 hours</strong>
+<em>"The temperature parameter isn't just a hyperparameter — it's a learned measure of how confident the model should be about its alignments." — On learned temperature</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-59-clip.html">Day 59: CLIP</a></li>
+<li><strong>Next:</strong> <a href="day-61-flamingo-blip2.html">Day 61: Flamingo &amp; BLIP-2</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 9 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/10-vision-language-models.html">Phase V: Vision-Language Models</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="clips-learned-temperature">CLIP's Learned Temperature</h3>
+<p>The temperature $\tau$ in CLIP's contrastive loss is <strong>learned</strong> (initialized to 0.07):</p>
+<p>$$\text{logits}_{ij} = \frac{\mathbf{v}_i \cdot \mathbf{t}_j}{\tau}$$</p>
+<p>Why learn it?
+- <strong>High $\tau$</strong> → soft distribution → model explores, considers multiple matches
+- <strong>Low $\tau$</strong> → sharp distribution → model is confident, focuses on best match
+- Optimal $\tau$ changes during training: starts soft, becomes sharper</p>
+<p>In practice, CLIP parameterizes it as $\tau = \exp(\log\tau)$ where $\log\tau$ is learnable, clamped to $[-\log 100, \log 100]$.</p>
+<h3 id="vision-language-alignment-deep-dive">Vision-Language Alignment Deep Dive</h3>
+<p>CLIP's alignment has subtle but important properties:</p>
+<pre><code>Batch similarity matrix (N×N):
+              text₁  text₂  text₃  ...  textₙ
+image₁    [  0.95   0.12   0.05  ...  0.03  ]  ← diagonal = matched
+image₂    [  0.08   0.91   0.15  ...  0.04  ]
+image₃    [  0.03   0.11   0.88  ...  0.07  ]
+  ...     [  ...    ...    ...   ...  ...   ]
+imageₙ   [  0.02   0.06   0.03  ...  0.93  ]
+
+Goal: maximize diagonal, minimize off-diagonal
+This is symmetric: image→text AND text→image
+</code></pre>
+<p><strong>Hard negatives:</strong> Within a batch, the most similar non-matching pairs are the hardest to separate. Larger batch sizes = more hard negatives = better alignment. CLIP uses batch size <strong>32,768</strong>.</p>
+<h3 id="siglip-sigmoid-loss-for-language-image-pretraining">SigLIP: Sigmoid Loss for Language-Image Pretraining</h3>
+<p>SigLIP (2023) replaces CLIP's softmax-based loss with <strong>pairwise sigmoid loss</strong>:</p>
+<p>$$\mathcal{L}_{\text{SigLIP}} = -\frac{1}{N^2} \sum_{i,j} \log \sigma\left(z_{ij}(-1)^{y_{ij}} (\mathbf{v}_i \cdot \mathbf{t}_j - b)\right)$$</p>
+<p>where:
+- $y_{ij} = 1$ if $(i, j)$ is a matched pair, $-1$ otherwise
+- $b$ is a learned bias
+- $z_{ij}$ is a per-pair weight</p>
+<p>Key differences from CLIP:</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>CLIP (Softmax)</th>
+<th>SigLIP (Sigmoid)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Loss type</td>
+<td>N-way classification</td>
+<td>Binary per-pair</td>
+</tr>
+<tr>
+<td>Normalization</td>
+<td>Across all negatives</td>
+<td>Independent per pair</td>
+</tr>
+<tr>
+<td>Batch dependency</td>
+<td>Softmax couples all items</td>
+<td>Each pair independent</td>
+</tr>
+<tr>
+<td>Large batch scaling</td>
+<td>Requires distributed softmax</td>
+<td>Naturally parallel</td>
+</tr>
+<tr>
+<td>Performance</td>
+<td>Baseline</td>
+<td>+2% on ImageNet zero-shot</td>
+</tr>
+</tbody>
+</table>
+<h3 id="why-sigmoid-softmax-for-scaling">Why Sigmoid &gt; Softmax for Scaling</h3>
+<p>Softmax requires computing a normalizer over the entire batch:</p>
+<p>$$\text{softmax}(x_i) = \frac{\exp(x_i)}{\sum_j \exp(x_j)} \quad \leftarrow \text{requires all-gather across GPUs}$$</p>
+<p>Sigmoid treats each pair independently:</p>
+<p>$$\sigma(x_{ij}) = \frac{1}{1 + \exp(-x_{ij})} \quad \leftarrow \text{no cross-GPU communication}$$</p>
+<p>This makes SigLIP much easier to scale to massive batch sizes across many GPUs.</p>
+<h3 id="embedding-space-geometry">Embedding Space Geometry</h3>
+<p>CLIP/SigLIP create a <strong>hypersphere</strong> where semantically similar items are close:</p>
+<pre><code>Embedding space (projected to 2D):
+
+    &quot;a golden retriever&quot;  •──────•  [photo of golden retriever]
+                           \
+                            •  [photo of labrador]
+                           /
+    &quot;a labrador dog&quot;      •
+
+    &quot;a red sports car&quot;    •──────•  [photo of Ferrari]
+
+    &quot;a pickup truck&quot;      •──────•  [photo of F-150]
+
+Distance between clusters &gt;&gt; distance within clusters
+</code></pre>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="implementing-contrastive-loss">Implementing Contrastive Loss</h3>
+<pre><code class="language-python">import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class CLIPLoss(nn.Module):
+    &quot;&quot;&quot;Standard CLIP contrastive loss with learned temperature.&quot;&quot;&quot;
+
+    def __init__(self, init_temperature=0.07):
+        super().__init__()
+        self.log_temperature = nn.Parameter(torch.log(torch.tensor(init_temperature)))
+
+    def forward(self, image_embeds, text_embeds):
+        &quot;&quot;&quot;
+        Args:
+            image_embeds: (B, D) normalized image embeddings
+            text_embeds: (B, D) normalized text embeddings
+        &quot;&quot;&quot;
+        temperature = self.log_temperature.exp().clamp(max=100.0)
+
+        # Similarity matrix
+        logits = (image_embeds @ text_embeds.T) / temperature  # (B, B)
+
+        # Labels: diagonal entries are correct matches
+        labels = torch.arange(len(logits), device=logits.device)
+
+        # Symmetric loss
+        loss_i2t = F.cross_entropy(logits, labels)
+        loss_t2i = F.cross_entropy(logits.T, labels)
+
+        return (loss_i2t + loss_t2i) / 2
+
+
+class SigLIPLoss(nn.Module):
+    &quot;&quot;&quot;SigLIP pairwise sigmoid loss — no softmax normalization.&quot;&quot;&quot;
+
+    def __init__(self, init_temperature=10.0, init_bias=-10.0):
+        super().__init__()
+        self.temperature = nn.Parameter(torch.tensor(init_temperature))
+        self.bias = nn.Parameter(torch.tensor(init_bias))
+
+    def forward(self, image_embeds, text_embeds):
+        &quot;&quot;&quot;
+        Args:
+            image_embeds: (B, D) normalized image embeddings
+            text_embeds: (B, D) normalized text embeddings
+        &quot;&quot;&quot;
+        # Pairwise similarities
+        logits = (image_embeds @ text_embeds.T) * self.temperature + self.bias  # (B, B)
+
+        # Labels: +1 for matched, -1 for unmatched
+        B = logits.shape[0]
+        labels = 2 * torch.eye(B, device=logits.device) - 1  # +1 diagonal, -1 elsewhere
+
+        # Binary cross-entropy per pair
+        loss = -F.logsigmoid(labels * logits).mean()
+
+        return loss
+
+
+# Compare the two losses
+B, D = 32, 512
+img_emb = F.normalize(torch.randn(B, D), dim=-1)
+txt_emb = F.normalize(torch.randn(B, D), dim=-1)
+
+clip_loss = CLIPLoss()
+siglip_loss = SigLIPLoss()
+
+print(f&quot;CLIP loss:   {clip_loss(img_emb, txt_emb).item():.4f}&quot;)
+print(f&quot;SigLIP loss: {siglip_loss(img_emb, txt_emb).item():.4f}&quot;)
+print(f&quot;Temperature (CLIP):  {clip_loss.log_temperature.exp().item():.4f}&quot;)
+print(f&quot;Temperature (SigLIP): {siglip_loss.temperature.item():.4f}&quot;)
+</code></pre>
+<h3 id="embedding-space-analysis">Embedding Space Analysis</h3>
+<pre><code class="language-python">import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.manifold import TSNE
+
+
+def analyze_clip_embeddings(image_paths, text_descriptions, model_name=&quot;openai/clip-vit-base-patch32&quot;):
+    &quot;&quot;&quot;Visualize the geometry of CLIP's embedding space.&quot;&quot;&quot;
+    from transformers import CLIPModel, CLIPProcessor
+
+    model = CLIPModel.from_pretrained(model_name)
+    processor = CLIPProcessor.from_pretrained(model_name)
+    model.eval()
+
+    # Encode images
+    images = [Image.open(p).convert(&quot;RGB&quot;) for p in image_paths]
+    img_inputs = processor(images=images, return_tensors=&quot;pt&quot;, padding=True)
+    with torch.no_grad():
+        img_embeds = F.normalize(model.get_image_features(**img_inputs), dim=-1)
+
+    # Encode text
+    txt_inputs = processor(text=text_descriptions, return_tensors=&quot;pt&quot;, padding=True)
+    with torch.no_grad():
+        txt_embeds = F.normalize(model.get_text_features(**txt_inputs), dim=-1)
+
+    # Combine and project with t-SNE
+    all_embeds = torch.cat([img_embeds, txt_embeds], dim=0).numpy()
+    n_images = len(image_paths)
+
+    tsne = TSNE(n_components=2, perplexity=min(5, len(all_embeds) - 1), random_state=42)
+    projected = tsne.fit_transform(all_embeds)
+
+    # Plot
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.scatter(projected[:n_images, 0], projected[:n_images, 1],
+               c='blue', marker='o', s=100, label='Images')
+    ax.scatter(projected[n_images:, 0], projected[n_images:, 1],
+               c='red', marker='x', s=100, label='Text')
+
+    # Draw lines between matched pairs
+    for i in range(min(n_images, len(text_descriptions))):
+        ax.plot([projected[i, 0], projected[n_images + i, 0]],
+                [projected[i, 1], projected[n_images + i, 1]],
+                'k--', alpha=0.3)
+
+    ax.legend()
+    ax.set_title('CLIP Embedding Space (t-SNE)')
+    plt.tight_layout()
+    plt.savefig('clip_embedding_space.png', dpi=150)
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<ol>
+<li>
+<p><strong>Temperature ablation:</strong> Train a small CLIP model (using CIFAR-10 + synthetic captions) with fixed temperatures {0.01, 0.07, 0.5, 1.0} vs learned temperature. Plot validation loss curves. What temperature does the learnable version converge to?</p>
+</li>
+<li>
+<p><strong>SigLIP vs CLIP:</strong> Implement both losses and train identical models. Compare convergence speed and final zero-shot accuracy. Does SigLIP's independence per pair help?</p>
+</li>
+<li>
+<p><strong>Embedding analysis:</strong> Encode 100 images and their captions with CLIP. Compute the full similarity matrix. What fraction of images have their correct caption as the top-1 retrieval? What about top-5?</p>
+</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Learned temperature.</strong> Adapts confidence automatically — starts exploratory, becomes confident</li>
+<li><strong>SigLIP improves CLIP.</strong> Pairwise sigmoid removes softmax bottleneck, enables easier scaling</li>
+<li><strong>Batch size matters.</strong> Larger batches = more hard negatives = better alignment</li>
+<li><strong>Embedding geometry.</strong> Matched image-text pairs cluster in the shared space</li>
+<li><strong>Foundation model.</strong> CLIP/SigLIP vision encoders power most modern VLMs</li>
+</ol>
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<blockquote>
+<p><em>CLIP aligns vision and language in a shared space, but it can't generate text. Tomorrow: Flamingo and BLIP-2, which connect CLIP-style vision encoders to frozen LLMs for visual understanding and generation.</em></p>
+</blockquote>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://arxiv.org/abs/2303.15343">SigLIP (Zhai et al., 2023)</a></li>
+<li><a href="https://arxiv.org/abs/2102.05918">Scaling Up Visual and Vision-Language Representation Learning (ALIGN, 2021)</a></li>
+<li><a href="https://github.com/mlfoundations/open_clip">OpenCLIP training recipes</a></li>
+<li><a href="https://arxiv.org/abs/2303.15389">EVA-CLIP (Sun et al., 2023)</a></li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-59-clip.html" class="text-violet-600 hover:text-violet-800">&larr; Day 59: CLIP</a>
+            <a href="day-61-flamingo-blip2.html" class="text-violet-600 hover:text-violet-800">Day 61: Flamingo & BLIP-2 &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

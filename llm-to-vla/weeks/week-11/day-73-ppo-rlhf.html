@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 73: PPO & RLHF Connection - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 11: RL & Diffusion</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-73-ppo-rlhf-connection">Day 73: PPO &amp; RLHF Connection</h1>
+<blockquote>
+<p><strong>Phase VI — Robot Learning: RL, Diffusion &amp; Data | Week 11 | 2.5 hours</strong>
+<em>"PPO is the workhorse of modern RL — simple enough to implement, stable enough to actually work." — John Schulman</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-72-rl-foundations-2.html">Day 72: RL Foundations Day 2</a></li>
+<li><strong>Next:</strong> <a href="day-74-ddpm.html">Day 74: Diffusion Models — DDPM</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 11 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/11-rl-foundations.html">Phase VI: Robot Learning</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="731-why-not-just-use-policy-gradients">73.1 Why Not Just Use Policy Gradients?</h3>
+<p>Vanilla policy gradient (REINFORCE, A2C) has a critical flaw: <strong>step size sensitivity</strong>.</p>
+<pre><code>Too small step  → painfully slow learning
+Too large step  → policy collapses, catastrophic forgetting
+Just right      → unknown in advance, changes during training
+</code></pre>
+<p><strong>Trust Region</strong> idea: constrain how much the policy can change per update.</p>
+<h3 id="732-ppo-clipped-surrogate-objective">73.2 PPO: Clipped Surrogate Objective</h3>
+<p>PPO approximates a trust region using a simple clipped objective:</p>
+<p>$$L^{\text{CLIP}}(\theta) = \mathbb{E}_t \left[ \min\left( r_t(\theta) \hat{A}_t, \; \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) \hat{A}_t \right) \right]$$</p>
+<p>where:
+- $r_t(\theta) = \frac{\pi_\theta(a_t | s_t)}{\pi_{\theta_\text{old}}(a_t | s_t)}$ — probability ratio
+- $\epsilon = 0.2$ — clipping threshold
+- $\hat{A}_t$ — GAE advantage from Day 72</p>
+<pre><code>           r(θ)·Â
+             │
+    ─────────┼───────── (1+ε)·Â
+             │ ╱
+             │╱  ← clipped: prevents too-large updates
+    ─────────┼───────── (1-ε)·Â
+            ╱│
+           ╱ │
+    ──────╱──┼─────────
+         ╱   │
+     r(θ): 0.8  1.0  1.2
+</code></pre>
+<p><strong>Why it works:</strong> if the advantage is positive and the ratio exceeds $1+\epsilon$, the gradient is zeroed out. The policy can't move too far in one update.</p>
+<h3 id="733-ppo-training-loop">73.3 PPO Training Loop</h3>
+<pre><code>repeat:
+  1. Collect N timesteps with current policy π_old
+  2. Compute GAE advantages Â_t
+  3. For K epochs over the collected data:
+     a. Compute r(θ) = π_θ(a|s) / π_old(a|s)
+     b. Compute clipped objective L^CLIP
+     c. Update θ via gradient ascent
+  4. Set π_old ← π_θ
+</code></pre>
+<p><strong>Key hyperparameters:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Typical Value</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>$\epsilon$ (clip)</td>
+<td>0.2</td>
+<td>Trust region width</td>
+</tr>
+<tr>
+<td>K (epochs)</td>
+<td>3–10</td>
+<td>Reuse of collected data</td>
+</tr>
+<tr>
+<td>N (batch)</td>
+<td>2048–8192</td>
+<td>Data per update</td>
+</tr>
+<tr>
+<td>$\gamma$</td>
+<td>0.99</td>
+<td>Discount factor</td>
+</tr>
+<tr>
+<td>$\lambda$ (GAE)</td>
+<td>0.95</td>
+<td>Advantage bias-variance</td>
+</tr>
+<tr>
+<td>lr</td>
+<td>3e-4</td>
+<td>Learning rate</td>
+</tr>
+</tbody>
+</table>
+<h3 id="734-the-rlhf-connection">73.4 The RLHF Connection</h3>
+<p>Recall Day 33: RLHF trains LLMs using PPO where:</p>
+<table>
+<thead>
+<tr>
+<th>RL Component</th>
+<th>RLHF Mapping</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>State $s$</td>
+<td>Prompt + partial generation</td>
+</tr>
+<tr>
+<td>Action $a$</td>
+<td>Next token</td>
+</tr>
+<tr>
+<td>Policy $\pi_\theta$</td>
+<td>Language model</td>
+</tr>
+<tr>
+<td>Reward $R$</td>
+<td>Reward model score</td>
+</tr>
+<tr>
+<td>$\pi_\text{ref}$</td>
+<td>Frozen pre-trained LM (KL penalty)</td>
+</tr>
+</tbody>
+</table>
+<p>$$\text{RLHF objective} = \mathbb{E}\left[R(y) - \beta \cdot D_\text{KL}(\pi_\theta \| \pi_\text{ref})\right]$$</p>
+<p><strong>Same algorithm, different domain:</strong> PPO clips policy updates to prevent catastrophic forgetting — whether the policy generates text or robot actions.</p>
+<h3 id="735-ppo-for-robot-learning">73.5 PPO for Robot Learning</h3>
+<p>For continuous-action robot control:
+- Policy outputs Gaussian: $\pi_\theta(a|s) = \mathcal{N}(\mu_\theta(s), \sigma_\theta(s))$
+- Actions: joint velocities, end-effector deltas
+- Reward: task-specific (reach target, grasp object)</p>
+<p><strong>Challenge:</strong> reward engineering is hard for robots. This motivates learning from demonstrations (Day 78) and diffusion-based policies (Day 81) instead.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="ppo-implementation">PPO Implementation</h3>
+<pre><code class="language-python">import gymnasium as gym
+import torch
+import torch.nn as nn
+import numpy as np
+
+class PPOActorCritic(nn.Module):
+    def __init__(self, state_dim, action_dim, hidden=64):
+        super().__init__()
+        self.actor = nn.Sequential(
+            nn.Linear(state_dim, hidden), nn.Tanh(),
+            nn.Linear(hidden, hidden), nn.Tanh(),
+            nn.Linear(hidden, action_dim),
+        )
+        self.critic = nn.Sequential(
+            nn.Linear(state_dim, hidden), nn.Tanh(),
+            nn.Linear(hidden, hidden), nn.Tanh(),
+            nn.Linear(hidden, 1),
+        )
+
+    def get_action_and_value(self, state):
+        logits = self.actor(state)
+        dist = torch.distributions.Categorical(logits=logits)
+        action = dist.sample()
+        return action, dist.log_prob(action), dist.entropy(), self.critic(state).squeeze(-1)
+
+    def evaluate(self, state, action):
+        logits = self.actor(state)
+        dist = torch.distributions.Categorical(logits=logits)
+        return dist.log_prob(action), dist.entropy(), self.critic(state).squeeze(-1)
+
+def ppo_train(env_name=&quot;CartPole-v1&quot;, total_steps=100000,
+              n_steps=2048, n_epochs=10, clip_eps=0.2,
+              gamma=0.99, lam=0.95, lr=3e-4):
+
+    env = gym.make(env_name)
+    model = PPOActorCritic(env.observation_space.shape[0], env.action_space.n)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    state, _ = env.reset()
+    ep_rewards, current_reward = [], 0
+
+    for update in range(total_steps // n_steps):
+        # --- Collect rollout ---
+        states, actions, rewards, dones = [], [], [], []
+        old_log_probs, values = [], []
+
+        for _ in range(n_steps):
+            state_t = torch.FloatTensor(state)
+            with torch.no_grad():
+                action, log_prob, _, value = model.get_action_and_value(state_t)
+
+            states.append(state_t)
+            actions.append(action)
+            old_log_probs.append(log_prob)
+            values.append(value)
+
+            state, reward, term, trunc, _ = env.step(action.item())
+            rewards.append(reward)
+            dones.append(float(term or trunc))
+            current_reward += reward
+
+            if term or trunc:
+                ep_rewards.append(current_reward)
+                current_reward = 0
+                state, _ = env.reset()
+
+        # --- Compute GAE ---
+        vals = [v.item() for v in values] + [0]
+        advantages, gae = [], 0
+        for t in reversed(range(n_steps)):
+            delta = rewards[t] + gamma * vals[t+1] * (1-dones[t]) - vals[t]
+            gae = delta + gamma * lam * (1-dones[t]) * gae
+            advantages.insert(0, gae)
+
+        advantages = torch.tensor(advantages)
+        returns = advantages + torch.tensor(vals[:-1])
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        states = torch.stack(states)
+        actions = torch.stack(actions)
+        old_log_probs = torch.stack(old_log_probs)
+
+        # --- PPO update ---
+        for epoch in range(n_epochs):
+            new_log_probs, entropy, new_values = model.evaluate(states, actions)
+            ratio = (new_log_probs - old_log_probs.detach()).exp()
+
+            # Clipped objective
+            surr1 = ratio * advantages
+            surr2 = torch.clamp(ratio, 1-clip_eps, 1+clip_eps) * advantages
+            actor_loss = -torch.min(surr1, surr2).mean()
+            critic_loss = ((new_values - returns.detach())**2).mean()
+
+            loss = actor_loss + 0.5 * critic_loss - 0.01 * entropy.mean()
+
+            optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+            optimizer.step()
+
+        if ep_rewards:
+            print(f&quot;Update {update}: avg reward = {np.mean(ep_rewards[-20:]):.1f}&quot;)
+
+    return model, ep_rewards
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<ol>
+<li>
+<p><strong>Clip visualization:</strong> For fixed $\hat{A} > 0$, plot $L^\text{CLIP}$ vs $r(\theta)$. Identify the flat region where gradient = 0.</p>
+</li>
+<li>
+<p><strong>Epsilon ablation:</strong> Train PPO with $\epsilon \in \{0.05, 0.1, 0.2, 0.3, 0.5\}$. What breaks at extremes?</p>
+</li>
+<li>
+<p><strong>RLHF simulation:</strong> Implement a toy RLHF loop: use PPO to fine-tune a small character-level LM where the "reward model" is just string length. Observe mode collapse vs KL penalty.</p>
+</li>
+<li>
+<p><strong>Compare REINFORCE vs A2C vs PPO:</strong> Run all three on CartPole with same number of environment steps. Plot learning curves.</p>
+</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>PPO clips the probability ratio</strong> to prevent destructive policy updates</li>
+<li><strong>Same data, multiple epochs</strong> — PPO reuses collected trajectories (K epochs)</li>
+<li><strong>PPO = the algorithm behind RLHF</strong> — Day 33's missing implementation detail</li>
+<li><strong>Reward engineering is the bottleneck</strong> for robot RL → motivates imitation learning</li>
+<li><strong>GAE + PPO + clipping</strong> = the standard recipe for modern RL</li>
+</ol>
+<hr />
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<blockquote>
+<p><em>PPO completes the RL toolkit. But robot RL's Achilles heel is reward design: how do you specify "pick up the mug carefully" as a scalar reward? The answer is you don't — you show demonstrations instead. Before we get to imitation learning (Week 12), we need one more tool: diffusion models. Starting tomorrow, we learn to generate by denoising — a framework that will transform how robots produce actions.</em></p>
+</blockquote>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Schulman et al. (2017), "Proximal Policy Optimization Algorithms"</li>
+<li>Ouyang et al. (2022), "Training language models to follow instructions with human feedback" (InstructGPT/RLHF)</li>
+<li>Andrychowicz et al. (2020), "What Matters In On-Policy Reinforcement Learning?"</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-72-rl-foundations-2.html" class="text-violet-600 hover:text-violet-800">&larr; Day 72: RL Foundations Day 2</a>
+            <a href="day-74-ddpm.html" class="text-violet-600 hover:text-violet-800">Day 74: Diffusion — DDPM &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

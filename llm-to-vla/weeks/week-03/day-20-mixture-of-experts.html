@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 20: Mixture of Experts (MoE) — Sparse Activation at Scale - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 3: Variants & GPT</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-20-mixture-of-experts-moe-sparse-activation-at-scale">Day 20: Mixture of Experts (MoE) — Sparse Activation at Scale</h1>
+<blockquote>
+<p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 3 | 2.5 hours</strong>
+<em>"Not all experts need to weigh in on every question. The art is in the routing." — Shazeer et al.</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-19-normalization-activations.html">Day 19: Normalization + Activations</a></li>
+<li><strong>Next:</strong> <a href="day-21-bert-masked-lm.html">Day 21: BERT &amp; Masked LM</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 3 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/03-transformers.html">Phase II: Attention &amp; Transformers</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="201-the-scaling-dilemma">20.1 The Scaling Dilemma</h3>
+<p>Dense transformers have a problem: <strong>every parameter is active for every token</strong>.</p>
+<ul>
+<li>LLaMA-70B: 70B parameters active per token → expensive inference</li>
+<li>Want: more knowledge capacity (more parameters) WITHOUT proportionally more compute</li>
+</ul>
+<p><strong>MoE insight:</strong> Replace the single FFN in each transformer layer with $N$ parallel FFN "experts," but only activate $k$ of them per token.</p>
+<pre><code>Dense Transformer Layer:               MoE Transformer Layer:
+┌────────────┐                         ┌────────────┐
+│   Attention │                         │   Attention │
+├────────────┤                         ├────────────┤
+│   Single   │  ← all params          │   Router    │ ← tiny network
+│   FFN      │     active             ┌┤ scores each│   picks top-k
+│            │                        │ │ expert     │
+│            │                        │ ├────────────┤
+│            │                        │ │ Expert 1   │ ← only 2 of 8
+│            │                        │ │ Expert 2   │   are active!
+│            │                        │ │ Expert 3 ✓ │
+└────────────┘                        │ │ Expert 4   │
+                                      │ │ Expert 5 ✓ │
+Total params = active params          │ │ Expert 6   │
+                                      │ │ Expert 7   │
+                                      │ │ Expert 8   │
+                                      │ └────────────┘
+                                      Total params &gt;&gt; active params
+</code></pre>
+<h3 id="202-the-router">20.2 The Router</h3>
+<p>The router (or gating network) decides which experts process each token:</p>
+<p>$$G(x) = \text{TopK}(\text{softmax}(xW_g), k)$$</p>
+<p>where $W_g \in \mathbb{R}^{d \times N}$ maps each token to $N$ expert scores.</p>
+<pre><code>Token embedding ──→ [W_g: d×8] ──→ softmax ──→ [0.05, 0.12, 0.41, 0.03, 0.31, 0.02, 0.04, 0.02]
+                                                         ↓ top-2
+                                              Expert 3 (weight 0.57) ──→ ┐
+                                              Expert 5 (weight 0.43) ──→ ┤──→ weighted sum
+                                                                          └──→ output
+
+Output = 0.57 × Expert3(x) + 0.43 × Expert5(x)
+</code></pre>
+<p>The router weights are renormalized so the top-k weights sum to 1.</p>
+<h3 id="203-load-balancing-the-critical-challenge">20.3 Load Balancing — The Critical Challenge</h3>
+<p><strong>Problem: expert collapse.</strong> Without intervention, the router learns to send ALL tokens to 1-2 experts (the rich get richer):</p>
+<pre><code>Step 0:    Expert usage: [13%, 12%, 13%, 12%, 13%, 12%, 13%, 12%]  ← balanced
+Step 1000: Expert usage: [45%, 30%, 5%, 5%, 5%, 5%, 3%, 2%]       ← collapsing
+Step 5000: Expert usage: [92%, 8%, 0%, 0%, 0%, 0%, 0%, 0%]        ← collapsed!
+</code></pre>
+<p><strong>Solution: auxiliary load balancing loss.</strong></p>
+<p>For $N$ experts and a batch of $T$ tokens:</p>
+<p>$$\mathcal{L}_{\text{balance}} = N \cdot \sum_{i=1}^{N} f_i \cdot P_i$$</p>
+<p>where:
+- $f_i = \frac{\text{tokens routed to expert } i}{T}$ (fraction of tokens)
+- $P_i = \frac{1}{T}\sum_{t=1}^{T} p_i(x_t)$ (average routing probability for expert $i$)</p>
+<p>This loss is minimized when $f_i = P_i = \frac{1}{N}$ (uniform distribution).</p>
+<p>$$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{task}} + \alpha \cdot \mathcal{L}_{\text{balance}}$$</p>
+<p>Typically $\alpha = 0.01$.</p>
+<h3 id="204-key-moe-architectures">20.4 Key MoE Architectures</h3>
+<p><strong>Switch Transformer (Fedus et al., 2022):</strong>
+- Top-1 routing (only ONE expert per token)
+- Simplest routing, fewest communication needs
+- Capacity factor limits how many tokens each expert processes
+- Result: 7× faster training with same compute as dense T5</p>
+<p><strong>Mixtral 8×7B (Mistral AI, 2024):</strong>
+- 8 experts, top-2 routing
+- Each expert is a 7B-parameter FFN (same as Mistral-7B)
+- Total params: <strong>46.7B</strong> (8 experts × ~5.6B FFN params + shared attention)
+- Active params: <strong>12.9B</strong> per token (attention + 2 expert FFNs)
+- Matches or exceeds LLaMA-2 70B quality with 5× less inference compute</p>
+<pre><code>Mixtral Architecture:
+┌──────────────────────────────────────┐
+│ Shared: Attention (same for all tokens) │
+├──────────────────────────────────────┤
+│ Router → Top-2 selection              │
+├───────┬───────┬─────┬───────┬────────┤
+│ FFN-1 │ FFN-2 │ ... │ FFN-7 │ FFN-8  │
+│ (7B)  │ (7B)  │     │ (7B)  │ (7B)   │  ← Only 2 active
+└───────┴───────┴─────┴───────┴────────┘
+
+Active per token:  Attention (~1.3B) + 2×FFN (~5.8B×2) = 12.9B
+Total parameters:  Attention + 8×FFN = 46.7B
+Memory needed:     ALL 46.7B must be in memory (even though only 12.9B active)
+</code></pre>
+<h3 id="205-trade-offs">20.5 Trade-offs</h3>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Dense Model</th>
+<th>MoE Model</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Parameters</td>
+<td>All active</td>
+<td>Only top-k active</td>
+</tr>
+<tr>
+<td>Quality at same compute</td>
+<td>Baseline</td>
+<td>Better (more capacity)</td>
+</tr>
+<tr>
+<td>Memory</td>
+<td>= active params</td>
+<td>= total params (&gt;&gt;active)</td>
+</tr>
+<tr>
+<td>Inference speed</td>
+<td>Proportional to params</td>
+<td>Proportional to active params</td>
+</tr>
+<tr>
+<td>Training complexity</td>
+<td>Simple</td>
+<td>Need load balancing, communication</td>
+</tr>
+<tr>
+<td>Hardware utilization</td>
+<td>High</td>
+<td>Can be low (expert imbalance)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The memory catch:</strong> Even though Mixtral only uses 12.9B params per forward pass, you need ALL 46.7B in GPU memory. MoE trades compute savings for memory overhead.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="206-moe-layer-from-scratch">20.6 MoE Layer from Scratch</h3>
+<pre><code class="language-python">import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
+
+
+class Expert(nn.Module):
+    &quot;&quot;&quot;A single expert — standard FFN.&quot;&quot;&quot;
+
+    def __init__(self, d_model, hidden_dim):
+        super().__init__()
+        self.w1 = nn.Linear(d_model, hidden_dim, bias=False)
+        self.w2 = nn.Linear(hidden_dim, d_model, bias=False)
+
+    def forward(self, x):
+        return self.w2(F.silu(self.w1(x)))
+
+
+class MoELayer(nn.Module):
+    &quot;&quot;&quot;Mixture of Experts layer with top-k routing.&quot;&quot;&quot;
+
+    def __init__(self, d_model=256, hidden_dim=512, n_experts=8, top_k=2):
+        super().__init__()
+        self.n_experts = n_experts
+        self.top_k = top_k
+
+        # Router: maps token → expert scores
+        self.router = nn.Linear(d_model, n_experts, bias=False)
+
+        # Create n_experts independent FFNs
+        self.experts = nn.ModuleList([
+            Expert(d_model, hidden_dim) for _ in range(n_experts)
+        ])
+
+    def forward(self, x):
+        &quot;&quot;&quot;
+        Args:
+            x: (batch, seq_len, d_model)
+        Returns:
+            output: (batch, seq_len, d_model)
+            aux_loss: load balancing loss
+        &quot;&quot;&quot;
+        B, T, D = x.shape
+        x_flat = x.view(-1, D)  # (B*T, D)
+
+        # Router scores
+        router_logits = self.router(x_flat)  # (B*T, n_experts)
+        router_probs = F.softmax(router_logits, dim=-1)
+
+        # Top-k selection
+        top_k_probs, top_k_indices = torch.topk(
+            router_probs, self.top_k, dim=-1
+        )
+        # Renormalize top-k weights to sum to 1
+        top_k_weights = top_k_probs / top_k_probs.sum(dim=-1, keepdim=True)
+
+        # Compute expert outputs (simple loop — not optimal but clear)
+        output = torch.zeros_like(x_flat)
+        for i in range(self.top_k):
+            expert_indices = top_k_indices[:, i]  # which expert for each token
+            weights = top_k_weights[:, i]          # weight for this expert
+
+            for e_idx in range(self.n_experts):
+                mask = (expert_indices == e_idx)
+                if mask.any():
+                    expert_input = x_flat[mask]
+                    expert_output = self.experts[e_idx](expert_input)
+                    output[mask] += weights[mask].unsqueeze(-1) * expert_output
+
+        output = output.view(B, T, D)
+
+        # Load balancing auxiliary loss
+        aux_loss = self._load_balancing_loss(router_probs, top_k_indices)
+
+        return output, aux_loss
+
+    def _load_balancing_loss(self, router_probs, top_k_indices):
+        &quot;&quot;&quot;
+        Compute auxiliary loss to encourage balanced expert usage.
+        L_balance = N * sum(f_i * P_i)
+        &quot;&quot;&quot;
+        n_tokens = router_probs.size(0)
+
+        # f_i: fraction of tokens assigned to each expert
+        expert_counts = torch.zeros(self.n_experts, device=router_probs.device)
+        for k in range(self.top_k):
+            for e in range(self.n_experts):
+                expert_counts[e] += (top_k_indices[:, k] == e).float().sum()
+        f = expert_counts / (n_tokens * self.top_k)
+
+        # P_i: average router probability for each expert
+        P = router_probs.mean(dim=0)
+
+        return self.n_experts * (f * P).sum()
+</code></pre>
+<h3 id="207-training-with-moe">20.7 Training with MoE</h3>
+<pre><code class="language-python">class MoETransformerBlock(nn.Module):
+    &quot;&quot;&quot;Transformer block with MoE FFN.&quot;&quot;&quot;
+
+    def __init__(self, d_model=256, n_heads=8, n_experts=8, top_k=2):
+        super().__init__()
+        self.norm1 = nn.RMSNorm(d_model) if hasattr(nn, 'RMSNorm') else nn.LayerNorm(d_model)
+        self.norm2 = nn.RMSNorm(d_model) if hasattr(nn, 'RMSNorm') else nn.LayerNorm(d_model)
+        self.attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
+        self.moe = MoELayer(d_model, d_model * 4, n_experts, top_k)
+
+    def forward(self, x):
+        # Pre-LN attention
+        normed = self.norm1(x)
+        attn_out, _ = self.attn(normed, normed, normed)
+        x = x + attn_out
+
+        # Pre-LN MoE FFN
+        normed = self.norm2(x)
+        moe_out, aux_loss = self.moe(normed)
+        x = x + moe_out
+
+        return x, aux_loss
+
+
+def train_moe_model(n_experts=8, top_k=2, n_steps=500):
+    &quot;&quot;&quot;Train a small MoE model and track expert usage.&quot;&quot;&quot;
+    d_model = 256
+    block = MoETransformerBlock(d_model, n_experts=n_experts, top_k=top_k)
+    optimizer = torch.optim.Adam(block.parameters(), lr=1e-3)
+
+    losses = []
+    aux_losses = []
+    expert_usage_history = []
+
+    for step in range(n_steps):
+        x = torch.randn(8, 32, d_model)
+        target = torch.randn(8, 32, d_model)
+
+        out, aux_loss = block(x)
+        task_loss = F.mse_loss(out, target)
+        total_loss = task_loss + 0.01 * aux_loss
+
+        optimizer.zero_grad()
+        total_loss.backward()
+        optimizer.step()
+
+        losses.append(task_loss.item())
+        aux_losses.append(aux_loss.item())
+
+        # Track expert usage every 50 steps
+        if step % 50 == 0:
+            with torch.no_grad():
+                probe = torch.randn(16, 64, d_model)
+                logits = block.moe.router(probe.view(-1, d_model))
+                probs = F.softmax(logits, dim=-1)
+                usage = probs.mean(dim=0)
+                expert_usage_history.append(usage.numpy())
+                print(f&quot;Step {step}: loss={task_loss.item():.4f}, &quot;
+                      f&quot;aux={aux_loss.item():.4f}, &quot;
+                      f&quot;usage={usage.numpy().round(3)}&quot;)
+
+    return losses, aux_losses, expert_usage_history
+
+losses, aux_losses, usage_hist = train_moe_model()
+</code></pre>
+<h3 id="208-visualize-expert-specialization">20.8 Visualize Expert Specialization</h3>
+<pre><code class="language-python">fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+# Training loss
+axes[0].plot(losses, alpha=0.5, label='Task Loss')
+axes[0].plot(
+    range(0, len(losses), 10),
+    [sum(losses[i:i+10])/10 for i in range(0, len(losses), 10)],
+    'r-', label='Smoothed'
+)
+axes[0].set_title('Task Loss')
+axes[0].set_xlabel('Step')
+axes[0].legend()
+
+# Auxiliary loss
+axes[1].plot(aux_losses, alpha=0.5, label='Balance Loss')
+axes[1].axhline(y=1.0, color='r', linestyle='--', label='Perfect balance')
+axes[1].set_title('Load Balancing Loss')
+axes[1].set_xlabel('Step')
+axes[1].legend()
+
+# Expert usage over time
+usage_array = torch.tensor(usage_hist).numpy()
+for e in range(usage_array.shape[1]):
+    axes[2].plot(
+        range(0, len(losses), 50)[:len(usage_array)],
+        usage_array[:, e],
+        label=f'Expert {e}'
+    )
+axes[2].axhline(y=1/8, color='k', linestyle='--', alpha=0.5, label='Ideal (1/8)')
+axes[2].set_title('Expert Usage Over Training')
+axes[2].set_xlabel('Step')
+axes[2].set_ylabel('Average Routing Probability')
+axes[2].legend(fontsize=7)
+
+plt.tight_layout()
+plt.savefig('moe_training.png', dpi=150)
+plt.show()
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e201-mixtral-math">E20.1 Mixtral Math</h3>
+<p>Mixtral 8×7B has:
+- 32 transformer layers
+- Each layer: shared attention + 8 FFN experts (each ~7B-equivalent FFN)
+- Top-2 routing
+- Total parameters: 46.7B
+- Active parameters per token: 12.9B</p>
+<p><strong>Questions:</strong>
+1. What is the theoretical FLOPs reduction vs a dense 46.7B model?
+2. What is the memory requirement (fp16) to load the full model?
+3. What is the inference speedup vs a dense 46.7B model? vs a dense 12.9B model?
+4. A dense 12.9B model needs ~26 GB. Mixtral needs ~93 GB. Is MoE "cheaper"?</p>
+<h3 id="e202-expert-collapse-experiment">E20.2 Expert Collapse Experiment</h3>
+<p>Train the MoE model <strong>without</strong> the auxiliary loss ($\alpha = 0$):</p>
+<pre><code class="language-python"># Modify train_moe_model to set aux_weight=0
+losses_no_bal, _, usage_no_bal = train_moe_model_custom(aux_weight=0.0)
+losses_with_bal, _, usage_with_bal = train_moe_model_custom(aux_weight=0.01)
+
+# Compare expert usage distributions
+# Does expert collapse occur? How quickly?
+</code></pre>
+<h3 id="e203-top-k-ablation">E20.3 Top-k Ablation</h3>
+<p>Compare top-1 (Switch Transformer style) vs top-2 (Mixtral style) vs top-4 routing:</p>
+<pre><code class="language-python">for k in [1, 2, 4]:
+    losses, _, usage = train_moe_model(n_experts=8, top_k=k)
+    print(f&quot;top-{k}: final_loss={losses[-1]:.4f}&quot;)
+    # Plot and compare convergence
+</code></pre>
+<p>What happens to quality and compute as $k$ increases? At what point does MoE lose its advantage over a dense model?</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>MoE decouples model capacity from compute cost</strong> — huge total parameters, small active parameters per token</li>
+<li><strong>The router is a tiny learned gating network</strong> that selects which experts process each token</li>
+<li><strong>Load balancing is critical</strong> — without it, the router collapses to using 1-2 experts and wastes the rest</li>
+<li><strong>Mixtral 8×7B matches LLaMA-2 70B</strong> with only 12.9B active parameters — a 5× inference speedup</li>
+<li><strong>Memory is the trade-off</strong> — you need ALL parameters in memory even though only a fraction are active</li>
+</ol>
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>MoE is the architectural answer to the question: "How do we make models smarter without making them proportionally slower?" You've seen computational optimizations (Flash Attention, KV Cache) and architectural refinements (Pre-LN, SwiGLU). MoE is a fundamentally different approach — instead of making every neuron work on every token, specialize. This idea will recur in Phase VII when you see how VLA models handle multimodal inputs: different "experts" for vision, language, and action.</p>
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><strong><a href="https://arxiv.org/abs/2101.03961">Switch Transformer</a></strong> — Fedus et al., 2022</li>
+<li><strong><a href="https://arxiv.org/abs/2401.04088">Mixtral Paper</a></strong> — Jiang et al., 2024</li>
+<li><strong><a href="https://arxiv.org/abs/2006.16668">GShard</a></strong> — Lepikhin et al., 2020 (MoE at scale)</li>
+<li><strong><a href="https://arxiv.org/abs/2202.08906">ST-MoE</a></strong> — Zoph et al., 2022 (stable MoE training)</li>
+<li><strong><a href="https://arxiv.org/abs/2401.06066">DeepSeek-MoE</a></strong> — DeepSeek AI, 2024 (fine-grained experts)</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-19-normalization-activations.html" class="text-violet-600 hover:text-violet-800">&larr; Day 19: Normalization & Activations</a>
+            <a href="day-21-bert-masked-lm.html" class="text-violet-600 hover:text-violet-800">Day 21: BERT & Masked LM &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11: Scaled Dot-Product Attention - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 2: Attention & Transformers</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-11-scaled-dot-product-attention">Day 11: Scaled Dot-Product Attention</h1>
+<blockquote>
+<p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 2 | 2.5 hours</strong>
+<em>"The dot product is nature's similarity measure — but without scaling, it breaks softmax."</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-10-bahdanau-attention.html">Day 10: Bahdanau Attention</a></li>
+<li><strong>Next:</strong> <a href="day-12-multi-head-attention.html">Day 12: Multi-Head Attention</a></li>
+<li><strong>Week:</strong> <a href="../README.html">Week 2 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/02-attention-mechanism.html">Phase II: Attention &amp; Transformers</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="111-from-additive-to-multiplicative-attention">11.1 From Additive to Multiplicative Attention</h3>
+<p>Yesterday's Bahdanau attention uses a learned feedforward network to compute alignment scores. This works but is slow — for each (query, key) pair, we run a neural network forward pass.</p>
+<p><strong>Luong et al. (2015)</strong> proposed a simpler alternative: just take the <strong>dot product</strong> between query and key vectors.</p>
+<table>
+<thead>
+<tr>
+<th>Attention type</th>
+<th>Score function</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Additive (Bahdanau)</td>
+<td>$e = v^T \tanh(W_s s + W_h h)$</td>
+<td>$O(d_a)$ per pair, sequential</td>
+</tr>
+<tr>
+<td>Dot-product (Luong)</td>
+<td>$e = s^T h$</td>
+<td>$O(d)$ per pair, parallelizable</td>
+</tr>
+<tr>
+<td>Scaled dot-product</td>
+<td>$e = \frac{s^T h}{\sqrt{d_k}}$</td>
+<td>$O(d)$ per pair, parallelizable</td>
+</tr>
+</tbody>
+</table>
+<p>The dot product is computationally cheaper and can be computed in parallel via matrix multiplication.</p>
+<h3 id="112-the-query-key-value-framework">11.2 The Query-Key-Value Framework</h3>
+<p>Vaswani et al. (2017) formalized attention using three projections:</p>
+<ul>
+<li><strong>Query</strong> ($Q$): "What am I looking for?" — each position projects its state into a query vector</li>
+<li><strong>Key</strong> ($K$): "What do I contain?" — each position projects into a key vector for matching</li>
+<li><strong>Value</strong> ($V$): "What do I offer?" — the actual content to be retrieved</li>
+</ul>
+<p>Given input sequence $X \in \mathbb{R}^{n \times d}$:</p>
+<p>$$Q = X W_Q, \quad K = X W_K, \quad V = X W_V$$</p>
+<p>where $W_Q, W_K \in \mathbb{R}^{d \times d_k}$ and $W_V \in \mathbb{R}^{d \times d_v}$.</p>
+<h3 id="113-the-attention-equation">11.3 The Attention Equation</h3>
+<p>$$\text{Attention}(Q, K, V) = \text{softmax}\!\left(\frac{Q K^T}{\sqrt{d_k}}\right) V$$</p>
+<p>Step by step:</p>
+<pre><code>1. Compute scores:   S = Q K^T          shape: (n, n)
+2. Scale:            S = S / √d_k       prevents softmax saturation
+3. Softmax:          A = softmax(S)      row-wise, each row sums to 1
+4. Weighted sum:     O = A V             shape: (n, d_v)
+</code></pre>
+<p>In matrix form, this is beautifully parallelizable:</p>
+<pre><code>Q: (n × d_k)     ┐
+                  ├──→ QK^T: (n × n) ──→ softmax ──→ A: (n × n) ──→ AV: (n × d_v)
+K: (n × d_k)     ┘                                                    ↑
+V: (n × d_v)  ────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="114-why-scale-by-latexinlineblock12endlatex">11.4 Why Scale by $\sqrt{d_k}$?</h3>
+<p>This is the critical insight that makes dot-product attention work in practice.</p>
+<p><strong>Problem:</strong> For large $d_k$, the dot products $q \cdot k$ grow in magnitude. If $q$ and $k$ have components drawn from $\mathcal{N}(0, 1)$, then:</p>
+<p>$$\mathbb{E}[q \cdot k] = 0, \quad \text{Var}[q \cdot k] = d_k$$</p>
+<p>So the standard deviation of dot products scales as $\sqrt{d_k}$. For $d_k = 64$, typical dot products have magnitude $\sim 8$.</p>
+<p><strong>What happens without scaling:</strong> Large values push softmax into regions where gradients are extremely small:</p>
+<p>$$\text{softmax}([10, 0, 0]) = [0.9999, 0.00005, 0.00005]$$</p>
+<p>The gradient $\frac{\partial}{\partial x_i} \text{softmax}(x)_i = p_i(1 - p_i)$ vanishes when $p_i \approx 1$ or $p_i \approx 0$.</p>
+<p><strong>Scaling by $\sqrt{d_k}$</strong> restores the variance to $\sim 1$:</p>
+<p>$$\text{Var}\!\left[\frac{q \cdot k}{\sqrt{d_k}}\right] = \frac{d_k}{d_k} = 1$$</p>
+<p>This keeps softmax in a regime with healthy gradients.</p>
+<h3 id="115-attention-as-matrix-operations">11.5 Attention as Matrix Operations</h3>
+<p>The elegance of scaled dot-product attention is that it's just three matrix multiplications:</p>
+<p>$$\underbrace{Q K^T}_{\text{all pairwise similarities}} \rightarrow \underbrace{\text{softmax}}_{\text{normalize}} \rightarrow \underbrace{\times V}_{\text{weighted retrieval}}$$</p>
+<p>This means <strong>every position attends to every other position simultaneously</strong> — no recurrence, no sequential bottleneck. An $n$-token sequence requires $O(n^2 \cdot d)$ compute but has $O(1)$ sequential depth.</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>RNN</th>
+<th>Attention</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sequential operations</td>
+<td>$O(n)$</td>
+<td>$O(1)$</td>
+</tr>
+<tr>
+<td>Total compute</td>
+<td>$O(n \cdot d^2)$</td>
+<td>$O(n^2 \cdot d)$</td>
+</tr>
+<tr>
+<td>Max path length</td>
+<td>$O(n)$</td>
+<td>$O(1)$</td>
+</tr>
+</tbody>
+</table>
+<p>For $n < d$ (typical in practice), attention wins on everything.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="116-implementing-scaled-dot-product-attention-from-scratch">11.6 Implementing Scaled Dot-Product Attention from Scratch</h3>
+<pre><code class="language-python">import torch
+import torch.nn.functional as F
+import math
+
+
+def scaled_dot_product_attention(
+    query: torch.Tensor,    # (batch, n_q, d_k)
+    key: torch.Tensor,      # (batch, n_k, d_k)
+    value: torch.Tensor,    # (batch, n_k, d_v)
+    mask: torch.Tensor | None = None,  # (batch, n_q, n_k) or broadcastable
+) -&gt; tuple[torch.Tensor, torch.Tensor]:
+    &quot;&quot;&quot;
+    Compute scaled dot-product attention.
+
+    Returns:
+        output: (batch, n_q, d_v) — weighted value vectors
+        weights: (batch, n_q, n_k) — attention weights
+    &quot;&quot;&quot;
+    d_k = query.size(-1)
+
+    # Step 1: Compute raw scores via matrix multiplication
+    # (batch, n_q, d_k) × (batch, d_k, n_k) → (batch, n_q, n_k)
+    scores = torch.bmm(query, key.transpose(-2, -1))
+
+    # Step 2: Scale by √d_k
+    scores = scores / math.sqrt(d_k)
+
+    # Step 3: Apply mask (e.g., causal mask for autoregressive decoding)
+    if mask is not None:
+        scores = scores.masked_fill(mask == 0, float('-inf'))
+
+    # Step 4: Softmax over keys dimension
+    weights = F.softmax(scores, dim=-1)
+
+    # Step 5: Weighted sum of values
+    output = torch.bmm(weights, value)
+
+    return output, weights
+</code></pre>
+<h3 id="117-testing-dimensions-and-properties">11.7 Testing Dimensions and Properties</h3>
+<pre><code class="language-python">def test_attention_shapes():
+    &quot;&quot;&quot;Verify output shapes match expectations.&quot;&quot;&quot;
+    batch, n_q, n_k, d_k, d_v = 2, 5, 7, 64, 32
+
+    Q = torch.randn(batch, n_q, d_k)
+    K = torch.randn(batch, n_k, d_k)
+    V = torch.randn(batch, n_k, d_v)
+
+    output, weights = scaled_dot_product_attention(Q, K, V)
+
+    assert output.shape == (batch, n_q, d_v), f&quot;Expected ({batch}, {n_q}, {d_v}), got {output.shape}&quot;
+    assert weights.shape == (batch, n_q, n_k), f&quot;Expected ({batch}, {n_q}, {n_k}), got {weights.shape}&quot;
+
+    # Attention weights should sum to 1 along key dimension
+    weight_sums = weights.sum(dim=-1)
+    assert torch.allclose(weight_sums, torch.ones_like(weight_sums), atol=1e-5), \
+        f&quot;Weights don't sum to 1: {weight_sums}&quot;
+
+    print(&quot;✓ All shape tests passed&quot;)
+
+
+def test_scaling_effect():
+    &quot;&quot;&quot;Demonstrate why scaling matters.&quot;&quot;&quot;
+    d_k = 512
+    Q = torch.randn(1, 1, d_k)
+    K = torch.randn(1, 10, d_k)
+    V = torch.randn(1, 10, d_k)
+
+    # Without scaling
+    scores_unscaled = torch.bmm(Q, K.transpose(-2, -1))
+    weights_unscaled = F.softmax(scores_unscaled, dim=-1)
+
+    # With scaling
+    scores_scaled = scores_unscaled / math.sqrt(d_k)
+    weights_scaled = F.softmax(scores_scaled, dim=-1)
+
+    print(f&quot;d_k = {d_k}&quot;)
+    print(f&quot;Score std (unscaled): {scores_unscaled.std():.2f}&quot;)
+    print(f&quot;Score std (scaled):   {scores_scaled.std():.2f}&quot;)
+    print(f&quot;Max weight (unscaled): {weights_unscaled.max():.4f}&quot;)
+    print(f&quot;Max weight (scaled):   {weights_scaled.max():.4f}&quot;)
+    print(f&quot;Entropy (unscaled): {-(weights_unscaled * weights_unscaled.log()).sum():.4f}&quot;)
+    print(f&quot;Entropy (scaled):   {-(weights_scaled * weights_scaled.log()).sum():.4f}&quot;)
+
+
+test_attention_shapes()
+test_scaling_effect()
+</code></pre>
+<h3 id="118-causal-autoregressive-masking">11.8 Causal (Autoregressive) Masking</h3>
+<pre><code class="language-python">def create_causal_mask(seq_len: int) -&gt; torch.Tensor:
+    &quot;&quot;&quot;Create lower-triangular mask for autoregressive attention.
+
+    Position i can only attend to positions ≤ i.
+    &quot;&quot;&quot;
+    mask = torch.tril(torch.ones(seq_len, seq_len))
+    return mask  # 1 = attend, 0 = block
+
+
+# Example: 4-token sequence
+mask = create_causal_mask(4)
+print(mask)
+# tensor([[1, 0, 0, 0],    ← token 0 sees only itself
+#         [1, 1, 0, 0],    ← token 1 sees 0,1
+#         [1, 1, 1, 0],    ← token 2 sees 0,1,2
+#         [1, 1, 1, 1]])   ← token 3 sees everything
+
+Q = K = V = torch.randn(1, 4, 64)
+output, weights = scaled_dot_product_attention(Q, K, V, mask=mask.unsqueeze(0))
+print(f&quot;Causal attention weights:\n{weights.squeeze()}&quot;)
+# Upper triangle should be zero
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e111-hand-computation">E11.1 Hand Computation</h3>
+<p>Given a 3-token sequence with $d_k = 2$:</p>
+<p>$$Q = \begin{bmatrix} 1 & 0 \\ 0 & 1 \\ 1 & 1 \end{bmatrix}, \quad K = \begin{bmatrix} 1 & 0 \\ 0 & 1 \\ 0.5 & 0.5 \end{bmatrix}, \quad V = \begin{bmatrix} 1 & 0 \\ 0 & 1 \\ 0.5 & 0.5 \end{bmatrix}$$</p>
+<ol>
+<li>Compute $QK^T$ (the raw scores matrix)</li>
+<li>Scale by $\sqrt{d_k} = \sqrt{2} \approx 1.414$</li>
+<li>Apply softmax row-wise to get the attention weight matrix $A$</li>
+<li>Compute the output $AV$</li>
+<li>Interpret: which query attends most uniformly? Which is most focused?</li>
+</ol>
+<h3 id="e112-saturation-demonstration">E11.2 Saturation Demonstration</h3>
+<p>Write code that:
+1. Fixes $Q$ and $K$ and varies $d_k$ from 1 to 1024
+2. For each $d_k$, computes attention weights <strong>with and without</strong> scaling
+3. Plots the <strong>entropy</strong> of the attention distribution vs $d_k$
+4. Shows that without scaling, entropy collapses (attention becomes one-hot) as $d_k$ grows</p>
+<h3 id="e113-comparing-bahdanau-vs-scaled-dot-product">E11.3 Comparing Bahdanau vs Scaled Dot-Product</h3>
+<p>Using the same encoder-decoder architecture:
+1. Replace Bahdanau attention with scaled dot-product attention
+2. Train both on the same data
+3. Compare: training speed (wall time per epoch), final BLEU, attention heatmaps
+4. Where do they agree? Where do they differ?</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ul>
+<li><strong>Dot-product attention</strong> replaces the learned alignment network with a simple dot product: $\text{score} = q \cdot k$</li>
+<li><strong>Scaling by $\sqrt{d_k}$</strong> prevents softmax saturation as dimensionality grows</li>
+<li>The full equation: $\text{Attention}(Q, K, V) = \text{softmax}(QK^T / \sqrt{d_k}) \, V$</li>
+<li>Everything is <strong>matrix multiplications</strong> — embarrassingly parallel on GPUs</li>
+<li>Attention has $O(1)$ path length between any two positions (vs $O(n)$ for RNNs)</li>
+</ul>
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>The dot product $q \cdot k = \|q\| \|k\| \cos\theta$ measures <strong>similarity</strong> in the embedding space. Attention weights are a similarity-normalized information retrieval. The model learns to place queries and keys in a space where geometrically close = semantically relevant. This is the same principle behind compression: identify redundancy (similarity), then use it to reconstruct (retrieve values). The transformer will build on this to create an <em>entire architecture</em> out of nothing but learned similarity lookups.</p>
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Vaswani et al. <strong>"Attention Is All You Need"</strong> (2017), Section 3.2.1. <a href="https://arxiv.org/abs/1706.03762">arXiv:1706.03762</a></li>
+<li>Luong, Pham, Manning. <strong>"Effective Approaches to Attention-based Neural Machine Translation"</strong> (2015). <a href="https://arxiv.org/abs/1508.04025">arXiv:1508.04025</a></li>
+<li>Lilian Weng. <strong>"Attention? Attention!"</strong> (2018). <a href="https://lilianweng.github.io/posts/2018-06-24-attention/">lilianweng.github.io</a></li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-10-bahdanau-attention.html" class="text-violet-600 hover:text-violet-800">&larr; Day 10: Bahdanau Attention</a>
+            <a href="day-12-multi-head-attention.html" class="text-violet-600 hover:text-violet-800">Day 12: Multi-Head Attention &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

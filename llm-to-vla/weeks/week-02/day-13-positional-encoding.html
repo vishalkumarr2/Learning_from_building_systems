@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13: Positional Encoding - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 2: Attention & Transformers</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-13-positional-encoding">Day 13: Positional Encoding</h1>
+<blockquote>
+<p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 2 | 2.5 hours</strong>
+<em>"Attention treats the input as a set, not a sequence. We must inject the notion of order."</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-12-multi-head-attention.html">Day 12: Multi-Head Attention</a></li>
+<li><strong>Next:</strong> <a href="day-14-full-transformer.html">Day 14: The Full Transformer</a></li>
+<li><strong>Week:</strong> <a href="../README.html">Week 2 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/02-attention-mechanism.html">Phase II: Attention &amp; Transformers</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="131-the-permutation-problem">13.1 The Permutation Problem</h3>
+<p>Self-attention is <strong>permutation-equivariant</strong>: if you shuffle the input tokens, the output gets shuffled the same way, but each token's representation is unchanged.</p>
+<p>$$\text{Attention}(\pi(X)) = \pi(\text{Attention}(X))$$</p>
+<p>where $\pi$ is any permutation. This means attention <strong>doesn't know word order</strong>. "The cat sat on the mat" and "mat the on sat cat the" produce the same attention weights (up to permutation).</p>
+<p>But word order matters! We need to somehow encode position into the representation.</p>
+<h3 id="132-sinusoidal-positional-encoding-vaswani-et-al-2017">13.2 Sinusoidal Positional Encoding (Vaswani et al., 2017)</h3>
+<p>The original transformer uses deterministic sinusoidal functions at different frequencies:</p>
+<p>$$PE_{(pos, 2i)} = \sin\!\left(\frac{pos}{10000^{2i/d_{\text{model}}}}\right)$$</p>
+<p>$$PE_{(pos, 2i+1)} = \cos\!\left(\frac{pos}{10000^{2i/d_{\text{model}}}}\right)$$</p>
+<p>where $pos$ is the position index and $i$ is the dimension index.</p>
+<p><strong>Why sinusoids?</strong>
+- For any fixed offset $k$, $PE_{pos+k}$ can be expressed as a <strong>linear function</strong> of $PE_{pos}$:</p>
+<p>$$\begin{bmatrix} \sin(\omega \cdot (pos+k)) \\ \cos(\omega \cdot (pos+k)) \end{bmatrix} = \begin{bmatrix} \cos(\omega k) & \sin(\omega k) \\ -\sin(\omega k) & \cos(\omega k) \end{bmatrix} \begin{bmatrix} \sin(\omega \cdot pos) \\ \cos(\omega \cdot pos) \end{bmatrix}$$</p>
+<p>This means the model can learn to attend to <strong>relative positions</strong> using linear transformations.</p>
+<ul>
+<li>Different dimensions use different frequencies (like Fourier basis), spanning from $2\pi$ (dimension 0) to $10000 \cdot 2\pi$ (last dimension). Low-frequency components capture coarse position, high-frequency components capture fine position.</li>
+</ul>
+<pre><code>Position →
+Dim 0: ∿∿∿∿∿∿∿∿∿∿   (high frequency — changes rapidly)
+Dim 1: ∿∿∿∿∿         (medium frequency)
+Dim 2: ∿∿             (low frequency — changes slowly)
+...
+Dim d: ∿              (very low — almost constant)
+</code></pre>
+<h3 id="133-learned-positional-embeddings-gpt-2">13.3 Learned Positional Embeddings (GPT-2)</h3>
+<p>Instead of a fixed formula, learn a position embedding table:</p>
+<p>$$\text{input} = \text{token\_embed}(x) + \text{pos\_embed}(pos)$$</p>
+<p>where $\text{pos\_embed} \in \mathbb{R}^{L_{\max} \times d_{\text{model}}}$ is a trainable parameter.</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Sinusoidal</th>
+<th>Learned</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Extrapolation</td>
+<td>Can generalize beyond training length (in theory)</td>
+<td>Cannot — unseen positions have random embeddings</td>
+</tr>
+<tr>
+<td>Parameters</td>
+<td>0 extra</td>
+<td>$L_{\max} \times d_{\text{model}}$ extra</td>
+</tr>
+<tr>
+<td>Performance</td>
+<td>Slightly worse on fixed-length tasks</td>
+<td>Slightly better within training range</td>
+</tr>
+<tr>
+<td>Used in</td>
+<td>Original Transformer</td>
+<td>GPT-2, BERT, ViT</td>
+</tr>
+</tbody>
+</table>
+<h3 id="134-rotary-position-embeddings-rope-su-et-al-2021">13.4 Rotary Position Embeddings — RoPE (Su et al., 2021)</h3>
+<p>The modern standard, used in LLaMA, Mistral, Qwen, Gemma. RoPE encodes position by <strong>rotating</strong> query and key vectors in 2D subspaces.</p>
+<p><strong>Core idea:</strong> Instead of adding position information, multiply by a rotation matrix. For position $m$ and dimension pair $(2i, 2i+1)$:</p>
+<p>$$\begin{bmatrix} q_{2i}^{(m)} \\ q_{2i+1}^{(m)} \end{bmatrix} = \begin{bmatrix} \cos(m\theta_i) & -\sin(m\theta_i) \\ \sin(m\theta_i) & \cos(m\theta_i) \end{bmatrix} \begin{bmatrix} q_{2i} \\ q_{2i+1} \end{bmatrix}$$</p>
+<p>where $\theta_i = 10000^{-2i/d}$ (same frequency base as sinusoidal PE).</p>
+<p><strong>Why RoPE is powerful:</strong></p>
+<p>The dot product between rotated queries and keys at positions $m$ and $n$ depends only on the <strong>relative position</strong> $m - n$:</p>
+<p>$$\langle \text{RoPE}(q, m), \text{RoPE}(k, n) \rangle = f(q, k, m-n)$$</p>
+<p>This gives relative position encoding <em>for free</em> through the attention score computation, without adding any parameters.</p>
+<h3 id="135-alibi-attention-with-linear-biases-press-et-al-2022">13.5 ALiBi — Attention with Linear Biases (Press et al., 2022)</h3>
+<p>A simpler alternative: don't modify embeddings at all. Instead, add a position-dependent <strong>bias</strong> directly to the attention scores:</p>
+<p>$$\text{score}_{ij} = q_i \cdot k_j - m \cdot |i - j|$$</p>
+<p>where $m$ is a head-specific slope. Closer positions get higher scores; distant positions are penalized linearly. Each head uses a different slope $m$, creating a geometric series:</p>
+<p>$$m \in \left\{\frac{1}{2^1}, \frac{1}{2^2}, \ldots, \frac{1}{2^h}\right\}$$</p>
+<p><strong>Advantages:</strong> Zero extra parameters, excellent length extrapolation, trivial to implement.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="136-sinusoidal-positional-encoding">13.6 Sinusoidal Positional Encoding</h3>
+<pre><code class="language-python">import torch
+import torch.nn as nn
+import math
+
+
+class SinusoidalPositionalEncoding(nn.Module):
+    &quot;&quot;&quot;Fixed sinusoidal positional encoding from 'Attention Is All You Need'.&quot;&quot;&quot;
+
+    def __init__(self, d_model: int, max_len: int = 5000, dropout: float = 0.1):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        # Precompute the positional encoding table
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)  # (max_len, 1)
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2, dtype=torch.float) * (-math.log(10000.0) / d_model)
+        )  # (d_model/2,)
+
+        pe[:, 0::2] = torch.sin(position * div_term)  # even dimensions
+        pe[:, 1::2] = torch.cos(position * div_term)  # odd dimensions
+
+        pe = pe.unsqueeze(0)  # (1, max_len, d_model)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x: torch.Tensor) -&gt; torch.Tensor:
+        &quot;&quot;&quot;Add positional encoding to input embeddings.
+
+        x: (batch, seq_len, d_model)
+        &quot;&quot;&quot;
+        x = x + self.pe[:, :x.size(1)]
+        return self.dropout(x)
+</code></pre>
+<h3 id="137-rotary-position-embeddings-rope">13.7 Rotary Position Embeddings (RoPE)</h3>
+<pre><code class="language-python">def precompute_rope_frequencies(dim: int, max_len: int, base: float = 10000.0) -&gt; torch.Tensor:
+    &quot;&quot;&quot;Precompute the complex exponentials for RoPE.
+
+    Returns: (max_len, dim//2) complex tensor
+    &quot;&quot;&quot;
+    freqs = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.float) / dim))
+    positions = torch.arange(max_len, dtype=torch.float)
+    angles = torch.outer(positions, freqs)  # (max_len, dim//2)
+    return torch.polar(torch.ones_like(angles), angles)  # complex exponentials
+
+
+def apply_rope(x: torch.Tensor, freqs: torch.Tensor) -&gt; torch.Tensor:
+    &quot;&quot;&quot;Apply rotary positional embedding to query or key tensor.
+
+    x: (batch, n_heads, seq_len, d_k)
+    freqs: (seq_len, d_k//2) complex
+    &quot;&quot;&quot;
+    # View real tensor as complex: pair up consecutive dimensions
+    x_complex = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2))
+
+    # Reshape freqs for broadcasting: (1, 1, seq_len, d_k//2)
+    freqs = freqs.unsqueeze(0).unsqueeze(0)
+
+    # Multiply by rotation (complex multiplication = rotation in 2D)
+    x_rotated = x_complex * freqs[:, :, :x.shape[2], :]
+
+    # Back to real: (batch, n_heads, seq_len, d_k)
+    return torch.view_as_real(x_rotated).flatten(-2).type_as(x)
+
+
+# Usage in attention:
+# freqs = precompute_rope_frequencies(d_k, max_len)
+# Q_rotated = apply_rope(Q, freqs)
+# K_rotated = apply_rope(K, freqs)
+# scores = Q_rotated @ K_rotated.transpose(-2, -1) / sqrt(d_k)
+</code></pre>
+<h3 id="138-visualizing-positional-encodings">13.8 Visualizing Positional Encodings</h3>
+<pre><code class="language-python">import matplotlib.pyplot as plt
+import numpy as np
+
+
+def visualize_sinusoidal_pe(d_model: int = 128, max_len: int = 100):
+    &quot;&quot;&quot;Visualize sinusoidal PE as heatmap and similarity matrix.&quot;&quot;&quot;
+    pe = SinusoidalPositionalEncoding(d_model, max_len)
+    pe_matrix = pe.pe.squeeze(0).numpy()  # (max_len, d_model)
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+    # 1. PE heatmap
+    axes[0].imshow(pe_matrix[:50, :64], aspect='auto', cmap='RdBu')
+    axes[0].set_xlabel('Dimension')
+    axes[0].set_ylabel('Position')
+    axes[0].set_title('Sinusoidal PE Values')
+
+    # 2. Cosine similarity between positions
+    norms = np.linalg.norm(pe_matrix, axis=1, keepdims=True)
+    similarity = (pe_matrix @ pe_matrix.T) / (norms @ norms.T)
+    axes[1].imshow(similarity[:50, :50], cmap='viridis')
+    axes[1].set_xlabel('Position')
+    axes[1].set_ylabel('Position')
+    axes[1].set_title('Position Similarity (cosine)')
+
+    # 3. Individual dimension waveforms
+    for dim in [0, 1, 10, 20, 50]:
+        axes[2].plot(pe_matrix[:, dim], label=f'dim {dim}')
+    axes[2].set_xlabel('Position')
+    axes[2].set_ylabel('PE Value')
+    axes[2].set_title('Selected Dimensions')
+    axes[2].legend()
+
+    plt.tight_layout()
+    plt.savefig('positional_encoding_viz.png', dpi=150)
+    plt.show()
+
+
+visualize_sinusoidal_pe()
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e131-relative-position-via-dot-products">E13.1 Relative Position via Dot Products</h3>
+<p>For sinusoidal PE with $d_{\text{model}} = 4$:
+1. Compute $PE(0), PE(1), PE(5), PE(6)$ by hand (use the formula with $10000^{2i/4}$)
+2. Compute the dot products: $PE(0) \cdot PE(1)$ and $PE(5) \cdot PE(6)$
+3. Are they similar? Why? (Hint: relative distance is the same)
+4. Compute $PE(0) \cdot PE(5)$ — how does it compare?</p>
+<h3 id="e132-comparing-positional-encoding-approaches">E13.2 Comparing Positional Encoding Approaches</h3>
+<p>Implement all three approaches and compare on a sequence ordering task:
+1. <strong>Sinusoidal PE</strong> (fixed, added to embeddings)
+2. <strong>Learned PE</strong> (trainable embedding table)
+3. <strong>RoPE</strong> (rotary, applied to Q and K)</p>
+<p>Task: classify whether a permuted sequence [3, 1, 4, 2] is in ascending order.
+- Compare accuracy, especially on sequence lengths <em>longer</em> than training (extrapolation test).</p>
+<h3 id="e133-alibi-implementation">E13.3 ALiBi Implementation</h3>
+<p>Implement ALiBi as a simple bias matrix:</p>
+<pre><code class="language-python">def alibi_bias(n_heads: int, seq_len: int) -&gt; torch.Tensor:
+    &quot;&quot;&quot;Return (n_heads, seq_len, seq_len) bias tensor.&quot;&quot;&quot;
+    # Your implementation here
+    pass
+</code></pre>
+<p>Test: verify that slopes form a geometric series, plot the bias patterns.</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ul>
+<li>Attention is <strong>permutation-equivariant</strong> — it needs external position information</li>
+<li><strong>Sinusoidal PE</strong>: deterministic, uses different frequency sines/cosines, enables relative position via linear transforms</li>
+<li><strong>Learned PE</strong>: trainable table, better within training range, can't extrapolate</li>
+<li><strong>RoPE</strong>: rotates Q and K by position, makes dot products depend on relative position, used in all modern LLMs</li>
+<li><strong>ALiBi</strong>: adds linear distance penalty to attention scores, best extrapolation</li>
+<li>The choice of positional encoding significantly affects length generalization</li>
+</ul>
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>Position encoding bridges two fundamental representations: <strong>sets</strong> (what attention naturally operates on) and <strong>sequences</strong> (what language actually is). Each approach represents a different compression of positional information: sinusoidal PE uses a Fourier basis (compact but fixed), learned PE uses a lookup table (flexible but finite), RoPE embeds position into the geometry of the attention computation itself. The evolution from absolute to relative to rotary encodings mirrors a broader ML pattern: make inductive biases <em>softer</em> and let the model discover the right structure.</p>
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Vaswani et al. <strong>"Attention Is All You Need"</strong> (2017), Section 3.5. <a href="https://arxiv.org/abs/1706.03762">arXiv:1706.03762</a></li>
+<li>Su et al. <strong>"RoFormer: Enhanced Transformer with Rotary Position Embedding"</strong> (2021). <a href="https://arxiv.org/abs/2104.09864">arXiv:2104.09864</a></li>
+<li>Press, Smith, Lewis. <strong>"Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation"</strong> (2022). <a href="https://arxiv.org/abs/2108.12409">arXiv:2108.12409</a></li>
+<li>Kazemnejad et al. <strong>"The Impact of Positional Encoding on Length Generalization in Transformers"</strong> (2023). <a href="https://arxiv.org/abs/2305.19466">arXiv:2305.19466</a></li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-12-multi-head-attention.html" class="text-violet-600 hover:text-violet-800">&larr; Day 12: Multi-Head Attention</a>
+            <a href="day-14-full-transformer.html" class="text-violet-600 hover:text-violet-800">Day 14: The Full Transformer &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

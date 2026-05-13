@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17: Efficient Attention — The O(n²) Problem - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 3: Variants & GPT</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-17-efficient-attention-the-on2-problem">Day 17: Efficient Attention — The O(n²) Problem</h1>
+<blockquote>
+<p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 3 | 2.5 hours</strong>
+<em>"The art of progress is to preserve order amid change and to preserve change amid order." — Alfred North Whitehead</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-16-stop-reflect-1.html">Day 16: Stop &amp; Reflect #1</a></li>
+<li><strong>Next:</strong> <a href="day-18-kv-cache.html">Day 18: KV Cache</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 3 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/02-attention-mechanism.html">Phase II: Attention &amp; Transformers</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="171-the-quadratic-wall">17.1 The Quadratic Wall</h3>
+<p>Standard self-attention computes:</p>
+<p>$$\text{Attention}(Q, K, V) = \text{softmax}\!\left(\frac{QK^T}{\sqrt{d_k}}\right) V$$</p>
+<p>The $QK^T$ product creates an $n \times n$ attention matrix where $n$ is the sequence length.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Complexity</th>
+<th>At $n = 4096$, $d = 128$</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Time</td>
+<td>$O(n^2 d)$</td>
+<td>~2.1B FLOPs per head</td>
+</tr>
+<tr>
+<td>Memory</td>
+<td>$O(n^2 + nd)$</td>
+<td>~64MB per head (fp32)</td>
+</tr>
+</tbody>
+</table>
+<p>This means:
+- <strong>Doubling</strong> sequence length → <strong>4× cost</strong>
+- GPT-4's 128K context would need ~65TB of attention matrices across all heads/layers
+- Clearly we need better approaches</p>
+<pre><code>Standard attention memory layout:
+
+Q (n×d)  ×  K^T (d×n)  =  S (n×n)  →  softmax  →  P (n×n)  ×  V (n×d)  =  O (n×d)
+  ↑               ↑            ↑                        ↑              ↑
+ small          small       MASSIVE                  MASSIVE         small
+                            (this is the problem)
+</code></pre>
+<h3 id="172-sparse-attention-patterns">17.2 Sparse Attention Patterns</h3>
+<p>Instead of attending to ALL positions, attend to a SUBSET. The key insight: most attention weights are near-zero anyway.</p>
+<p><strong>Local/Sliding Window Attention (Longformer):</strong></p>
+<pre><code>Token attends to:  [w tokens left] [self] [w tokens right]
+                    ←── window ──→
+
+Full attention matrix (8 tokens, w=2):
+  1 2 3 4 5 6 7 8
+1 ■ ■ ■ · · · · ·     ■ = attends
+2 ■ ■ ■ ■ · · · ·     · = masked
+3 ■ ■ ■ ■ ■ · · ·
+4 · ■ ■ ■ ■ ■ · ·     Complexity: O(n × w × d)
+5 · · ■ ■ ■ ■ ■ ·     where w &lt;&lt; n
+6 · · · ■ ■ ■ ■ ■
+7 · · · · ■ ■ ■ ■
+8 · · · · · ■ ■ ■
+</code></pre>
+<p><strong>Strided/Dilated Attention:</strong></p>
+<pre><code>Stride = 3:
+  1 2 3 4 5 6 7 8 9
+1 ■ · · ■ · · ■ · ·    Every 3rd token
+4 ■ · · ■ · · ■ · ·    Captures long-range
+7 ■ · · ■ · · ■ · ·    dependencies
+</code></pre>
+<p><strong>BigBird (Google, 2020):</strong> Combines three patterns:
+1. <strong>Random attention</strong> — attend to $r$ random tokens
+2. <strong>Window attention</strong> — attend to $w$ local neighbors
+3. <strong>Global tokens</strong> — a few tokens attend to ALL positions (like [CLS])</p>
+<p>This gives $O(n)$ complexity while provably approximating full attention (it's a universal approximation of sequence-to-sequence functions).</p>
+<h3 id="173-flash-attention-the-hardware-aware-revolution">17.3 Flash Attention — The Hardware-Aware Revolution</h3>
+<p>Flash Attention (Dao et al., 2022) is <strong>not</strong> an approximation. It computes <strong>exact</strong> standard attention but reorganizes the computation to minimize GPU memory transfers.</p>
+<p><strong>The key insight: memory hierarchy matters more than FLOPs.</strong></p>
+<pre><code>GPU Memory Hierarchy:
+┌──────────────────────────┐
+│  HBM (High Bandwidth     │  ~80 GB, ~2 TB/s bandwidth
+│  Memory / Global)         │  ← Attention matrices stored here
+├──────────────────────────┤
+│  L2 Cache                 │  ~40 MB, ~4 TB/s
+├──────────────────────────┤
+│  SRAM (Shared Memory /    │  ~20 MB, ~19 TB/s bandwidth
+│  Registers per SM)        │  ← Want computation HERE
+└──────────────────────────┘
+
+Standard attention: writes n×n matrix to HBM, reads it back → IO bound!
+Flash attention:    never materializes n×n matrix, tiles computation in SRAM
+</code></pre>
+<p><strong>How Flash Attention works (tiling + online softmax):</strong></p>
+<ol>
+<li><strong>Divide</strong> Q, K, V into blocks that fit in SRAM</li>
+<li><strong>For each block of Q:</strong> iterate over blocks of K, V</li>
+<li><strong>Compute block attention</strong> in SRAM using online softmax (Milakov &amp; Gimelshein)</li>
+<li><strong>Write only the output</strong> O back to HBM — never write the $n \times n$ matrix</li>
+</ol>
+<p>$$m_{\text{new}} = \max(m_{\text{old}}, \max(\text{block scores}))$$
+$$\ell_{\text{new}} = e^{m_{\text{old}} - m_{\text{new}}} \cdot \ell_{\text{old}} + \sum e^{s_i - m_{\text{new}}}$$</p>
+<p>The online softmax trick maintains running statistics so we never need the full attention matrix.</p>
+<p><strong>Results:</strong>
+- <strong>2–4× faster</strong> than standard PyTorch attention
+- <strong>5–20× less memory</strong> (linear in $n$ instead of quadratic)
+- Enables 16K+ context lengths that were previously OOM
+- Now the default in PyTorch 2.0+ via <code>F.scaled_dot_product_attention</code></p>
+<h3 id="174-linear-attention-approximations">17.4 Linear Attention Approximations</h3>
+<p>Replace softmax with kernel approximations to get truly $O(n)$ attention:</p>
+<p>$$\text{Attention}(Q, K, V) = \frac{\phi(Q) (\phi(K)^T V)}{\phi(Q) (\phi(K)^T \mathbf{1})}$$</p>
+<p>By computing $\phi(K)^T V$ first (a $d \times d$ matrix), we avoid the $n \times n$ product.</p>
+<p><strong>Examples:</strong> Random Feature Attention (Performer), cosine similarity (Linear Transformer).</p>
+<p><strong>Trade-off:</strong> These are approximations — quality degrades, especially for tasks requiring precise positional attention. In practice, Flash Attention (exact but fast) has won over linear approximations.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="175-sliding-window-attention">17.5 Sliding Window Attention</h3>
+<pre><code class="language-python">import torch
+import torch.nn.functional as F
+import time
+import matplotlib.pyplot as plt
+
+
+def standard_attention(Q, K, V):
+    &quot;&quot;&quot;Standard O(n²) attention.&quot;&quot;&quot;
+    d_k = Q.size(-1)
+    scores = torch.matmul(Q, K.transpose(-2, -1)) / (d_k ** 0.5)
+    weights = F.softmax(scores, dim=-1)
+    return torch.matmul(weights, V)
+
+
+def sliding_window_attention(Q, K, V, window_size=256):
+    &quot;&quot;&quot;
+    Sliding window attention — each token attends to
+    window_size tokens on each side.
+    &quot;&quot;&quot;
+    batch, n_heads, seq_len, d_k = Q.shape
+    scale = d_k ** -0.5
+    output = torch.zeros_like(V)
+
+    for i in range(seq_len):
+        # Define window boundaries
+        start = max(0, i - window_size)
+        end = min(seq_len, i + window_size + 1)
+
+        # Extract windowed K, V
+        q_i = Q[:, :, i:i+1, :]             # (B, H, 1, d)
+        k_win = K[:, :, start:end, :]        # (B, H, w, d)
+        v_win = V[:, :, start:end, :]        # (B, H, w, d)
+
+        scores = torch.matmul(q_i, k_win.transpose(-2, -1)) * scale
+        weights = F.softmax(scores, dim=-1)
+        output[:, :, i:i+1, :] = torch.matmul(weights, v_win)
+
+    return output
+
+
+# --- Benchmark ---
+def benchmark_attention(fn, Q, K, V, name, **kwargs):
+    &quot;&quot;&quot;Time an attention function over multiple runs.&quot;&quot;&quot;
+    # Warmup
+    for _ in range(3):
+        _ = fn(Q, K, V, **kwargs)
+    torch.cuda.synchronize() if Q.is_cuda else None
+
+    times = []
+    for _ in range(10):
+        start = time.perf_counter()
+        _ = fn(Q, K, V, **kwargs)
+        torch.cuda.synchronize() if Q.is_cuda else None
+        times.append(time.perf_counter() - start)
+
+    avg = sum(times) / len(times)
+    print(f&quot;{name}: {avg*1000:.2f} ms (seq_len={Q.size(2)})&quot;)
+    return avg
+
+
+# Compare on increasing sequence lengths
+seq_lengths = [128, 256, 512, 1024, 2048]
+standard_times = []
+window_times = []
+
+for n in seq_lengths:
+    Q = torch.randn(1, 8, n, 64)
+    K = torch.randn(1, 8, n, 64)
+    V = torch.randn(1, 8, n, 64)
+
+    t1 = benchmark_attention(standard_attention, Q, K, V, f&quot;Standard (n={n})&quot;)
+    t2 = benchmark_attention(
+        sliding_window_attention, Q, K, V,
+        f&quot;Window  (n={n})&quot;, window_size=64
+    )
+    standard_times.append(t1)
+    window_times.append(t2)
+</code></pre>
+<h3 id="176-flash-attention-via-pytorch-sdpa">17.6 Flash Attention via PyTorch SDPA</h3>
+<pre><code class="language-python"># PyTorch 2.0+ provides Flash Attention automatically
+def flash_attention_benchmark(Q, K, V):
+    &quot;&quot;&quot;Uses Flash Attention under the hood when possible.&quot;&quot;&quot;
+    return F.scaled_dot_product_attention(Q, K, V)
+
+
+def naive_attention_benchmark(Q, K, V):
+    &quot;&quot;&quot;Force the naive math implementation.&quot;&quot;&quot;
+    with torch.nn.attention.sdpa_kernel(
+        torch.nn.attention.SDPBackend.MATH
+    ):
+        return F.scaled_dot_product_attention(Q, K, V)
+
+
+# GPU benchmark (requires CUDA)
+if torch.cuda.is_available():
+    device = &quot;cuda&quot;
+    flash_times = []
+    naive_times = []
+
+    for n in [512, 1024, 2048, 4096, 8192]:
+        Q = torch.randn(1, 32, n, 128, device=device, dtype=torch.float16)
+        K = torch.randn(1, 32, n, 128, device=device, dtype=torch.float16)
+        V = torch.randn(1, 32, n, 128, device=device, dtype=torch.float16)
+
+        t_flash = benchmark_attention(
+            flash_attention_benchmark, Q, K, V, f&quot;Flash  (n={n})&quot;
+        )
+        t_naive = benchmark_attention(
+            naive_attention_benchmark, Q, K, V, f&quot;Naive  (n={n})&quot;
+        )
+        flash_times.append(t_flash)
+        naive_times.append(t_naive)
+
+    print(f&quot;\nSpeedup at n=8192: {naive_times[-1]/flash_times[-1]:.1f}x&quot;)
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e171-memory-usage-analysis">E17.1 Memory Usage Analysis</h3>
+<p>Calculate the peak memory for standard attention at these sequence lengths. Assume <code>float16</code>, batch=1, 32 heads, $d_k = 128$:</p>
+<table>
+<thead>
+<tr>
+<th>Seq Length</th>
+<th>Attention Matrix Size</th>
+<th>Memory (GB)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2,048</td>
+<td>?</td>
+<td>?</td>
+</tr>
+<tr>
+<td>8,192</td>
+<td>?</td>
+<td>?</td>
+</tr>
+<tr>
+<td>32,768</td>
+<td>?</td>
+<td>?</td>
+</tr>
+<tr>
+<td>131,072</td>
+<td>?</td>
+<td>?</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Formula:</strong> $\text{mem} = \text{batch} \times \text{heads} \times n^2 \times \text{bytes}$</p>
+<h3 id="e172-plot-standard-vs-flash-attention">E17.2 Plot: Standard vs Flash Attention</h3>
+<p>Using the benchmarks above, create a plot:
+- X-axis: sequence length (log scale)
+- Y-axis: time in ms (log scale)
+- Two lines: standard vs flash
+- Add a vertical line where flash becomes &gt;2× faster</p>
+<pre><code class="language-python"># Starter code
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+# Time comparison
+ax1.plot(seq_lengths, standard_times, 'r-o', label='Standard')
+ax1.plot(seq_lengths, window_times, 'b-s', label='Sliding Window (w=64)')
+ax1.set_xlabel('Sequence Length')
+ax1.set_ylabel('Time (s)')
+ax1.set_title('Attention Time Complexity')
+ax1.legend()
+ax1.set_xscale('log')
+ax1.set_yscale('log')
+
+# Memory comparison (theoretical)
+mem_standard = [n**2 * 32 * 2 / 1e9 for n in seq_lengths]  # fp16
+mem_window = [n * 128 * 32 * 2 / 1e9 for n in seq_lengths]
+ax2.plot(seq_lengths, mem_standard, 'r-o', label='Standard O(n²)')
+ax2.plot(seq_lengths, mem_window, 'b-s', label='Window O(nw)')
+ax2.set_xlabel('Sequence Length')
+ax2.set_ylabel('Memory (GB)')
+ax2.set_title('Attention Memory Usage')
+ax2.legend()
+ax2.set_xscale('log')
+ax2.set_yscale('log')
+
+plt.tight_layout()
+plt.savefig('efficient_attention_comparison.png', dpi=150)
+plt.show()
+</code></pre>
+<h3 id="e173-critical-thinking">E17.3 Critical Thinking</h3>
+<p>At what sequence length does flash attention become <strong>essential</strong> (not just nice-to-have)? Consider:
+1. A100 GPU with 80GB HBM
+2. LLaMA-2 with 32 heads, $d_k = 128$, 32 layers
+3. Each layer needs its own attention matrix</p>
+<p>Calculate the max sequence length before OOM with standard attention, then with flash attention.</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Standard attention is O(n²)</strong> in both time and memory — this is THE bottleneck for long sequences</li>
+<li><strong>Sparse patterns</strong> (sliding window, BigBird) reduce to O(n) but lose some global connectivity</li>
+<li><strong>Flash Attention is not an approximation</strong> — it's the same math with smarter memory access patterns</li>
+<li><strong>IO-awareness matters more than FLOP count</strong> — Flash Attention does MORE arithmetic but runs faster because it avoids HBM round-trips</li>
+<li><strong>In practice, Flash Attention has won</strong> — it's now the default in PyTorch, and linear approximations are rarely used</li>
+</ol>
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>You've been building attention from Bahdanau (Day 10) through multi-head (Day 12) to the full transformer (Day 14). Now you've hit the scaling wall: attention doesn't scale to long sequences naively. Flash Attention is the engineering breakthrough that makes modern LLMs with 128K+ context possible. Tomorrow, you'll see another critical optimization: the KV cache that makes autoregressive generation practical.</p>
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><strong><a href="https://arxiv.org/abs/2205.14135">Flash Attention Paper</a></strong> — Dao et al., 2022</li>
+<li><strong><a href="https://arxiv.org/abs/2307.08691">Flash Attention 2</a></strong> — Dao, 2023 (further optimizations)</li>
+<li><strong><a href="https://arxiv.org/abs/2004.05150">Longformer</a></strong> — Beltagy et al., 2020</li>
+<li><strong><a href="https://arxiv.org/abs/2007.14062">BigBird</a></strong> — Zaheer et al., 2020</li>
+<li><strong><a href="https://arxiv.org/abs/1805.02867">Online Softmax</a></strong> — Milakov &amp; Gimelshein, 2018</li>
+<li><strong><a href="https://www.youtube.com/watch?v=kCc8FmEb1nY">Karpathy on Flash Attention</a></strong> — relevant section in his transformer lecture</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-16-stop-reflect-1.html" class="text-violet-600 hover:text-violet-800">&larr; Day 16: Stop & Reflect #1</a>
+            <a href="day-18-kv-cache.html" class="text-violet-600 hover:text-violet-800">Day 18: KV Cache &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

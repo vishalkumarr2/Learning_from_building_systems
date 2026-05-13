@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 22: Tokenization Deep Dive — From Characters to Subwords - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 4: Scaling & Decoders</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-22-tokenization-deep-dive-from-characters-to-subwords">Day 22: Tokenization Deep Dive — From Characters to Subwords</h1>
+<blockquote>
+<p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 4 | 2.5 hours</strong>
+<em>"How many Rs in strawberry? If you can't answer that, your tokenizer is showing." — @karpathy</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="../week-03/day-21-bert-masked-lm.html">Day 21: BERT &amp; Masked LM</a></li>
+<li><strong>Next:</strong> <a href="day-23-gpt-nanogpt.html">Day 23: GPT &amp; nanoGPT</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 4 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/03-transformers.html">Phase II: Attention &amp; Transformers</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="221-the-tokenization-problem">22.1 The Tokenization Problem</h3>
+<p>Models don't see text. They see integer sequences. How you convert text → integers has profound consequences:</p>
+<pre><code>Text:      &quot;unhappiness&quot;
+
+Character: ['u','n','h','a','p','p','i','n','e','s','s']  → 11 tokens
+Word:      ['unhappiness']                                  → 1 token (but vocab=∞)
+Subword:   ['un', 'happiness']                              → 2 tokens ← sweet spot
+BPE:       ['un', 'happ', 'iness']                          → 3 tokens (depends on training)
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Vocab Size</th>
+<th>Seq Length</th>
+<th>OOV?</th>
+<th>Morphology</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Character</td>
+<td>~256</td>
+<td>Very long</td>
+<td>Never</td>
+<td>Must learn from scratch</td>
+</tr>
+<tr>
+<td>Word</td>
+<td>100K+</td>
+<td>Short</td>
+<td>Yes, common</td>
+<td>Captures full words</td>
+</tr>
+<tr>
+<td>Subword (BPE)</td>
+<td>32K–100K</td>
+<td>Medium</td>
+<td>Rare</td>
+<td>Learns morphemes</td>
+</tr>
+</tbody>
+</table>
+<h3 id="222-byte-pair-encoding-bpe-step-by-step">22.2 Byte Pair Encoding (BPE) — Step by Step</h3>
+<p>BPE is the dominant tokenization algorithm. It's a compression algorithm repurposed for NLP.</p>
+<p><strong>Algorithm:</strong></p>
+<ol>
+<li>Start with a vocabulary of individual characters (or bytes)</li>
+<li>Count all adjacent pairs in the corpus</li>
+<li>Merge the most frequent pair into a new token</li>
+<li>Repeat steps 2–3 until desired vocabulary size is reached</li>
+</ol>
+<pre><code>Corpus: &quot;low low low low low lowest lowest newer newer newer wider wider&quot;
+
+Step 0 — Character vocabulary:
+  {'l','o','w','e','s','t','n','r','i','d',' '}
+
+Step 0 — Tokenized corpus:
+  l o w   l o w   l o w   l o w   l o w   l o w e s t   l o w e s t
+  n e w e r   n e w e r   n e w e r   w i d e r   w i d e r
+
+Step 1 — Most frequent pair: ('l', 'o') → count: 7
+  Merge 'l'+'o' → 'lo'
+  lo w   lo w   lo w   lo w   lo w   lo w e s t   lo w e s t
+  n e w e r   n e w e r   n e w e r   w i d e r   w i d e r
+
+Step 2 — Most frequent pair: ('lo', 'w') → count: 7
+  Merge 'lo'+'w' → 'low'
+  low   low   low   low   low   low e s t   low e s t
+  n e w e r   n e w e r   n e w e r   w i d e r   w i d e r
+
+Step 3 — Most frequent pair: ('e', 'r') → count: 5
+  Merge 'e'+'r' → 'er'
+  low   low   low   low   low   low e s t   low e s t
+  n e w er   n e w er   n e w er   w i d er   w i d er
+
+Step 4 — Most frequent pair: ('e', 'w') → count: 3
+  Merge 'e'+'w' → 'ew'
+  ...and so on until vocab size reached
+</code></pre>
+<h3 id="223-wordpiece-bert-vs-bpe-gpt">22.3 WordPiece (BERT) vs BPE (GPT)</h3>
+<p>Both are subword tokenization but differ in the merge criterion:</p>
+<p><strong>BPE:</strong> Merges the most <strong>frequent</strong> pair.</p>
+<p><strong>WordPiece:</strong> Merges the pair that maximizes the <strong>likelihood</strong> of the training data:
+$$\text{score}(a, b) = \frac{\text{freq}(ab)}{\text{freq}(a) \times \text{freq}(b)}$$</p>
+<p>This favors merging rare subwords that appear together, rather than just common pairs.</p>
+<p><strong>In practice:</strong> The difference is minor. BPE is more common in modern models.</p>
+<h3 id="224-sentencepiece-and-byte-level-bpe">22.4 SentencePiece and Byte-Level BPE</h3>
+<p><strong>Problem:</strong> Standard BPE depends on pre-tokenization (splitting on spaces). This fails for languages without spaces (Chinese, Japanese) and creates language bias.</p>
+<p><strong>SentencePiece (Kudo &amp; Richardson, 2018):</strong>
+- Treats the input as a raw stream of characters (including spaces as <code>▁</code>)
+- Language-agnostic — no pre-tokenization needed
+- Used by LLaMA, T5, mBART</p>
+<p><strong>Byte-Level BPE (GPT-2/3/4, tiktoken):</strong>
+- Start with 256 byte tokens (UTF-8 bytes)
+- Build BPE merges on bytes, not characters
+- Can represent ANY text (including code, emoji, non-Latin scripts)
+- <code>tiktoken</code> is OpenAI's fast implementation</p>
+<pre><code class="language-python"># tiktoken example
+import tiktoken
+
+enc = tiktoken.get_encoding(&quot;cl100k_base&quot;)  # GPT-4 encoding
+
+text = &quot;Hello, world! 🌍 こんにちは&quot;
+tokens = enc.encode(text)
+print(f&quot;Text: {text}&quot;)
+print(f&quot;Tokens: {tokens}&quot;)
+print(f&quot;Decoded pieces: {[enc.decode([t]) for t in tokens]}&quot;)
+# ['Hello', ',', ' world', '!', ' 🌍', ' ', 'こん', 'にち', 'は']
+</code></pre>
+<h3 id="225-tokenization-artifacts-and-failure-modes">22.5 Tokenization Artifacts and Failure Modes</h3>
+<p>Tokenization creates <strong>blindness</strong> — the model can't reason about sub-token structure:</p>
+<pre><code>&quot;How many Rs in strawberry?&quot;
+
+GPT-4 tokenization:
+  ['How', ' many', ' Rs', ' in', ' str', 'aw', 'berry', '?']
+                                         ↑
+  'strawberry' is split into 'str' + 'aw' + 'berry'
+  The model sees 3 tokens, not individual characters
+  It cannot count letters because it never sees them!
+
+Other artifacts:
+  &quot; Hello&quot;  ≠  &quot;Hello&quot;     (leading space is a separate token)
+  &quot;1+1=2&quot;   tokenized as:  ['1', '+', '1', '=', '2']   ← fine
+  &quot;12345&quot;   tokenized as:  ['123', '45']                ← number split!
+
+  Python code:
+  &quot;    if x:&quot; → ['    ', 'if', ' x', ':']
+  vs
+  &quot;  if x:&quot;  → ['  ', 'if', ' x', ':']
+  Different indentation = different first token!
+</code></pre>
+<p><strong>Why this matters for LLMs:</strong>
+- Arithmetic errors (numbers split unpredictably)
+- Spelling/character-level tasks fail
+- Multilingual efficiency varies wildly (English: ~1 token/word, Japanese: ~3 tokens/character)
+- Code formatting sensitivity</p>
+<h3 id="226-vocabulary-size-trade-offs">22.6 Vocabulary Size Trade-offs</h3>
+<table>
+<thead>
+<tr>
+<th>Vocab Size</th>
+<th>Sequence Length</th>
+<th>Embedding Params</th>
+<th>Quality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>256 (bytes)</td>
+<td>Very long</td>
+<td>256 × d</td>
+<td>Must learn everything</td>
+</tr>
+<tr>
+<td>32K (GPT-2)</td>
+<td>Medium</td>
+<td>32K × d (~25M)</td>
+<td>Good general balance</td>
+</tr>
+<tr>
+<td>50K (BERT)</td>
+<td>Shorter</td>
+<td>50K × d (~38M)</td>
+<td>Better word coverage</td>
+</tr>
+<tr>
+<td>100K (GPT-4)</td>
+<td>Shortest</td>
+<td>100K × d (~77M)</td>
+<td>Best coverage, most params</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule of thumb:</strong> Larger vocab → shorter sequences → faster training, but more embedding parameters and harder to train rare tokens.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="227-bpe-from-scratch-karpathys-minbpe">22.7 BPE from Scratch (Karpathy's minbpe)</h3>
+<pre><code class="language-python">&quot;&quot;&quot;
+Minimal BPE implementation.
+Based on Karpathy's minbpe: https://github.com/karpathy/minbpe
+&quot;&quot;&quot;
+
+
+def get_pair_counts(token_ids):
+    &quot;&quot;&quot;Count frequency of adjacent token pairs.&quot;&quot;&quot;
+    counts = {}
+    for a, b in zip(token_ids, token_ids[1:]):
+        counts[(a, b)] = counts.get((a, b), 0) + 1
+    return counts
+
+
+def merge_pair(token_ids, pair, new_id):
+    &quot;&quot;&quot;Replace all occurrences of pair with new_id.&quot;&quot;&quot;
+    result = []
+    i = 0
+    while i &lt; len(token_ids):
+        if i &lt; len(token_ids) - 1 and (token_ids[i], token_ids[i+1]) == pair:
+            result.append(new_id)
+            i += 2
+        else:
+            result.append(token_ids[i])
+            i += 1
+    return result
+
+
+class MinBPE:
+    &quot;&quot;&quot;Minimal BPE tokenizer.&quot;&quot;&quot;
+
+    def __init__(self):
+        self.merges = {}     # (int, int) → int
+        self.vocab = {}      # int → bytes
+
+    def train(self, text, vocab_size=276):
+        &quot;&quot;&quot;Train BPE on text. Default: 276 = 256 bytes + 20 merges.&quot;&quot;&quot;
+        assert vocab_size &gt;= 256, &quot;Vocab must include all bytes&quot;
+        n_merges = vocab_size - 256
+
+        # Convert text to bytes
+        token_ids = list(text.encode(&quot;utf-8&quot;))
+        print(f&quot;Training BPE: {len(token_ids)} bytes → {n_merges} merges&quot;)
+
+        # Build initial vocab: byte → byte
+        self.vocab = {i: bytes([i]) for i in range(256)}
+
+        for i in range(n_merges):
+            counts = get_pair_counts(token_ids)
+            if not counts:
+                break
+
+            # Find most frequent pair
+            best_pair = max(counts, key=counts.get)
+            new_id = 256 + i
+
+            # Merge
+            token_ids = merge_pair(token_ids, best_pair, new_id)
+
+            # Record
+            self.merges[best_pair] = new_id
+            self.vocab[new_id] = self.vocab[best_pair[0]] + self.vocab[best_pair[1]]
+
+            if i &lt; 10 or i % 50 == 0:
+                piece = self.vocab[new_id].decode(&quot;utf-8&quot;, errors=&quot;replace&quot;)
+                print(f&quot;  Merge {i}: {best_pair} → {new_id} &quot;
+                      f&quot;('{piece}', count={counts[best_pair]})&quot;)
+
+        print(f&quot;Final: {len(token_ids)} tokens &quot;
+              f&quot;(compression: {len(text.encode('utf-8'))/len(token_ids):.1f}x)&quot;)
+        return self
+
+    def encode(self, text):
+        &quot;&quot;&quot;Encode text to token IDs.&quot;&quot;&quot;
+        token_ids = list(text.encode(&quot;utf-8&quot;))
+        while len(token_ids) &gt;= 2:
+            counts = get_pair_counts(token_ids)
+            # Find the pair with the lowest merge index (earliest learned)
+            best = min(
+                counts,
+                key=lambda p: self.merges.get(p, float('inf'))
+            )
+            if best not in self.merges:
+                break
+            token_ids = merge_pair(token_ids, best, self.merges[best])
+        return token_ids
+
+    def decode(self, token_ids):
+        &quot;&quot;&quot;Decode token IDs back to text.&quot;&quot;&quot;
+        raw = b&quot;&quot;.join(self.vocab[t] for t in token_ids)
+        return raw.decode(&quot;utf-8&quot;, errors=&quot;replace&quot;)
+
+
+# Train on a sample corpus
+corpus = &quot;&quot;&quot;
+The transformer architecture has revolutionized natural language processing.
+Attention is all you need. Self-attention allows each token to attend to every
+other token in the sequence. Multi-head attention splits the attention into
+multiple heads, each learning different patterns. The transformer uses
+positional encodings to inject sequence order information.
+&quot;&quot;&quot; * 100  # Repeat for more data
+
+bpe = MinBPE()
+bpe.train(corpus, vocab_size=356)  # 256 bytes + 100 merges
+
+# Test encoding
+test = &quot;The transformer uses attention mechanisms.&quot;
+encoded = bpe.encode(test)
+decoded = bpe.decode(encoded)
+print(f&quot;\nOriginal:  '{test}'&quot;)
+print(f&quot;Encoded:   {encoded}&quot;)
+print(f&quot;N tokens:  {len(encoded)} (vs {len(test)} chars)&quot;)
+print(f&quot;Decoded:   '{decoded}'&quot;)
+print(f&quot;Roundtrip: {test == decoded}&quot;)
+
+# Show the learned vocabulary pieces
+print(&quot;\nLearned merges (first 20):&quot;)
+for (a, b), new_id in list(bpe.merges.items())[:20]:
+    piece = bpe.vocab[new_id].decode(&quot;utf-8&quot;, errors=&quot;replace&quot;)
+    print(f&quot;  {a} + {b} → {new_id} = '{piece}'&quot;)
+</code></pre>
+<h3 id="228-compare-tokenizers">22.8 Compare Tokenizers</h3>
+<pre><code class="language-python">import tiktoken
+
+enc = tiktoken.get_encoding(&quot;cl100k_base&quot;)  # GPT-4 encoding
+
+test_texts = [
+    &quot;Hello, world!&quot;,
+    &quot;The quick brown fox jumps over the lazy dog.&quot;,
+    &quot;unhappiness&quot;,
+    &quot;How many Rs in strawberry?&quot;,
+    &quot;def fibonacci(n):\n    if n &lt;= 1:\n        return n&quot;,
+    &quot;こんにちは世界&quot;,  # &quot;Hello world&quot; in Japanese
+    &quot;🎉🎊🎈&quot;,  # Emoji
+    &quot;3.14159265358979323846&quot;,  # Pi digits
+]
+
+print(f&quot;{'Text':&lt;50} {'tiktoken':&gt;10} {'BPE':&gt;10} {'Chars':&gt;10}&quot;)
+print(&quot;-&quot; * 85)
+for text in test_texts:
+    n_tiktoken = len(enc.encode(text))
+    n_bpe = len(bpe.encode(text))
+    n_chars = len(text)
+    display = text[:47] + &quot;...&quot; if len(text) &gt; 50 else text
+    print(f&quot;{display:&lt;50} {n_tiktoken:&gt;10} {n_bpe:&gt;10} {n_chars:&gt;10}&quot;)
+
+# Inspect tokenization of tricky cases
+for text in [&quot;strawberry&quot;, &quot;How many Rs in strawberry?&quot;]:
+    tokens = enc.encode(text)
+    pieces = [enc.decode([t]) for t in tokens]
+    print(f&quot;\ntiktoken({text!r}):&quot;)
+    print(f&quot;  Pieces: {pieces}&quot;)
+    print(f&quot;  IDs:    {tokens}&quot;)
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e221-compression-ratio-analysis">E22.1 Compression Ratio Analysis</h3>
+<p>Train your MinBPE on different corpus types and measure compression:</p>
+<pre><code class="language-python">corpora = {
+    &quot;english&quot;: &quot;The quick brown fox...&quot; * 1000,
+    &quot;python_code&quot;: &quot;def func(x):\n    return x * 2\n&quot; * 1000,
+    &quot;numbers&quot;: &quot;3141592653589793238462643383279&quot; * 100,
+    &quot;repetitive&quot;: &quot;aaabbbcccaaabbbccc&quot; * 1000,
+}
+
+for name, text in corpora.items():
+    bpe = MinBPE()
+    bpe.train(text, vocab_size=356)
+    encoded = bpe.encode(text)
+    ratio = len(text.encode('utf-8')) / len(encoded)
+    print(f&quot;{name}: {ratio:.1f}x compression&quot;)
+</code></pre>
+<p>Which corpus compresses best? Why?</p>
+<h3 id="e222-tokenization-blindness-demo">E22.2 Tokenization Blindness Demo</h3>
+<p>Test multiple tokenizers on character-level tasks:</p>
+<pre><code class="language-python"># Task: Count occurrences of 'r' in these words
+words = [&quot;strawberry&quot;, &quot;mirror&quot;, &quot;raspberry&quot;, &quot;error&quot;, &quot;corridor&quot;]
+
+for word in words:
+    tokens_gpt4 = enc.encode(word)
+    pieces = [enc.decode([t]) for t in tokens_gpt4]
+    actual_count = word.count('r')
+    print(f&quot;'{word}': actual r-count={actual_count}, &quot;
+          f&quot;tokens={pieces}, n_tokens={len(tokens_gpt4)}&quot;)
+    # Can the model count 'r's if it sees these pieces?
+    # Does any piece split an 'r' from its context?
+</code></pre>
+<h3 id="e223-vocabulary-efficiency-across-languages">E22.3 Vocabulary Efficiency Across Languages</h3>
+<p>Compare token count for the same meaning in different languages:</p>
+<pre><code class="language-python">sentences = {
+    &quot;English&quot;: &quot;Artificial intelligence will transform the world.&quot;,
+    &quot;Japanese&quot;: &quot;人工知能は世界を変革するでしょう。&quot;,
+    &quot;Chinese&quot;: &quot;人工智能将改变世界。&quot;,
+    &quot;Russian&quot;: &quot;Искусственный интеллект изменит мир.&quot;,
+    &quot;Arabic&quot;: &quot;سيغير الذكاء الاصطناعي العالم.&quot;,
+}
+
+for lang, text in sentences.items():
+    tokens = enc.encode(text)
+    chars = len(text)
+    ratio = len(tokens) / len(text.split()) if ' ' in text else len(tokens)
+    print(f&quot;{lang:10s}: {len(tokens):3d} tokens, {chars:3d} chars, &quot;
+          f&quot;tokens/char={len(tokens)/chars:.2f}&quot;)
+</code></pre>
+<p>Why is this ratio so different across languages? What are the implications for multilingual LLMs?</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>BPE is a compression algorithm</strong> — it learns the most efficient subword vocabulary for a given corpus</li>
+<li><strong>Tokenization determines what the model "sees"</strong> — it can never reason below the token level</li>
+<li><strong>"Strawberry" problem:</strong> Tokenization blindness means LLMs struggle with character-level tasks, arithmetic, and spelling</li>
+<li><strong>Byte-level BPE (tiktoken)</strong> handles any input text but creates efficiency imbalances across languages</li>
+<li><strong>Vocabulary size is a trade-off:</strong> larger vocab → shorter sequences (faster) but more embedding parameters and harder to learn rare tokens</li>
+<li><strong>This preprocessing step profoundly affects model behavior</strong> — it's not just an implementation detail</li>
+</ol>
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>Tokenization is the invisible foundation under everything you've built. Every attention matrix, every embedding, every generation step operates on tokens — not characters or words. Understanding tokenization explains many "surprising" LLM failures (arithmetic, spelling, multilingual inconsistency). Tomorrow, you'll build GPT from scratch with nanoGPT, and you'll see tokenization in action as the first step of the entire pipeline.</p>
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><strong><a href="https://github.com/karpathy/minbpe">Karpathy's minbpe</a></strong> — The clearest BPE implementation</li>
+<li><strong><a href="https://www.youtube.com/watch?v=zduSFxRajkE">Karpathy's Tokenization Video</a></strong> — 2+ hours, essential viewing</li>
+<li><strong><a href="https://arxiv.org/abs/1808.06226">SentencePiece Paper</a></strong> — Kudo &amp; Richardson, 2018</li>
+<li><strong><a href="https://github.com/openai/tiktoken">tiktoken</a></strong> — OpenAI's fast BPE implementation</li>
+<li><strong><a href="https://arxiv.org/abs/1508.07909">BPE Original Paper</a></strong> — Sennrich et al., 2016 (BPE for NMT)</li>
+<li><strong><a href="https://arxiv.org/abs/2404.01373">Tokenization Effects</a></strong> — Analysis of tokenization artifacts</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="../week-03/day-21-bert-masked-lm.html" class="text-violet-600 hover:text-violet-800">&larr; Day 21: BERT & Masked LM</a>
+            <a href="day-23-gpt-nanogpt.html" class="text-violet-600 hover:text-violet-800">Day 23: GPT & nanoGPT &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 47: Swin Transformer - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 7: Vision Transformers</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-47-swin-transformer">Day 47: Swin Transformer</h1>
+<blockquote>
+<p><strong>Phase IV — Vision: ViT, 3D, Video | Week 7 | 2.5 hours</strong>
+<em>"Shifted windows: the trick that made vision transformers practical for dense prediction." — Liu et al., 2021</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-46-training-vit-deit.html">Day 46: Training ViT + DeiT</a></li>
+<li><strong>Next:</strong> <a href="day-48-dino-self-supervised.html">Day 48: DINO &amp; Self-Supervised Vision</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 7 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/08-vision-transformers.html">Phase IV: Vision</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="the-problem-with-vit">The Problem with ViT</h3>
+<p>ViT computes global self-attention over all patches — $O(n^2)$ where $n$ is the number of patches. For a 224×224 image with 16×16 patches, $n = 196$. Manageable.</p>
+<p>But for dense prediction tasks (object detection, segmentation) at higher resolutions:
+- 512×512, patch_size=4 → $n = 16{,}384$ patches → attention matrix is 16K × 16K
+- This is <strong>computationally infeasible</strong></p>
+<h3 id="swins-solution-windowed-attention">Swin's Solution: Windowed Attention</h3>
+<p>Swin Transformer computes attention <strong>within local windows</strong>, then shifts the windows to enable cross-window communication:</p>
+<pre><code>Stage 1: Window Attention         Stage 2: Shifted Window Attention
+┌───┬───┬───┬───┐               ┌──┬────┬────┬──┐
+│ A │ A │ B │ B │               │  │    │    │  │
+│   │   │   │   │               │──┼────┼────┼──│
+│ A │ A │ B │ B │    shift by   │  │ E  │ F  │  │
+├───┼───┼───┼───┤  ──────────►  │──┼────┼────┼──│
+│ C │ C │ D │ D │    (M/2, M/2) │  │ G  │ H  │  │
+│   │   │   │   │               │──┼────┼────┼──│
+│ C │ C │ D │ D │               │  │    │    │  │
+└───┴───┴───┴───┘               └──┴────┴────┴──┘
+
+Attention in A,B,C,D: local      Shifted: new windows E,F,G,H
+                                  cross previous boundaries!
+</code></pre>
+<h3 id="complexity-comparison">Complexity Comparison</h3>
+<p>For an image with $h \times w$ patches and window size $M$:</p>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Global attention (ViT)</td>
+<td>$O(h^2 w^2 \cdot d)$ — quadratic in image size</td>
+</tr>
+<tr>
+<td>Window attention (Swin)</td>
+<td>$O(h w \cdot M^2 \cdot d)$ — <strong>linear</strong> in image size</td>
+</tr>
+</tbody>
+</table>
+<p>With $M = 7$ (typical), attention is computed on $7 \times 7 = 49$ tokens per window — tiny and fixed!</p>
+<h3 id="hierarchical-feature-maps-via-patch-merging">Hierarchical Feature Maps via Patch Merging</h3>
+<p>Unlike ViT (single-scale), Swin produces multi-scale features like a CNN backbone:</p>
+<pre><code>Stage 1: 56×56, C=96      ← high resolution, fine features
+    │ Patch Merging (2×2 → 1, double channels)
+    ▼
+Stage 2: 28×28, C=192     ← medium resolution
+    │ Patch Merging
+    ▼
+Stage 3: 14×14, C=384     ← low resolution, semantic features
+    │ Patch Merging
+    ▼
+Stage 4: 7×7, C=768       ← coarsest features
+</code></pre>
+<p><strong>Patch Merging:</strong> Concatenate 2×2 neighboring patches (4C channels) → linear projection to 2C.</p>
+<p>This hierarchical design makes Swin a drop-in replacement for CNN backbones in detection (FPN) and segmentation (UPerNet).</p>
+<h3 id="relative-position-bias">Relative Position Bias</h3>
+<p>Instead of absolute position embeddings, Swin uses <strong>relative position bias</strong> $B \in \mathbb{R}^{M^2 \times M^2}$:</p>
+<p>$$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d}} + B\right) V$$</p>
+<p>This handles variable window positions and improves performance.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="window-attention">Window Attention</h3>
+<pre><code class="language-python">import torch
+import torch.nn as nn
+from einops import rearrange
+
+
+def window_partition(x, window_size):
+    &quot;&quot;&quot;Partition feature map into non-overlapping windows.
+
+    Args:
+        x: (B, H, W, C)
+        window_size: int (M)
+    Returns:
+        windows: (B * num_windows, M, M, C)
+    &quot;&quot;&quot;
+    B, H, W, C = x.shape
+    x = x.view(B, H // window_size, window_size, W // window_size, window_size, C)
+    windows = x.permute(0, 1, 3, 2, 4, 5).contiguous()
+    windows = windows.view(-1, window_size, window_size, C)
+    return windows
+
+
+def window_reverse(windows, window_size, H, W):
+    &quot;&quot;&quot;Reverse window_partition.&quot;&quot;&quot;
+    B = int(windows.shape[0] / (H * W / window_size / window_size))
+    x = windows.view(B, H // window_size, W // window_size, window_size, window_size, -1)
+    x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, H, W, -1)
+    return x
+
+
+class WindowAttention(nn.Module):
+    &quot;&quot;&quot;Window-based multi-head self-attention with relative position bias.&quot;&quot;&quot;
+
+    def __init__(self, dim, window_size, n_heads):
+        super().__init__()
+        self.dim = dim
+        self.window_size = window_size
+        self.n_heads = n_heads
+        self.scale = (dim // n_heads) ** -0.5
+
+        self.qkv = nn.Linear(dim, 3 * dim)
+        self.proj = nn.Linear(dim, dim)
+
+        # Relative position bias table
+        # (2*M-1) * (2*M-1) possible relative positions
+        self.relative_position_bias_table = nn.Parameter(
+            torch.zeros((2 * window_size - 1) * (2 * window_size - 1), n_heads)
+        )
+        nn.init.trunc_normal_(self.relative_position_bias_table, std=0.02)
+
+        # Compute relative position index for each token pair
+        coords_h = torch.arange(window_size)
+        coords_w = torch.arange(window_size)
+        coords = torch.stack(torch.meshgrid(coords_h, coords_w, indexing='ij'))  # (2, M, M)
+        coords_flat = coords.view(2, -1)  # (2, M*M)
+
+        # Relative coordinates
+        relative_coords = coords_flat[:, :, None] - coords_flat[:, None, :]  # (2, M*M, M*M)
+        relative_coords = relative_coords.permute(1, 2, 0).contiguous()
+        relative_coords[:, :, 0] += window_size - 1
+        relative_coords[:, :, 1] += window_size - 1
+        relative_coords[:, :, 0] *= 2 * window_size - 1
+        relative_position_index = relative_coords.sum(-1)  # (M*M, M*M)
+        self.register_buffer(&quot;relative_position_index&quot;, relative_position_index)
+
+    def forward(self, x, mask=None):
+        B_, N, C = x.shape  # B_ = batch * num_windows
+        head_dim = C // self.n_heads
+
+        qkv = self.qkv(x).reshape(B_, N, 3, self.n_heads, head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv.unbind(0)
+
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+
+        # Add relative position bias
+        bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
+            N, N, -1
+        ).permute(2, 0, 1)
+        attn = attn + bias.unsqueeze(0)
+
+        if mask is not None:
+            attn = attn + mask.unsqueeze(1)
+
+        attn = attn.softmax(dim=-1)
+        out = (attn @ v).transpose(1, 2).reshape(B_, N, C)
+        return self.proj(out)
+</code></pre>
+<h3 id="swin-transformer-block">Swin Transformer Block</h3>
+<pre><code class="language-python">class SwinBlock(nn.Module):
+    &quot;&quot;&quot;Two consecutive Swin blocks: W-MSA then SW-MSA.&quot;&quot;&quot;
+
+    def __init__(self, dim, n_heads, window_size=7, shift_size=0, mlp_ratio=4.0):
+        super().__init__()
+        self.window_size = window_size
+        self.shift_size = shift_size
+
+        self.norm1 = nn.LayerNorm(dim)
+        self.attn = WindowAttention(dim, window_size, n_heads)
+        self.norm2 = nn.LayerNorm(dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, int(dim * mlp_ratio)),
+            nn.GELU(),
+            nn.Linear(int(dim * mlp_ratio), dim),
+        )
+
+    def forward(self, x, H, W):
+        B, L, C = x.shape
+        x_reshaped = x.view(B, H, W, C)
+
+        # Cyclic shift
+        if self.shift_size &gt; 0:
+            shifted = torch.roll(x_reshaped, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
+        else:
+            shifted = x_reshaped
+
+        # Partition into windows
+        windows = window_partition(shifted, self.window_size)
+        windows = windows.view(-1, self.window_size * self.window_size, C)
+
+        # Window attention
+        attn_out = self.attn(self.norm1(windows).view(-1, self.window_size * self.window_size, C))
+
+        # Reverse windows
+        attn_out = attn_out.view(-1, self.window_size, self.window_size, C)
+        shifted = window_reverse(attn_out, self.window_size, H, W)
+
+        # Reverse cyclic shift
+        if self.shift_size &gt; 0:
+            out = torch.roll(shifted, shifts=(self.shift_size, self.shift_size), dims=(1, 2))
+        else:
+            out = shifted
+
+        out = out.view(B, H * W, C)
+        x = x + out
+        x = x + self.mlp(self.norm2(x))
+        return x
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<ol>
+<li>
+<p><strong>Complexity comparison:</strong> For a 512×512 image with patch_size=4 and window_size=7, compute:
+   - Number of patches (tokens) for ViT
+   - Number of windows for Swin
+   - FLOPs for global attention vs window attention</p>
+</li>
+<li>
+<p><strong>Shifted window visualization:</strong> Create a 8×8 grid and manually trace which tokens can attend to each other after one regular + one shifted window attention layer with window_size=4.</p>
+</li>
+<li>
+<p><strong>Use pretrained Swin:</strong> Load <code>swin_tiny_patch4_window7_224</code> from timm and extract multi-scale features. Print the shapes at each stage.</p>
+</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Linear complexity.</strong> Window attention makes transformers practical for high-resolution images</li>
+<li><strong>Shifted windows.</strong> Alternating between regular and shifted windows enables cross-window communication</li>
+<li><strong>Hierarchical features.</strong> Patch merging creates multi-scale feature maps like CNN backbones</li>
+<li><strong>Relative position bias.</strong> Better than absolute position embeddings for windowed attention</li>
+<li><strong>Drop-in backbone.</strong> Swin replaces ResNet in FPN, UPerNet, Mask R-CNN with better performance</li>
+</ol>
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<blockquote>
+<p><em>Swin solved ViT's efficiency bottleneck. But both ViT and Swin need labeled data. Tomorrow: DINO learns visual features without any labels at all — through self-distillation.</em></p>
+</blockquote>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://arxiv.org/abs/2103.14030">Swin Transformer (Liu et al., 2021)</a></li>
+<li><a href="https://arxiv.org/abs/2111.09883">Swin Transformer V2 (Liu et al., 2022)</a></li>
+<li>Official implementation: github.com/microsoft/Swin-Transformer</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-46-training-vit-deit.html" class="text-violet-600 hover:text-violet-800">&larr; Day 46: Training ViT + DeiT</a>
+            <a href="day-48-dino-self-supervised.html" class="text-violet-600 hover:text-violet-800">Day 48: DINO & Self-Supervised Vision &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

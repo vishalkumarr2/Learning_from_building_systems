@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 32: Supervised Fine-Tuning - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 5: LLM Training</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-32-supervised-fine-tuning">Day 32: Supervised Fine-Tuning</h1>
+<blockquote>
+<p><strong>Phase III — LLMs: Training &amp; Alignment | Week 5 | 2.5 hours</strong>
+<em>"A pretrained model is a jack of all trades — SFT makes it a helpful assistant." — Jason Wei</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-31-modern-llm-recipe.html">Day 31: The Modern LLM Recipe</a></li>
+<li><strong>Next:</strong> <a href="day-33-rlhf.html">Day 33: RLHF</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 5 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/06-llm-training-alignment.html">Phase III: LLM Training &amp; Alignment</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="321-why-sft-the-gap-between-prediction-and-following">32.1 Why SFT? The Gap Between Prediction and Following</h3>
+<p>A pretrained model can <em>complete</em> text but can't <em>follow instructions</em>:</p>
+<pre><code>Pretrained model:
+  Input:  &quot;What is the capital of France?&quot;
+  Output: &quot;What is the capital of Germany? What is the capital of Spain?...&quot;
+
+After SFT:
+  Input:  &quot;What is the capital of France?&quot;
+  Output: &quot;The capital of France is Paris.&quot;
+</code></pre>
+<p><strong>SFT bridges the format gap:</strong> the model already <em>knows</em> the answer from pretraining — SFT teaches it to <em>output</em> the answer in the right format.</p>
+<h3 id="322-instruction-datasets">32.2 Instruction Datasets</h3>
+<p>Key datasets that shaped the field:</p>
+<table>
+<thead>
+<tr>
+<th>Dataset</th>
+<th>Size</th>
+<th>Method</th>
+<th>Key Innovation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FLAN (2022)</td>
+<td>1.8K tasks, millions of examples</td>
+<td>Aggregated NLP benchmarks</td>
+<td>Task diversity</td>
+</tr>
+<tr>
+<td>Alpaca (2023)</td>
+<td>52K</td>
+<td>GPT-3.5 distillation</td>
+<td>Self-instruct: LLM generates training data</td>
+</tr>
+<tr>
+<td>ShareGPT</td>
+<td>~90K</td>
+<td>User conversations</td>
+<td>Real user distribution</td>
+</tr>
+<tr>
+<td>OpenAssistant</td>
+<td>161K</td>
+<td>Human-written</td>
+<td>Multilingual, multi-turn</td>
+</tr>
+<tr>
+<td>UltraChat</td>
+<td>1.5M</td>
+<td>GPT-4 generated</td>
+<td>Scale + diversity</td>
+</tr>
+<tr>
+<td>Orca</td>
+<td>5M</td>
+<td>GPT-4 explanations</td>
+<td>Chain-of-thought reasoning</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Self-Instruct pipeline (Alpaca):</strong></p>
+<pre><code>Seed instructions (175 examples)
+        │
+        ▼
+LLM generates new instructions  ──→  Filter low quality
+        │
+        ▼
+LLM generates input-output pairs
+        │
+        ▼
+52K instruction-following examples
+</code></pre>
+<h3 id="323-chat-templates">32.3 Chat Templates</h3>
+<p>Models use specific templates to separate roles in conversation:</p>
+<pre><code># ChatML format (OpenAI / Qwen):
+&lt;|im_start|&gt;system
+You are a helpful assistant.&lt;|im_end|&gt;
+&lt;|im_start|&gt;user
+What is 2+2?&lt;|im_end|&gt;
+&lt;|im_start|&gt;assistant
+2+2 equals 4.&lt;|im_end|&gt;
+
+# Llama 2 format:
+[INST] &lt;&lt;SYS&gt;&gt;
+You are a helpful assistant.
+&lt;&lt;/SYS&gt;&gt;
+What is 2+2? [/INST] 2+2 equals 4.
+
+# Llama 3 format:
+&lt;|begin_of_text|&gt;&lt;|start_header_id|&gt;system&lt;|end_header_id|&gt;
+You are a helpful assistant.&lt;|eot_id|&gt;
+&lt;|start_header_id|&gt;user&lt;|end_header_id|&gt;
+What is 2+2?&lt;|eot_id|&gt;
+&lt;|start_header_id|&gt;assistant&lt;|end_header_id|&gt;
+2+2 equals 4.&lt;|eot_id|&gt;
+</code></pre>
+<p><strong>Critical:</strong> During SFT, we only compute loss on the <strong>assistant tokens</strong> — the model isn't penalized for not predicting the user's messages.</p>
+<p>$$
+\mathcal{L}_{\text{SFT}} = -\sum_{t \in \text{assistant tokens}} \log P_\theta(x_t \mid x_{<t})
+$$</p>
+<h3 id="324-sft-training-dynamics">32.4 SFT Training Dynamics</h3>
+<pre><code>Typical SFT hyperparameters:
+────────────────────────────
+Learning rate:    1e-5 to 2e-5 (10-100x lower than pretraining)
+Epochs:           2-3 (overfitting is easy with small datasets)
+Batch size:       128-256 (effective, with gradient accumulation)
+Warmup:           3-10% of steps
+Weight decay:     0.0 to 0.1
+Max seq length:   2048-4096
+Scheduler:        Cosine decay to 0
+
+Rule of thumb: If loss stops decreasing after 1 epoch,
+your dataset is too small or too easy.
+</code></pre>
+<p><strong>The alignment tax:</strong> SFT slightly degrades base model performance on benchmarks (1-3%) because it narrows the output distribution. This is expected and acceptable.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="sft-with-lora-on-tinyllama-using-huggingface-trl">SFT with LoRA on TinyLlama Using HuggingFace + TRL</h3>
+<pre><code class="language-python">&quot;&quot;&quot;
+Day 32 Implementation: Supervised Fine-Tuning with LoRA on TinyLlama.
+Uses TRL's SFTTrainer for instruction-tuning.
+&quot;&quot;&quot;
+import torch
+from datasets import Dataset
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    TrainingArguments,
+)
+from peft import LoraConfig, get_peft_model, TaskType
+from trl import SFTTrainer
+
+# --- 1. Load base model ---
+MODEL_ID = &quot;TinyLlama/TinyLlama-1.1B-Chat-v1.0&quot;
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = &quot;right&quot;
+
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_ID,
+    torch_dtype=torch.float16,
+    device_map=&quot;auto&quot;,
+)
+
+# --- 2. Prepare instruction dataset ---
+def create_instruction_dataset() -&gt; Dataset:
+    &quot;&quot;&quot;Create a small robotics instruction-following dataset.&quot;&quot;&quot;
+    examples = [
+        {
+            &quot;instruction&quot;: &quot;Move the robot forward 2 meters&quot;,
+            &quot;response&quot;: &quot;Executing linear motion: distance=2.0m, speed=0.5m/s. &quot;
+                        &quot;Publishing cmd_vel with linear.x=0.5 for 4.0 seconds.&quot;,
+        },
+        {
+            &quot;instruction&quot;: &quot;What is the robot's current battery level?&quot;,
+            &quot;response&quot;: &quot;Current battery status: voltage=25.2V, &quot;
+                        &quot;charge=78%, estimated runtime=3.2 hours.&quot;,
+        },
+        {
+            &quot;instruction&quot;: &quot;Navigate to the charging station&quot;,
+            &quot;response&quot;: &quot;Planning path to charging station at coordinates &quot;
+                        &quot;(12.5, 3.2). Distance: 15.3m. Estimated time: 45s. &quot;
+                        &quot;Initiating autonomous navigation.&quot;,
+        },
+        {
+            &quot;instruction&quot;: &quot;Rotate 90 degrees clockwise&quot;,
+            &quot;response&quot;: &quot;Executing rotation: angle=-90°(clockwise), &quot;
+                        &quot;angular_speed=0.5rad/s. Publishing cmd_vel with &quot;
+                        &quot;angular.z=-0.5 for π seconds.&quot;,
+        },
+        {
+            &quot;instruction&quot;: &quot;Report any obstacles detected&quot;,
+            &quot;response&quot;: &quot;LiDAR scan results: 3 obstacles detected. &quot;
+                        &quot;Obstacle 1: 2.1m at 15° (wall). &quot;
+                        &quot;Obstacle 2: 0.8m at 340° (box). &quot;
+                        &quot;Obstacle 3: 5.2m at 90° (shelf). &quot;
+                        &quot;Closest obstacle at 0.8m — within safety threshold.&quot;,
+        },
+    ]
+    return Dataset.from_list(examples)
+
+def format_chat(example: dict) -&gt; str:
+    &quot;&quot;&quot;Format as ChatML for SFT.&quot;&quot;&quot;
+    return (
+        &quot;&lt;|im_start|&gt;system\n&quot;
+        &quot;You are a warehouse robot controller. Execute commands precisely &quot;
+        &quot;and report status clearly.&lt;|im_end|&gt;\n&quot;
+        f&quot;&lt;|im_start|&gt;user\n{example['instruction']}&lt;|im_end|&gt;\n&quot;
+        f&quot;&lt;|im_start|&gt;assistant\n{example['response']}&lt;|im_end|&gt;&quot;
+    )
+
+dataset = create_instruction_dataset()
+
+# --- 3. Configure LoRA ---
+lora_config = LoraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=16,                    # rank of the update matrices
+    lora_alpha=32,           # scaling factor
+    lora_dropout=0.05,
+    target_modules=[&quot;q_proj&quot;, &quot;v_proj&quot;, &quot;k_proj&quot;, &quot;o_proj&quot;],
+    bias=&quot;none&quot;,
+)
+
+model = get_peft_model(model, lora_config)
+model.print_trainable_parameters()
+# → trainable params: ~4M / 1.1B total → 0.36%
+
+# --- 4. Train with SFTTrainer ---
+training_args = TrainingArguments(
+    output_dir=&quot;./sft-tinyllama-robot&quot;,
+    num_train_epochs=3,
+    per_device_train_batch_size=4,
+    gradient_accumulation_steps=4,
+    learning_rate=2e-4,          # higher LR for LoRA
+    warmup_ratio=0.03,
+    lr_scheduler_type=&quot;cosine&quot;,
+    logging_steps=10,
+    save_strategy=&quot;epoch&quot;,
+    fp16=True,
+    report_to=&quot;none&quot;,
+)
+
+trainer = SFTTrainer(
+    model=model,
+    train_dataset=dataset,
+    args=training_args,
+    formatting_func=format_chat,
+    max_seq_length=512,
+    tokenizer=tokenizer,
+)
+
+trainer.train()
+
+# --- 5. Inference test ---
+model.eval()
+prompt = (
+    &quot;&lt;|im_start|&gt;system\n&quot;
+    &quot;You are a warehouse robot controller.&lt;|im_end|&gt;\n&quot;
+    &quot;&lt;|im_start|&gt;user\nStop immediately&lt;|im_end|&gt;\n&quot;
+    &quot;&lt;|im_start|&gt;assistant\n&quot;
+)
+inputs = tokenizer(prompt, return_tensors=&quot;pt&quot;).to(model.device)
+with torch.no_grad():
+    outputs = model.generate(
+        **inputs,
+        max_new_tokens=100,
+        temperature=0.7,
+        do_sample=True,
+    )
+print(tokenizer.decode(outputs[0], skip_special_tokens=False))
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e321-chat-template-masking-20-min">E32.1 — Chat Template Masking (20 min)</h3>
+<p>Implement a custom data collator that masks user tokens from the loss:
+1. Tokenize a multi-turn conversation
+2. Create a <code>labels</code> tensor where user/system tokens are set to <code>-100</code> (ignored)
+3. Verify that only assistant tokens contribute to the loss</p>
+<h3 id="e322-dataset-quality-analysis-25-min">E32.2 — Dataset Quality Analysis (25 min)</h3>
+<p>Download the Alpaca dataset (52K examples) and analyze:
+1. Distribution of instruction lengths (histogram)
+2. Most common verbs in instructions (what tasks dominate?)
+3. Average response length by task type
+4. Find 5 examples that seem low-quality — what patterns do you notice?</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>SFT teaches format, not knowledge</strong> — the model already knows answers from pretraining</li>
+<li><strong>Only compute loss on assistant tokens</strong> — this is the critical implementation detail</li>
+<li><strong>Chat templates</strong> vary by model family — using the wrong template breaks the model</li>
+<li><strong>Small, high-quality datasets</strong> (10-100K) are sufficient for SFT</li>
+<li><strong>Self-Instruct</strong> (LLM generates training data) bootstraps instruction datasets cheaply</li>
+</ol>
+<hr />
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>SFT is exactly how robot foundation models learn to follow commands. After pretraining on internet-scale data, models like RT-2 are fine-tuned on robot demonstration data — instruction-action pairs that are the robotic equivalent of instruction-response pairs. The chat template structure (system/user/assistant) maps directly to (robot context/user command/robot action).</p>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://arxiv.org/abs/2203.02155">Training Language Models to Follow Instructions (InstructGPT)</a> — OpenAI, 2022</li>
+<li><a href="https://arxiv.org/abs/2212.10560">Self-Instruct: Aligning LLMs with Self-Generated Instructions</a> — Alpaca's foundation</li>
+<li><a href="https://arxiv.org/abs/2301.13688">FLAN Collection: Designing Data and Methods for Effective Instruction Tuning</a> — Google, 2023</li>
+<li><a href="https://arxiv.org/abs/2305.11206">Lima: Less Is More for Alignment</a> — 1K examples suffice</li>
+<li><a href="https://huggingface.co/docs/trl">TRL Documentation</a> — HuggingFace training library</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-31-modern-llm-recipe.html" class="text-violet-600 hover:text-violet-800">&larr; Day 31: The Modern LLM Recipe</a>
+            <a href="day-33-rlhf.html" class="text-violet-600 hover:text-violet-800">Day 33: RLHF &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

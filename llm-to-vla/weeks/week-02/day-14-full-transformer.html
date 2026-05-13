@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14: The Full Transformer — "Attention Is All You Need" - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 2: Attention & Transformers</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-14-the-full-transformer-attention-is-all-you-need">Day 14: The Full Transformer — "Attention Is All You Need"</h1>
+<blockquote>
+<p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 2 | 2.5 hours</strong>
+<em>"The Transformer is the first transduction model relying entirely on self-attention to compute representations of its input and output."</em>
+— Vaswani et al., 2017</p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-13-positional-encoding.html">Day 13: Positional Encoding</a></li>
+<li><strong>Next:</strong> <a href="../week-03/day-15-training-transformer.html">Day 15: Training a Transformer</a></li>
+<li><strong>Week:</strong> <a href="../README.html">Week 2 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/02-attention-mechanism.html">Phase II: Attention &amp; Transformers</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="141-the-complete-architecture">14.1 The Complete Architecture</h3>
+<p>The transformer consists of an <strong>encoder</strong> (processes the source) and a <strong>decoder</strong> (generates the target). Each is a stack of identical layers.</p>
+<pre><code>                    THE TRANSFORMER ARCHITECTURE
+
+  ┌──────────── ENCODER ────────────┐    ┌──────────── DECODER ────────────┐
+  │                                 │    │                                 │
+  │  ┌─────────────────────────┐    │    │  ┌─────────────────────────┐    │
+  │  │  Encoder Layer × N      │    │    │  │  Decoder Layer × N      │    │
+  │  │  ┌───────────────────┐  │    │    │  │  ┌───────────────────┐  │    │
+  │  │  │ Multi-Head        │  │    │    │  │  │ Masked Multi-Head │  │    │
+  │  │  │ Self-Attention    │  │    │    │  │  │ Self-Attention    │  │    │
+  │  │  └────────┬──────────┘  │    │    │  │  └────────┬──────────┘  │    │
+  │  │       Add &amp; Norm        │    │    │  │       Add &amp; Norm        │    │
+  │  │  ┌───────────────────┐  │    │    │  │  ┌───────────────────┐  │    │
+  │  │  │ Feed-Forward      │  │    │    │  │  │ Cross-Attention   │  │    │
+  │  │  │ Network           │  │    │    │  │  │ (Q=decoder,       │  │    │
+  │  │  └────────┬──────────┘  │    │    │  │  │  K,V=encoder)     │  │    │
+  │  │       Add &amp; Norm        │    │    │  │  └────────┬──────────┘  │    │
+  │  └─────────────────────────┘    │    │  │       Add &amp; Norm        │    │
+  │                                 │    │  │  ┌───────────────────┐  │    │
+  │  Input Embedding                │    │  │  │ Feed-Forward      │  │    │
+  │       +                         │    │  │  │ Network           │  │    │
+  │  Positional Encoding            │    │  │  └────────┬──────────┘  │    │
+  │       ↑                         │    │  │       Add &amp; Norm        │    │
+  │  Source Tokens                  │    │  └─────────────────────────┘    │
+  └─────────────────────────────────┘    │                                 │
+                                         │  Output Embedding              │
+                                         │       +                        │
+                                         │  Positional Encoding           │
+                                         │       ↑                        │
+                                         │  Target Tokens (shifted right) │
+                                         └─────────────────────────────────┘
+</code></pre>
+<h3 id="142-encoder-block">14.2 Encoder Block</h3>
+<p>Each encoder layer has two sublayers:</p>
+<p><strong>Sublayer 1: Multi-Head Self-Attention</strong>
+$$\text{MHA}(X, X, X) \quad \text{// Q=K=V=X, every position attends to every position}$$</p>
+<p><strong>Sublayer 2: Position-wise Feed-Forward Network (FFN)</strong>
+$$\text{FFN}(x) = W_2 \cdot \text{GELU}(W_1 x + b_1) + b_2$$</p>
+<p>where $W_1 \in \mathbb{R}^{d_{\text{model}} \times d_{\text{ff}}}$ and $W_2 \in \mathbb{R}^{d_{\text{ff}} \times d_{\text{model}}}$. Typically $d_{\text{ff}} = 4 \times d_{\text{model}}$.</p>
+<p><strong>Each sublayer</strong> is wrapped with a residual connection and layer normalization:</p>
+<p>$$\text{output} = \text{LayerNorm}(x + \text{Sublayer}(x))$$</p>
+<h3 id="143-decoder-block">14.3 Decoder Block</h3>
+<p>Each decoder layer has <strong>three</strong> sublayers:</p>
+<ol>
+<li><strong>Masked self-attention</strong> — the decoder attends to itself, but with a causal mask preventing positions from attending to future tokens</li>
+<li><strong>Cross-attention</strong> — the decoder queries attend to encoder key/value pairs. This is where the decoder "looks at" the source</li>
+<li><strong>Feed-forward network</strong> — same as encoder</li>
+</ol>
+<pre><code>Target tokens → Embed + PE → [Masked Self-Attn] → [Cross-Attn] → [FFN] → Output
+                                    ↑                    ↑
+                               causal mask          encoder output
+</code></pre>
+<h3 id="144-pre-ln-vs-post-ln">14.4 Pre-LN vs Post-LN</h3>
+<p>The original paper uses <strong>Post-LN</strong> (normalize after the residual):
+$$x = \text{LayerNorm}(x + \text{Sublayer}(x))$$</p>
+<p>Modern practice uses <strong>Pre-LN</strong> (normalize before the sublayer):
+$$x = x + \text{Sublayer}(\text{LayerNorm}(x))$$</p>
+<p>Pre-LN is much easier to train:
+- Gradients flow directly through the residual path without passing through LayerNorm
+- No need for careful warmup scheduling
+- Enables training deeper models (100+ layers)</p>
+<h3 id="145-the-feed-forward-network-per-position-mlp">14.5 The Feed-Forward Network: Per-Position MLP</h3>
+<p>The FFN processes each position independently (no interaction between positions). It's the same MLP applied to each token:</p>
+<p>$$\text{FFN}(x) = W_2 \cdot \sigma(W_1 x + b_1) + b_2$$</p>
+<p><strong>Activation functions</strong> have evolved:
+- <strong>ReLU</strong> (original): $\sigma(x) = \max(0, x)$
+- <strong>GELU</strong> (BERT, GPT-2): $\sigma(x) = x \cdot \Phi(x)$ where $\Phi$ is the Gaussian CDF
+- <strong>SwiGLU</strong> (LLaMA, modern): $\sigma(x) = \text{Swish}(W_{\text{gate}} x) \odot (W_{\text{up}} x)$</p>
+<p>The FFN's hidden dimension $d_{\text{ff}} = 4 d_{\text{model}}$ creates a bottleneck:</p>
+<p>$$d_{\text{model}} \xrightarrow{W_1} d_{\text{ff}} \xrightarrow{W_2} d_{\text{model}}$$</p>
+<p>This is an <strong>expand-and-compress</strong> pattern — the inner dimension provides capacity for complex transformations before projecting back down.</p>
+<h3 id="146-residual-connections-the-highway-for-gradients">14.6 Residual Connections: The Highway for Gradients</h3>
+<p>Every sublayer is wrapped with $x + \text{Sublayer}(x)$. This is essential for deep networks:</p>
+<p>$$\frac{\partial \mathcal{L}}{\partial x_l} = \frac{\partial \mathcal{L}}{\partial x_L} \prod_{i=l}^{L-1} \left(I + \frac{\partial f_i}{\partial x_i}\right)$$</p>
+<p>The identity term $I$ guarantees that gradients can flow through the residual stream unchanged. Even if a sublayer's gradient vanishes, the gradient through the skip connection survives.</p>
+<p><strong>The residual stream</strong> view (Elhage et al., 2021): think of the transformer as a stream of vectors where each layer <em>writes additions</em> to the stream. Each attention head and FFN block reads from the stream and writes back a delta.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="147-transformer-encoder-layer">14.7 Transformer Encoder Layer</h3>
+<pre><code class="language-python">import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import math
+
+
+class TransformerEncoderLayer(nn.Module):
+    &quot;&quot;&quot;Single encoder layer with Pre-LN.&quot;&quot;&quot;
+
+    def __init__(self, d_model: int, n_heads: int, d_ff: int, dropout: float = 0.1):
+        super().__init__()
+        # Multi-head self-attention
+        self.self_attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
+        self.norm1 = nn.LayerNorm(d_model)
+
+        # Feed-forward network
+        self.ffn = nn.Sequential(
+            nn.Linear(d_model, d_ff),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_ff, d_model),
+            nn.Dropout(dropout),
+        )
+        self.norm2 = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor, src_mask: torch.Tensor | None = None) -&gt; torch.Tensor:
+        # Pre-LN: normalize before sublayer
+        # Sublayer 1: Self-attention
+        x_norm = self.norm1(x)
+        attn_out, _ = self.self_attn(x_norm, x_norm, x_norm, attn_mask=src_mask)
+        x = x + self.dropout(attn_out)
+
+        # Sublayer 2: FFN
+        x_norm = self.norm2(x)
+        ffn_out = self.ffn(x_norm)
+        x = x + ffn_out
+
+        return x
+
+
+class TransformerDecoderLayer(nn.Module):
+    &quot;&quot;&quot;Single decoder layer with Pre-LN.&quot;&quot;&quot;
+
+    def __init__(self, d_model: int, n_heads: int, d_ff: int, dropout: float = 0.1):
+        super().__init__()
+        # Masked self-attention
+        self.self_attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
+        self.norm1 = nn.LayerNorm(d_model)
+
+        # Cross-attention
+        self.cross_attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
+        self.norm2 = nn.LayerNorm(d_model)
+
+        # Feed-forward
+        self.ffn = nn.Sequential(
+            nn.Linear(d_model, d_ff),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_ff, d_model),
+            nn.Dropout(dropout),
+        )
+        self.norm3 = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self,
+        x: torch.Tensor,           # target sequence
+        memory: torch.Tensor,      # encoder output
+        tgt_mask: torch.Tensor | None = None,
+        memory_mask: torch.Tensor | None = None,
+    ) -&gt; torch.Tensor:
+        # Sublayer 1: Masked self-attention
+        x_norm = self.norm1(x)
+        self_attn_out, _ = self.self_attn(x_norm, x_norm, x_norm, attn_mask=tgt_mask)
+        x = x + self.dropout(self_attn_out)
+
+        # Sublayer 2: Cross-attention (Q=decoder, K=V=encoder)
+        x_norm = self.norm2(x)
+        cross_attn_out, _ = self.cross_attn(x_norm, memory, memory, attn_mask=memory_mask)
+        x = x + self.dropout(cross_attn_out)
+
+        # Sublayer 3: FFN
+        x_norm = self.norm3(x)
+        ffn_out = self.ffn(x_norm)
+        x = x + ffn_out
+
+        return x
+</code></pre>
+<h3 id="148-full-transformer-model">14.8 Full Transformer Model</h3>
+<pre><code class="language-python">class Transformer(nn.Module):
+    &quot;&quot;&quot;Full encoder-decoder Transformer for sequence-to-sequence tasks.&quot;&quot;&quot;
+
+    def __init__(
+        self,
+        src_vocab: int,
+        tgt_vocab: int,
+        d_model: int = 512,
+        n_heads: int = 8,
+        n_encoder_layers: int = 6,
+        n_decoder_layers: int = 6,
+        d_ff: int = 2048,
+        max_len: int = 5000,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.d_model = d_model
+
+        # Embeddings + positional encoding
+        self.src_embed = nn.Embedding(src_vocab, d_model)
+        self.tgt_embed = nn.Embedding(tgt_vocab, d_model)
+        self.pos_enc = SinusoidalPositionalEncoding(d_model, max_len, dropout)
+
+        # Encoder and decoder stacks
+        self.encoder_layers = nn.ModuleList([
+            TransformerEncoderLayer(d_model, n_heads, d_ff, dropout)
+            for _ in range(n_encoder_layers)
+        ])
+        self.decoder_layers = nn.ModuleList([
+            TransformerDecoderLayer(d_model, n_heads, d_ff, dropout)
+            for _ in range(n_decoder_layers)
+        ])
+
+        self.encoder_norm = nn.LayerNorm(d_model)
+        self.decoder_norm = nn.LayerNorm(d_model)
+
+        # Output projection
+        self.output_proj = nn.Linear(d_model, tgt_vocab)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for p in self.parameters():
+            if p.dim() &gt; 1:
+                nn.init.xavier_uniform_(p)
+
+    def encode(self, src: torch.Tensor, src_mask: torch.Tensor | None = None) -&gt; torch.Tensor:
+        x = self.pos_enc(self.src_embed(src) * math.sqrt(self.d_model))
+        for layer in self.encoder_layers:
+            x = layer(x, src_mask)
+        return self.encoder_norm(x)
+
+    def decode(
+        self, tgt: torch.Tensor, memory: torch.Tensor,
+        tgt_mask: torch.Tensor | None = None,
+        memory_mask: torch.Tensor | None = None,
+    ) -&gt; torch.Tensor:
+        x = self.pos_enc(self.tgt_embed(tgt) * math.sqrt(self.d_model))
+        for layer in self.decoder_layers:
+            x = layer(x, memory, tgt_mask, memory_mask)
+        return self.decoder_norm(x)
+
+    def forward(
+        self, src: torch.Tensor, tgt: torch.Tensor,
+        src_mask: torch.Tensor | None = None,
+        tgt_mask: torch.Tensor | None = None,
+    ) -&gt; torch.Tensor:
+        memory = self.encode(src, src_mask)
+        output = self.decode(tgt, memory, tgt_mask)
+        return self.output_proj(output)  # (batch, tgt_len, tgt_vocab)
+</code></pre>
+<h3 id="149-parameter-count-analysis">14.9 Parameter Count Analysis</h3>
+<pre><code class="language-python">def count_transformer_params(model: Transformer):
+    &quot;&quot;&quot;Break down parameter count by component.&quot;&quot;&quot;
+    def count(module):
+        return sum(p.numel() for p in module.parameters())
+
+    print(f&quot;Source embedding:   {count(model.src_embed):&gt;10,}&quot;)
+    print(f&quot;Target embedding:   {count(model.tgt_embed):&gt;10,}&quot;)
+    print(f&quot;Encoder layers:     {count(model.encoder_layers):&gt;10,}&quot;)
+    print(f&quot;Decoder layers:     {count(model.decoder_layers):&gt;10,}&quot;)
+    print(f&quot;Output projection:  {count(model.output_proj):&gt;10,}&quot;)
+
+    total = count(model)
+    print(f&quot;{'Total':&gt;20s}: {total:&gt;10,}&quot;)
+    return total
+
+
+# Base transformer config
+model = Transformer(src_vocab=32000, tgt_vocab=32000, d_model=512, n_heads=8, d_ff=2048)
+count_transformer_params(model)
+# Expect ~65M parameters for base config
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e141-parameter-audit">E14.1 Parameter Audit</h3>
+<p>For the base transformer ($d_{\text{model}}=512$, $h=8$, $d_{\text{ff}}=2048$, $N=6$):
+1. Compute the parameter count for one encoder layer: MHA ($4 d^2$) + FFN ($2 \cdot d \cdot d_{\text{ff}}$) + LayerNorms ($4d$)
+2. Multiply by 6 layers for the encoder total
+3. How much of the total is FFN vs attention?
+4. Compare with the "large" config ($d=1024$, $h=16$, $d_{\text{ff}}=4096$, $N=6$)</p>
+<h3 id="e142-token-tracing">E14.2 Token Tracing</h3>
+<p>Trace a single token through the entire forward pass:
+1. Start with token ID 42 at position 3 in the source
+2. Embedding: $42 \rightarrow \mathbb{R}^{512}$
+3. Add positional encoding
+4. Through encoder layer 1: self-attention (attending to all 10 source tokens) → FFN
+5. Through decoder: masked self-attention → cross-attention → FFN
+6. Final linear + softmax → probability distribution over vocab</p>
+<p>Write pseudocode tracking the <strong>shape</strong> at each step.</p>
+<h3 id="e143-build-and-validate">E14.3 Build and Validate</h3>
+<ol>
+<li>Instantiate your Transformer model with the base config</li>
+<li>Create dummy source (batch=2, src_len=10) and target (batch=2, tgt_len=8) tensors</li>
+<li>Generate a causal mask for the decoder</li>
+<li>Run a forward pass and verify the output shape is (2, 8, vocab_size)</li>
+<li>Compute a cross-entropy loss with random target labels</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ul>
+<li>The transformer = <strong>encoder</strong> (self-attention + FFN) × N layers + <strong>decoder</strong> (masked self-attention + cross-attention + FFN) × N layers</li>
+<li><strong>Residual connections</strong> enable gradient flow; <strong>Layer normalization</strong> stabilizes training</li>
+<li><strong>Pre-LN</strong> (normalize before sublayer) is easier to train than Post-LN</li>
+<li>The <strong>FFN</strong> ($d_{\text{model}} \rightarrow 4 d_{\text{model}} \rightarrow d_{\text{model}}$) actually has more parameters than MHA</li>
+<li>Modern activations (GELU, SwiGLU) outperform ReLU in practice</li>
+<li>The decoder uses a <strong>causal mask</strong> to prevent attending to future tokens</li>
+</ul>
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>The transformer is a <strong>compression machine with full connectivity</strong>. Unlike RNNs, which compress information sequentially (and lose distant information), the transformer gives every position direct access to every other position via attention. The FFN then processes each position's attended information independently. This is why transformers scale: they separate the <em>gathering</em> of information (attention) from the <em>processing</em> of information (FFN), and both can be parallelized across the sequence. We now have all the pieces for modern LLMs — tomorrow we train one.</p>
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Vaswani et al. <strong>"Attention Is All You Need"</strong> (2017). <a href="https://arxiv.org/abs/1706.03762">arXiv:1706.03762</a></li>
+<li>Alammar. <strong>"The Illustrated Transformer"</strong> (2018). <a href="https://jalammar.github.io/illustrated-transformer/">jalammar.github.io</a></li>
+<li>Xiong et al. <strong>"On Layer Normalization in the Transformer Architecture"</strong> (2020). <a href="https://arxiv.org/abs/2002.04745">arXiv:2002.04745</a> — Pre-LN vs Post-LN analysis</li>
+<li>Elhage et al. <strong>"A Mathematical Framework for Transformer Circuits"</strong> (2021). <a href="https://transformer-circuits.pub/2021/framework/index.html">transformer-circuits.pub</a> — the residual stream interpretation</li>
+<li>The Annotated Transformer. <a href="https://nlp.seas.harvard.edu/annotated-transformer/">nlp.seas.harvard.edu</a></li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-13-positional-encoding.html" class="text-violet-600 hover:text-violet-800">&larr; Day 13: Positional Encoding</a>
+            <a href="../week-03/day-15-training-transformer.html" class="text-violet-600 hover:text-violet-800">Day 15: Training a Transformer &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

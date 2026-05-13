@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 31: The Modern LLM Recipe - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 5: LLM Training</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-31-the-modern-llm-recipe">Day 31: The Modern LLM Recipe</h1>
+<blockquote>
+<p><strong>Phase III — LLMs: Training &amp; Alignment | Week 5 | 2.5 hours</strong>
+<em>"Data is the new code. Curation is the new programming." — Andrej Karpathy</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-30-phase2-capstone-2.html">Day 30: Phase II Capstone Day 2</a></li>
+<li><strong>Next:</strong> <a href="day-32-supervised-finetuning.html">Day 32: Supervised Fine-Tuning</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 5 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/06-llm-training-alignment.html">Phase III: LLM Training &amp; Alignment</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="311-the-3-stage-pipeline">31.1 The 3-Stage Pipeline</h3>
+<p>Every modern LLM follows the same fundamental recipe:</p>
+<pre><code>Stage 1: PRETRAINING          Stage 2: SFT                Stage 3: ALIGNMENT
+━━━━━━━━━━━━━━━━━━━          ━━━━━━━━━━━                 ━━━━━━━━━━━━━━━
+Internet text (TB)            Instruction pairs (10-100K)  Human preferences (50-200K)
+Next-token prediction         Input→Output format          RLHF / DPO / KTO
+1000s of GPU-hours            10s of GPU-hours             10s of GPU-hours
+
+&quot;Learn language&quot;              &quot;Learn to follow&quot;            &quot;Learn values&quot;
+Broad knowledge               Task formatting              Safety + helpfulness
+
+Loss: cross-entropy           Loss: cross-entropy          Loss: preference-based
+on next token                 on response tokens            (reward model or direct)
+</code></pre>
+<p><strong>Why 3 stages?</strong> Each stage optimizes a different objective:</p>
+<p>$$
+\underbrace{\mathcal{L}_{\text{pretrain}} = -\sum_{t} \log P(x_t | x_{<t})}_{\text{Stage 1: predict next token}}
+\quad \rightarrow \quad
+\underbrace{\mathcal{L}_{\text{SFT}} = -\sum_{t \in \text{response}} \log P(x_t | x_{<t})}_{\text{Stage 2: predict response only}}
+\quad \rightarrow \quad
+\underbrace{\mathcal{L}_{\text{align}}}_{\text{Stage 3: preference}}
+$$</p>
+<h3 id="312-stage-1-pretraining-the-foundation">31.2 Stage 1: Pretraining — The Foundation</h3>
+<p>Pretraining is the most expensive stage (~99% of total compute). The model learns:
+- Syntax, grammar, semantics
+- World knowledge and facts
+- Reasoning patterns
+- Code understanding</p>
+<p><strong>Data sources and their properties:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Size</th>
+<th>Quality</th>
+<th>Diversity</th>
+<th>Typical %</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Common Crawl</td>
+<td>PB-scale</td>
+<td>Low (needs filtering)</td>
+<td>Very high</td>
+<td>60-70%</td>
+</tr>
+<tr>
+<td>Books</td>
+<td>~100GB</td>
+<td>High</td>
+<td>Medium</td>
+<td>5-10%</td>
+</tr>
+<tr>
+<td>Wikipedia</td>
+<td>~20GB</td>
+<td>Very high</td>
+<td>Medium</td>
+<td>3-5%</td>
+</tr>
+<tr>
+<td>Code (GitHub)</td>
+<td>~300GB</td>
+<td>Variable</td>
+<td>High</td>
+<td>10-15%</td>
+</tr>
+<tr>
+<td>Scientific papers</td>
+<td>~100GB</td>
+<td>Very high</td>
+<td>Low</td>
+<td>3-5%</td>
+</tr>
+<tr>
+<td>Curated web</td>
+<td>Variable</td>
+<td>High</td>
+<td>High</td>
+<td>5-10%</td>
+</tr>
+</tbody>
+</table>
+<h3 id="313-data-quality-the-secret-weapon">31.3 Data Quality: The Secret Weapon</h3>
+<p>The revolution in LLM quality came not from architecture but from <strong>data curation</strong>.</p>
+<p><strong>Deduplication pipeline:</strong></p>
+<pre><code>Raw crawl (100TB+)
+    │
+    ▼
+URL dedup (exact match)           → removes ~30%
+    │
+    ▼
+Document-level MinHash dedup     → removes ~40%
+    │
+    ▼
+Paragraph-level dedup            → removes ~10%
+    │
+    ▼
+Quality filtering (perplexity,   → removes ~50%
+  classifier, heuristics)
+    │
+    ▼
+Safety filtering                 → removes ~5%
+    │
+    ▼
+Clean corpus (~1-5TB)
+</code></pre>
+<p><strong>Key insight (Llama 2 paper):</strong> Training on 2T tokens of <em>high-quality</em> data beats training on 10T tokens of unfiltered data.</p>
+<h3 id="314-data-mix-the-art-of-ratios">31.4 Data Mix: The Art of Ratios</h3>
+<p>The proportion of each data source significantly affects model capabilities:</p>
+<pre><code class="language-python"># Llama 2 approximate data mix
+DATA_MIX = {
+    &quot;common_crawl&quot;: 0.67,    # General knowledge
+    &quot;c4&quot;:           0.15,    # Cleaned web text
+    &quot;github&quot;:       0.04,    # Code understanding
+    &quot;wikipedia&quot;:    0.04,    # Factual knowledge
+    &quot;books&quot;:        0.04,    # Long-form reasoning
+    &quot;arxiv&quot;:        0.03,    # Scientific knowledge
+    &quot;stackexchange&quot;: 0.03,   # Q&amp;A format
+}
+
+# Key trade-offs:
+# More code    → better reasoning, worse conversation
+# More books   → better long-form, slower learning
+# More web     → more knowledge, more noise
+</code></pre>
+<h3 id="315-the-chinchilla-connection">31.5 The Chinchilla Connection</h3>
+<p>Recall from Day 25 — <strong>compute-optimal training</strong> dictates:</p>
+<p>$$
+N_{\text{opt}} \propto C^{0.5}, \quad D_{\text{opt}} \propto C^{0.5}
+$$</p>
+<p>For a given compute budget $C$:
+- <strong>Chinchilla approach:</strong> Balance model size and data (20 tokens per parameter)
+- <strong>LLaMA approach:</strong> Over-train smaller model on more data (200+ tokens/param) → cheaper inference</p>
+<pre><code>Chinchilla (70B, 1.4T tokens) ≈ Gopher (280B, 300B tokens)
+LLaMA-7B (7B, 1T tokens)     → undertrained by Chinchilla, but fast at inference
+LLaMA-2 (7B, 2T tokens)      → even more over-trained, even better at inference
+</code></pre>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="build-a-mini-data-curation-pipeline">Build a Mini Data Curation Pipeline</h3>
+<pre><code class="language-python">&quot;&quot;&quot;
+Day 31 Implementation: Data curation pipeline for LLM pretraining.
+Demonstrates quality filtering, dedup, and data mixing.
+&quot;&quot;&quot;
+import hashlib
+import re
+from collections import Counter
+from dataclasses import dataclass
+
+import torch
+from transformers import AutoTokenizer
+
+@dataclass
+class Document:
+    text: str
+    source: str
+    url: str = &quot;&quot;
+    quality_score: float = 0.0
+
+class QualityFilter:
+    &quot;&quot;&quot;Heuristic quality filter inspired by CCNet and RefinedWeb.&quot;&quot;&quot;
+
+    def __init__(self, min_words: int = 50, max_words: int = 100_000):
+        self.min_words = min_words
+        self.max_words = max_words
+
+    def score(self, doc: Document) -&gt; float:
+        &quot;&quot;&quot;Score document quality (0-1). Higher = better.&quot;&quot;&quot;
+        text = doc.text
+        words = text.split()
+        n_words = len(words)
+
+        if n_words &lt; self.min_words or n_words &gt; self.max_words:
+            return 0.0
+
+        score = 1.0
+
+        # Penalty: too many short lines (boilerplate/menus)
+        lines = text.split('\n')
+        short_lines = sum(1 for l in lines if len(l.split()) &lt; 3)
+        if lines:
+            score *= max(0.0, 1.0 - short_lines / len(lines))
+
+        # Penalty: excessive repetition
+        word_counts = Counter(words)
+        if word_counts:
+            most_common_frac = word_counts.most_common(1)[0][1] / n_words
+            if most_common_frac &gt; 0.1:
+                score *= 0.5
+
+        # Penalty: too many special characters
+        alpha_chars = sum(c.isalpha() for c in text)
+        if len(text) &gt; 0:
+            alpha_ratio = alpha_chars / len(text)
+            if alpha_ratio &lt; 0.5:
+                score *= 0.3
+
+        # Bonus: paragraph structure
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+        if len(paragraphs) &gt; 2:
+            score *= 1.1
+
+        return min(1.0, score)
+
+
+class MinHashDeduplicator:
+    &quot;&quot;&quot;Approximate near-duplicate detection using MinHash signatures.&quot;&quot;&quot;
+
+    def __init__(self, num_hashes: int = 128, ngram_size: int = 5):
+        self.num_hashes = num_hashes
+        self.ngram_size = ngram_size
+        self.seen_signatures: list[tuple] = []
+
+    def _get_ngrams(self, text: str) -&gt; set[str]:
+        words = text.lower().split()
+        return {' '.join(words[i:i+self.ngram_size])
+                for i in range(len(words) - self.ngram_size + 1)}
+
+    def _minhash(self, ngrams: set[str]) -&gt; tuple:
+        if not ngrams:
+            return tuple([float('inf')] * self.num_hashes)
+        signatures = []
+        for seed in range(self.num_hashes):
+            min_hash = min(
+                int(hashlib.md5(f&quot;{seed}_{ng}&quot;.encode()).hexdigest(), 16)
+                for ng in ngrams
+            )
+            signatures.append(min_hash)
+        return tuple(signatures)
+
+    def _jaccard_from_minhash(self, sig1: tuple, sig2: tuple) -&gt; float:
+        return sum(a == b for a, b in zip(sig1, sig2)) / len(sig1)
+
+    def is_duplicate(self, text: str, threshold: float = 0.5) -&gt; bool:
+        ngrams = self._get_ngrams(text)
+        sig = self._minhash(ngrams)
+        for existing_sig in self.seen_signatures:
+            if self._jaccard_from_minhash(sig, existing_sig) &gt; threshold:
+                return True
+        self.seen_signatures.append(sig)
+        return False
+
+
+class DataMixer:
+    &quot;&quot;&quot;Mix data sources according to specified ratios.&quot;&quot;&quot;
+
+    def __init__(self, mix_ratios: dict[str, float]):
+        total = sum(mix_ratios.values())
+        self.ratios = {k: v / total for k, v in mix_ratios.items()}
+
+    def create_batch(
+        self,
+        sources: dict[str, list[Document]],
+        batch_size: int = 1000,
+    ) -&gt; list[Document]:
+        batch = []
+        for source, ratio in self.ratios.items():
+            n = int(batch_size * ratio)
+            docs = sources.get(source, [])
+            batch.extend(docs[:n])
+        return batch[:batch_size]
+
+
+# --- Demo pipeline ---
+if __name__ == &quot;__main__&quot;:
+    qf = QualityFilter()
+    dedup = MinHashDeduplicator(num_hashes=64, ngram_size=3)
+
+    sample_docs = [
+        Document(&quot;This is a well-written article about machine learning. &quot; * 20,
+                 source=&quot;web&quot;),
+        Document(&quot;Buy now! Click here! Free! &quot; * 50, source=&quot;web&quot;),
+        Document(&quot;This is a well-written article about machine learning. &quot; * 20,
+                 source=&quot;web&quot;),  # near-duplicate
+    ]
+
+    for i, doc in enumerate(sample_docs):
+        score = qf.score(doc)
+        is_dup = dedup.is_duplicate(doc.text)
+        status = &quot;KEEP&quot; if score &gt; 0.3 and not is_dup else &quot;DROP&quot;
+        print(f&quot;Doc {i}: quality={score:.2f}, dup={is_dup} → {status}&quot;)
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e311-data-mix-ablation-20-min">E31.1 — Data Mix Ablation (20 min)</h3>
+<p>Design an experiment to test how different data mixes affect downstream task performance. Create 3 different mix ratios emphasizing: (a) code, (b) books, (c) web. Predict which mix wins on each benchmark (MMLU, HumanEval, HellaSwag).</p>
+<h3 id="e312-quality-classifier-25-min">E31.2 — Quality Classifier (25 min)</h3>
+<p>Extend the <code>QualityFilter</code> class with a learned component:
+1. Create 20 manually-labeled examples (10 high-quality, 10 low-quality)
+2. Extract features: avg word length, vocabulary diversity, sentence count, punctuation ratio
+3. Train a simple logistic regression to predict quality
+4. Compare with heuristic scoring</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>3-stage pipeline</strong> (pretrain → SFT → alignment) is the universal recipe for modern LLMs</li>
+<li><strong>Data quality beats data quantity</strong> — careful curation is the biggest lever</li>
+<li><strong>Data mix ratios</strong> directly shape model capabilities and trade-offs</li>
+<li><strong>Deduplication</strong> at multiple levels (URL, document, paragraph) is essential</li>
+<li><strong>Over-training</strong> smaller models on more data trades compute for cheaper inference (LLaMA strategy)</li>
+</ol>
+<hr />
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>We've spent Phase II understanding <em>what</em> transformers compute (attention, scaling, generation). Now we learn <em>how to teach them</em>. The 3-stage pipeline is also exactly how VLAs are trained: pretrain a vision-language model, fine-tune on robot demonstrations, then align with preference data. <strong>Mastering LLM training is mastering robot training.</strong></p>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://arxiv.org/abs/2307.09288">Llama 2: Open Foundation and Fine-Tuned Chat Models</a> — Meta, 2023</li>
+<li><a href="https://arxiv.org/abs/2306.01116">The RefinedWeb Dataset for Falcon LLM</a> — Data curation at scale</li>
+<li><a href="https://arxiv.org/abs/2305.16264">Scaling Data-Constrained Language Models</a> — What to do when data runs out</li>
+<li><a href="https://arxiv.org/abs/2203.15556">Chinchilla: Training Compute-Optimal LLMs</a> — DeepMind, 2022</li>
+<li><a href="https://huggingface.co/spaces/HuggingFaceFW/blogpost-fineweb-v1">FineWeb: 15T Tokens of Quality Web Data</a> — HuggingFace, 2024</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-30-phase2-capstone-2.html" class="text-violet-600 hover:text-violet-800">&larr; Day 30: Phase II Capstone Day 2</a>
+            <a href="day-32-supervised-finetuning.html" class="text-violet-600 hover:text-violet-800">Day 32: Supervised Fine-Tuning &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

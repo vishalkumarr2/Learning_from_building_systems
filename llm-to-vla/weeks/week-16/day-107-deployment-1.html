@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 107: Deployment — Latency, Compute & Edge Hardware - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 16: Deployment & Capstone</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-107-deployment-latency-compute-edge-hardware">Day 107: Deployment — Latency, Compute &amp; Edge Hardware</h1>
+<blockquote>
+<p><strong>Phase VII — VLAs: Architecture to Deployment | Week 16 | 2.5 hours</strong>
+<em>"A 7B parameter model running at 3 Hz is a research demo. The same model running at 20 Hz on edge hardware is a product." — Deployment Reality</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-106-world-models.html">Day 106: World Models</a></li>
+<li><strong>Next:</strong> <a href="day-108-deployment-2.html">Day 108: Deployment — Safety &amp; Monitoring</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 16 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/16-deployment-hybrid.html">Phase VII: VLAs</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-60-min">Theory (60 min)</h2>
+<h3 id="1071-deployment-latency-budget">107.1 Deployment Latency Budget</h3>
+<pre><code>Total control loop: ≤ 50ms (20 Hz) for manipulation
+                    ≤ 100ms (10 Hz) for mobile manipulation
+
+Budget breakdown:
+  Image capture + transfer:     5 ms
+  Vision encoder:              10 ms  ← Bottleneck #1
+  VLM reasoning:               20 ms  ← Bottleneck #2
+  Action head:                  5 ms
+  Safety check:                 2 ms
+  Communication:                3 ms
+  Motor command:                5 ms
+  ────────────────────────────────────
+  Total:                       50 ms
+</code></pre>
+<h3 id="1072-model-compression-techniques">107.2 Model Compression Techniques</h3>
+<table>
+<thead>
+<tr>
+<th>Technique</th>
+<th>Compression</th>
+<th>Speed Gain</th>
+<th>Quality Loss</th>
+<th>Best For</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FP16</td>
+<td>2×</td>
+<td>1.5-2×</td>
+<td>Negligible</td>
+<td>Always use</td>
+</tr>
+<tr>
+<td>INT8 (PTQ)</td>
+<td>4×</td>
+<td>2-3×</td>
+<td>&lt;1%</td>
+<td>Standard deployment</td>
+</tr>
+<tr>
+<td>INT4 (GPTQ)</td>
+<td>8×</td>
+<td>3-5×</td>
+<td>2-5%</td>
+<td>Edge devices</td>
+</tr>
+<tr>
+<td>Pruning</td>
+<td>2-5×</td>
+<td>2-4×</td>
+<td>1-3%</td>
+<td>Structured sparsity</td>
+</tr>
+<tr>
+<td>Distillation</td>
+<td>10-50×</td>
+<td>5-20×</td>
+<td>3-10%</td>
+<td>Dedicated student</td>
+</tr>
+<tr>
+<td>ONNX + TensorRT</td>
+<td>—</td>
+<td>2-5×</td>
+<td>None</td>
+<td>NVIDIA hardware</td>
+</tr>
+</tbody>
+</table>
+<h3 id="1073-vision-encoder-optimization">107.3 Vision Encoder Optimization</h3>
+<p>The vision encoder is often the bottleneck:</p>
+<pre><code class="language-python"># Strategy 1: Reduce resolution
+# ViT-Large at 224×224: ~15ms
+# ViT-Large at 128×128: ~6ms  (2.5× faster, ~3% quality drop)
+
+# Strategy 2: Smaller backbone
+# ViT-Large (307M): ~15ms
+# ViT-Base  (86M):  ~5ms
+# ViT-Small (22M):  ~2ms
+# MobileNetV3:       ~1ms
+
+# Strategy 3: Cache when scene is static
+# Key insight: if no hand/object movement in frame,
+# vision features are the same as last step.
+# Check: ||frame_t - frame_{t-1}|| &lt; threshold
+# If static: reuse cached features (0ms vs 15ms)
+</code></pre>
+<h3 id="1074-edge-deployment-hardware">107.4 Edge Deployment Hardware</h3>
+<pre><code>Tier 1: Cloud GPU (best quality, highest latency)
+  NVIDIA A100/H100 — unlimited compute
+  Latency: 5-20ms model + 10-50ms network
+  Best for: fleet management, offline training
+
+Tier 2: On-robot GPU (balanced)
+  NVIDIA Jetson Orin (275 TOPS) — $1500
+  Latency: 15-50ms
+  Best for: autonomous robots
+
+Tier 3: Edge TPU / NPU (low power)
+  Google Edge TPU (4 TOPS) — $75
+  Intel Myriad X (1 TOPS)  — $50
+  Latency: 20-100ms (small models only)
+  Best for: simple perception + small action head
+
+Tier 4: Custom ASIC (future)
+  Specialized VLA accelerator
+  Latency: &lt;5ms (theoretical)
+  Best for: mass-produced robots
+</code></pre>
+<h3 id="1075-serving-architecture">107.5 Serving Architecture</h3>
+<pre><code>Option A: On-robot inference
+  ┌──────────────────────────┐
+  │  Robot (Jetson Orin)     │
+  │  ┌──────────────────┐   │
+  │  │  VLA model (INT8) │   │
+  │  │  TensorRT runtime │   │
+  │  └──────────────────┘   │
+  │  Latency: 30-50ms       │
+  │  No network dependency   │
+  └──────────────────────────┘
+
+Option B: Cloud inference
+  ┌──────────┐   WiFi/5G   ┌──────────┐
+  │  Robot   │ ←─────────→ │  Cloud   │
+  │  Camera  │   20-50ms   │  A100    │
+  │  Motors  │   network   │  VLA     │
+  └──────────┘             └──────────┘
+  Latency: 40-100ms (network dependent)
+
+Option C: Hybrid (recommended)
+  ┌───────────────────────────────┐
+  │  Robot (Jetson)               │
+  │  ┌──────────────────┐        │
+  │  │  Small action     │←─ VLM │ ← Cloud
+  │  │  head (local)     │  feats │   (async)
+  │  └──────────────────┘        │
+  │  Latency: 10ms local         │
+  │  VLM updates: 200ms async    │
+  └───────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="model-optimization-pipeline">Model Optimization Pipeline</h3>
+<pre><code class="language-python">import torch
+import time
+import numpy as np
+
+class LatencyProfiler:
+    &quot;&quot;&quot;Profile VLA inference latency.&quot;&quot;&quot;
+
+    def __init__(self, model, device=&quot;cuda&quot;):
+        self.model = model.to(device)
+        self.device = device
+
+    def profile(self, input_shape, n_warmup=10, n_runs=100):
+        &quot;&quot;&quot;Measure inference latency.&quot;&quot;&quot;
+        dummy_input = torch.randn(*input_shape, device=self.device)
+
+        # Warmup
+        with torch.no_grad():
+            for _ in range(n_warmup):
+                self.model(dummy_input)
+
+        # Synchronize GPU
+        if self.device == &quot;cuda&quot;:
+            torch.cuda.synchronize()
+
+        # Timed runs
+        latencies = []
+        with torch.no_grad():
+            for _ in range(n_runs):
+                if self.device == &quot;cuda&quot;:
+                    torch.cuda.synchronize()
+                start = time.perf_counter()
+                self.model(dummy_input)
+                if self.device == &quot;cuda&quot;:
+                    torch.cuda.synchronize()
+                end = time.perf_counter()
+                latencies.append((end - start) * 1000)  # ms
+
+        return {
+            &quot;mean_ms&quot;: np.mean(latencies),
+            &quot;p50_ms&quot;: np.percentile(latencies, 50),
+            &quot;p95_ms&quot;: np.percentile(latencies, 95),
+            &quot;p99_ms&quot;: np.percentile(latencies, 99),
+            &quot;std_ms&quot;: np.std(latencies),
+            &quot;max_hz&quot;: 1000 / np.percentile(latencies, 95),
+        }
+
+class ModelQuantizer:
+    &quot;&quot;&quot;Quantize model for deployment.&quot;&quot;&quot;
+
+    @staticmethod
+    def to_fp16(model):
+        &quot;&quot;&quot;Convert to FP16.&quot;&quot;&quot;
+        return model.half()
+
+    @staticmethod
+    def dynamic_int8(model):
+        &quot;&quot;&quot;Dynamic INT8 quantization (PyTorch).&quot;&quot;&quot;
+        return torch.quantization.quantize_dynamic(
+            model, {torch.nn.Linear}, dtype=torch.qint8
+        )
+
+    @staticmethod
+    def export_onnx(model, dummy_input, path=&quot;model.onnx&quot;):
+        &quot;&quot;&quot;Export to ONNX for TensorRT/other runtimes.&quot;&quot;&quot;
+        torch.onnx.export(
+            model, dummy_input, path,
+            input_names=[&quot;observation&quot;],
+            output_names=[&quot;action&quot;],
+            dynamic_axes={&quot;observation&quot;: {0: &quot;batch&quot;},
+                         &quot;action&quot;: {0: &quot;batch&quot;}},
+            opset_version=14,
+        )
+        print(f&quot;Exported to {path}&quot;)
+
+class VisionCacheManager:
+    &quot;&quot;&quot;Cache vision encoder outputs when scene is static.&quot;&quot;&quot;
+
+    def __init__(self, encoder, change_threshold=0.02):
+        self.encoder = encoder
+        self.threshold = change_threshold
+        self.cached_features = None
+        self.cached_frame = None
+        self.cache_hits = 0
+        self.total_calls = 0
+
+    @torch.no_grad()
+    def encode(self, frame):
+        self.total_calls += 1
+
+        if self.cached_frame is not None:
+            # Check if scene changed
+            diff = (frame - self.cached_frame).abs().mean().item()
+            if diff &lt; self.threshold:
+                self.cache_hits += 1
+                return self.cached_features
+
+        # Scene changed or first call: compute features
+        self.cached_features = self.encoder(frame)
+        self.cached_frame = frame.clone()
+        return self.cached_features
+
+    @property
+    def cache_hit_rate(self):
+        return self.cache_hits / max(1, self.total_calls)
+
+class HybridInferenceServer:
+    &quot;&quot;&quot;Hybrid local + cloud inference.&quot;&quot;&quot;
+
+    def __init__(self, local_action_head, vision_cache, cloud_interval_ms=200):
+        self.action_head = local_action_head
+        self.vision_cache = vision_cache
+        self.cloud_interval = cloud_interval_ms / 1000
+        self.last_cloud_time = 0
+        self.vlm_features = None
+
+    def local_step(self, proprio):
+        &quot;&quot;&quot;Fast local action prediction (~5ms).&quot;&quot;&quot;
+        if self.vlm_features is None:
+            return None
+
+        with torch.no_grad():
+            action = self.action_head(
+                torch.cat([self.vlm_features, proprio.unsqueeze(0)], dim=-1)
+            )
+        return action
+
+    def cloud_update(self, frame, instruction):
+        &quot;&quot;&quot;Async VLM update from cloud (~200ms, non-blocking).&quot;&quot;&quot;
+        # In practice: send to cloud, receive features asynchronously
+        # Simulated here:
+        self.vlm_features = self.vision_cache.encode(frame)
+        self.last_cloud_time = time.time()
+
+    def should_update_cloud(self):
+        return (time.time() - self.last_cloud_time) &gt; self.cloud_interval
+
+# Demo: Profiling
+print(&quot;=== Model Size Comparison ===&quot;)
+sizes = {
+    &quot;ViT-Small (22M)&quot;: torch.nn.Sequential(
+        torch.nn.Linear(512, 384), torch.nn.ReLU(), torch.nn.Linear(384, 256)),
+    &quot;ViT-Base (86M)&quot;: torch.nn.Sequential(
+        torch.nn.Linear(512, 768), torch.nn.ReLU(), torch.nn.Linear(768, 256)),
+    &quot;ViT-Large (307M)&quot;: torch.nn.Sequential(
+        torch.nn.Linear(512, 1024), torch.nn.ReLU(), torch.nn.Linear(1024, 256)),
+}
+
+for name, model in sizes.items():
+    params = sum(p.numel() for p in model.parameters())
+    profiler = LatencyProfiler(model, device=&quot;cpu&quot;)
+    result = profiler.profile((1, 512), n_warmup=5, n_runs=50)
+    print(f&quot;{name}: {params:,} params, {result['mean_ms']:.2f}ms, &quot;
+          f&quot;{result['max_hz']:.0f} Hz&quot;)
+
+# Vision cache demo
+encoder = torch.nn.Linear(512, 256)
+cache = VisionCacheManager(encoder, change_threshold=0.01)
+frame = torch.randn(1, 512)
+_ = cache.encode(frame)
+_ = cache.encode(frame + torch.randn(1, 512) * 0.001)  # Static → cache hit
+_ = cache.encode(frame + torch.randn(1, 512) * 0.1)    # Changed → recompute
+print(f&quot;\nVision cache hit rate: {cache.cache_hit_rate:.0%}&quot;)
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<ol>
+<li>
+<p><strong>Quantization comparison:</strong> Take a VLA model. Compare FP32, FP16, INT8, and INT4 quantization. Measure latency and action prediction accuracy on 1000 test samples.</p>
+</li>
+<li>
+<p><strong>Resolution vs quality:</strong> Train the same model at 224×224, 160×160, 128×128, and 96×96 input resolution. Plot success rate vs latency. Find the Pareto-optimal point.</p>
+</li>
+<li>
+<p><strong>Vision caching:</strong> On a real manipulation trajectory, measure what percentage of consecutive frames have &lt;2% pixel difference. What's the effective speedup from caching?</p>
+</li>
+<li>
+<p><strong>Hybrid architecture:</strong> Simulate a hybrid system: VLM updates at 5 Hz, local action head at 50 Hz. Compare with VLA-only at 10 Hz. Which achieves better task success?</p>
+</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>50ms total budget</strong> for 20 Hz manipulation control</li>
+<li><strong>Vision encoder is the bottleneck</strong> — reduce resolution, cache, or use smaller backbone</li>
+<li><strong>Quantization (INT8) is free performance</strong> — always deploy with at least FP16</li>
+<li><strong>Hybrid cloud+edge</strong> decouples VLM reasoning from fast local control</li>
+<li><strong>Profile before optimizing</strong> — measure p95 latency, not just mean</li>
+</ol>
+<hr />
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<blockquote>
+<p><em>Latency and compute are necessary but not sufficient. Tomorrow: deployment safety and monitoring — the systems that prevent your VLA from breaking things, and the dashboards that tell you when something's wrong.</em></p>
+</blockquote>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>NVIDIA TensorRT documentation for model optimization</li>
+<li>Jetson Orin developer guide for edge deployment</li>
+<li>Google Coral Edge TPU for low-power inference</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-106-world-models.html" class="text-violet-600 hover:text-violet-800">&larr; Day 106: World Models</a>
+            <a href="day-108-deployment-2.html" class="text-violet-600 hover:text-violet-800">Day 108: Deployment — Safety & Monitoring &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 28: T5 & Encoder-Decoder LMs - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 4: Scaling & Decoders</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-28-t5-encoder-decoder-lms">Day 28: T5 &amp; Encoder-Decoder LMs</h1>
+<blockquote>
+<p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 4 | 2.5 hours</strong>
+<em>"Every problem is a text-to-text problem, if you look at it right." — Colin Raffel</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-27-sampling-generation.html">Day 27: Sampling &amp; Generation</a></li>
+<li><strong>Next:</strong> <a href="../week-05/day-29-phase2-capstone-1.html">Day 29: Phase II Capstone Day 1</a></li>
+<li><strong>Week:</strong> <a href="../README.html">Week 4 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/04-transformer-variants.html">Phase II: Attention &amp; Transformers</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="281-the-text-to-text-framework">28.1 The Text-to-Text Framework</h3>
+<p>T5 (Text-to-Text Transfer Transformer) proposed a radical unification: <strong>every NLP task is text-in, text-out.</strong></p>
+<pre><code>Traditional approach (task-specific heads):
+
+  Input ──→ [Shared Encoder] ──→ [Classification Head] ──→ Label
+                               └→ [Regression Head]    ──→ Number
+                               └→ [Seq2Seq Head]       ──→ Text
+
+T5 approach (one format):
+
+  &quot;translate English to German: The house is wonderful&quot; ──→ T5 ──→ &quot;Das Haus ist wunderbar&quot;
+  &quot;summarize: &lt;long article&gt;&quot;                           ──→ T5 ──→ &quot;&lt;summary&gt;&quot;
+  &quot;sst2 sentence: I loved this movie&quot;                   ──→ T5 ──→ &quot;positive&quot;
+  &quot;cola sentence: The dog ran quickly&quot;                  ──→ T5 ──→ &quot;acceptable&quot;
+</code></pre>
+<p><strong>Why this matters:</strong> The task instruction is <em>part of the input</em>. The model learns what to do from the text prefix. This is a precursor to instruction-following LLMs (ChatGPT, etc.).</p>
+<h3 id="282-t5-architecture">28.2 T5 Architecture</h3>
+<p>T5 uses the original encoder-decoder transformer architecture (Vaswani et al., 2017):</p>
+<pre><code>T5 Architecture:
+
+  Input tokens                           Target tokens
+      │                                      │
+      ▼                                      ▼
+  [Embedding]                           [Embedding]
+      │                                      │
+      ▼                                      ▼
+  ┌──────────────┐                   ┌──────────────────┐
+  │  Encoder      │                   │  Decoder          │
+  │  Block ×N     │                   │  Block ×N         │
+  │               │                   │                    │
+  │  Self-Attn    │     ┌────────────→│  Masked Self-Attn │
+  │  (bidirect.)  │     │             │  Cross-Attention   │←─ attends to encoder
+  │  FFN          │     │             │  FFN               │
+  │  LayerNorm    │─────┘             │  LayerNorm         │
+  └──────────────┘                   └──────────────────┘
+                                          │
+                                          ▼
+                                     [Linear + Softmax]
+                                          │
+                                          ▼
+                                     Output tokens
+</code></pre>
+<p>Three types of attention in T5:</p>
+<table>
+<thead>
+<tr>
+<th>Attention Type</th>
+<th>Query</th>
+<th>Key/Value</th>
+<th>Masking</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Encoder self-attention</td>
+<td>Encoder</td>
+<td>Encoder</td>
+<td>None (bidirectional)</td>
+</tr>
+<tr>
+<td>Decoder self-attention</td>
+<td>Decoder</td>
+<td>Decoder</td>
+<td>Causal (can only see past)</td>
+</tr>
+<tr>
+<td>Cross-attention</td>
+<td>Decoder</td>
+<td>Encoder</td>
+<td>None (can see all input)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="283-the-three-architectures-compared">28.3 The Three Architectures Compared</h3>
+<p>This is the most important comparison in modern NLP:</p>
+<pre><code>┌─────────────────────────────────────────────────────────────────┐
+│                                                                   │
+│  ENCODER-ONLY (BERT)           DECODER-ONLY (GPT)                │
+│                                                                   │
+│  Input: &quot;The [MASK] sat&quot;       Input: &quot;The cat&quot;                  │
+│         ↓                              ↓                         │
+│  ┌─────────────┐               ┌──────────────┐                 │
+│  │ Bidirectional│               │ Causal (L→R) │                 │
+│  │ Self-Attn    │               │ Self-Attn    │                 │
+│  └─────────────┘               └──────────────┘                 │
+│         ↓                              ↓                         │
+│  Output: &quot;cat&quot;                  Output: &quot;sat&quot;                    │
+│  (fill in blank)                (predict next)                   │
+│                                                                   │
+│  ENCODER-DECODER (T5)                                            │
+│                                                                   │
+│  Input: &quot;translate: The cat sat&quot; ──→ [Encoder] ──→ [Decoder]    │
+│                                                       ↓          │
+│                                            Output: &quot;Le chat...&quot;  │
+│                                                                   │
+└─────────────────────────────────────────────────────────────────┘
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th style="text-align: center;">BERT (Enc-only)</th>
+<th style="text-align: center;">GPT (Dec-only)</th>
+<th style="text-align: center;">T5 (Enc-Dec)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pre-training</td>
+<td style="text-align: center;">Masked LM</td>
+<td style="text-align: center;">Autoregressive LM</td>
+<td style="text-align: center;">Span corruption</td>
+</tr>
+<tr>
+<td>Bidirectional context</td>
+<td style="text-align: center;">✅ Yes</td>
+<td style="text-align: center;">❌ No (causal)</td>
+<td style="text-align: center;">✅ Encoder, ❌ Decoder</td>
+</tr>
+<tr>
+<td>Generation</td>
+<td style="text-align: center;">❌ Poor</td>
+<td style="text-align: center;">✅ Excellent</td>
+<td style="text-align: center;">✅ Good</td>
+</tr>
+<tr>
+<td>Understanding</td>
+<td style="text-align: center;">✅ Excellent</td>
+<td style="text-align: center;">⚠️ Good</td>
+<td style="text-align: center;">✅ Excellent</td>
+</tr>
+<tr>
+<td>Few-shot learning</td>
+<td style="text-align: center;">❌ Needs fine-tuning</td>
+<td style="text-align: center;">✅ In-context</td>
+<td style="text-align: center;">⚠️ Mixed</td>
+</tr>
+<tr>
+<td>Parameters (for same quality)</td>
+<td style="text-align: center;">Smallest</td>
+<td style="text-align: center;">Largest</td>
+<td style="text-align: center;">Medium</td>
+</tr>
+<tr>
+<td>Won in practice</td>
+<td style="text-align: center;">NLU tasks (2018-2020)</td>
+<td style="text-align: center;">Everything (2022+)</td>
+<td style="text-align: center;">Seq2seq tasks</td>
+</tr>
+</tbody>
+</table>
+<h3 id="284-why-decoder-only-won-for-generation">28.4 Why Decoder-Only Won for Generation</h3>
+<p>GPT-style models dominate today. Why?</p>
+<ol>
+<li><strong>Simpler architecture:</strong> One stack of layers, not two. Easier to scale.</li>
+<li><strong>Unified pre-training:</strong> Next-token prediction on everything. No need for special denoising objectives.</li>
+<li><strong>Scaling efficiency:</strong> For a given parameter count, one big decoder &gt; two smaller stacks.</li>
+<li><strong>In-context learning:</strong> Decoder-only models excel at few-shot learning from the prompt.</li>
+<li><strong>KV cache:</strong> More efficient autoregressive generation (only cache, no re-encode).</li>
+</ol>
+<h3 id="285-when-encoder-decoder-still-wins">28.5 When Encoder-Decoder Still Wins</h3>
+<p>T5-style models remain better for specific tasks:</p>
+<ol>
+<li>
+<p><strong>Translation:</strong> The encoder processes the full source sentence bidirectionally before the decoder generates the target. This bidirectional encoding captures source context that causal decoders miss.</p>
+</li>
+<li>
+<p><strong>Summarization:</strong> Full bidirectional understanding of the source document is crucial for selecting what to include.</p>
+</li>
+<li>
+<p><strong>Structured prediction:</strong> When the output is significantly shorter than and structurally different from the input.</p>
+</li>
+<li>
+<p><strong>Conditional generation with complex inputs:</strong> When you need to deeply process the "condition" (image, document, etc.) before generating.</p>
+</li>
+</ol>
+<p><strong>The VLA connection:</strong> Many VLAs use encoder-decoder–like structures! The vision encoder processes the image bidirectionally, and the action decoder generates actions autoregressively. This is essentially a T5 architecture where the "encoder" is a ViT and the "decoder" generates actions instead of text.</p>
+<h3 id="286-t5s-pre-training-span-corruption">28.6 T5's Pre-Training: Span Corruption</h3>
+<p>T5 doesn't use next-token prediction or masked LM. Instead, it uses <strong>span corruption</strong>:</p>
+<pre><code>Original:  &quot;The quick brown fox jumps over the lazy dog&quot;
+
+Corrupted: &quot;The &lt;X&gt; brown fox &lt;Y&gt; the lazy dog&quot;
+                 ↓
+Target:    &quot;&lt;X&gt; quick &lt;Y&gt; jumps over&quot;
+</code></pre>
+<ul>
+<li>Random contiguous spans are replaced with sentinel tokens <code>&lt;X&gt;</code>, <code>&lt;Y&gt;</code>, etc.</li>
+<li>The model must reconstruct the missing spans</li>
+<li>This teaches both understanding (encoder must grasp context) and generation (decoder must produce text)</li>
+</ul>
+<p>Mean span length of 3 tokens, corruption rate of 15% worked best in T5's ablation study.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="using-t5-for-summarization">Using T5 for Summarization</h3>
+<pre><code class="language-python">from transformers import T5ForConditionalGeneration, T5Tokenizer
+import torch
+
+# Load T5-small (60M params — fast for experimentation)
+model_name = &quot;t5-small&quot;
+tokenizer = T5Tokenizer.from_pretrained(model_name)
+model = T5ForConditionalGeneration.from_pretrained(model_name)
+model.eval()
+
+def summarize_with_t5(text: str, max_length: int = 150) -&gt; str:
+    &quot;&quot;&quot;Summarize text using T5's text-to-text format.&quot;&quot;&quot;
+    # T5 expects the task prefix
+    input_text = f&quot;summarize: {text}&quot;
+
+    input_ids = tokenizer.encode(
+        input_text, 
+        return_tensors=&quot;pt&quot;,
+        max_length=512,
+        truncation=True
+    )
+
+    with torch.no_grad():
+        output_ids = model.generate(
+            input_ids,
+            max_length=max_length,
+            num_beams=4,           # beam search for quality
+            length_penalty=2.0,    # encourage longer summaries
+            early_stopping=True,
+            no_repeat_ngram_size=3,
+        )
+
+    return tokenizer.decode(output_ids[0], skip_special_tokens=True)
+
+
+# Example
+article = &quot;&quot;&quot;
+Scaling laws for neural language models show that performance improves 
+predictably as a power law with increased compute, data, and parameters. 
+The Chinchilla paper demonstrated that most large language models were 
+significantly undertrained, recommending approximately 20 training tokens 
+per parameter for compute-optimal training. This finding reshaped how 
+the industry approaches model training, leading to models like LLaMA 
+that deliberately over-train smaller models on more data to optimize 
+inference-time efficiency rather than training-time efficiency.
+&quot;&quot;&quot;
+
+summary = summarize_with_t5(article)
+print(f&quot;Summary: {summary}&quot;)
+</code></pre>
+<h3 id="using-t5-for-translation">Using T5 for Translation</h3>
+<pre><code class="language-python">def translate_with_t5(text: str, source: str = &quot;English&quot;, target: str = &quot;German&quot;):
+    &quot;&quot;&quot;Translate text using T5.&quot;&quot;&quot;
+    input_text = f&quot;translate {source} to {target}: {text}&quot;
+
+    input_ids = tokenizer.encode(input_text, return_tensors=&quot;pt&quot;, max_length=512, truncation=True)
+
+    with torch.no_grad():
+        output_ids = model.generate(
+            input_ids,
+            max_length=512,
+            num_beams=4,
+            early_stopping=True,
+        )
+
+    return tokenizer.decode(output_ids[0], skip_special_tokens=True)
+
+
+# Examples
+sentences = [
+    &quot;The cat sits on the mat.&quot;,
+    &quot;Scaling laws predict model performance.&quot;,
+    &quot;Robots must learn from experience.&quot;,
+]
+
+for sent in sentences:
+    translation = translate_with_t5(sent)
+    print(f&quot;  EN: {sent}&quot;)
+    print(f&quot;  DE: {translation}\n&quot;)
+</code></pre>
+<h3 id="comparing-t5-vs-gpt-2-on-the-same-task">Comparing T5 vs GPT-2 on the Same Task</h3>
+<pre><code class="language-python">from transformers import GPT2LMHeadModel, GPT2Tokenizer
+
+
+def summarize_with_gpt2(text: str, max_new_tokens: int = 100) -&gt; str:
+    &quot;&quot;&quot;Attempt summarization with GPT-2 using prompting.&quot;&quot;&quot;
+    gpt2_tok = GPT2Tokenizer.from_pretrained(&quot;gpt2&quot;)
+    gpt2_model = GPT2LMHeadModel.from_pretrained(&quot;gpt2&quot;)
+    gpt2_model.eval()
+
+    # GPT-2 doesn't have a task prefix — use prompting
+    prompt = f&quot;Article: {text}\n\nSummary:&quot;
+    input_ids = gpt2_tok.encode(prompt, return_tensors=&quot;pt&quot;)
+
+    with torch.no_grad():
+        output_ids = gpt2_model.generate(
+            input_ids,
+            max_new_tokens=max_new_tokens,
+            temperature=0.7,
+            top_p=0.9,
+            do_sample=True,
+            no_repeat_ngram_size=3,
+        )
+
+    full_text = gpt2_tok.decode(output_ids[0], skip_special_tokens=True)
+    # Extract just the generated summary
+    summary = full_text[len(prompt):]
+    return summary.strip()
+
+
+# Compare on the same article
+print(&quot;=== T5 Summary ===&quot;)
+print(summarize_with_t5(article))
+print(&quot;\n=== GPT-2 Summary ===&quot;)
+print(summarize_with_gpt2(article))
+</code></pre>
+<h3 id="visualizing-cross-attention">Visualizing Cross-Attention</h3>
+<pre><code class="language-python">def visualize_cross_attention(model, tokenizer, input_text: str, target_text: str):
+    &quot;&quot;&quot;Visualize which input tokens the decoder attends to.&quot;&quot;&quot;
+    import matplotlib.pyplot as plt
+
+    input_ids = tokenizer.encode(input_text, return_tensors=&quot;pt&quot;)
+    target_ids = tokenizer.encode(target_text, return_tensors=&quot;pt&quot;)
+
+    with torch.no_grad():
+        outputs = model(
+            input_ids=input_ids,
+            decoder_input_ids=target_ids,
+            output_attentions=True,
+        )
+
+    # Cross-attention from last decoder layer, first head
+    cross_attn = outputs.cross_attentions[-1][0, 0].numpy()  # (dec_len, enc_len)
+
+    # Token labels
+    input_tokens = tokenizer.convert_ids_to_tokens(input_ids[0])
+    target_tokens = tokenizer.convert_ids_to_tokens(target_ids[0])
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    im = ax.imshow(cross_attn, cmap=&quot;Blues&quot;, aspect=&quot;auto&quot;)
+
+    ax.set_xticks(range(len(input_tokens)))
+    ax.set_xticklabels(input_tokens, rotation=45, ha=&quot;right&quot;, fontsize=8)
+    ax.set_yticks(range(len(target_tokens)))
+    ax.set_yticklabels(target_tokens, fontsize=8)
+
+    ax.set_xlabel(&quot;Encoder (Input)&quot;)
+    ax.set_ylabel(&quot;Decoder (Output)&quot;)
+    ax.set_title(&quot;Cross-Attention: What does the decoder look at?&quot;)
+
+    plt.colorbar(im)
+    plt.tight_layout()
+    plt.savefig(&quot;cross_attention.png&quot;, dpi=150)
+    plt.show()
+
+# visualize_cross_attention(model, tokenizer,
+#     &quot;translate English to German: The cat sits on the mat&quot;,
+#     &quot;Die Katze sitzt auf der Matte&quot;)
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e281-architecture-comparison-table">E28.1 — Architecture Comparison Table</h3>
+<p>Fill in this table from your understanding (not from looking it up):</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th style="text-align: center;">GPT (Decoder)</th>
+<th style="text-align: center;">BERT (Encoder)</th>
+<th style="text-align: center;">T5 (Enc-Dec)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pre-training objective</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+</tr>
+<tr>
+<td>Bidirectional input context</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+</tr>
+<tr>
+<td>Can generate text</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+</tr>
+<tr>
+<td>Few-shot capable</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+</tr>
+<tr>
+<td>Parameter efficiency</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+</tr>
+<tr>
+<td>Best for classification</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+</tr>
+<tr>
+<td>Best for translation</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+</tr>
+<tr>
+<td>Best for open-ended generation</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+<td style="text-align: center;">?</td>
+</tr>
+</tbody>
+</table>
+<h3 id="e282-when-would-you-choose-t5">E28.2 — When Would You Choose T5?</h3>
+<p>List 3 tasks where an encoder-decoder architecture is strictly better than decoder-only:</p>
+<ol>
+<li>
+<p><strong>Task:</strong> ___<br />
+<strong>Why:</strong> ___</p>
+</li>
+<li>
+<p><strong>Task:</strong> ___<br />
+<strong>Why:</strong> ___</p>
+</li>
+<li>
+<p><strong>Task:</strong> ___<br />
+<strong>Why:</strong> ___</p>
+</li>
+</ol>
+<p><strong>Hint:</strong> Think about tasks where the output is much shorter than the input, where bidirectional understanding of the input is critical, or where the output has different structure than the input.</p>
+<h3 id="e283-vla-architecture-connection">E28.3 — VLA Architecture Connection</h3>
+<p>Answer: "Is a VLA more like GPT, BERT, or T5? Why?"</p>
+<p>Consider:
+- The image encoder processes visual input bidirectionally (like BERT/T5 encoder)
+- The action decoder generates actions autoregressively (like GPT/T5 decoder)
+- Cross-attention connects vision to action (like T5 cross-attention)</p>
+<p>Draw the VLA as a T5-like architecture:</p>
+<pre><code>Image ──→ [Vision Encoder] ──→ cross-attn ──→ [Action Decoder] ──→ Actions
+                                    ↑
+Text  ──→ [Language Model ] ────────┘
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Text-to-text unifies all NLP tasks</strong> — every task becomes "input text → output text" with the right prefix</li>
+<li><strong>Three transformer architectures:</strong> Encoder-only (BERT), Decoder-only (GPT), Encoder-Decoder (T5)</li>
+<li><strong>Decoder-only won for generation</strong> — simpler, scales better, supports in-context learning</li>
+<li><strong>Encoder-decoder wins for seq2seq</strong> — translation, summarization, and tasks where input ≠ output structure</li>
+<li><strong>VLAs are encoder-decoder models</strong> — vision encoder + action decoder connected by cross-attention</li>
+<li><strong>Cross-attention is the bridge</strong> — it lets the decoder "look at" the encoded input, essential for conditioned generation</li>
+</ol>
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>T5's encoder-decoder architecture is the hidden blueprint of VLAs. When RT-2 processes an image through a ViT encoder and generates actions through a decoder, it's running a T5-like architecture where the "text" is robot commands. Understanding when and why encoder-decoder works better than decoder-only helps you reason about VLA design choices.</p>
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Raffel et al., "Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer" (2020) — the T5 paper</li>
+<li>Lewis et al., "BART: Denoising Sequence-to-Sequence Pre-training" (2020) — another encoder-decoder approach</li>
+<li>Tay et al., "Unifying Language Learning Paradigms" (2022) — UL2, unifying all three approaches</li>
+<li>Wang et al., "What Language Model Architecture and Pretraining Objective Work Best for Zero-Shot Generalization?" (2022)</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-27-sampling-generation.html" class="text-violet-600 hover:text-violet-800">&larr; Day 27: Sampling & Generation</a>
+            <a href="../week-05/day-29-phase2-capstone-1.html" class="text-violet-600 hover:text-violet-800">Day 29: Phase II Capstone Day 1 &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 23: GPT & nanoGPT — Decoder-Only Transformers (Ablation Lab Day 1) - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 4: Scaling & Decoders</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-23-gpt-nanogpt-decoder-only-transformers-ablation-lab-day-1">Day 23: GPT &amp; nanoGPT — Decoder-Only Transformers (Ablation Lab Day 1)</h1>
+<blockquote>
+<p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 4 | 2.5 hours</strong>
+<em>"The unreasonable effectiveness of predicting the next token." — Ilya Sutskever</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-22-tokenization.html">Day 22: Tokenization Deep Dive</a></li>
+<li><strong>Next:</strong> <a href="day-24-nanogpt-ablations.html">Day 24: nanoGPT Ablations Day 2</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 4 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/03-transformers.html">Phase II: Attention &amp; Transformers</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="231-the-decoder-only-architecture">23.1 The Decoder-Only Architecture</h3>
+<p>GPT uses <strong>only</strong> the transformer decoder — no encoder, no cross-attention. Just causal self-attention stacked deep.</p>
+<pre><code>Full Transformer (Vaswani 2017):         GPT (Decoder-Only):
+┌──────────────┐ ┌──────────────┐       ┌──────────────┐
+│   Encoder    │ │   Decoder    │       │   Decoder    │
+│              │ │              │       │              │
+│ Self-Attn    │ │ Masked       │       │ Causal       │
+│ (bidir.)     │→│ Self-Attn    │       │ Self-Attn    │
+│              │ │              │       │              │
+│ FFN          │ │ Cross-Attn   │       │ FFN          │
+│              │ │ (to encoder) │       │              │
+│              │ │              │       │ × N layers   │
+│              │ │ FFN          │       │              │
+│              │ │              │       │              │
+│              │ │ × N layers   │       │              │
+└──────────────┘ └──────────────┘       └──────────────┘
+     ↑ source         ↑ target                ↑ everything
+
+Needs paired data    Needs paired data     Just needs text!
+(src → tgt)          (src → tgt)           Next-token prediction
+</code></pre>
+<p><strong>Why decoder-only won:</strong>
+1. <strong>Simplicity</strong> — One architecture, one training objective, one data type
+2. <strong>Data efficiency</strong> — Only needs raw text (unlimited on the internet)
+3. <strong>Generality</strong> — Any task can be framed as text completion
+4. <strong>Emergent abilities</strong> — Scale unlocks capabilities not present in smaller versions</p>
+<h3 id="232-gpt-evolution-1-2-3-4">23.2 GPT Evolution: 1 → 2 → 3 → 4</h3>
+<pre><code>GPT-1 (2018)          GPT-2 (2019)         GPT-3 (2020)          GPT-4 (2023)
+117M params           1.5B params          175B params           ~1.8T params (est.)
+12 layers             48 layers            96 layers             ~120 layers (est.)
+768 dim               1600 dim             12288 dim             ~?
+BooksCorpus           WebText (40GB)       CommonCrawl+          ~?
+                                           (570GB)
+
+Key idea:             Key idea:            Key idea:             Key idea:
+Transfer learning     Zero-shot via        In-context            Multimodal +
+(pretrain + finetune) task description     learning (few-shot)   RLHF + MoE (est.)
+
+&quot;Fine-tuning          &quot;Language models      &quot;Language models     &quot;The architecture
+ works for NLP&quot;        are unsupervised     are few-shot         works for everything
+                       multitask learners&quot;   learners&quot;            (text, vision, code)&quot;
+</code></pre>
+<p><strong>The progression:</strong>
+1. <strong>GPT-1:</strong> Proved that transformer pre-training + fine-tuning works for NLP
+2. <strong>GPT-2:</strong> Showed that scale alone enables zero-shot task performance
+3. <strong>GPT-3:</strong> Demonstrated in-context learning — no weight updates needed
+4. <strong>GPT-4:</strong> Extended to multimodal, achieved near-human performance on benchmarks</p>
+<h3 id="233-the-causal-language-modeling-objective">23.3 The Causal Language Modeling Objective</h3>
+<p>$$\mathcal{L} = -\sum_{t=1}^{T} \log P(x_t \mid x_1, x_2, \ldots, x_{t-1}; \theta)$$</p>
+<p>Every position predicts the next token, supervised by the actual next token:</p>
+<pre><code>Input:    [BOS]  The   cat   sat   on    the
+Target:    The   cat   sat   on    the   mat
+
+Position 0: P(&quot;The&quot; | [BOS])           ← predict &quot;The&quot;
+Position 1: P(&quot;cat&quot; | [BOS], The)      ← predict &quot;cat&quot;  
+Position 2: P(&quot;sat&quot; | [BOS], The, cat) ← predict &quot;sat&quot;
+...
+
+Every token is BOTH a prediction target AND context for later tokens.
+Training is maximally efficient — every position contributes to the loss.
+</code></pre>
+<h3 id="234-the-gpt-block-nanogpt-style">23.4 The GPT Block (nanoGPT Style)</h3>
+<pre><code>Input tokens → Token Embedding + Position Embedding
+                        ↓
+              ┌─────────────────────┐
+              │ LayerNorm           │ ← Pre-LN
+              │ Causal Self-Attn    │
+              │ + Residual          │
+              │                     │
+              │ LayerNorm           │ ← Pre-LN
+              │ FFN (GELU)          │
+              │ + Residual          │
+              └─────────────────────┘
+                   × N layers
+                        ↓
+              LayerNorm (final)
+                        ↓
+              Linear → logits (vocab_size)
+                        ↓
+              softmax → P(next token)
+</code></pre>
+<p><strong>GPT-2 specifics:</strong>
+- Pre-LN (not Post-LN like original transformer)
+- GELU activation (not ReLU)
+- Learned positional embeddings (not sinusoidal)
+- No bias in attention projections (GPT-3+/LLaMA)
+- Weight tying: token embedding = output projection (transposed)</p>
+<h3 id="235-what-makes-this-different-from-day-14">23.5 What Makes This Different from Day 14?</h3>
+<p>On Day 14, you built a full encoder-decoder transformer for translation. nanoGPT is different:</p>
+<table>
+<thead>
+<tr>
+<th>Day 14 Transformer</th>
+<th>nanoGPT</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Encoder + Decoder</td>
+<td>Decoder only</td>
+</tr>
+<tr>
+<td>Cross-attention</td>
+<td>No cross-attention</td>
+</tr>
+<tr>
+<td>Sinusoidal positions</td>
+<td>Learned positions</td>
+</tr>
+<tr>
+<td>Post-LN</td>
+<td>Pre-LN</td>
+</tr>
+<tr>
+<td>ReLU FFN</td>
+<td>GELU FFN</td>
+</tr>
+<tr>
+<td>Translation task</td>
+<td>Language modeling</td>
+</tr>
+<tr>
+<td>Small vocab (~10K)</td>
+<td>Large vocab (50K+)</td>
+</tr>
+<tr>
+<td>Short sequences (~50)</td>
+<td>Medium sequences (1024)</td>
+</tr>
+<tr>
+<td>Trained from scratch on toy data</td>
+<td>Can reproduce GPT-2</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="236-read-and-annotate-nanogpt">23.6 Read and Annotate nanoGPT</h3>
+<p>The core of nanoGPT is ~300 lines. Here's the annotated architecture:</p>
+<pre><code class="language-python">&quot;&quot;&quot;
+nanoGPT — annotated core architecture.
+Original: https://github.com/karpathy/nanoGPT
+&quot;&quot;&quot;
+import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class CausalSelfAttention(nn.Module):
+    &quot;&quot;&quot;Multi-head causal self-attention.&quot;&quot;&quot;
+
+    def __init__(self, n_embd, n_head, block_size, dropout=0.0, bias=False):
+        super().__init__()
+        assert n_embd % n_head == 0
+        self.n_head = n_head
+        self.n_embd = n_embd
+        self.dropout = dropout
+
+        # Key, Query, Value projections — all in one matrix for efficiency
+        self.c_attn = nn.Linear(n_embd, 3 * n_embd, bias=bias)
+        # Output projection
+        self.c_proj = nn.Linear(n_embd, n_embd, bias=bias)
+
+        self.attn_dropout = nn.Dropout(dropout)
+        self.resid_dropout = nn.Dropout(dropout)
+
+        # Causal mask — registered as buffer (not a parameter)
+        self.register_buffer(
+            &quot;mask&quot;,
+            torch.tril(torch.ones(block_size, block_size))
+            .view(1, 1, block_size, block_size)
+        )
+
+    def forward(self, x):
+        B, T, C = x.size()  # batch, sequence length, embedding dim
+
+        # Calculate Q, K, V in one shot
+        q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
+
+        # Reshape: (B, T, C) → (B, n_head, T, head_dim)
+        head_dim = C // self.n_head
+        q = q.view(B, T, self.n_head, head_dim).transpose(1, 2)
+        k = k.view(B, T, self.n_head, head_dim).transpose(1, 2)
+        v = v.view(B, T, self.n_head, head_dim).transpose(1, 2)
+
+        # Attention: (B, n_head, T, T)
+        # Use PyTorch's SDPA which auto-selects Flash Attention when possible
+        att = F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=None,
+            dropout_p=self.dropout if self.training else 0.0,
+            is_causal=True,  # ← this enables the causal mask!
+        )
+
+        # Re-assemble heads: (B, n_head, T, head_dim) → (B, T, C)
+        att = att.transpose(1, 2).contiguous().view(B, T, C)
+
+        # Output projection
+        return self.resid_dropout(self.c_proj(att))
+
+
+class MLP(nn.Module):
+    &quot;&quot;&quot;Feed-forward network with GELU activation.&quot;&quot;&quot;
+
+    def __init__(self, n_embd, dropout=0.0, bias=False):
+        super().__init__()
+        self.c_fc = nn.Linear(n_embd, 4 * n_embd, bias=bias)
+        self.gelu = nn.GELU()
+        self.c_proj = nn.Linear(4 * n_embd, n_embd, bias=bias)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        x = self.c_fc(x)
+        x = self.gelu(x)
+        x = self.c_proj(x)
+        return self.dropout(x)
+
+
+class Block(nn.Module):
+    &quot;&quot;&quot;Transformer block: Pre-LN attention + FFN with residuals.&quot;&quot;&quot;
+
+    def __init__(self, n_embd, n_head, block_size, dropout=0.0, bias=False):
+        super().__init__()
+        self.ln_1 = nn.LayerNorm(n_embd)
+        self.attn = CausalSelfAttention(n_embd, n_head, block_size, dropout, bias)
+        self.ln_2 = nn.LayerNorm(n_embd)
+        self.mlp = MLP(n_embd, dropout, bias)
+
+    def forward(self, x):
+        # Pre-LN: normalize BEFORE sublayer
+        x = x + self.attn(self.ln_1(x))   # residual + attention
+        x = x + self.mlp(self.ln_2(x))    # residual + FFN
+        return x
+
+
+class GPT(nn.Module):
+    &quot;&quot;&quot;The full GPT language model.&quot;&quot;&quot;
+
+    def __init__(self, vocab_size, block_size=1024, n_layer=12,
+                 n_head=12, n_embd=768, dropout=0.0, bias=False):
+        super().__init__()
+        self.block_size = block_size
+
+        self.transformer = nn.ModuleDict(dict(
+            wte=nn.Embedding(vocab_size, n_embd),          # token embeddings
+            wpe=nn.Embedding(block_size, n_embd),          # position embeddings
+            drop=nn.Dropout(dropout),
+            h=nn.ModuleList([
+                Block(n_embd, n_head, block_size, dropout, bias)
+                for _ in range(n_layer)
+            ]),
+            ln_f=nn.LayerNorm(n_embd),                    # final layer norm
+        ))
+        # Language model head — shares weights with token embedding!
+        self.lm_head = nn.Linear(n_embd, vocab_size, bias=False)
+        self.transformer.wte.weight = self.lm_head.weight  # weight tying
+
+        # Initialize weights
+        self.apply(self._init_weights)
+        # Special scaled init for residual projections (GPT-2 recipe)
+        for pn, p in self.named_parameters():
+            if pn.endswith('c_proj.weight'):
+                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * n_layer))
+
+        n_params = sum(p.numel() for p in self.parameters())
+        print(f&quot;GPT model: {n_params/1e6:.1f}M parameters&quot;)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def forward(self, idx, targets=None):
+        &quot;&quot;&quot;
+        idx: (B, T) token indices
+        targets: (B, T) target token indices (shifted by 1)
+        &quot;&quot;&quot;
+        B, T = idx.size()
+        assert T &lt;= self.block_size, f&quot;Sequence {T} &gt; block_size {self.block_size}&quot;
+
+        # Token + position embeddings
+        pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
+        tok_emb = self.transformer.wte(idx)     # (B, T, n_embd)
+        pos_emb = self.transformer.wpe(pos)     # (T, n_embd)
+        x = self.transformer.drop(tok_emb + pos_emb)
+
+        # Transformer blocks
+        for block in self.transformer.h:
+            x = block(x)
+
+        x = self.transformer.ln_f(x)
+
+        if targets is not None:
+            # Training: compute loss
+            logits = self.lm_head(x)            # (B, T, vocab_size)
+            loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                targets.view(-1),
+                ignore_index=-1,
+            )
+        else:
+            # Inference: only compute last position
+            logits = self.lm_head(x[:, [-1], :])  # (B, 1, vocab_size)
+            loss = None
+
+        return logits, loss
+
+    @torch.no_grad()
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+        &quot;&quot;&quot;Autoregressive generation.&quot;&quot;&quot;
+        for _ in range(max_new_tokens):
+            # Crop context to block_size
+            idx_cond = idx if idx.size(1) &lt;= self.block_size else idx[:, -self.block_size:]
+
+            logits, _ = self(idx_cond)
+            logits = logits[:, -1, :] / temperature
+
+            if top_k is not None:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits &lt; v[:, [-1]]] = float('-inf')
+
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
+            idx = torch.cat((idx, idx_next), dim=1)
+
+        return idx
+</code></pre>
+<h3 id="237-train-on-shakespeare">23.7 Train on Shakespeare</h3>
+<pre><code class="language-python">import os
+import requests
+
+# Download Shakespeare dataset
+data_url = &quot;https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt&quot;
+data_path = &quot;shakespeare.txt&quot;
+if not os.path.exists(data_path):
+    text = requests.get(data_url).text
+    with open(data_path, 'w') as f:
+        f.write(text)
+else:
+    with open(data_path, 'r') as f:
+        text = f.read()
+
+print(f&quot;Dataset: {len(text)} characters&quot;)
+
+# Character-level tokenizer (simple for this exercise)
+chars = sorted(list(set(text)))
+vocab_size = len(chars)
+stoi = {ch: i for i, ch in enumerate(chars)}
+itos = {i: ch for i, ch in enumerate(chars)}
+encode = lambda s: [stoi[c] for c in s]
+decode = lambda l: ''.join([itos[i] for i in l])
+
+print(f&quot;Vocab size: {vocab_size}&quot;)
+print(f&quot;Chars: {''.join(chars[:50])}...&quot;)
+
+# Train/val split
+data = torch.tensor(encode(text), dtype=torch.long)
+n = int(0.9 * len(data))
+train_data = data[:n]
+val_data = data[n:]
+
+
+def get_batch(split, batch_size=64, block_size=256):
+    data_split = train_data if split == 'train' else val_data
+    ix = torch.randint(len(data_split) - block_size, (batch_size,))
+    x = torch.stack([data_split[i:i+block_size] for i in ix])
+    y = torch.stack([data_split[i+1:i+block_size+1] for i in ix])
+    return x, y
+
+
+# Create a small GPT
+model = GPT(
+    vocab_size=vocab_size,
+    block_size=256,
+    n_layer=6,
+    n_head=6,
+    n_embd=384,
+    dropout=0.2,
+)
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+model = model.to(device)
+optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+
+# Training loop
+for step in range(5000):
+    xb, yb = get_batch('train')
+    xb, yb = xb.to(device), yb.to(device)
+
+    logits, loss = model(xb, yb)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    if step % 500 == 0:
+        model.eval()
+        val_x, val_y = get_batch('val')
+        val_x, val_y = val_x.to(device), val_y.to(device)
+        _, val_loss = model(val_x, val_y)
+        model.train()
+
+        print(f&quot;Step {step}: train_loss={loss.item():.4f}, val_loss={val_loss.item():.4f}&quot;)
+
+# Generate!
+model.eval()
+context = torch.zeros((1, 1), dtype=torch.long, device=device)
+generated = model.generate(context, max_new_tokens=500, temperature=0.8, top_k=50)
+print(&quot;\n--- Generated Shakespeare ---&quot;)
+print(decode(generated[0].tolist()))
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e231-architecture-comparison">E23.1 Architecture Comparison</h3>
+<p>List EVERY difference between your Day 14 transformer and this nanoGPT:</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Day 14 Transformer</th>
+<th>nanoGPT</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Architecture type</td>
+<td>?</td>
+<td>?</td>
+</tr>
+<tr>
+<td>Normalization</td>
+<td>?</td>
+<td>?</td>
+</tr>
+<tr>
+<td>Activation</td>
+<td>?</td>
+<td>?</td>
+</tr>
+<tr>
+<td>Positional encoding</td>
+<td>?</td>
+<td>?</td>
+</tr>
+<tr>
+<td>Weight tying</td>
+<td>?</td>
+<td>?</td>
+</tr>
+<tr>
+<td>Cross-attention</td>
+<td>?</td>
+<td>?</td>
+</tr>
+<tr>
+<td>Initialization</td>
+<td>?</td>
+<td>?</td>
+</tr>
+</tbody>
+</table>
+<h3 id="e232-parameter-count-verification">E23.2 Parameter Count Verification</h3>
+<p>For the Shakespeare model (6 layers, 6 heads, 384 dim, vocab=65):</p>
+<p>Calculate by hand:
+1. Token embedding: <code>vocab_size × n_embd</code> = ?
+2. Position embedding: <code>block_size × n_embd</code> = ?
+3. Per block attention: <code>4 × n_embd²</code> = ? (Q, K, V, Out projections)
+4. Per block FFN: <code>2 × n_embd × 4*n_embd</code> = ?
+5. Per block LayerNorm: <code>2 × 2 × n_embd</code> = ?
+6. Total = ?</p>
+<p>Compare with <code>sum(p.numel() for p in model.parameters())</code>. Do they match?</p>
+<h3 id="e233-generation-quality-vs-training">E23.3 Generation Quality vs Training</h3>
+<p>Generate text at steps 0, 500, 1000, 2000, 5000:</p>
+<pre><code class="language-python">checkpoints = [0, 500, 1000, 2000, 5000]
+# At each checkpoint, generate 200 characters and save
+# Observe: random → character patterns → word patterns → Shakespeare-like
+
+# Also: try temperature = [0.1, 0.5, 0.8, 1.0, 1.5, 2.0]
+# What happens at each extreme?
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Decoder-only transformers</strong> use causal self-attention — each token can only attend to previous tokens</li>
+<li><strong>GPT's training objective is simple:</strong> predict the next token — this scales remarkably well</li>
+<li><strong>Weight tying</strong> shares the token embedding with the output projection, reducing parameters</li>
+<li><strong>nanoGPT is ~300 lines</strong> — the entire architecture fits in your head, yet it reproduces GPT-2</li>
+<li><strong>GPT-1→2→3→4</strong> shows that scale + simplicity beats architectural complexity</li>
+<li><strong>Character-level Shakespeare</strong> is a perfect sandbox — fast training, immediate visual feedback</li>
+</ol>
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>Today you built the architecture that dominates modern AI. GPT's decoder-only design is what powers ChatGPT, Claude, LLaMA, and eventually the language backbone of VLA models. Tomorrow, you'll use this codebase as an <strong>ablation laboratory</strong> — systematically varying architecture choices (heads, layers, dim, activation, normalization) to understand what matters and why. This is how real ML research works.</p>
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><strong><a href="https://github.com/karpathy/nanoGPT">nanoGPT Repository</a></strong> — Karpathy, full code + training scripts</li>
+<li><strong><a href="https://www.youtube.com/watch?v=kCc8FmEb1nY">Karpathy's "Let's build GPT"</a></strong> — 2-hour video, essential</li>
+<li><strong><a href="https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf">GPT-1 Paper</a></strong> — Radford et al., 2018</li>
+<li><strong><a href="https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf">GPT-2 Paper</a></strong> — Radford et al., 2019</li>
+<li><strong><a href="https://arxiv.org/abs/2005.14165">GPT-3 Paper</a></strong> — Brown et al., 2020</li>
+<li><strong><a href="https://arxiv.org/abs/1608.05859">Weight Tying</a></strong> — Press &amp; Wolf, 2017</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-22-tokenization.html" class="text-violet-600 hover:text-violet-800">&larr; Day 22: Tokenization Deep Dive</a>
+            <a href="day-24-nanogpt-ablations.html" class="text-violet-600 hover:text-violet-800">Day 24: nanoGPT Ablations &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 87: Policy Evaluation — How Do You Know It Works? - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 13: Data & Evaluation</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-87-policy-evaluation-how-do-you-know-it-works">Day 87: Policy Evaluation — How Do You Know It Works?</h1>
+<blockquote>
+<p><strong>Phase VI — Robot Learning: RL, Diffusion &amp; Data | Week 13 | 2.5 hours</strong>
+<em>"In NLP, you compute BLEU. In vision, you compute FID. In robotics, you put the robot on a table and see if it breaks things." — Sergey Levine</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-86-data-collection-2.html">Day 86: Data Collection Part 2</a></li>
+<li><strong>Next:</strong> <a href="day-88-policy-debugging.html">Day 88: Policy Debugging &amp; Failure Analysis</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 13 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/14-robot-data-eval.html">Phase VI: Robot Learning</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="871-the-evaluation-problem">87.1 The Evaluation Problem</h3>
+<table>
+<thead>
+<tr>
+<th>Domain</th>
+<th>Evaluation</th>
+<th>Cost</th>
+<th>Speed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Language</td>
+<td>Benchmark (MMLU, etc.)</td>
+<td>Free</td>
+<td>Seconds</td>
+</tr>
+<tr>
+<td>Vision</td>
+<td>FID, IS, CLIP score</td>
+<td>Free</td>
+<td>Seconds</td>
+</tr>
+<tr>
+<td>Robotics</td>
+<td><strong>Physical rollouts</strong></td>
+<td>$$$, risk of damage | Hours |
+
+Robot evaluation is **expensive, slow, and potentially destructive**.
+
+### 87.2 Offline vs Online Metrics
+
+**Offline (cheap, fast, incomplete):**
+
+| Metric | Formula | What It Measures |
+|--------|---------|-----------------|
+| MSE loss | $\|a - \hat{a}\|^2$ | Action prediction accuracy |
+| Action likelihood | $\log p(a \mid o)$ | How well model explains data |
+| FVD | Feature Video Distance | Visual trajectory similarity |
+| Trajectory similarity | DTW distance | Shape of predicted trajectory |
+
+**Online (expensive, slow, definitive):**
+
+| Metric | How to Measure | What It Means |
+|--------|---------------|---------------|
+| **Success rate** | $N_\text{success}/N_\text{trials}$ | Primary metric |
+| **Completion fraction** | Subtask progress (0-1) | Partial credit |
+| **Cycle time** | Time to complete task | Efficiency |
+| **Collision rate** | Contact sensor triggers | Safety |
+| **Generalization** | Test on unseen objects/poses | Robustness |
+
+### 87.3 The Offline-Online Gap
+
+Low training loss ≠ high success rate. Why?
+
+```
+Training loss ↓                    Success rate ?
+
+Reasons for the gap:
+  1. Compounding errors (not visible in single-step loss)
+  2. Distribution shift (test poses differ from training)
+  3. Mode averaging (loss is low but policy grabs air)
+  4. Observation processing (lighting, camera angle changes)
+  5. Timing (control frequency different from training)
+```
+
+### 87.4 Evaluation Protocol Design
+
+A rigorous evaluation protocol specifies:
+
+```
+Protocol: "Push T evaluation" (Diffusion Policy benchmark)
+  ├── Task: Push T-shaped block to goal pose
+  ├── Trials: 50 rollouts per checkpoint
+  ├── Randomization:
+  │   ├── Initial block pose: sampled from distribution D₁
+  │   ├── Goal pose: sampled from distribution D₂
+  │   └── Distractors: 2 random objects on table
+  ├── Success criteria:
+  │   ├── Block within 5mm of goal position
+  │   └── Block within 5° of goal orientation
+  ├── Max steps: 300 (at 10 Hz = 30 seconds)
+  └── Reporting: mean ± std over 3 seeds, 50 trials each
+```
+
+### 87.5 Simulation vs Real Evaluation
+
+| Aspect | Simulation | Real |
+|--------|-----------|------|
+| Speed | 1000× faster | Real-time only |
+| Cost | ~$0 | Robot time, operator |
+| Fidelity | Approximate physics | Ground truth |
+| Diversity | Easy to randomize | Limited |
+| Safety | No damage | Risk of damage |
+
+**The sim-to-real gap:** policies that work in simulation often fail on real robots due to:
+- Physics differences (friction, deformation, contact)
+- Visual differences (textures, lighting, reflections)
+- Sensor noise (not modeled in sim)
+
+### 87.6 Statistical Rigor
+
+**How many trials do you need?**
+
+For binomial success rate with confidence interval:
+
+$$n = \frac{z^2 \cdot p(1-p)}{\epsilon^2}$$</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>where $z = 1.96$ for 95% CI, $p$ = expected success rate, $\epsilon$ = margin of error.</p>
+<table>
+<thead>
+<tr>
+<th>Expected Rate</th>
+<th>Margin ±5%</th>
+<th>Margin ±10%</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>50%</td>
+<td>385 trials</td>
+<td>97 trials</td>
+</tr>
+<tr>
+<td>80%</td>
+<td>246 trials</td>
+<td>62 trials</td>
+</tr>
+<tr>
+<td>95%</td>
+<td>73 trials</td>
+<td>19 trials</td>
+</tr>
+</tbody>
+</table>
+<p><strong>In practice:</strong> most papers use 20-50 trials (statistically weak but practically necessary).</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="evaluation-framework">Evaluation Framework</h3>
+<pre><code class="language-python">import numpy as np
+from dataclasses import dataclass, field
+from typing import Optional
+
+@dataclass
+class EvalResult:
+    success: bool
+    completion: float  # 0-1 partial progress
+    steps: int
+    collision: bool = False
+    info: dict = field(default_factory=dict)
+
+class PolicyEvaluator:
+    &quot;&quot;&quot;Systematic policy evaluation with statistical reporting.&quot;&quot;&quot;
+
+    def __init__(self, env, policy, max_steps=300):
+        self.env = env
+        self.policy = policy
+        self.max_steps = max_steps
+
+    def run_single_trial(self, seed=None) -&gt; EvalResult:
+        &quot;&quot;&quot;Run a single evaluation trial.&quot;&quot;&quot;
+        if seed is not None:
+            obs, _ = self.env.reset(seed=seed)
+        else:
+            obs, _ = self.env.reset()
+
+        total_reward = 0
+        for step in range(self.max_steps):
+            action = self.policy.predict(obs)
+            obs, reward, terminated, truncated, info = self.env.step(action)
+            total_reward += reward
+
+            if terminated or truncated:
+                break
+
+        return EvalResult(
+            success=total_reward &gt; 0,
+            completion=min(1.0, max(0.0, total_reward)),
+            steps=step + 1,
+            info=info,
+        )
+
+    def evaluate(self, n_trials=50, seeds=None):
+        &quot;&quot;&quot;Run full evaluation with statistics.&quot;&quot;&quot;
+        if seeds is None:
+            seeds = list(range(n_trials))
+
+        results = []
+        for i, seed in enumerate(seeds[:n_trials]):
+            result = self.run_single_trial(seed=seed)
+            results.append(result)
+            if (i + 1) % 10 == 0:
+                sr = sum(r.success for r in results) / len(results)
+                print(f&quot;  Trial {i+1}/{n_trials}: running SR = {sr:.1%}&quot;)
+
+        return self._compute_statistics(results)
+
+    def _compute_statistics(self, results):
+        &quot;&quot;&quot;Compute evaluation statistics with confidence intervals.&quot;&quot;&quot;
+        n = len(results)
+        successes = sum(r.success for r in results)
+        sr = successes / n
+
+        # Wilson score confidence interval (better than Wald for small n)
+        z = 1.96  # 95% CI
+        denominator = 1 + z**2 / n
+        center = (sr + z**2 / (2*n)) / denominator
+        spread = z * np.sqrt((sr*(1-sr) + z**2/(4*n)) / n) / denominator
+        ci_low = max(0, center - spread)
+        ci_high = min(1, center + spread)
+
+        completions = [r.completion for r in results]
+        steps = [r.steps for r in results]
+
+        stats = {
+            &quot;n_trials&quot;: n,
+            &quot;success_rate&quot;: sr,
+            &quot;ci_95&quot;: (ci_low, ci_high),
+            &quot;completion_mean&quot;: np.mean(completions),
+            &quot;completion_std&quot;: np.std(completions),
+            &quot;steps_mean&quot;: np.mean(steps),
+            &quot;steps_std&quot;: np.std(steps),
+            &quot;collision_rate&quot;: sum(r.collision for r in results) / n,
+        }
+
+        print(&quot;\n&quot; + &quot;=&quot;*50)
+        print(&quot;EVALUATION RESULTS&quot;)
+        print(&quot;=&quot;*50)
+        print(f&quot;Success Rate: {sr:.1%} ({successes}/{n})&quot;)
+        print(f&quot;95% CI: [{ci_low:.1%}, {ci_high:.1%}]&quot;)
+        print(f&quot;Completion: {stats['completion_mean']:.2f} ± {stats['completion_std']:.2f}&quot;)
+        print(f&quot;Steps: {stats['steps_mean']:.0f} ± {stats['steps_std']:.0f}&quot;)
+        print(&quot;=&quot;*50)
+
+        return stats
+
+    @staticmethod
+    def compare_policies(stats_a, stats_b, name_a=&quot;A&quot;, name_b=&quot;B&quot;):
+        &quot;&quot;&quot;Compare two policies with statistical significance.&quot;&quot;&quot;
+        sr_a, n_a = stats_a[&quot;success_rate&quot;], stats_a[&quot;n_trials&quot;]
+        sr_b, n_b = stats_b[&quot;success_rate&quot;], stats_b[&quot;n_trials&quot;]
+
+        # Two-proportion z-test
+        p_pool = (sr_a * n_a + sr_b * n_b) / (n_a + n_b)
+        se = np.sqrt(p_pool * (1 - p_pool) * (1/n_a + 1/n_b))
+        z_stat = (sr_a - sr_b) / (se + 1e-10)
+        significant = abs(z_stat) &gt; 1.96
+
+        print(f&quot;\n{name_a}: {sr_a:.1%} vs {name_b}: {sr_b:.1%}&quot;)
+        print(f&quot;Difference: {(sr_a-sr_b):.1%}&quot;)
+        print(f&quot;z-statistic: {z_stat:.2f}&quot;)
+        print(f&quot;Significant (p&lt;0.05): {'YES' if significant else 'NO'}&quot;)
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<ol>
+<li>
+<p><strong>Confidence interval experiment:</strong> Simulate a policy with 80% true success rate. Run 10, 20, 50, 100, 200 trials. Plot CI width vs trial count.</p>
+</li>
+<li>
+<p><strong>Offline-online correlation:</strong> Train BC with different dataset sizes. Plot MSE loss vs simulated success rate. Is there a correlation? When does it break down?</p>
+</li>
+<li>
+<p><strong>Evaluation protocol:</strong> Write a complete evaluation protocol specification for a task of your choice (push, pick-place, or navigation). Include randomization, success criteria, and trial count justification.</p>
+</li>
+<li>
+<p><strong>Policy comparison:</strong> Train two variants of a policy (e.g., chunk_size=4 vs 16). Use <code>compare_policies</code> to determine if the difference is statistically significant with 50 trials.</p>
+</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Success rate is the primary metric</strong> — offline losses are insufficient</li>
+<li><strong>Wilson score CI</strong> is better than simple binomial CI for small sample sizes</li>
+<li><strong>50 trials is the minimum</strong> for credible evaluation; 100+ is better</li>
+<li><strong>Sim evaluation is necessary</strong> but not sufficient — real-world testing is essential</li>
+<li><strong>Report confidence intervals</strong>, not just point estimates</li>
+</ol>
+<hr />
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<blockquote>
+<p><em>Evaluation tells you what's wrong. Tomorrow: how to diagnose why it's wrong. Policy debugging is more art than science — but structured hypothesis testing helps. Then Days 89-91 are the Phase VI capstone: integrating RL, diffusion, data, and evaluation into a complete robot learning pipeline.</em></p>
+</blockquote>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Brown et al. (2001), "Interval Estimation for a Binomial Proportion" (Wilson CI)</li>
+<li>Chi et al. (2023), "Diffusion Policy" — evaluation protocol appendix</li>
+<li>RT-2 evaluation: Brohan et al. (2023), extensive real-world eval section</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-86-data-collection-2.html" class="text-violet-600 hover:text-violet-800">&larr; Day 86: Data Collection Part 2</a>
+            <a href="day-88-policy-debugging.html" class="text-violet-600 hover:text-violet-800">Day 88: Policy Debugging &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18: KV Cache — Why Autoregressive Inference Is Fast - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 3: Variants & GPT</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-18-kv-cache-why-autoregressive-inference-is-fast">Day 18: KV Cache — Why Autoregressive Inference Is Fast</h1>
+<blockquote>
+<p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 3 | 2.5 hours</strong>
+<em>"The best optimization is the one that eliminates work you never needed to do." — Every systems engineer ever</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-17-efficient-attention.html">Day 17: Efficient Attention</a></li>
+<li><strong>Next:</strong> <a href="day-19-normalization-activations.html">Day 19: Normalization + Activations</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 3 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/02-attention-mechanism.html">Phase II: Attention &amp; Transformers</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="181-the-autoregressive-inference-problem">18.1 The Autoregressive Inference Problem</h3>
+<p>During generation, a transformer produces one token at a time:</p>
+<pre><code>Step 1: &quot;The&quot;           → predict &quot;cat&quot;
+Step 2: &quot;The cat&quot;       → predict &quot;sat&quot;
+Step 3: &quot;The cat sat&quot;   → predict &quot;on&quot;
+...
+Step n: &quot;The cat sat on the...&quot; → predict next
+</code></pre>
+<p><strong>Naive approach:</strong> At step $n$, run the FULL transformer on all $n$ tokens.
+- Step 1: process 1 token
+- Step 2: process 2 tokens
+- Step 3: process 3 tokens
+- Step $n$: process $n$ tokens</p>
+<p><strong>Total work:</strong> $1 + 2 + 3 + \ldots + n = \frac{n(n+1)}{2} = O(n^2)$ forward passes through the model.</p>
+<p>This is catastrophically wasteful — we're recomputing the same representations over and over.</p>
+<h3 id="182-the-kv-cache-insight">18.2 The KV Cache Insight</h3>
+<p>Look at the attention computation for the <strong>new</strong> token at position $t$:</p>
+<p>$$\text{Attention}(q_t, K_{1:t}, V_{1:t}) = \text{softmax}\!\left(\frac{q_t K_{1:t}^T}{\sqrt{d_k}}\right) V_{1:t}$$</p>
+<p><strong>Key observation:</strong> Only $q_t$ changes. The keys $K_{1:t-1}$ and values $V_{1:t-1}$ for all previous tokens are the same as the last step!</p>
+<pre><code>Without KV Cache (step 4):
+  ┌────────────────────┐
+  │ Recompute K,V for  │ ← WASTED: identical to step 3
+  │ tokens 1, 2, 3     │
+  │ Compute K,V for    │ ← NEW: only this is needed
+  │ token 4            │
+  └────────────────────┘
+
+With KV Cache (step 4):
+  ┌────────────────────┐
+  │ Load K,V from cache│ ← FREE: already computed
+  │ for tokens 1, 2, 3 │
+  │ Compute K,V for    │ ← Only compute this
+  │ token 4            │
+  │ Append to cache    │
+  └────────────────────┘
+</code></pre>
+<p><strong>Speedup:</strong> Each generation step processes 1 token instead of $t$ tokens → total work drops from $O(n^2)$ to $O(n)$.</p>
+<h3 id="183-kv-cache-memory-calculation">18.3 KV Cache Memory Calculation</h3>
+<p>The cache stores K and V tensors for all previous tokens across all layers and heads.</p>
+<p>$$\text{KV Cache Size} = 2 \times n_{\text{layers}} \times n_{\text{heads}} \times d_{\text{head}} \times n_{\text{seq}} \times \text{bytes}$$</p>
+<p>The factor of 2 is for K <strong>and</strong> V (both cached).</p>
+<p><strong>Example — LLaMA-7B:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>$n_{\text{layers}}$</td>
+<td>32</td>
+</tr>
+<tr>
+<td>$n_{\text{heads}}$</td>
+<td>32</td>
+</tr>
+<tr>
+<td>$d_{\text{head}}$</td>
+<td>128</td>
+</tr>
+<tr>
+<td>Context length</td>
+<td>4,096</td>
+</tr>
+<tr>
+<td>Precision</td>
+<td>float16 (2 bytes)</td>
+</tr>
+</tbody>
+</table>
+<p>$$\text{Cache} = 2 \times 32 \times 32 \times 128 \times 4096 \times 2 = 2,147,483,648 \text{ bytes} = \textbf{2 GB}$$</p>
+<p>For <strong>LLaMA-70B</strong> at 4096 context: ~10 GB of KV cache alone!</p>
+<p><strong>This is why batch size matters:</strong> Each request in a batch needs its OWN KV cache. Serving 32 concurrent users with LLaMA-7B needs 32 × 2 GB = 64 GB just for caches.</p>
+<h3 id="184-paged-attention-vllm">18.4 Paged Attention (vLLM)</h3>
+<p>The KV cache problem: requests have <strong>variable</strong> lengths. Pre-allocating max-length cache wastes massive memory.</p>
+<pre><code>Traditional: Pre-allocate max_seq_len for every request
+┌──────────────────────────────────────────────────┐
+│ Request 1: [used: 256 tokens][wasted: 3840 empty]│
+│ Request 2: [used: 2048 tokens][wasted: 2048]     │
+│ Request 3: [used: 100 tokens][wasted: 3996 empty]│
+└──────────────────────────────────────────────────┘
+Utilization: (256+2048+100) / (4096×3) = 19.6% ← terrible!
+</code></pre>
+<p><strong>vLLM's PagedAttention</strong> borrows from OS virtual memory:</p>
+<pre><code>Physical &quot;pages&quot; of KV cache (e.g., 16 tokens each):
+┌────┬────┬────┬────┬────┬────┬────┬────┐
+│ P0 │ P1 │ P2 │ P3 │ P4 │ P5 │ P6 │ P7 │  Physical pages
+└────┴────┴────┴────┴────┴────┴────┴────┘
+
+Page Table (per request):
+  Request 1: [P0, P3, P7] → 48 tokens, no waste
+  Request 2: [P1, P2, P4, P5, P6] → 80 tokens, no waste
+
+New tokens? Allocate a new page on demand.
+Request done? Free its pages immediately.
+</code></pre>
+<p><strong>Result:</strong> Near-optimal memory utilization, 2–4× more requests served concurrently.</p>
+<h3 id="185-multi-query-grouped-query-attention">18.5 Multi-Query &amp; Grouped-Query Attention</h3>
+<p>Reduce KV cache size by sharing K,V across heads:</p>
+<table>
+<thead>
+<tr>
+<th>Variant</th>
+<th>K,V Heads</th>
+<th>Cache Size</th>
+<th>Quality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Multi-Head (MHA)</td>
+<td>$h$ (e.g., 32)</td>
+<td>100%</td>
+<td>Baseline</td>
+</tr>
+<tr>
+<td>Multi-Query (MQA)</td>
+<td>1</td>
+<td>$1/h$ (3.1%)</td>
+<td>Slight degradation</td>
+</tr>
+<tr>
+<td>Grouped-Query (GQA)</td>
+<td>$g$ (e.g., 8)</td>
+<td>$g/h$ (25%)</td>
+<td>Near-MHA quality</td>
+</tr>
+</tbody>
+</table>
+<p>LLaMA-2 70B uses GQA with 8 KV heads (vs 64 Q heads) → 8× smaller KV cache.</p>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="186-kv-cache-from-scratch">18.6 KV Cache from Scratch</h3>
+<pre><code class="language-python">import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import time
+
+
+class CausalSelfAttention(nn.Module):
+    &quot;&quot;&quot;Self-attention with optional KV cache for fast inference.&quot;&quot;&quot;
+
+    def __init__(self, d_model=512, n_heads=8, max_seq_len=1024):
+        super().__init__()
+        self.n_heads = n_heads
+        self.d_head = d_model // n_heads
+        self.scale = self.d_head ** -0.5
+
+        self.qkv_proj = nn.Linear(d_model, 3 * d_model, bias=False)
+        self.out_proj = nn.Linear(d_model, d_model, bias=False)
+
+    def forward(self, x, kv_cache=None, use_cache=False):
+        &quot;&quot;&quot;
+        Args:
+            x: (batch, seq_len, d_model) — full sequence or single new token
+            kv_cache: tuple of (cached_K, cached_V) or None
+            use_cache: whether to return updated cache
+        Returns:
+            output: (batch, seq_len, d_model)
+            new_cache: updated (K, V) if use_cache=True
+        &quot;&quot;&quot;
+        B, T, C = x.shape
+        qkv = self.qkv_proj(x)
+        q, k, v = qkv.chunk(3, dim=-1)
+
+        # Reshape to (B, n_heads, T, d_head)
+        q = q.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        k = k.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        v = v.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+
+        # Append to KV cache
+        if kv_cache is not None:
+            cached_k, cached_v = kv_cache
+            k = torch.cat([cached_k, k], dim=2)  # (B, H, T_total, d)
+            v = torch.cat([cached_v, v], dim=2)
+
+        # Standard causal attention
+        scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+
+        # Causal mask: only attend to past + current
+        T_total = k.size(2)
+        T_query = q.size(2)
+        causal_mask = torch.triu(
+            torch.ones(T_query, T_total, device=x.device, dtype=torch.bool),
+            diagonal=T_total - T_query + 1
+        )
+        scores.masked_fill_(causal_mask, float('-inf'))
+
+        weights = F.softmax(scores, dim=-1)
+        out = torch.matmul(weights, v)
+
+        # Reshape back
+        out = out.transpose(1, 2).contiguous().view(B, T_query, C)
+        out = self.out_proj(out)
+
+        if use_cache:
+            return out, (k, v)
+        return out, None
+
+
+def generate_with_cache(attn, prompt_emb, n_tokens=100):
+    &quot;&quot;&quot;Autoregressive generation WITH KV cache.&quot;&quot;&quot;
+    B, T, C = prompt_emb.shape
+    cache = None
+    outputs = []
+
+    # Prefill: process entire prompt
+    out, cache = attn(prompt_emb, kv_cache=None, use_cache=True)
+    outputs.append(out[:, -1:, :])  # last token's output
+
+    # Decode: one token at a time
+    x = out[:, -1:, :]  # (B, 1, C) — just the new token
+    for _ in range(n_tokens - 1):
+        out, cache = attn(x, kv_cache=cache, use_cache=True)
+        outputs.append(out)
+        x = out  # feed output as next input (simplified)
+
+    return torch.cat(outputs, dim=1)
+
+
+def generate_without_cache(attn, prompt_emb, n_tokens=100):
+    &quot;&quot;&quot;Autoregressive generation WITHOUT KV cache (naive).&quot;&quot;&quot;
+    B, T, C = prompt_emb.shape
+    all_tokens = prompt_emb.clone()
+    outputs = []
+
+    for i in range(n_tokens):
+        out, _ = attn(all_tokens, kv_cache=None, use_cache=False)
+        next_tok = out[:, -1:, :]
+        outputs.append(next_tok)
+        all_tokens = torch.cat([all_tokens, next_tok], dim=1)
+
+    return torch.cat(outputs, dim=1)
+</code></pre>
+<h3 id="187-benchmark-cache-vs-no-cache">18.7 Benchmark: Cache vs No Cache</h3>
+<pre><code class="language-python">attn = CausalSelfAttention(d_model=512, n_heads=8)
+attn.eval()
+
+prompt = torch.randn(1, 32, 512)  # 32-token prompt
+n_gen = [10, 50, 100, 200]
+
+for n in n_gen:
+    # With cache
+    start = time.perf_counter()
+    with torch.no_grad():
+        _ = generate_with_cache(attn, prompt, n_tokens=n)
+    t_cache = time.perf_counter() - start
+
+    # Without cache
+    start = time.perf_counter()
+    with torch.no_grad():
+        _ = generate_without_cache(attn, prompt, n_tokens=n)
+    t_nocache = time.perf_counter() - start
+
+    speedup = t_nocache / t_cache
+    print(f&quot;n_tokens={n:3d} | Cache: {t_cache*1000:7.1f}ms | &quot;
+          f&quot;No cache: {t_nocache*1000:7.1f}ms | Speedup: {speedup:.1f}x&quot;)
+</code></pre>
+<p>Expected output pattern:</p>
+<pre><code>n_tokens= 10 | Cache:    5.2ms | No cache:    8.1ms | Speedup: 1.6x
+n_tokens= 50 | Cache:   18.3ms | No cache:   89.4ms | Speedup: 4.9x
+n_tokens=100 | Cache:   34.7ms | No cache:  310.2ms | Speedup: 8.9x
+n_tokens=200 | Cache:   68.1ms | No cache: 1142.5ms | Speedup: 16.8x
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e181-kv-cache-memory-for-real-models">E18.1 KV Cache Memory for Real Models</h3>
+<p>Fill in the table (use the formula from §18.3):</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>Layers</th>
+<th>Heads</th>
+<th>$d_{\text{head}}$</th>
+<th>Context</th>
+<th>Precision</th>
+<th>KV Cache</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GPT-2 (124M)</td>
+<td>12</td>
+<td>12</td>
+<td>64</td>
+<td>1,024</td>
+<td>fp32</td>
+<td>?</td>
+</tr>
+<tr>
+<td>LLaMA-7B</td>
+<td>32</td>
+<td>32</td>
+<td>128</td>
+<td>4,096</td>
+<td>fp16</td>
+<td>?</td>
+</tr>
+<tr>
+<td>LLaMA-70B (GQA)</td>
+<td>80</td>
+<td>8 KV</td>
+<td>128</td>
+<td>4,096</td>
+<td>fp16</td>
+<td>?</td>
+</tr>
+<tr>
+<td>GPT-4 (est.)</td>
+<td>120</td>
+<td>96</td>
+<td>128</td>
+<td>128,000</td>
+<td>fp16</td>
+<td>?</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Bonus:</strong> How many concurrent LLaMA-7B requests can an A100-80GB serve, assuming model weights take 14GB?</p>
+<h3 id="e182-plot-per-token-latency">E18.2 Plot Per-Token Latency</h3>
+<pre><code class="language-python">import matplotlib.pyplot as plt
+
+# Measure per-token latency during generation
+def measure_per_token_latency(attn, prompt, n_tokens, use_cache):
+    latencies = []
+    if use_cache:
+        cache = None
+        out, cache = attn(prompt, kv_cache=None, use_cache=True)
+        x = out[:, -1:, :]
+        for _ in range(n_tokens):
+            start = time.perf_counter()
+            out, cache = attn(x, kv_cache=cache, use_cache=True)
+            latencies.append(time.perf_counter() - start)
+            x = out
+    else:
+        all_tokens = prompt.clone()
+        for _ in range(n_tokens):
+            start = time.perf_counter()
+            out, _ = attn(all_tokens, kv_cache=None, use_cache=False)
+            latencies.append(time.perf_counter() - start)
+            all_tokens = torch.cat([all_tokens, out[:, -1:, :]], dim=1)
+    return latencies
+
+# Your task: plot latency[i] vs token index for both approaches
+# What shape do you expect for each? Why?
+</code></pre>
+<h3 id="e183-the-serving-cost-problem">E18.3 The Serving Cost Problem</h3>
+<p>A startup serves LLaMA-7B on 8× A100-80GB GPUs.</p>
+<ol>
+<li>Model weights (fp16): 14 GB per GPU (tensor parallel across 8)</li>
+<li>Each user request has average context length 2048, generates 512 tokens</li>
+<li>Each request needs its own KV cache</li>
+</ol>
+<p><strong>Questions:</strong>
+- How much memory per request for KV cache at peak (2048 + 512 = 2560 tokens)?
+- How many concurrent requests can the cluster serve?
+- What happens if you switch to GQA with 8 KV heads instead of 32?</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>KV cache eliminates redundant computation</strong> — reduces autoregressive generation from $O(n^2)$ to $O(n)$</li>
+<li><strong>Memory is the new bottleneck</strong> — the KV cache can consume more memory than the model weights</li>
+<li><strong>Paged attention (vLLM)</strong> treats KV cache like virtual memory — allocate pages on demand, eliminate waste</li>
+<li><strong>GQA reduces cache size</strong> by sharing K,V across query head groups — LLaMA-2 70B uses this</li>
+<li><strong>Cache size scales linearly</strong> with sequence length, layers, and batch size — this fundamentally limits serving capacity</li>
+</ol>
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>Yesterday you learned that Flash Attention solves the O(n²) <strong>training</strong> bottleneck. Today's KV cache solves the O(n²) <strong>inference</strong> bottleneck. Together, they make modern LLM deployment viable. But the KV cache introduces a new constraint: memory per request limits how many users you can serve simultaneously. This tension between compute and memory will recur throughout the curriculum — especially when we get to VLA models that must run on robot hardware (Phase VII).</p>
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><strong><a href="https://arxiv.org/abs/2309.06180">vLLM Paper</a></strong> — Kwon et al., 2023 (PagedAttention)</li>
+<li><strong><a href="https://arxiv.org/abs/2305.13245">GQA Paper</a></strong> — Ainslie et al., 2023</li>
+<li><strong><a href="https://arxiv.org/abs/1911.02150">Multi-Query Attention</a></strong> — Shazeer, 2019</li>
+<li><strong><a href="https://arxiv.org/abs/2312.07104">Efficient Memory Management for LLM Serving</a></strong> — Survey</li>
+<li><strong><a href="https://www.youtube.com/watch?v=kCc8FmEb1nY">Karpathy's LLM Inference</a></strong> — KV cache explained visually</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-17-efficient-attention.html" class="text-violet-600 hover:text-violet-800">&larr; Day 17: Efficient Attention</a>
+            <a href="day-19-normalization-activations.html" class="text-violet-600 hover:text-violet-800">Day 19: Normalization & Activations &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

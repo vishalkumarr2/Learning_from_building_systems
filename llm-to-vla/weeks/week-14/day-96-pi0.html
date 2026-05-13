@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 96: π₀ — Flow Matching Meets VLAs - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 14: VLA Architectures</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-96-0-flow-matching-meets-vlas">Day 96: π₀ — Flow Matching Meets VLAs</h1>
+<blockquote>
+<p><strong>Phase VII — VLAs: Architecture to Deployment | Week 14 | 2.5 hours</strong>
+<em>"Pre-trained VLM backbone + flow matching action expert. π₀ doesn't tokenize actions — it generates them as continuous trajectories." — Black et al., 2024</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-95-openvla.html">Day 95: OpenVLA</a></li>
+<li><strong>Next:</strong> <a href="day-97-pi0-5.html">Day 97: π₀.5 — Hybrid VLA</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 14 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/15-vla-architectures.html">Phase VII: VLAs</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="961-why-0-matters">96.1 Why π₀ Matters</h3>
+<p>The action representation debate:</p>
+<pre><code>Tokenized actions (RT-2, OpenVLA):
+  + Compatible with LM head
+  + Simple training (cross-entropy)
+  - Discretization artifacts
+  - Autoregressive → slow
+
+Diffusion actions (Octo):
+  + Continuous output
+  + Handles multimodality
+  - No pre-trained VLM reasoning
+  - Small model (93M)
+
+π₀ = Pre-trained VLM + Flow Matching action head
+  + VLM reasoning (3B params)
+  + Continuous, multimodal actions
+  + Fast inference (flow matching)
+  + Dexterous manipulation SOTA
+</code></pre>
+<h3 id="962-architecture">96.2 Architecture</h3>
+<pre><code>┌─────────────────────────────────────────────────────────┐
+│                          π₀                              │
+├─────────────────────────────────────────────────────────┤
+│                                                          │
+│  Image ──→ SigLIP ──→ visual tokens                      │
+│  Language ──→ Gemma tokenizer ──→ text tokens             │
+│  Proprioception ──→ MLP ──→ proprio tokens                │
+│                                                          │
+│  ┌───────────────────────────────────────────────┐       │
+│  │          PaliGemma 2B (frozen VLM)            │       │
+│  │          + trainable expert layers             │       │
+│  └───────────────────────────────────────────┬───┘       │
+│                                              │            │
+│  ┌───────────────────────────────────────────▼───┐       │
+│  │      Flow Matching Action Expert              │       │
+│  │                                                │       │
+│  │  Input:  VLM features + noisy action chunk     │       │
+│  │  Process: predict velocity field v_θ(x_t, t)   │       │
+│  │  Output:  action chunk (H=50 steps @ 50Hz)     │       │
+│  └───────────────────────────────────────────────┘       │
+│                                                          │
+└─────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="963-flow-matching-action-expert">96.3 Flow Matching Action Expert</h3>
+<p>Recall flow matching from Day 77. π₀ applies it to action generation:</p>
+<p>$$v_\theta(x_t, t) = \text{ActionExpert}(\text{VLM\_features}, x_t, t)$$</p>
+<p><strong>Training:</strong>
+$$\mathcal{L} = \mathbb{E}_{t, a_0, a_1}\left[\|v_\theta(a_t, t) - (a_1 - a_0)\|^2\right]$$</p>
+<p>where $a_t = (1-t)a_0 + t \cdot a_1$ is the interpolated action between noise $a_0$ and data $a_1$.</p>
+<p><strong>Inference (ODE):</strong>
+$$a_1 = a_0 + \int_0^1 v_\theta(a_t, t) \, dt$$</p>
+<p>In practice, 10 Euler steps:
+$$a_{t+\Delta t} = a_t + \Delta t \cdot v_\theta(a_t, t), \quad \Delta t = 0.1$$</p>
+<h3 id="964-expert-layers">96.4 Expert Layers</h3>
+<p>π₀ doesn't fine-tune the full VLM. Instead, it adds <strong>expert layers</strong> that interleave with VLM layers:</p>
+<pre><code>VLM Layer 1 (frozen) → Expert Layer 1 (trainable)
+VLM Layer 2 (frozen) → Expert Layer 2 (trainable)
+...
+VLM Layer N (frozen) → Expert Layer N (trainable)
+</code></pre>
+<p>Expert layers see both VLM features and action-specific information. This preserves VLM capabilities while learning robot-specific features.</p>
+<h3 id="965-action-chunk">96.5 Action Chunk</h3>
+<p>π₀ predicts long action chunks for dexterous manipulation:</p>
+<ul>
+<li><strong>Chunk size:</strong> 50 timesteps at 50 Hz (1 second horizon)</li>
+<li><strong>Action dims:</strong> 24 per step (bimanual: 2 × 6 DoF arm + 2 × 6 DoF hand)</li>
+<li><strong>Total output:</strong> $50 \times 24 = 1200$ continuous values per prediction</li>
+</ul>
+<p>This is far too large for tokenization (would need 1200 × 256 = 307K tokens per step).</p>
+<h3 id="966-results">96.6 Results</h3>
+<table>
+<thead>
+<tr>
+<th>Task</th>
+<th>π₀</th>
+<th>OpenVLA</th>
+<th>Octo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Laundry folding</td>
+<td><strong>80%</strong></td>
+<td>N/A</td>
+<td>N/A</td>
+</tr>
+<tr>
+<td>Table clearing</td>
+<td><strong>95%</strong></td>
+<td>72%</td>
+<td>65%</td>
+</tr>
+<tr>
+<td>Box assembly</td>
+<td><strong>70%</strong></td>
+<td>N/A</td>
+<td>N/A</td>
+</tr>
+<tr>
+<td>Dexterous manipulation</td>
+<td><strong>SOTA</strong></td>
+<td>Can't (no hand control)</td>
+<td>Limited</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="0-style-flow-matching-vla">π₀-Style Flow Matching VLA</h3>
+<pre><code class="language-python">import torch
+import torch.nn as nn
+
+class FlowMatchingActionExpert(nn.Module):
+    &quot;&quot;&quot;Action expert using flow matching.&quot;&quot;&quot;
+
+    def __init__(self, context_dim=512, action_dim=7, chunk_size=16,
+                 hidden=512, n_layers=4):
+        super().__init__()
+        self.action_dim = action_dim
+        self.chunk_size = chunk_size
+        flat_action = action_dim * chunk_size
+
+        # Time embedding
+        self.time_mlp = nn.Sequential(
+            nn.Linear(1, 128), nn.SiLU(),
+            nn.Linear(128, 128),
+        )
+
+        # Context projection
+        self.context_proj = nn.Linear(context_dim, hidden)
+
+        # Velocity prediction network
+        layers = []
+        in_dim = flat_action + hidden + 128  # action + context + time
+        for _ in range(n_layers):
+            layers.extend([nn.Linear(in_dim, hidden), nn.SiLU()])
+            in_dim = hidden
+        layers.append(nn.Linear(hidden, flat_action))
+        self.velocity_net = nn.Sequential(*layers)
+
+    def forward(self, context, noisy_action, t):
+        &quot;&quot;&quot;Predict velocity field.&quot;&quot;&quot;
+        B = context.shape[0]
+        t_emb = self.time_mlp(t.view(B, 1))
+        ctx = self.context_proj(context)
+        flat_action = noisy_action.flatten(1)
+        inp = torch.cat([flat_action, ctx, t_emb], dim=-1)
+        velocity = self.velocity_net(inp)
+        return velocity.view(B, self.chunk_size, self.action_dim)
+
+    def training_loss(self, context, target_actions):
+        &quot;&quot;&quot;Flow matching loss.&quot;&quot;&quot;
+        B = target_actions.shape[0]
+        # Sample time
+        t = torch.rand(B, device=context.device)
+        # Sample noise (source distribution)
+        noise = torch.randn_like(target_actions)
+        # Interpolate
+        t_expand = t.view(B, 1, 1)
+        x_t = (1 - t_expand) * noise + t_expand * target_actions
+        # Target velocity: data - noise
+        target_v = target_actions - noise
+        # Predict
+        pred_v = self.forward(context, x_t, t)
+        return ((pred_v - target_v)**2).mean()
+
+    @torch.no_grad()
+    def sample(self, context, n_steps=10):
+        &quot;&quot;&quot;Generate actions via ODE integration.&quot;&quot;&quot;
+        B = context.shape[0]
+        device = context.device
+        # Start from noise
+        x = torch.randn(B, self.chunk_size, self.action_dim, device=device)
+        dt = 1.0 / n_steps
+        for i in range(n_steps):
+            t = torch.full((B,), i * dt, device=device)
+            v = self.forward(context, x, t)
+            x = x + dt * v
+        return x
+
+class Pi0Style(nn.Module):
+    &quot;&quot;&quot;Simplified π₀ architecture.&quot;&quot;&quot;
+
+    def __init__(self, obs_dim=512, lang_dim=256, action_dim=7,
+                 d_model=512, chunk_size=16):
+        super().__init__()
+        # Simplified VLM backbone
+        self.vision_encoder = nn.Sequential(
+            nn.Conv2d(3, 64, 7, stride=4, padding=3), nn.ReLU(),
+            nn.Conv2d(64, 128, 3, stride=2, padding=1), nn.ReLU(),
+            nn.AdaptiveAvgPool2d(4),
+            nn.Flatten(),
+            nn.Linear(128 * 16, d_model),
+        )
+        self.lang_encoder = nn.Sequential(
+            nn.Embedding(10000, 256),
+        )
+        self.proprio_encoder = nn.Linear(action_dim, d_model)
+
+        # VLM layers (frozen in real π₀)
+        vlm_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=8, dim_feedforward=d_model*4, batch_first=True,
+        )
+        self.vlm = nn.TransformerEncoder(vlm_layer, num_layers=4)
+
+        # Expert layers (trainable)
+        expert_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=8, dim_feedforward=d_model*4, batch_first=True,
+        )
+        self.expert = nn.TransformerEncoder(expert_layer, num_layers=4)
+
+        # Flow matching action head
+        self.action_head = FlowMatchingActionExpert(
+            context_dim=d_model, action_dim=action_dim,
+            chunk_size=chunk_size,
+        )
+
+    def encode(self, image, text_tokens, proprio):
+        vis = self.vision_encoder(image).unsqueeze(1)
+        lang = self.lang_encoder(text_tokens).mean(1, keepdim=True)
+        prop = self.proprio_encoder(proprio).unsqueeze(1)
+        tokens = torch.cat([vis, lang, prop], dim=1)
+
+        # VLM (frozen) + Expert (trainable)
+        vlm_out = self.vlm(tokens)
+        expert_out = self.expert(vlm_out)
+        return expert_out.mean(dim=1)  # Pool to (B, D)
+
+    def forward(self, image, text_tokens, proprio, actions):
+        context = self.encode(image, text_tokens, proprio)
+        return self.action_head.training_loss(context, actions)
+
+    @torch.no_grad()
+    def predict(self, image, text_tokens, proprio, n_steps=10):
+        context = self.encode(image, text_tokens, proprio)
+        return self.action_head.sample(context, n_steps)
+
+# Demo
+model = Pi0Style()
+img = torch.randn(4, 3, 224, 224)
+txt = torch.randint(0, 1000, (4, 10))
+prop = torch.randn(4, 7)
+actions = torch.randn(4, 16, 7)
+
+loss = model(img, txt, prop, actions)
+print(f&quot;Loss: {loss.item():.4f}&quot;)
+
+pred = model.predict(img, txt, prop)
+print(f&quot;Predicted actions: {pred.shape}&quot;)  # (4, 16, 7)
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<ol>
+<li>
+<p><strong>Flow vs diffusion speed:</strong> Compare flow matching (10 Euler steps) with DDIM (10 steps) for action generation. Measure quality (MSE to ground truth) and speed.</p>
+</li>
+<li>
+<p><strong>Expert layer analysis:</strong> Freeze the VLM and train only expert layers. Then compare with full fine-tuning. What fraction of VLM knowledge transfers to actions?</p>
+</li>
+<li>
+<p><strong>Chunk size analysis:</strong> Train π₀ with chunk sizes {4, 16, 50}. How does chunk size affect dexterous task performance? At what point do long horizons help vs hurt?</p>
+</li>
+<li>
+<p><strong>Bimodal demonstration:</strong> Create a dataset where the optimal action is bimodal (reach left or right). Show that flow matching correctly samples both modes while MSE regression averages.</p>
+</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>π₀ = PaliGemma + flow matching action expert</strong> — best of both worlds</li>
+<li><strong>Flow matching</strong> generates continuous action chunks without tokenization</li>
+<li><strong>Expert layers</strong> preserve VLM reasoning while adding robot-specific features</li>
+<li><strong>Long action chunks</strong> (50 steps) enable dexterous manipulation</li>
+<li><strong>SOTA on bimanual tasks</strong> — laundry folding, assembly, dexterous manipulation</li>
+</ol>
+<hr />
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<blockquote>
+<p><em>π₀ showed that flow matching + VLMs is the new frontier. Tomorrow, π₀.5 takes this further: it adds </em><em>language-based high-level planning</em><em> on top of π₀'s flow matching action generation. The VLM reasons about what to do, then the flow matching head figures out how to do it. This hybrid approach is where the field is heading.</em></p>
+</blockquote>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Black et al. (2024), "π₀: A Vision-Language-Action Flow Model for General Robot Control"</li>
+<li><a href="https://www.physicalintelligence.company/">Physical Intelligence</a></li>
+<li>Lipman et al. (2023), "Flow Matching for Generative Modeling" (background)</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-95-openvla.html" class="text-violet-600 hover:text-violet-800">&larr; Day 95: OpenVLA</a>
+            <a href="day-97-pi0-5.html" class="text-violet-600 hover:text-violet-800">Day 97: π₀.5 &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

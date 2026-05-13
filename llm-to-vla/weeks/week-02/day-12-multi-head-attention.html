@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12: Multi-Head Attention - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 2: Attention & Transformers</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-12-multi-head-attention">Day 12: Multi-Head Attention</h1>
+<blockquote>
+<p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 2 | 2.5 hours</strong>
+<em>"Instead of performing a single attention function, we found it beneficial to linearly project the queries, keys and values h times."</em>
+— Vaswani et al., 2017</p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-11-scaled-dot-product-attention.html">Day 11: Scaled Dot-Product Attention</a></li>
+<li><strong>Next:</strong> <a href="day-13-positional-encoding.html">Day 13: Positional Encoding</a></li>
+<li><strong>Week:</strong> <a href="../README.html">Week 2 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/02-attention-mechanism.html">Phase II: Attention &amp; Transformers</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="121-why-one-head-isnt-enough">12.1 Why One Head Isn't Enough</h3>
+<p>A single attention head computes one set of attention weights — one "view" of how positions relate to each other. But language has many types of relationships:</p>
+<ul>
+<li><strong>Syntactic:</strong> subject–verb agreement ("The cat <strong>sits</strong>")</li>
+<li><strong>Semantic:</strong> coreference ("Alice picked up the book. <strong>She</strong> read it.")</li>
+<li><strong>Positional:</strong> nearby words tend to interact ("the big <strong>red</strong> car")</li>
+</ul>
+<p>A single head must compromise between all of these. <strong>Multi-head attention</strong> runs multiple attention functions in parallel, each free to learn a different relationship type.</p>
+<h3 id="122-the-multi-head-attention-equation">12.2 The Multi-Head Attention Equation</h3>
+<p>$$\text{MultiHead}(Q, K, V) = \text{Concat}(\text{head}_1, \ldots, \text{head}_h) \, W_O$$</p>
+<p>where each head is an independent scaled dot-product attention:</p>
+<p>$$\text{head}_i = \text{Attention}(Q W_Q^{(i)}, \; K W_K^{(i)}, \; V W_V^{(i)})$$</p>
+<p><strong>Dimensions:</strong>
+- Input: $Q, K, V \in \mathbb{R}^{n \times d_{\text{model}}}$
+- Per-head projections: $W_Q^{(i)}, W_K^{(i)} \in \mathbb{R}^{d_{\text{model}} \times d_k}$, $W_V^{(i)} \in \mathbb{R}^{d_{\text{model}} \times d_v}$
+- Typically: $d_k = d_v = d_{\text{model}} / h$
+- Output projection: $W_O \in \mathbb{R}^{h \cdot d_v \times d_{\text{model}}}$</p>
+<pre><code>Input X ──┬──→ [W_Q¹, W_K¹, W_V¹] ──→ Attention ──→ head₁ ──┐
+          ├──→ [W_Q², W_K², W_V²] ──→ Attention ──→ head₂ ──┤
+          ├──→ [W_Q³, W_K³, W_V³] ──→ Attention ──→ head₃ ──┼──→ Concat ──→ W_O ──→ Output
+          └──→ [W_Q⁴, W_K⁴, W_V⁴] ──→ Attention ──→ head₄ ──┘
+</code></pre>
+<h3 id="123-parameter-count-analysis">12.3 Parameter Count Analysis</h3>
+<p>The key insight: multi-head attention has <strong>approximately the same parameter count</strong> as single-head attention with the same $d_{\text{model}}$.</p>
+<p>For $h$ heads with $d_k = d_{\text{model}} / h$:</p>
+<p>$$\text{Params (multi-head)} = h \times (d_{\text{model}} \times d_k + d_{\text{model}} \times d_k + d_{\text{model}} \times d_v) + h \cdot d_v \times d_{\text{model}}$$</p>
+<p>$$= h \times 3 \times d_{\text{model}} \times \frac{d_{\text{model}}}{h} + d_{\text{model}}^2 = 3 d_{\text{model}}^2 + d_{\text{model}}^2 = 4 d_{\text{model}}^2$$</p>
+<p>For single-head with $d_k = d_{\text{model}}$:</p>
+<p>$$\text{Params (single-head)} = 3 d_{\text{model}}^2 + d_{\text{model}}^2 = 4 d_{\text{model}}^2$$</p>
+<p>Same! Multiple heads are <strong>free</strong> — you get diversity without extra parameters.</p>
+<h3 id="124-what-different-heads-learn">12.4 What Different Heads Learn</h3>
+<p>Empirical studies (Clark et al., 2019; Voita et al., 2019) reveal that heads specialize:</p>
+<table>
+<thead>
+<tr>
+<th>Head type</th>
+<th>What it attends to</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Positional</strong></td>
+<td>Previous/next token</td>
+<td>Local context</td>
+</tr>
+<tr>
+<td><strong>Syntactic</strong></td>
+<td>Verb from subject, object from verb</td>
+<td>Dependency parsing</td>
+</tr>
+<tr>
+<td><strong>Separator</strong></td>
+<td>[SEP] or [CLS] tokens</td>
+<td>"No-op" attention</td>
+</tr>
+<tr>
+<td><strong>Rare token</strong></td>
+<td>Infrequent or important words</td>
+<td>Content words</td>
+</tr>
+<tr>
+<td><strong>Coreference</strong></td>
+<td>Pronouns to their referents</td>
+<td>Long-range links</td>
+</tr>
+</tbody>
+</table>
+<p>Not all heads are equally important — <strong>head pruning</strong> shows that many can be removed with minimal accuracy loss (Michel et al., 2019).</p>
+<h3 id="125-efficient-implementation-reshape-dont-loop">12.5 Efficient Implementation: Reshape, Don't Loop</h3>
+<p>Naively looping over heads is slow. The standard trick: reshape the $d_{\text{model}}$ dimension into $(h, d_k)$, compute all heads simultaneously, then reshape back.</p>
+<pre><code>(batch, seq, d_model) 
+    → project Q, K, V: (batch, seq, d_model) each
+    → reshape: (batch, seq, h, d_k)
+    → transpose: (batch, h, seq, d_k)
+    → attention: (batch, h, seq, d_v)
+    → transpose: (batch, seq, h, d_v)
+    → reshape: (batch, seq, h * d_v)
+    → project out: (batch, seq, d_model)
+</code></pre>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="126-multi-head-attention-from-scratch">12.6 Multi-Head Attention from Scratch</h3>
+<pre><code class="language-python">import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import math
+
+
+class MultiHeadAttention(nn.Module):
+    &quot;&quot;&quot;Multi-head scaled dot-product attention.&quot;&quot;&quot;
+
+    def __init__(self, d_model: int, n_heads: int):
+        super().__init__()
+        assert d_model % n_heads == 0, &quot;d_model must be divisible by n_heads&quot;
+
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_k = d_model // n_heads  # dimension per head
+
+        # Projections for Q, K, V and output
+        self.W_q = nn.Linear(d_model, d_model, bias=False)
+        self.W_k = nn.Linear(d_model, d_model, bias=False)
+        self.W_v = nn.Linear(d_model, d_model, bias=False)
+        self.W_o = nn.Linear(d_model, d_model, bias=False)
+
+    def split_heads(self, x: torch.Tensor) -&gt; torch.Tensor:
+        &quot;&quot;&quot;Reshape (batch, seq, d_model) → (batch, n_heads, seq, d_k).&quot;&quot;&quot;
+        batch, seq_len, _ = x.shape
+        x = x.view(batch, seq_len, self.n_heads, self.d_k)
+        return x.transpose(1, 2)  # (batch, n_heads, seq, d_k)
+
+    def merge_heads(self, x: torch.Tensor) -&gt; torch.Tensor:
+        &quot;&quot;&quot;Reshape (batch, n_heads, seq, d_k) → (batch, seq, d_model).&quot;&quot;&quot;
+        batch, _, seq_len, _ = x.shape
+        x = x.transpose(1, 2).contiguous()  # (batch, seq, n_heads, d_k)
+        return x.view(batch, seq_len, self.d_model)
+
+    def forward(
+        self,
+        query: torch.Tensor,   # (batch, n_q, d_model)
+        key: torch.Tensor,     # (batch, n_k, d_model)
+        value: torch.Tensor,   # (batch, n_k, d_model)
+        mask: torch.Tensor | None = None,
+    ) -&gt; tuple[torch.Tensor, torch.Tensor]:
+        # Project Q, K, V
+        Q = self.split_heads(self.W_q(query))   # (batch, h, n_q, d_k)
+        K = self.split_heads(self.W_k(key))     # (batch, h, n_k, d_k)
+        V = self.split_heads(self.W_v(value))   # (batch, h, n_k, d_k)
+
+        # Scaled dot-product attention (all heads in parallel)
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
+
+        if mask is not None:
+            # mask shape: (batch, 1, 1, n_k) or (batch, 1, n_q, n_k)
+            scores = scores.masked_fill(mask == 0, float('-inf'))
+
+        attn_weights = F.softmax(scores, dim=-1)  # (batch, h, n_q, n_k)
+
+        # Weighted sum of values
+        attn_output = torch.matmul(attn_weights, V)  # (batch, h, n_q, d_k)
+
+        # Merge heads and project
+        output = self.W_o(self.merge_heads(attn_output))  # (batch, n_q, d_model)
+
+        return output, attn_weights
+</code></pre>
+<h3 id="127-testing-and-verification">12.7 Testing and Verification</h3>
+<pre><code class="language-python">def test_multi_head_attention():
+    batch, seq, d_model, n_heads = 2, 10, 512, 8
+
+    mha = MultiHeadAttention(d_model, n_heads)
+    x = torch.randn(batch, seq, d_model)
+
+    # Self-attention: Q=K=V=x
+    output, weights = mha(x, x, x)
+
+    assert output.shape == (batch, seq, d_model), f&quot;Output shape: {output.shape}&quot;
+    assert weights.shape == (batch, n_heads, seq, seq), f&quot;Weights shape: {weights.shape}&quot;
+
+    # Verify parameter count
+    total_params = sum(p.numel() for p in mha.parameters())
+    expected = 4 * d_model * d_model  # W_q + W_k + W_v + W_o (no bias)
+    assert total_params == expected, f&quot;Params: {total_params} != {expected}&quot;
+
+    # Attention weights should sum to 1
+    weight_sums = weights.sum(dim=-1)
+    assert torch.allclose(weight_sums, torch.ones_like(weight_sums), atol=1e-5)
+
+    print(f&quot;✓ Output shape: {output.shape}&quot;)
+    print(f&quot;✓ Weights shape: {weights.shape}&quot;)
+    print(f&quot;✓ Parameter count: {total_params:,} = 4 × {d_model}² = {expected:,}&quot;)
+    print(f&quot;✓ d_k per head: {d_model // n_heads}&quot;)
+
+
+test_multi_head_attention()
+</code></pre>
+<h3 id="128-visualizing-per-head-attention-patterns">12.8 Visualizing Per-Head Attention Patterns</h3>
+<pre><code class="language-python">import matplotlib.pyplot as plt
+
+
+def visualize_heads(attn_weights: torch.Tensor, tokens: list[str], n_cols: int = 4):
+    &quot;&quot;&quot;Plot attention patterns for each head side by side.
+
+    attn_weights: (n_heads, seq, seq) — weights from one example
+    &quot;&quot;&quot;
+    n_heads = attn_weights.shape[0]
+    n_rows = (n_heads + n_cols - 1) // n_cols
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
+    axes = axes.flatten()
+
+    for h in range(n_heads):
+        ax = axes[h]
+        ax.matshow(attn_weights[h].detach().numpy(), cmap='Blues')
+        ax.set_title(f'Head {h}', fontsize=10)
+        ax.set_xticks(range(len(tokens)))
+        ax.set_xticklabels(tokens, rotation=45, fontsize=7)
+        ax.set_yticks(range(len(tokens)))
+        ax.set_yticklabels(tokens, fontsize=7)
+
+    for h in range(n_heads, len(axes)):
+        axes[h].set_visible(False)
+
+    plt.suptitle('Attention Patterns per Head', fontsize=14)
+    plt.tight_layout()
+    plt.savefig('multi_head_patterns.png', dpi=150)
+    plt.show()
+
+
+# After training, you'd see heads specializing:
+# Head 0: mostly diagonal (positional)
+# Head 3: attends to verbs from subjects (syntactic)
+# Head 7: attends to [CLS] everywhere (aggregation)
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e121-parameter-count-verification">E12.1 Parameter Count Verification</h3>
+<p>For the base transformer ($d_{\text{model}} = 512$, $h = 8$):
+1. Compute $d_k = d_v$ per head
+2. Count parameters in $W_Q, W_K, W_V, W_O$ (with and without bias)
+3. Verify that single-head ($h=1, d_k=512$) has the same count
+4. What fraction of a full transformer's parameters are in MHA vs FFN?</p>
+<h3 id="e122-head-count-comparison">E12.2 Head Count Comparison</h3>
+<p>Using the same self-attention task (e.g., copy task or simple sequence classification):
+1. Train with $h \in \{1, 2, 4, 8, 16\}$ heads, keeping $d_{\text{model}} = 256$ fixed
+2. Compare: convergence speed, final accuracy, attention entropy
+3. Plot attention entropy per head — do more heads lead to more specialization?</p>
+<h3 id="e123-head-pruning-experiment">E12.3 Head Pruning Experiment</h3>
+<p>After training a multi-head attention model:
+1. Zero out one head at a time and measure accuracy drop
+2. Rank heads by importance (biggest accuracy drop = most important)
+3. Iteratively prune least important heads — how many can you remove before accuracy drops &gt; 1%?
+4. Visualize the surviving heads — what patterns do they capture?</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ul>
+<li><strong>Multi-head attention</strong> runs $h$ parallel attention functions, each with its own $W_Q, W_K, W_V$</li>
+<li>Heads split $d_{\text{model}}$ into $h$ subspaces of dimension $d_k = d_{\text{model}} / h$</li>
+<li><strong>Same parameter count</strong> as single-head attention — diversity is free</li>
+<li>Different heads learn different relationship types: positional, syntactic, semantic</li>
+<li>Efficient implementation uses <strong>reshape + transpose</strong>, not loops</li>
+</ul>
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>Multi-head attention is <strong>multi-view compression</strong>. Each head finds a different kind of redundancy in the input: one discovers syntactic patterns, another semantic ones, another positional regularities. The concat + projection step merges these views into a unified representation. This parallels how good compression algorithms use multiple models — e.g., PNG uses both horizontal and vertical prediction. The transformer gets its power not from one attention, but from many simultaneous perspectives on the same data.</p>
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Vaswani et al. <strong>"Attention Is All You Need"</strong> (2017), Section 3.2.2. <a href="https://arxiv.org/abs/1706.03762">arXiv:1706.03762</a></li>
+<li>Clark et al. <strong>"What Does BERT Look At? An Analysis of BERT's Attention"</strong> (2019). <a href="https://arxiv.org/abs/1906.04341">arXiv:1906.04341</a></li>
+<li>Voita et al. <strong>"Analyzing Multi-Head Self-Attention: Specialized Heads Do the Heavy Lifting"</strong> (2019). <a href="https://arxiv.org/abs/1905.09418">arXiv:1905.09418</a></li>
+<li>Michel et al. <strong>"Are Sixteen Heads Really Better than One?"</strong> (2019). <a href="https://arxiv.org/abs/1905.10650">arXiv:1905.10650</a></li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-11-scaled-dot-product-attention.html" class="text-violet-600 hover:text-violet-800">&larr; Day 11: Scaled Dot-Product Attention</a>
+            <a href="day-13-positional-encoding.html" class="text-violet-600 hover:text-violet-800">Day 13: Positional Encoding &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

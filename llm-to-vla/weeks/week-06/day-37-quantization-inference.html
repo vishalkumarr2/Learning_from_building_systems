@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 37: Quantization & Inference - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 6: LLM Engineering</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-37-quantization-inference">Day 37: Quantization &amp; Inference</h1>
+<blockquote>
+<p><strong>Phase III — LLMs: Training &amp; Alignment | Week 6 | 2.5 hours</strong>
+<em>"The best model is the one you can actually run." — Practical ML wisdom</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-36-llm-evaluation.html">Day 36: LLM Evaluation</a></li>
+<li><strong>Next:</strong> <a href="day-38-in-context-learning.html">Day 38: In-Context Learning</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 6 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/07-llm-engineering.html">Phase III: LLM Engineering</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="371-the-inference-cost-problem">37.1 The Inference Cost Problem</h3>
+<p>LLM inference is bottlenecked by <strong>memory bandwidth</strong>, not compute:</p>
+<pre><code>Autoregressive generation: 1 token at a time
+Each token requires loading ALL model weights from GPU memory
+
+7B model (FP16): 14 GB of weights
+GPU memory bandwidth: ~2 TB/s (A100)
+→ Max throughput: 2000 / 14 ≈ 143 forward passes/sec
+→ ~143 tokens/sec (memory-bound, not compute-bound)
+
+Solution: Make the model smaller → fewer bytes to load → faster
+</code></pre>
+<h3 id="372-number-formats">37.2 Number Formats</h3>
+<pre><code>Format     Bits   Range                    Example
+──────     ────   ─────                    ───────
+FP32       32     ±3.4 × 10³⁸             Standard training
+FP16       16     ±65,504                  Mixed-precision training
+BF16       16     ±3.4 × 10³⁸             Same range as FP32, less precision
+INT8       8      [-128, 127]              Post-training quantization
+INT4       4      [-8, 7]                  Aggressive compression
+NF4        4      Normal-float 4-bit       QLoRA's innovation
+
+Memory per parameter:
+  FP32:  4 bytes
+  FP16:  2 bytes  → 2× compression
+  INT8:  1 byte   → 4× compression
+  INT4:  0.5 byte → 8× compression
+</code></pre>
+<p><strong>BFloat16 vs Float16:</strong></p>
+<pre><code>FP16:   1 sign | 5 exponent  | 10 mantissa  → high precision, limited range
+BF16:   1 sign | 8 exponent  | 7 mantissa   → lower precision, FP32 range
+
+BF16 is preferred for training because gradient values can be very large,
+and the wider exponent range prevents overflow.
+</code></pre>
+<h3 id="373-post-training-quantization-ptq">37.3 Post-Training Quantization (PTQ)</h3>
+<p>Quantize a pretrained model without retraining:</p>
+<p><strong>Absmax quantization (symmetric):</strong></p>
+<p>$$
+x_q = \text{round}\left(\frac{x}{\alpha} \cdot (2^{b-1} - 1)\right), \quad \alpha = \max(|x|)
+$$</p>
+<p><strong>Zero-point quantization (asymmetric):</strong></p>
+<p>$$
+x_q = \text{round}\left(\frac{x - x_{\min}}{x_{\max} - x_{\min}} \cdot (2^b - 1)\right)
+$$</p>
+<p><strong>Per-channel vs per-tensor:</strong> Quantizing each output channel separately preserves more information than a single scale for the whole tensor.</p>
+<h3 id="374-advanced-quantization-gptq-awq">37.4 Advanced Quantization: GPTQ &amp; AWQ</h3>
+<p><strong>GPTQ (GPT Quantization):</strong>
+- Uses second-order information (Hessian) to minimize quantization error
+- Quantizes weights column by column, adjusting remaining columns to compensate
+- One-shot: only needs a small calibration dataset (~128 samples)</p>
+<p>$$
+\min_{\hat{W}} \| W X - \hat{W} X \|_2^2
+$$</p>
+<p><strong>AWQ (Activation-Aware Weight Quantization):</strong>
+- Key insight: 1% of weights are disproportionately important (they correspond to large activations)
+- Scale these important weights up before quantization, scale activations down
+- Better quality than GPTQ at the same bit width</p>
+<pre><code>GPTQ: Minimize reconstruction error directly
+AWQ:  Protect important weights → better overall quality
+
+Both → 4-bit quantization with &lt;1% quality loss on most benchmarks
+</code></pre>
+<p><strong>GGUF (GPT-Generated Unified Format):</strong>
+- CPU-friendly format used by llama.cpp
+- Supports mixed quantization (different bits per layer)
+- Enables running 7B models on laptops without GPU</p>
+<h3 id="375-speculative-decoding">37.5 Speculative Decoding</h3>
+<p>Generate tokens faster by using a small "draft" model:</p>
+<pre><code>Standard decoding (slow):
+  Big model generates tokens one at a time
+  Each token: load 14 GB of weights → 1 token
+
+Speculative decoding (fast):
+  1. Draft model (small, fast) generates K tokens quickly
+  2. Big model verifies all K tokens in ONE forward pass
+  3. Accept correct tokens, reject wrong ones, revert to that point
+
+  If draft model is good: accept most tokens → K× speedup
+  If draft model is bad: reject many → fall back to standard speed
+  Guarantee: output distribution is identical to big model alone!
+</code></pre>
+<p><strong>Medusa</strong> takes this further — adds multiple prediction heads to the model itself, generating multiple candidate continuations in parallel.</p>
+<h3 id="376-inference-engines-vllm-friends">37.6 Inference Engines: vLLM &amp; Friends</h3>
+<p><strong>vLLM</strong> introduces <strong>PagedAttention</strong> — managing KV cache like virtual memory:</p>
+<pre><code>Standard KV cache:
+  Each request gets contiguous GPU memory for max_length
+  → 50%+ memory wasted on incomplete sequences
+
+PagedAttention:
+  KV cache split into fixed-size &quot;pages&quot;
+  Pages allocated on demand, can be non-contiguous
+  → Near-zero waste, 2-4× more concurrent requests
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Engine</th>
+<th>Key Feature</th>
+<th>Best For</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>vLLM</td>
+<td>PagedAttention, continuous batching</td>
+<td>High-throughput serving</td>
+</tr>
+<tr>
+<td>TGI</td>
+<td>HuggingFace integration</td>
+<td>Easy deployment</td>
+</tr>
+<tr>
+<td>llama.cpp</td>
+<td>CPU inference, GGUF format</td>
+<td>Edge/laptop deployment</td>
+</tr>
+<tr>
+<td>TensorRT-LLM</td>
+<td>NVIDIA optimization</td>
+<td>Maximum GPU performance</td>
+</tr>
+<tr>
+<td>Ollama</td>
+<td>Simple local deployment</td>
+<td>Developer convenience</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="quantize-a-7b-model-and-benchmark">Quantize a 7B Model and Benchmark</h3>
+<pre><code class="language-python">&quot;&quot;&quot;
+Day 37 Implementation: Quantization comparison.
+Quantize a model to different precisions and benchmark.
+&quot;&quot;&quot;
+import time
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+MODEL_ID = &quot;TinyLlama/TinyLlama-1.1B-Chat-v1.0&quot;
+
+
+def measure_model(model, tokenizer, label: str, prompt: str) -&gt; dict:
+    &quot;&quot;&quot;Measure memory, latency, and output quality.&quot;&quot;&quot;
+    # Memory
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        mem_gb = torch.cuda.memory_allocated() / 1e9
+    else:
+        mem_gb = sum(p.numel() * p.element_size()
+                     for p in model.parameters()) / 1e9
+
+    # Latency (generate 50 tokens)
+    inputs = tokenizer(prompt, return_tensors=&quot;pt&quot;).to(model.device)
+    n_tokens = 50
+
+    start = time.perf_counter()
+    with torch.no_grad():
+        output = model.generate(
+            **inputs, max_new_tokens=n_tokens, do_sample=False,
+        )
+    elapsed = time.perf_counter() - start
+    tokens_per_sec = n_tokens / elapsed
+
+    # Output text
+    text = tokenizer.decode(output[0], skip_special_tokens=True)
+
+    return {
+        &quot;label&quot;: label,
+        &quot;memory_gb&quot;: mem_gb,
+        &quot;tokens_per_sec&quot;: tokens_per_sec,
+        &quot;latency_ms&quot;: elapsed * 1000,
+        &quot;output_preview&quot;: text[:200],
+    }
+
+
+def load_fp16():
+    return AutoModelForCausalLM.from_pretrained(
+        MODEL_ID, torch_dtype=torch.float16, device_map=&quot;auto&quot;,
+    )
+
+def load_int8():
+    config = BitsAndBytesConfig(load_in_8bit=True)
+    return AutoModelForCausalLM.from_pretrained(
+        MODEL_ID, quantization_config=config, device_map=&quot;auto&quot;,
+    )
+
+def load_int4():
+    config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type=&quot;nf4&quot;,
+        bnb_4bit_compute_dtype=torch.float16,
+    )
+    return AutoModelForCausalLM.from_pretrained(
+        MODEL_ID, quantization_config=config, device_map=&quot;auto&quot;,
+    )
+
+
+# --- Manual quantization demo ---
+def demonstrate_quantization():
+    &quot;&quot;&quot;Show quantization math on a small tensor.&quot;&quot;&quot;
+    # Original FP32 weights
+    W = torch.randn(4, 4) * 0.5
+    print(&quot;Original (FP32):&quot;)
+    print(W)
+
+    # INT8 absmax quantization
+    scale = W.abs().max() / 127
+    W_int8 = torch.round(W / scale).clamp(-128, 127).to(torch.int8)
+    W_dequant_8 = W_int8.float() * scale
+
+    # INT4 absmax quantization (simulated)
+    scale_4 = W.abs().max() / 7
+    W_int4 = torch.round(W / scale_4).clamp(-8, 7)
+    W_dequant_4 = W_int4 * scale_4
+
+    # Quantization error
+    err_8 = (W - W_dequant_8).abs().mean().item()
+    err_4 = (W - W_dequant_4).abs().mean().item()
+    print(f&quot;\nINT8 mean abs error: {err_8:.6f}&quot;)
+    print(f&quot;INT4 mean abs error: {err_4:.6f}&quot;)
+    print(f&quot;INT4/INT8 error ratio: {err_4/err_8:.1f}×&quot;)
+
+
+if __name__ == &quot;__main__&quot;:
+    print(&quot;=&quot; * 60)
+    print(&quot;Quantization Math Demo&quot;)
+    print(&quot;=&quot; * 60)
+    demonstrate_quantization()
+
+    if torch.cuda.is_available():
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+        prompt = &quot;Explain how a warehouse robot navigates safely.&quot;
+
+        print(&quot;\n&quot; + &quot;=&quot; * 60)
+        print(&quot;Model Comparison&quot;)
+        print(&quot;=&quot; * 60)
+
+        configs = [
+            (&quot;FP16&quot;, load_fp16),
+            (&quot;INT8&quot;, load_int8),
+            (&quot;NF4&quot;, load_int4),
+        ]
+
+        results = []
+        for label, loader in configs:
+            torch.cuda.empty_cache()
+            model = loader()
+            r = measure_model(model, tokenizer, label, prompt)
+            results.append(r)
+            del model
+
+        print(f&quot;\n{'Method':&lt;8} {'Memory':&gt;8} {'Tok/s':&gt;8} {'Latency':&gt;10}&quot;)
+        print(&quot;-&quot; * 40)
+        for r in results:
+            print(f&quot;{r['label']:&lt;8} {r['memory_gb']:&gt;7.2f}G &quot;
+                  f&quot;{r['tokens_per_sec']:&gt;7.1f} {r['latency_ms']:&gt;9.0f}ms&quot;)
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e371-per-channel-vs-per-tensor-quantization-20-min">E37.1 — Per-Channel vs Per-Tensor Quantization (20 min)</h3>
+<ol>
+<li>Create a weight matrix with varying magnitudes across rows</li>
+<li>Quantize with per-tensor scale vs per-row (per-channel) scale</li>
+<li>Compare reconstruction error — when does per-channel matter most?</li>
+</ol>
+<h3 id="e372-speculative-decoding-simulator-25-min">E37.2 — Speculative Decoding Simulator (25 min)</h3>
+<ol>
+<li>Simulate speculative decoding with a "draft model" acceptance rate $p$</li>
+<li>For $K \in \{2, 4, 8, 16\}$ draft tokens and $p \in \{0.5, 0.7, 0.9\}$:
+   - Calculate expected speedup = $K \cdot p^K / (1 + K \cdot (1-p))$ (approximate)</li>
+<li>Plot: at what acceptance rate does speculative decoding stop helping?</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>LLM inference is memory-bandwidth-bound</strong> — smaller models = faster</li>
+<li><strong>4-bit quantization</strong> (GPTQ, AWQ, NF4) compresses 7B models to ~3.5 GB with &lt;1% quality loss</li>
+<li><strong>GGUF + llama.cpp</strong> enables running models on CPU/laptops</li>
+<li><strong>Speculative decoding</strong> gets big-model quality at near-small-model speed</li>
+<li><strong>vLLM's PagedAttention</strong> is the standard for production serving — 2-4× throughput improvement</li>
+</ol>
+<hr />
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>Edge deployment is everything in robotics. A warehouse robot can't call a cloud API for every decision — latency kills. Quantization (INT4/INT8) + efficient inference engines are how you run a VLA model on robot hardware (Jetson, TPU Edge). Understanding quantization math is prerequisite for deploying any model on a real robot.</p>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://arxiv.org/abs/2210.17323">GPTQ: Accurate Post-Training Quantization</a> — Frantar et al., 2023</li>
+<li><a href="https://arxiv.org/abs/2306.00978">AWQ: Activation-aware Weight Quantization</a> — Lin et al., 2023</li>
+<li><a href="https://arxiv.org/abs/2309.06180">vLLM: Easy, Fast, and Cheap LLM Serving</a> — Kwon et al., 2023</li>
+<li><a href="https://arxiv.org/abs/2211.17192">Speculative Decoding: Fast Inference from Transformers</a> — Leviathan et al., 2023</li>
+<li><a href="https://arxiv.org/abs/2305.14314">QLoRA: Efficient Finetuning of Quantized LLMs</a> — Dettmers et al., 2023</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-36-llm-evaluation.html" class="text-violet-600 hover:text-violet-800">&larr; Day 36: LLM Evaluation</a>
+            <a href="day-38-in-context-learning.html" class="text-violet-600 hover:text-violet-800">Day 38: In-Context Learning &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

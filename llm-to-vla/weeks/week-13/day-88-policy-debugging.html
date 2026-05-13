@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 88: Policy Debugging & Failure Analysis - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 13: Data & Evaluation</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-88-policy-debugging-failure-analysis">Day 88: Policy Debugging &amp; Failure Analysis</h1>
+<blockquote>
+<p><strong>Phase VI — Robot Learning: RL, Diffusion &amp; Data | Week 13 | 2.5 hours</strong>
+<em>"A policy that fails 30% of the time is useless in production. But the failure modes tell you exactly what to fix." — Suraj Nair</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-87-policy-evaluation.html">Day 87: Policy Evaluation</a></li>
+<li><strong>Next:</strong> <a href="day-89-phase6-capstone-1.html">Day 89: Phase VI Capstone Day 1</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 13 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/14-robot-data-eval.html">Phase VI: Robot Learning</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="881-failure-taxonomy">88.1 Failure Taxonomy</h3>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Symptoms</th>
+<th>Root Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Perception</strong></td>
+<td>Wrong grasp point, misaligned</td>
+<td>Visual encoder fails</td>
+<td>More image augmentation, better cameras</td>
+</tr>
+<tr>
+<td><strong>Prediction</strong></td>
+<td>Jerky motion, oscillation</td>
+<td>Mode averaging</td>
+<td>Use diffusion/CVAE instead of MSE</td>
+</tr>
+<tr>
+<td><strong>Timing</strong></td>
+<td>Too slow, misses target</td>
+<td>Control frequency too low</td>
+<td>Action chunking, faster inference</td>
+</tr>
+<tr>
+<td><strong>Generalization</strong></td>
+<td>Works on trained objects only</td>
+<td>Overfitting</td>
+<td>More diverse training data</td>
+</tr>
+<tr>
+<td><strong>Compounding</strong></td>
+<td>Starts OK, drifts</td>
+<td>No recovery data</td>
+<td>DAgger, longer chunks</td>
+</tr>
+<tr>
+<td><strong>Physical</strong></td>
+<td>Slips, collides</td>
+<td>Physics not in training</td>
+<td>Domain randomization, compliance</td>
+</tr>
+</tbody>
+</table>
+<h3 id="882-systematic-debugging-protocol">88.2 Systematic Debugging Protocol</h3>
+<pre><code>Step 1: CATEGORIZE failure mode
+  └── Watch 10 failures. What's the dominant pattern?
+
+Step 2: ISOLATE the component
+  ├── Is perception correct? (overlay predicted pose)
+  ├── Is action prediction reasonable? (plot predicted vs actual)
+  └── Is execution accurate? (log commanded vs executed)
+
+Step 3: HYPOTHESIZE root cause
+  └── Form 2-3 hypotheses. Design test for each.
+
+Step 4: TEST hypothesis
+  └── Minimal intervention: change ONE thing.
+
+Step 5: VALIDATE fix
+  └── Re-run full evaluation. Is success rate up?
+</code></pre>
+<h3 id="883-visualization-tools">88.3 Visualization Tools</h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>What to Plot</th>
+<th>Diagnostic Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Action trajectory</strong></td>
+<td>Predicted vs actual over time</td>
+<td>Reveals oscillation, drift</td>
+</tr>
+<tr>
+<td><strong>Attention maps</strong></td>
+<td>Where the model "looks"</td>
+<td>Perception debugging</td>
+</tr>
+<tr>
+<td><strong>Latent space</strong></td>
+<td>t-SNE of CVAE latent</td>
+<td>Mode coverage</td>
+</tr>
+<tr>
+<td><strong>Loss per timestep</strong></td>
+<td>Loss at each step in trajectory</td>
+<td>When errors appear</td>
+</tr>
+<tr>
+<td><strong>Action histogram</strong></td>
+<td>Distribution of predicted actions</td>
+<td>Mode collapse</td>
+</tr>
+<tr>
+<td><strong>Gripper timing</strong></td>
+<td>Open/close signal over time</td>
+<td>Grasp timing issues</td>
+</tr>
+</tbody>
+</table>
+<h3 id="884-common-failure-patterns-fixes">88.4 Common Failure Patterns &amp; Fixes</h3>
+<p><strong>Pattern 1: Mode Averaging</strong></p>
+<pre><code>Symptom: Robot reaches between two objects
+Diagnosis: MSE loss averages two valid grasps
+Fix: Switch to diffusion policy or GMM loss
+Test: Plot action histogram — bimodal → unimodal?
+</code></pre>
+<p><strong>Pattern 2: Compounding Error</strong></p>
+<pre><code>Symptom: Policy works for 5 steps, then fails
+Diagnosis: Never saw off-distribution states
+Fix: Collect DAgger corrections OR increase chunk size
+Test: Compare success vs trajectory length
+</code></pre>
+<p><strong>Pattern 3: Visual Overfitting</strong></p>
+<pre><code>Symptom: Works under training lighting only
+Diagnosis: No visual augmentation
+Fix: Color jitter, random crop, background randomization
+Test: Evaluate under novel lighting conditions
+</code></pre>
+<p><strong>Pattern 4: Action Delay</strong></p>
+<pre><code>Symptom: Robot moves correctly but 0.5s late
+Diagnosis: Observation-action time misalignment in data
+Fix: Check timestamp alignment, add latency compensation
+Test: Plot cross-correlation of obs and actions
+</code></pre>
+<h3 id="885-ablation-studies">88.5 Ablation Studies</h3>
+<p>Structured ablation reveals what matters:</p>
+<pre><code>Full model:     chunk=16, CVAE, ResNet-18, 100 demos → 85% success
+
+Ablations:
+  chunk=1:      -25% (60% success) → chunking is critical
+  No CVAE:      -15% (70% success) → CVAE helps multimodality
+  ResNet-50:    +2%  (87% success) → bigger backbone not worth it
+  50 demos:     -10% (75% success) → data quantity matters
+  No img aug:   -20% (65% success) → augmentation is critical
+</code></pre>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="debugging-toolkit">Debugging Toolkit</h3>
+<pre><code class="language-python">import numpy as np
+import json
+from pathlib import Path
+
+class PolicyDebugger:
+    &quot;&quot;&quot;Tools for diagnosing policy failures.&quot;&quot;&quot;
+
+    def __init__(self, env, policy, n_debug_episodes=20):
+        self.env = env
+        self.policy = policy
+        self.n_debug = n_debug_episodes
+
+    def collect_debug_trajectories(self):
+        &quot;&quot;&quot;Collect trajectories with full diagnostic info.&quot;&quot;&quot;
+        trajectories = []
+        for i in range(self.n_debug):
+            obs, _ = self.env.reset()
+            traj = {
+                &quot;observations&quot;: [],
+                &quot;predicted_actions&quot;: [],
+                &quot;executed_actions&quot;: [],
+                &quot;rewards&quot;: [],
+                &quot;success&quot;: False,
+            }
+
+            for step in range(300):
+                pred_action = self.policy.predict(obs)
+                traj[&quot;observations&quot;].append(obs.tolist())
+                traj[&quot;predicted_actions&quot;].append(pred_action.tolist())
+
+                obs, reward, term, trunc, info = self.env.step(pred_action)
+                traj[&quot;executed_actions&quot;].append(pred_action.tolist())
+                traj[&quot;rewards&quot;].append(float(reward))
+
+                if term or trunc:
+                    traj[&quot;success&quot;] = bool(reward &gt; 0)
+                    break
+
+            trajectories.append(traj)
+
+        successes = sum(t[&quot;success&quot;] for t in trajectories)
+        print(f&quot;Debug rollouts: {successes}/{len(trajectories)} successful&quot;)
+        return trajectories
+
+    def analyze_failures(self, trajectories):
+        &quot;&quot;&quot;Analyze failure patterns.&quot;&quot;&quot;
+        failures = [t for t in trajectories if not t[&quot;success&quot;]]
+        successes = [t for t in trajectories if t[&quot;success&quot;]]
+
+        if not failures:
+            print(&quot;No failures to analyze!&quot;)
+            return
+
+        print(f&quot;\n{'='*50}&quot;)
+        print(f&quot;FAILURE ANALYSIS ({len(failures)} failures)&quot;)
+        print(f&quot;{'='*50}&quot;)
+
+        # 1. Failure timing
+        fail_lengths = [len(t[&quot;rewards&quot;]) for t in failures]
+        succ_lengths = [len(t[&quot;rewards&quot;]) for t in successes] if successes else [0]
+        print(f&quot;\nFailure timing:&quot;)
+        print(f&quot;  Failure episode length: {np.mean(fail_lengths):.0f} ± {np.std(fail_lengths):.0f}&quot;)
+        print(f&quot;  Success episode length: {np.mean(succ_lengths):.0f} ± {np.std(succ_lengths):.0f}&quot;)
+
+        early_failures = sum(1 for l in fail_lengths if l &lt; np.mean(succ_lengths) * 0.3)
+        print(f&quot;  Early failures (&lt;30% of success length): {early_failures}/{len(failures)}&quot;)
+
+        # 2. Action statistics comparison
+        fail_actions = np.concatenate([np.array(t[&quot;predicted_actions&quot;]) for t in failures])
+        succ_actions = np.concatenate([np.array(t[&quot;predicted_actions&quot;]) for t in successes]) if successes else fail_actions
+
+        print(f&quot;\nAction distribution comparison:&quot;)
+        for d in range(fail_actions.shape[1]):
+            f_mean, f_std = fail_actions[:, d].mean(), fail_actions[:, d].std()
+            s_mean, s_std = succ_actions[:, d].mean(), succ_actions[:, d].std()
+            print(f&quot;  dim {d}: fail μ={f_mean:.4f} σ={f_std:.4f} | &quot;
+                  f&quot;succ μ={s_mean:.4f} σ={s_std:.4f}&quot;)
+
+        # 3. Action smoothness
+        fail_jerks = []
+        succ_jerks = []
+        for t in failures:
+            acts = np.array(t[&quot;predicted_actions&quot;])
+            if len(acts) &gt; 3:
+                jerk = np.mean(np.abs(np.diff(acts, n=3, axis=0)))
+                fail_jerks.append(jerk)
+        for t in successes:
+            acts = np.array(t[&quot;predicted_actions&quot;])
+            if len(acts) &gt; 3:
+                jerk = np.mean(np.abs(np.diff(acts, n=3, axis=0)))
+                succ_jerks.append(jerk)
+
+        if fail_jerks and succ_jerks:
+            print(f&quot;\nAction smoothness (jerk):&quot;)
+            print(f&quot;  Failures: {np.mean(fail_jerks):.6f}&quot;)
+            print(f&quot;  Successes: {np.mean(succ_jerks):.6f}&quot;)
+            if np.mean(fail_jerks) &gt; 2 * np.mean(succ_jerks):
+                print(f&quot;  ⚠️ Failures are significantly jerkier → possible mode averaging&quot;)
+
+        # 4. Diagnose pattern
+        print(f&quot;\n{'='*50}&quot;)
+        print(&quot;DIAGNOSIS:&quot;)
+        if early_failures &gt; len(failures) * 0.5:
+            print(&quot;  → Perception failure likely (fails before reaching target)&quot;)
+        elif np.mean(fail_jerks) &gt; 2 * np.mean(succ_jerks) if succ_jerks else False:
+            print(&quot;  → Mode averaging likely (jerky actions in failures)&quot;)
+        elif np.mean(fail_lengths) &gt; np.mean(succ_lengths) * 1.5:
+            print(&quot;  → Compounding error likely (reaches target but drifts)&quot;)
+        else:
+            print(&quot;  → Mixed failure modes. Manual video review recommended.&quot;)
+
+    def run_ablation(self, configs, n_trials=20):
+        &quot;&quot;&quot;Run systematic ablation study.&quot;&quot;&quot;
+        results = {}
+        for name, config_fn in configs.items():
+            print(f&quot;\nAblation: {name}&quot;)
+            config_fn()  # Apply config change
+            trajectories = self.collect_debug_trajectories()
+            sr = sum(t[&quot;success&quot;] for t in trajectories) / len(trajectories)
+            results[name] = sr
+
+        # Print sorted results
+        print(f&quot;\n{'='*50}&quot;)
+        print(&quot;ABLATION RESULTS&quot;)
+        print(f&quot;{'='*50}&quot;)
+        for name, sr in sorted(results.items(), key=lambda x: -x[1]):
+            bar = &quot;█&quot; * int(sr * 40)
+            print(f&quot;  {name:30s} {sr:6.1%} {bar}&quot;)
+
+        return results
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<ol>
+<li>
+<p><strong>Failure taxonomy:</strong> Collect 20 rollouts of a trained policy. Manually classify each failure into the categories from §88.1. What's the dominant mode?</p>
+</li>
+<li>
+<p><strong>Debug a policy:</strong> Use <code>PolicyDebugger.analyze_failures()</code>. Based on the output, form a hypothesis and propose a fix. Implement the fix and re-evaluate.</p>
+</li>
+<li>
+<p><strong>Ablation study:</strong> Take your best policy. Run 5 ablations (remove augmentation, reduce data, smaller model, no chunking, different learning rate). Present results as a table.</p>
+</li>
+<li>
+<p><strong>Action visualization:</strong> Plot predicted action trajectories for 5 successful and 5 failed episodes on the same axes. What visual patterns distinguish success from failure?</p>
+</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Categorize first</strong> — don't guess; watch failures and classify them</li>
+<li><strong>Isolate the component</strong> — perception, prediction, or execution?</li>
+<li><strong>Change one thing at a time</strong> — systematic ablation, not shotgun debugging</li>
+<li><strong>Visual analysis is essential</strong> — overlay predictions, plot distributions</li>
+<li><strong>Most failures are data problems</strong> — more diverse demos often fix more than architecture changes</li>
+</ol>
+<hr />
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<blockquote>
+<p><em>With debugging tools in hand, we're ready for the Phase VI capstone. Days 89-91: build a complete robot learning pipeline from scratch — collect data, train a policy (BC, diffusion, or flow), evaluate systematically, debug failures, iterate. This consolidates everything from RL through diffusion to deployment.</em></p>
+</blockquote>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Mandlekar et al. (2021), "What Matters in Learning from Offline Human Demonstrations" — systematic ablation study</li>
+<li>Zhao et al. (2023), ACT paper — excellent failure analysis section</li>
+<li>Chi et al. (2023), Diffusion Policy — comprehensive ablation appendix</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-87-policy-evaluation.html" class="text-violet-600 hover:text-violet-800">&larr; Day 87: Policy Evaluation</a>
+            <a href="day-89-phase6-capstone-1.html" class="text-violet-600 hover:text-violet-800">Day 89: Phase VI Capstone Day 1 &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

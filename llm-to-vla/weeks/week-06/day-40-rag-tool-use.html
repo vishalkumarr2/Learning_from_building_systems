@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 40: RAG & Tool Use - LLM to VLA - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #7c3aed; text-decoration: underline; }
+        .md-content a:hover { color: #6d28d9; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+        .phase-6 { background: #ccfbf1; color: #115e59; }
+        .phase-7 { background: #fef9c3; color: #713f12; }
+        /* Progress bar */
+        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 6: LLM Engineering</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-40-rag-tool-use">Day 40: RAG &amp; Tool Use</h1>
+<blockquote>
+<p><strong>Phase III — LLMs: Training &amp; Alignment | Week 6 | 2.5 hours</strong>
+<em>"Retrieval-augmented generation: why memorize the encyclopedia when you can look it up?" — Patrick Lewis</em></p>
+</blockquote>
+<h2 id="navigation">Navigation</h2>
+<ul>
+<li><strong>Previous:</strong> <a href="day-39-long-context-reasoning.html">Day 39: Long Context &amp; Reasoning</a></li>
+<li><strong>Next:</strong> <a href="day-41-llm-for-robotics.html">Day 41: LLM for Robotics</a></li>
+<li><strong>Week:</strong> <a href="README.html">Week 6 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/07-llm-engineering.html">Phase III: LLM Engineering</a></li>
+<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+</ul>
+<hr />
+<h2 id="theory-45-min">Theory (45 min)</h2>
+<h3 id="401-rag-architecture">40.1 RAG Architecture</h3>
+<p>Retrieval-Augmented Generation combines an LLM with an external knowledge base:</p>
+<pre><code>┌──────────────────────────────────────────────────────┐
+│                    RAG Pipeline                       │
+│                                                       │
+│  User Query ──→ Embedder ──→ Vector Search ──→ Top-K │
+│       │                           │            docs   │
+│       │                      ┌────┴────┐              │
+│       │                      │ Vector  │              │
+│       │                      │   DB    │              │
+│       │                      └─────────┘              │
+│       │                                               │
+│       └──→ Prompt = Query + Retrieved Docs ──→ LLM   │
+│                                                  │    │
+│                                            Answer ◄───┘│
+└──────────────────────────────────────────────────────┘
+</code></pre>
+<p><strong>Indexing pipeline (offline):</strong></p>
+<p>$$
+\text{Documents} \xrightarrow{\text{chunk}} \text{Chunks} \xrightarrow{\text{embed}} \text{Vectors} \xrightarrow{\text{store}} \text{Vector DB}
+$$</p>
+<p><strong>Query pipeline (online):</strong></p>
+<p>$$
+\text{Query} \xrightarrow{\text{embed}} q \xrightarrow{\text{search}} \text{Top-K} \xrightarrow{\text{augment}} \text{Prompt} \xrightarrow{\text{LLM}} \text{Answer}
+$$</p>
+<h3 id="402-rag-vs-fine-tuning-vs-long-context">40.2 RAG vs Fine-Tuning vs Long Context</h3>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th>When to Use</th>
+<th>Pros</th>
+<th>Cons</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>RAG</strong></td>
+<td>Dynamic/updated knowledge</td>
+<td>Fresh data, attributable</td>
+<td>Retrieval quality limits output</td>
+</tr>
+<tr>
+<td><strong>Fine-tuning</strong></td>
+<td>Behavioral changes, format</td>
+<td>Internalized knowledge</td>
+<td>Stale, expensive to update</td>
+</tr>
+<tr>
+<td><strong>Long context</strong></td>
+<td>Full document analysis</td>
+<td>No retrieval needed</td>
+<td>Expensive, needle-in-haystack</td>
+</tr>
+</tbody>
+</table>
+<pre><code>Decision tree:
+  Does the knowledge change frequently?
+    Yes → RAG (easy to update vector DB)
+    No → Does the model need to change behavior?
+      Yes → Fine-tuning (e.g., new output format)
+      No → Does the full context fit in the window?
+        Yes → Long context (stuff it all in)
+        No → RAG (retrieve relevant parts)
+</code></pre>
+<h3 id="403-chunking-strategies">40.3 Chunking Strategies</h3>
+<p>How you split documents dramatically affects retrieval quality:</p>
+<pre><code>Fixed-size chunks (simple):
+  Split every 500 tokens with 50-token overlap
+  ✅ Easy to implement
+  ❌ Cuts mid-sentence, loses structure
+
+Semantic chunks:
+  Split on paragraph/section boundaries
+  ✅ Preserves meaning
+  ❌ Variable chunk sizes
+
+Recursive character splitting:
+  Try to split on: &quot;\n\n&quot; → &quot;\n&quot; → &quot;. &quot; → &quot; &quot; → &quot;&quot;
+  ✅ Good balance
+  ❌ Doesn't understand document structure
+
+Parent-child chunks:
+  Index small chunks (retrieval) but return parent chunk (context)
+  ✅ Precise retrieval + full context
+  ❌ More complex implementation
+</code></pre>
+<h3 id="404-embedding-models">40.4 Embedding Models</h3>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>Dimensions</th>
+<th>Context</th>
+<th>Quality (MTEB)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>text-embedding-3-small</td>
+<td>1536</td>
+<td>8191</td>
+<td>62.3</td>
+</tr>
+<tr>
+<td>text-embedding-3-large</td>
+<td>3072</td>
+<td>8191</td>
+<td>64.6</td>
+</tr>
+<tr>
+<td>BGE-large-en-v1.5</td>
+<td>1024</td>
+<td>512</td>
+<td>64.2</td>
+</tr>
+<tr>
+<td>E5-mistral-7b</td>
+<td>4096</td>
+<td>32768</td>
+<td>66.6</td>
+</tr>
+<tr>
+<td>Nomic-embed-text</td>
+<td>768</td>
+<td>8192</td>
+<td>62.4</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Similarity search:</strong> given query embedding $q$ and document embedding $d$:</p>
+<p>$$
+\text{cosine\_sim}(q, d) = \frac{q \cdot d}{\|q\| \|d\|}
+$$</p>
+<h3 id="405-function-calling-tool-use">40.5 Function Calling / Tool Use</h3>
+<p>LLMs can be trained to invoke external tools:</p>
+<pre><code class="language-json">{
+  &quot;tools&quot;: [
+    {
+      &quot;type&quot;: &quot;function&quot;,
+      &quot;function&quot;: {
+        &quot;name&quot;: &quot;get_robot_status&quot;,
+        &quot;description&quot;: &quot;Get current status of a warehouse robot&quot;,
+        &quot;parameters&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;properties&quot;: {
+            &quot;robot_id&quot;: {&quot;type&quot;: &quot;string&quot;, &quot;description&quot;: &quot;Robot identifier&quot;},
+            &quot;include_battery&quot;: {&quot;type&quot;: &quot;boolean&quot;, &quot;default&quot;: true}
+          },
+          &quot;required&quot;: [&quot;robot_id&quot;]
+        }
+      }
+    }
+  ]
+}
+</code></pre>
+<p><strong>Tool use for robotics:</strong></p>
+<pre><code>User: &quot;What's the battery level of robot OKS-42?&quot;
+
+LLM reasoning:
+  1. I need to call get_robot_status(robot_id=&quot;OKS-42&quot;)
+  2. [TOOL CALL] → {&quot;battery&quot;: 67, &quot;status&quot;: &quot;navigating&quot;, ...}
+  3. &quot;Robot OKS-42 has 67% battery and is currently navigating.&quot;
+</code></pre>
+<h3 id="406-rag-for-robotics-applications">40.6 RAG for Robotics Applications</h3>
+<pre><code>Robot maintenance RAG:
+  Knowledge base: service manuals, past incident reports, error codes
+  Query: &quot;Robot shows NAV_ESTIMATED_STATE_NOT_FINITE&quot;
+  Retrieved: 3 past incidents with this error + manual section
+  Answer: Structured diagnosis with likely causes and resolution steps
+
+Fleet monitoring RAG:
+  Knowledge base: real-time telemetry, shift reports, alert history
+  Query: &quot;Why are robots in Zone B slow today?&quot;
+  Retrieved: Recent alerts for Zone B + environmental sensor data
+  Answer: &quot;Floor sensor detected wet surface in Zone B at 14:00,
+           causing speed reduction protocol activation.&quot;
+</code></pre>
+<hr />
+<h2 id="implementation-60-min">Implementation (60 min)</h2>
+<h3 id="build-a-simple-rag-system">Build a Simple RAG System</h3>
+<pre><code class="language-python">&quot;&quot;&quot;
+Day 40 Implementation: Build a RAG system from scratch.
+Uses sentence-transformers for embedding and FAISS for vector search.
+&quot;&quot;&quot;
+import json
+import numpy as np
+from dataclasses import dataclass, field
+
+@dataclass
+class Document:
+    text: str
+    metadata: dict = field(default_factory=dict)
+    embedding: np.ndarray | None = None
+
+@dataclass
+class SearchResult:
+    document: Document
+    score: float
+    rank: int
+
+
+class SimpleEmbedder:
+    &quot;&quot;&quot;Embedding using bag-of-words TF-IDF (no GPU needed).&quot;&quot;&quot;
+
+    def __init__(self):
+        self.vocabulary: dict[str, int] = {}
+        self.idf: np.ndarray | None = None
+
+    def _tokenize(self, text: str) -&gt; list[str]:
+        return text.lower().split()
+
+    def fit(self, documents: list[str]):
+        &quot;&quot;&quot;Build vocabulary and compute IDF.&quot;&quot;&quot;
+        # Build vocabulary
+        for doc in documents:
+            for token in self._tokenize(doc):
+                if token not in self.vocabulary:
+                    self.vocabulary[token] = len(self.vocabulary)
+
+        # Compute IDF
+        n_docs = len(documents)
+        doc_freq = np.zeros(len(self.vocabulary))
+        for doc in documents:
+            tokens = set(self._tokenize(doc))
+            for token in tokens:
+                if token in self.vocabulary:
+                    doc_freq[self.vocabulary[token]] += 1
+
+        self.idf = np.log((n_docs + 1) / (doc_freq + 1)) + 1
+
+    def embed(self, text: str) -&gt; np.ndarray:
+        &quot;&quot;&quot;Compute TF-IDF embedding for a text.&quot;&quot;&quot;
+        tokens = self._tokenize(text)
+        tf = np.zeros(len(self.vocabulary))
+        for token in tokens:
+            if token in self.vocabulary:
+                tf[self.vocabulary[token]] += 1
+        if tokens:
+            tf /= len(tokens)
+
+        tfidf = tf * (self.idf if self.idf is not None else 1.0)
+        norm = np.linalg.norm(tfidf)
+        return tfidf / norm if norm &gt; 0 else tfidf
+
+
+class VectorStore:
+    &quot;&quot;&quot;Simple vector store with cosine similarity search.&quot;&quot;&quot;
+
+    def __init__(self):
+        self.documents: list[Document] = []
+        self.embeddings: np.ndarray | None = None
+
+    def add(self, documents: list[Document]):
+        self.documents.extend(documents)
+        vecs = np.array([d.embedding for d in documents])
+        if self.embeddings is None:
+            self.embeddings = vecs
+        else:
+            self.embeddings = np.vstack([self.embeddings, vecs])
+
+    def search(self, query_embedding: np.ndarray, top_k: int = 3) -&gt; list[SearchResult]:
+        if self.embeddings is None:
+            return []
+        scores = self.embeddings @ query_embedding
+        top_indices = np.argsort(scores)[::-1][:top_k]
+        return [
+            SearchResult(
+                document=self.documents[i],
+                score=float(scores[i]),
+                rank=rank,
+            )
+            for rank, i in enumerate(top_indices)
+        ]
+
+
+class RAGPipeline:
+    &quot;&quot;&quot;Complete RAG pipeline: index, retrieve, augment, generate.&quot;&quot;&quot;
+
+    def __init__(self, embedder: SimpleEmbedder, store: VectorStore):
+        self.embedder = embedder
+        self.store = store
+
+    def index_documents(self, texts: list[str], metadata: list[dict] | None = None):
+        &quot;&quot;&quot;Index documents into the vector store.&quot;&quot;&quot;
+        self.embedder.fit(texts)
+        docs = []
+        for i, text in enumerate(texts):
+            meta = metadata[i] if metadata else {&quot;id&quot;: i}
+            doc = Document(
+                text=text,
+                metadata=meta,
+                embedding=self.embedder.embed(text),
+            )
+            docs.append(doc)
+        self.store.add(docs)
+
+    def retrieve(self, query: str, top_k: int = 3) -&gt; list[SearchResult]:
+        query_emb = self.embedder.embed(query)
+        return self.store.search(query_emb, top_k)
+
+    def build_prompt(self, query: str, results: list[SearchResult]) -&gt; str:
+        context = &quot;\n\n&quot;.join(
+            f&quot;[Source {r.rank+1}] {r.document.text}&quot; for r in results
+        )
+        return (
+            &quot;Answer the question using ONLY the provided context. &quot;
+            &quot;If the context doesn't contain the answer, say so.\n\n&quot;
+            f&quot;Context:\n{context}\n\n&quot;
+            f&quot;Question: {query}\n\n&quot;
+            &quot;Answer:&quot;
+        )
+
+    def query(self, question: str, top_k: int = 3) -&gt; dict:
+        results = self.retrieve(question, top_k)
+        prompt = self.build_prompt(question, results)
+        return {
+            &quot;prompt&quot;: prompt,
+            &quot;sources&quot;: [
+                {&quot;text&quot;: r.document.text[:100], &quot;score&quot;: r.score}
+                for r in results
+            ],
+        }
+
+
+# --- Function calling demo ---
+ROBOT_TOOLS = [
+    {
+        &quot;name&quot;: &quot;get_robot_status&quot;,
+        &quot;description&quot;: &quot;Get current status of a robot&quot;,
+        &quot;parameters&quot;: {&quot;robot_id&quot;: &quot;string&quot;},
+    },
+    {
+        &quot;name&quot;: &quot;send_robot_command&quot;,
+        &quot;description&quot;: &quot;Send navigation command to a robot&quot;,
+        &quot;parameters&quot;: {&quot;robot_id&quot;: &quot;string&quot;, &quot;command&quot;: &quot;string&quot;, &quot;target&quot;: &quot;string&quot;},
+    },
+    {
+        &quot;name&quot;: &quot;query_error_log&quot;,
+        &quot;description&quot;: &quot;Search robot error logs&quot;,
+        &quot;parameters&quot;: {&quot;robot_id&quot;: &quot;string&quot;, &quot;time_range&quot;: &quot;string&quot;, &quot;error_type&quot;: &quot;string&quot;},
+    },
+]
+
+def format_tool_call_prompt(query: str, tools: list[dict]) -&gt; str:
+    tools_json = json.dumps(tools, indent=2)
+    return (
+        f&quot;You have access to these tools:\n{tools_json}\n\n&quot;
+        f&quot;User: {query}\n\n&quot;
+        &quot;Respond with a JSON tool call if needed, or answer directly.\n&quot;
+        &quot;Format: {\&quot;tool\&quot;: \&quot;name\&quot;, \&quot;args\&quot;: {...}}\n&quot;
+    )
+
+
+# --- Demo ---
+if __name__ == &quot;__main__&quot;:
+    # Build RAG system
+    knowledge_base = [
+        &quot;The sensorbar uses SPI communication at 10MHz. Common failure modes &quot;
+        &quot;include stiction from debris and firmware version mismatch.&quot;,
+        &quot;Battery exchange robots dock using IR alignment sensors. The docking &quot;
+        &quot;sequence takes approximately 45 seconds including verification.&quot;,
+        &quot;NAV_ESTIMATED_STATE_NOT_FINITE indicates the navigation estimator &quot;
+        &quot;received NaN values. Check IMU calibration and wheel encoder signals.&quot;,
+        &quot;The OKS robot uses differential drive with two powered wheels and &quot;
+        &quot;two caster wheels. Maximum speed is 1.5 m/s in open areas.&quot;,
+        &quot;LiDAR-based SLAM provides centimeter-level localization accuracy. &quot;
+        &quot;Degradation occurs in large open areas with few features.&quot;,
+        &quot;The guardian node monitors robot health. It triggers emergency stop &quot;
+        &quot;when critical errors exceed threshold within a time window.&quot;,
+    ]
+
+    embedder = SimpleEmbedder()
+    store = VectorStore()
+    rag = RAGPipeline(embedder, store)
+    rag.index_documents(knowledge_base)
+
+    # Query
+    result = rag.query(&quot;Why is my robot showing NaN errors in navigation?&quot;)
+    print(&quot;RAG Query Result:&quot;)
+    for src in result[&quot;sources&quot;]:
+        print(f&quot;  Score: {src['score']:.3f} | {src['text']}...&quot;)
+    print(f&quot;\nPrompt length: {len(result['prompt'])} chars&quot;)
+
+    # Tool call
+    print(&quot;\n&quot; + &quot;=&quot; * 60)
+    tool_prompt = format_tool_call_prompt(
+        &quot;Check the error logs for robot OKS-42 from the last hour&quot;,
+        ROBOT_TOOLS,
+    )
+    print(tool_prompt)
+</code></pre>
+<hr />
+<h2 id="exercise-45-min">Exercise (45 min)</h2>
+<h3 id="e401-chunking-comparison-25-min">E40.1 — Chunking Comparison (25 min)</h3>
+<p>Take a 2000-word document and:
+1. Chunk with fixed 200-word windows (50-word overlap)
+2. Chunk on paragraph boundaries
+3. Index both and query — which retrieves more relevant chunks?
+4. Implement parent-child: index sentences, return parent paragraphs</p>
+<h3 id="e402-hybrid-search-20-min">E40.2 — Hybrid Search (20 min)</h3>
+<p>Combine keyword (BM25) and semantic (embedding) search:
+1. Implement a simple BM25 scorer
+2. Combine: <code>score = α * bm25_score + (1-α) * cosine_score</code>
+3. Find the optimal α on 5 test queries — is hybrid better than either alone?</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>RAG = retrieval + generation</strong> — the model answers using retrieved documents</li>
+<li><strong>Chunking strategy</strong> is the most important design decision in a RAG system</li>
+<li><strong>RAG vs fine-tuning</strong> is a false dichotomy — use both (RAG for dynamic knowledge, fine-tuning for behavior)</li>
+<li><strong>Function calling</strong> extends LLMs to interact with external systems — critical for robotics</li>
+<li><strong>Embedding quality</strong> directly bounds RAG quality — garbage retrieval → garbage answers</li>
+</ol>
+<hr />
+<h2 id="connection-to-the-thread">Connection to the Thread</h2>
+<p>RAG is how you give a robot LLM access to its manuals, past incidents, and fleet telemetry without fine-tuning on every update. Function calling is how an LLM-based planner translates high-level goals ("deliver package to Zone C") into API calls to the robot's navigation stack. This is exactly what we build in the capstone.</p>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://arxiv.org/abs/2005.11401">Retrieval-Augmented Generation for NLP (RAG)</a> — Lewis et al., 2020</li>
+<li><a href="https://arxiv.org/abs/2004.04906">Dense Passage Retrieval for Open-Domain QA</a> — Karpukhin et al., 2020</li>
+<li><a href="https://arxiv.org/abs/2302.04761">Toolformer: Language Models Can Teach Themselves to Use Tools</a> — Schick et al., 2023</li>
+<li><a href="https://arxiv.org/abs/2404.16130">From Local to Global: A Graph RAG Approach</a> — Edge et al., 2024</li>
+<li><a href="https://arxiv.org/abs/2309.15217">RAGAS: Automated Evaluation of RAG</a> — Evaluation framework</li>
+</ul>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-39-long-context-reasoning.html" class="text-violet-600 hover:text-violet-800">&larr; Day 39: Long Context & Reasoning</a>
+            <a href="day-41-llm-for-robotics.html" class="text-violet-600 hover:text-violet-800">Day 41: LLM for Robotics &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>
