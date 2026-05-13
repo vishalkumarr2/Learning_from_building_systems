@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14: Stop & Reflect #1 - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 2: PyTorch Internals</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-14-stop-reflect-1">Day 14: Stop &amp; Reflect #1</h1>
+<blockquote>
+<p><strong>Phase I · Week 2 · Day 14 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"You don't really understand something until you can explain it without opening your notes."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">�phase Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-13-operator-fusion-fundamentals.html">Day 13: Operator Fusion</a></td>
+<td style="text-align: left;"><a href="../week-03/day-15-compiler-101-for-ml.html">Day 15: Compiler 101 for ML</a></td>
+<td style="text-align: left;"><a href="README.html">Week 2: PyTorch Internals</a></td>
+<td style="text-align: left;">Phase I: Foundations</td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Curriculum Home</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Two weeks and 14 days of dense material. Before we move into Phase II (Compiler Fundamentals), we need to <strong>consolidate</strong>. Research on learning shows that active recall, concept mapping, and identifying misconceptions produces 2–3× better retention than re-reading. This session is not optional downtime — it's where the material clicks into a coherent mental model.</p>
+<hr />
+<h2 id="1-phase-i-concept-map">1. Phase I Concept Map</h2>
+<p>Every concept from Days 1–13 connects. Trace the arrows to see how knowledge builds:</p>
+<pre><code>                        ┌─────────────────────────────┐
+                        │    ML Systems &amp; Compilers    │
+                        │      WHY do we need them?    │
+                        └──────────────┬──────────────┘
+                                       │
+                    ┌──────────────────┴──────────────────┐
+                    │                                      │
+             ┌──────▼──────┐                        ┌──────▼──────┐
+             │  Hardware   │                        │  Software   │
+             │ Constraints │                        │  Execution  │
+             └──────┬──────┘                        └──────┬──────┘
+                    │                                      │
+        ┌───────────┼───────────┐               ┌──────────┼──────────┐
+        │           │           │               │          │          │
+   ┌────▼───┐ ┌────▼────┐ ┌────▼────┐    ┌─────▼────┐ ┌──▼───┐ ┌───▼───┐
+   │GPU Arch│ │ Memory  │ │Compute  │    │  Eager   │ │Graph │ │Fusion │
+   │(Day1-3)│ │Hierarchy│ │ vs BW   │    │  Mode    │ │ Mode │ │(Day13)│
+   └────┬───┘ │(Day4-5) │ │(Day6-7) │    │ (Day12) │ │(Day12│ └───┬───┘
+        │     └────┬────┘ └────┬────┘    └─────┬────┘ └──┬───┘     │
+        │          │           │               │         │          │
+        │     ┌────▼────┐     │          ┌─────▼────┐    │          │
+        │     │ HBM     │     │          │Dispatcher│    │          │
+        │     │ L2/SRAM │     │          │ per-op   │    │          │
+        │     │Registers│     │          │ overhead │    │          │
+        │     └────┬────┘     │          └──────────┘    │          │
+        │          │           │                          │          │
+        │          └─────┬─────┘                          │          │
+        │                │                                │          │
+   ┌────▼────────────────▼──────┐              ┌──────────▼──────────▼──┐
+   │     Roofline Model         │              │   Graph Capture         │
+   │  AI = FLOPs / Bytes        │              │ trace/script/fx/dynamo │
+   │  compute vs memory bound   │              │ (Day 12)               │
+   │  (Day 6-7)                 │              └───────────┬────────────┘
+   └────────────┬───────────────┘                          │
+                │                                          │
+                └──────────────────┬───────────────────────┘
+                                   │
+                          ┌────────▼────────┐
+                          │   FUSION        │
+                          │ Eliminate HBM   │
+                          │ round-trips by  │
+                          │ keeping interme-│
+                          │ diates in regs  │
+                          │ (Day 13)        │
+                          └────────┬────────┘
+                                   │
+                          ┌────────▼────────┐
+                          │   Profiling     │
+                          │ (Days 8-11)     │
+                          │ Measure before  │
+                          │ &amp; after to      │
+                          │ validate gains  │
+                          └─────────────────┘
+</code></pre>
+<h3 id="key-insight-chains">Key Insight Chains</h3>
+<ol>
+<li>
+<p><strong>Hardware → Software path:</strong> GPU has limited memory bandwidth → element-wise ops are memory-bound → fusion reduces memory traffic → graph mode enables the compiler to find fusion opportunities</p>
+</li>
+<li>
+<p><strong>Measurement path:</strong> Profiling (nsight, torch.profiler) → identify bottleneck (compute vs memory) → Roofline model quantifies gap → fusion/optimization targets the gap → re-profile to validate</p>
+</li>
+<li>
+<p><strong>Abstraction path:</strong> Eager mode (Python-friendly) → graph capture (multiple methods) → IR representation → compiler optimizations → generated kernel code</p>
+</li>
+</ol>
+<hr />
+<h2 id="2-the-five-mental-models">2. The Five Mental Models</h2>
+<p>These are the core frameworks you should now carry in your head:</p>
+<h3 id="model-1-the-memory-hierarchy-ladder">Model 1: The Memory Hierarchy Ladder</h3>
+<pre><code>Speed:   Fastest ◄──────────────────────────────► Slowest
+Size:    Smallest ◄─────────────────────────────► Largest
+
+┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
+│Registers │  │  SRAM    │  │   L2     │  │   HBM    │
+│ ~20 TB/s │  │ ~19 TB/s │  │ ~6 TB/s  │  │ ~2 TB/s  │
+│  256 KB  │  │  20 MB   │  │  40 MB   │  │  80 GB   │
+│(per SM)  │  │(per SM:  │  │ (shared) │  │ (global) │
+│          │  │ 192 KB)  │  │          │  │          │
+└──────────┘  └──────────┘  └──────────┘  └──────────┘
+
+The goal of every optimization: keep data as far LEFT as possible.
+Fusion keeps intermediates in registers instead of writing to HBM.
+</code></pre>
+<h3 id="model-2-arithmetic-intensity-and-the-roofline">Model 2: Arithmetic Intensity and the Roofline</h3>
+<p>$$\text{Attainable FLOPS} = \min\left(\text{Peak FLOPS},\; \text{BW} \times \text{AI}\right)$$</p>
+<ul>
+<li>Below the ridge point → <strong>memory-bound</strong> → optimize for fewer bytes</li>
+<li>Above the ridge point → <strong>compute-bound</strong> → optimize for fewer FLOPs</li>
+<li><strong>Fusion increases AI</strong> by reducing bytes while keeping FLOPs constant</li>
+</ul>
+<h3 id="model-3-the-eager-graph-spectrum">Model 3: The Eager-Graph Spectrum</h3>
+<pre><code>Full Python ◄──────────────────────────────► Full Optimization
+
+  Eager       jit.trace   jit.script   FX      torch.compile
+  │              │            │         │            │
+  │  No graph    │  Frozen    │ Parsed  │ Symbolic   │ Dynamic
+  │  capture     │  snapshot  │ subset  │ proxy      │ bytecode
+  │              │            │         │            │ interception
+  │              │            │         │            │
+  Flexibility ★★★★★          ★★★       ★★           ★★★★
+  Optimization   ☆            ★★        ★★           ★★★★★
+</code></pre>
+<h3 id="model-4-the-fusion-decision-tree">Model 4: The Fusion Decision Tree</h3>
+<pre><code>Can these ops be fused?
+         │
+    Are they element-wise    YES ──► FUSE (pointwise fusion)
+    with same shapes?
+         │ NO
+         │
+    Is one a producer and    YES ──► Is the consumer element-wise?
+    the other a consumer?                │
+         │ NO                       YES ──► FUSE (vertical fusion)
+         │                          NO  ──► Is it matmul epilogue?
+    Do they share                            │
+    the same input?                     YES ──► EPILOGUE FUSE
+         │                              NO  ──► CANNOT FUSE
+    YES ──► HORIZONTAL FUSE
+    NO  ──► CANNOT FUSE
+
+Special barrier: REDUCTIONS must complete before downstream fusion.
+</code></pre>
+<h3 id="model-5-the-profiling-loop">Model 5: The Profiling Loop</h3>
+<pre><code>    ┌─► Profile (measure) ─► Identify bottleneck ─► Hypothesize fix ─┐
+    │                                                                  │
+    └──────────── Validate improvement ◄── Apply optimization ◄───────┘
+
+    NEVER optimize without measuring first.
+    NEVER claim improvement without measuring after.
+</code></pre>
+<hr />
+<h2 id="3-self-assessment-quiz-10-questions">3. Self-Assessment Quiz (10 Questions)</h2>
+<p>Answer each question before checking. Rate your confidence (1–5).</p>
+<h3 id="questions">Questions</h3>
+<p><strong>Q1.</strong> An A100 has 2 TB/s memory bandwidth and 312 TFLOPS FP16 compute. What is the arithmetic intensity ridge point?</p>
+<p><strong>Q2.</strong> A <code>relu()</code> on an FP32 tensor performs 1 FLOP per element and accesses 8 bytes per element (4 read + 4 write). Is this operation compute-bound or memory-bound on an A100?</p>
+<p><strong>Q3.</strong> You have a chain: <code>y = sigmoid(relu(x * w + b))</code>. How many HBM read/write operations occur unfused (assuming each intermediate is written and read back)? How many with full fusion?</p>
+<p><strong>Q4.</strong> What is the key difference between <code>torch.jit.trace</code> and <code>torch.jit.script</code>?</p>
+<p><strong>Q5.</strong> Why does <code>torch.jit.trace</code> give wrong results for models with data-dependent <code>if</code> statements?</p>
+<p><strong>Q6.</strong> What is a "graph break" in <code>torch.compile</code>, and why is it bad?</p>
+<p><strong>Q7.</strong> Can <code>x / x.sum()</code> be fused into a single kernel? Why or why not?</p>
+<p><strong>Q8.</strong> What does the Roofline model tell you that a simple latency measurement does not?</p>
+<p><strong>Q9.</strong> Name three things a compiler can do with a computation graph that it cannot do in eager mode.</p>
+<p><strong>Q10.</strong> A colleague claims their custom CUDA kernel is "optimal" because it uses 100% of compute FLOPS. But the operation is element-wise ReLU. What's wrong with this claim?</p>
+<hr />
+<h3 id="answers">Answers</h3>
+<details>
+<summary>Click to reveal answers</summary>
+
+**A1.** Ridge point = $\frac{312 \times 10^{12}}{2 \times 10^{12}} = 156$ FLOPs/byte. Operations below 156 FLOPs/byte are memory-bound.
+
+**A2.** Memory-bound. AI = 1 FLOP / 8 bytes = 0.125 FLOPs/byte, which is far below the 156 FLOPs/byte ridge point. The GPU's compute units are idle >99% of the time waiting for data.
+
+**A3.** **Unfused:** Let each tensor be $N$ elements of 4 bytes.
+- `x * w`: read $x$, read $w$, write $t_1$ → 12N bytes
+- `+ b`: read $t_1$, read $b$, write $t_2$ → 12N bytes
+- `relu()`: read $t_2$, write $t_3$ → 8N bytes
+- `sigmoid()`: read $t_3$, write $y$ → 8N bytes
+- Total: **40N bytes**, 4 kernel launches
+
+**Fused:** read $x$, $w$, $b$, write $y$ → **16N bytes**, 1 kernel launch. Savings: 60%.
+
+**A4.** `trace` executes the model with real inputs and records operations — control flow is baked in as whatever path was taken during tracing. `script` parses the Python AST and preserves control flow as `if/else` in the IR, but only supports a subset of Python.
+
+**A5.** Because tracing runs the model once with example inputs, it follows only one branch of the `if`. The resulting graph always takes that branch, regardless of future inputs. The conditional is "baked in" at trace time.
+
+**A6.** A graph break is where TorchDynamo cannot trace through a Python operation (e.g., `print()`, unsupported library call) and splits the graph. Each break creates a boundary across which the compiler cannot optimize — no fusion, no memory planning, extra Python overhead between graph segments.
+
+**A7.** No, it cannot be fused into a **single** kernel in general. `x.sum()` is a reduction that must read all elements of $x$ before producing a scalar. Only after the reduction completes can the division proceed. The reduction creates a fusion barrier. (However, the element-wise part `x / scalar` and the reduction `x.sum()` can each be internally optimized.)
+
+**A8.** The Roofline model tells you **whether you're memory-bound or compute-bound** and how close you are to the hardware's theoretical peak. A latency measurement tells you how long something took but not *why* it was slow or how much headroom remains. The Roofline identifies whether to optimize for fewer bytes (memory-bound) or fewer FLOPs (compute-bound).
+
+**A9.** Any three of: (1) Operator fusion, (2) Memory/buffer planning and reuse, (3) Shape specialization / kernel selection, (4) Dead code elimination, (5) Constant folding, (6) Layout optimization (e.g., channels-last), (7) Operation reordering for data locality.
+
+**A10.** ReLU is memory-bound (AI = 0.125 FLOPs/byte). Achieving 100% compute utilization is meaningless because compute is not the bottleneck — memory bandwidth is. The correct metric is % of peak memory bandwidth utilized. A truly optimal ReLU kernel should be hitting close to 2 TB/s bandwidth, not 312 TFLOPS compute.
+
+</details>
+
+<hr />
+<h2 id="4-common-misconceptions">4. Common Misconceptions</h2>
+<h3 id="misconception-1-more-flops-slower">Misconception 1: "More FLOPs = Slower"</h3>
+<p><strong>Reality:</strong> An operation with 10× the FLOPs can be <em>faster</em> than one with fewer FLOPs if the high-FLOP operation is compute-bound and efficiently utilizing the GPU, while the low-FLOP operation is memory-bound and bottlenecked by bandwidth. Matrix multiplication (many FLOPs, high AI) can be faster than a chain of element-wise ops (few FLOPs, low AI) on the same data.</p>
+<h3 id="misconception-2-graph-mode-replaces-eager-mode">Misconception 2: "Graph Mode Replaces Eager Mode"</h3>
+<p><strong>Reality:</strong> <code>torch.compile</code> uses eager mode as a <strong>fallback</strong> for anything it can't trace. Graph breaks insert eager regions between compiled graphs. The two modes coexist — graph mode is an optimization <em>layer</em>, not a replacement.</p>
+<h3 id="misconception-3-fusion-always-helps">Misconception 3: "Fusion Always Helps"</h3>
+<p><strong>Reality:</strong> Fusion helps for <strong>memory-bound</strong> operations. For compute-bound operations (large matmuls), fusion of the matmul itself is not the optimization — the matmul kernel already has high arithmetic intensity. Epilogue fusion (fusing a ReLU after matmul) helps, but fusing two large matmuls together rarely does.</p>
+<h3 id="misconception-4-torchcompile-is-free-performance">Misconception 4: "torch.compile is Free Performance"</h3>
+<p><strong>Reality:</strong> <code>torch.compile</code> has:
+- <strong>Compilation overhead:</strong> First call triggers compilation (seconds to minutes)
+- <strong>Graph breaks:</strong> Non-trivial models may have many breaks, limiting optimization scope
+- <strong>Guard overhead:</strong> Dynamic shapes require recompilation when shapes change
+- <strong>Correctness risks:</strong> Subtle differences in floating-point behavior under fusion</p>
+<h3 id="misconception-5-registers-are-just-fast-memory">Misconception 5: "Registers Are Just Fast Memory"</h3>
+<p><strong>Reality:</strong> Registers are <em>not addressable memory</em> — they're operand storage for ALU instructions. You can't take a pointer to a register. The compiler assigns variables to registers; you control this indirectly through code structure. In GPU programming (Triton/CUDA), register pressure affects occupancy, which affects latency hiding.</p>
+<hr />
+<h2 id="5-ready-for-phase-ii-checklist">5. "Ready for Phase II" Checklist</h2>
+<p>Check each box honestly. If you can't check ≥8/10, revisit the indicated days.</p>
+<ul>
+<li>[ ] <strong>I can draw the GPU memory hierarchy</strong> from registers to HBM with approximate bandwidths (Days 1–3)</li>
+<li>[ ] <strong>I can calculate arithmetic intensity</strong> for any element-wise operation and determine if it's compute or memory bound (Days 6–7)</li>
+<li>[ ] <strong>I can use the Roofline model</strong> to explain why fusion helps element-wise ops but not large matmuls (Days 6–7, 13)</li>
+<li>[ ] <strong>I can explain the difference</strong> between eager and graph execution with concrete examples (Day 12)</li>
+<li>[ ] <strong>I can list 3+ graph capture methods</strong> in PyTorch and their tradeoffs (Day 12)</li>
+<li>[ ] <strong>I can identify fusion opportunities</strong> in a chain of operations and know when fusion is blocked (Day 13)</li>
+<li>[ ] <strong>I can calculate memory traffic savings</strong> from fusing a chain of N element-wise ops (Day 13)</li>
+<li>[ ] <strong>I can use <code>torch.profiler</code></strong> to capture and interpret a Chrome trace (Days 8–11)</li>
+<li>[ ] <strong>I can run <code>torch.compile</code></strong> and inspect generated Triton code with <code>TORCH_LOGS</code> (Days 12–13)</li>
+<li>[ ] <strong>I understand why reductions are fusion barriers</strong> and can explain with an example (Day 13)</li>
+</ul>
+<h3 id="scoring">Scoring</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Score</th>
+<th style="text-align: left;">Assessment</th>
+<th style="text-align: left;">Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">10/10</td>
+<td style="text-align: left;">Ready for Phase II</td>
+<td style="text-align: left;">Proceed to Day 15</td>
+</tr>
+<tr>
+<td style="text-align: left;">8–9/10</td>
+<td style="text-align: left;">Minor gaps</td>
+<td style="text-align: left;">Review indicated days, then proceed</td>
+</tr>
+<tr>
+<td style="text-align: left;">5–7/10</td>
+<td style="text-align: left;">Significant gaps</td>
+<td style="text-align: left;">Re-do the exercises from weak areas</td>
+</tr>
+<tr>
+<td style="text-align: left;">&lt;5/10</td>
+<td style="text-align: left;">Foundation incomplete</td>
+<td style="text-align: left;">Revisit Week 1 before continuing</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-reflection-prompts">6. Reflection Prompts</h2>
+<p>Spend 10 minutes writing brief answers to these. Writing forces clarity.</p>
+<ol>
+<li>
+<p><strong>What was the single most surprising thing you learned in Phase I?</strong> Why did it surprise you — what was your prior mental model?</p>
+</li>
+<li>
+<p><strong>Draw the data flow for a single <code>y = relu(x + bias)</code> call</strong> from Python through the dispatcher to GPU execution. Where does time go in eager mode? Where does fusion save time?</p>
+</li>
+<li>
+<p><strong>If you were designing a new ML framework from scratch</strong>, would you start with eager or graph mode? What would you sacrifice?</p>
+</li>
+<li>
+<p><strong>Name one topic where you feel shaky.</strong> Write one specific question you still have. (This becomes your personal focus for Phase II review.)</p>
+</li>
+<li>
+<p><strong>Explain to an imaginary colleague</strong> (who knows Python but not ML systems) why <code>torch.compile</code> can make their training loop 2× faster without changing any model code.</p>
+</li>
+</ol>
+<hr />
+<h2 id="phase-i-phase-ii-bridge">Phase I → Phase II Bridge</h2>
+<p>What changes in Phase II:</p>
+<pre><code>Phase I (Days 1-14):                    Phase II (Days 15-28):
+─────────────────                       ──────────────────────
+&quot;What happens on the GPU&quot;              &quot;How compilers generate code&quot;
+
+GPU architecture                  ──►  Compiler IR design
+Memory hierarchy                  ──►  Optimization passes
+Profiling &amp; measurement           ──►  Lowering &amp; code generation
+Eager vs graph mode               ──►  Compiler frontend/backend
+Operator fusion (intuition)       ──►  Formal fusion algorithms
+
+You now know WHY things are slow.       You'll learn HOW compilers fix it.
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Phase I gave you the hardware mental model</strong> — memory hierarchy, bandwidth limits, arithmetic intensity, and the Roofline framework</li>
+<li><strong>Profiling is the foundation</strong> — never optimize without measuring first, never claim improvement without measuring after</li>
+<li><strong>Graph capture enables optimization</strong> — the compiler needs to see multiple ops to optimize across them</li>
+<li><strong>Fusion is the #1 optimization</strong> for memory-bound workloads — it eliminates intermediate HBM traffic</li>
+<li><strong>The ecosystem is converging</strong> on <code>torch.compile</code> as the primary optimization path, but understanding <em>why</em> it works requires the hardware foundations from Phase I</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Hennessy &amp; Patterson, "Computer Architecture: A Quantitative Approach" — Chapter 4 (Memory Hierarchy)</li>
+<li>Williams, Waterman, Patterson, "Roofline: An Insightful Visual Performance Model" (2009)</li>
+<li><a href="https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html">PyTorch Performance Tuning Guide</a></li>
+<li><a href="https://jalammar.github.io/illustrated-transformer/">The Illustrated Transformer</a> — useful context for Phase II</li>
+</ul>
+<hr />
+<h2 id="tomorrows-teaser">Tomorrow's Teaser</h2>
+<p><strong>Day 15: Compiler 101 for ML</strong> opens Phase II. We leave the GPU and zoom out to the classic compiler pipeline — lexing, parsing, IR, optimization passes, code generation — and see how ML compilers (XLA, TVM, TorchInductor) map onto this structure. The concepts you've built about <em>what to optimize</em> meet the machinery of <em>how to optimize it</em>.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-13-operator-fusion-fundamentals.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 13: Operator Fusion Fundamentals</a>
+            <a href="../week-03/day-15-compiler-101-for-ml.html" class="text-emerald-600 hover:text-emerald-800">Day 15: Compiler 101 for ML Engineers &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

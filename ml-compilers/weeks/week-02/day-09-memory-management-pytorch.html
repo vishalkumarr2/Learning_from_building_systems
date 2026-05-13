@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 9: Memory Management in PyTorch - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 2: PyTorch Internals</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-9-memory-management-in-pytorch">Day 9: Memory Management in PyTorch</h1>
+<blockquote>
+<p><strong>Phase I · Week 2 · Day 9 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"OOM is not a memory problem — it's a fragmentation problem you haven't visualized yet."</em></p>
+<table>
+<thead>
+<tr>
+<th>Previous</th>
+<th>Next</th>
+<th>Week</th>
+<th>Phase</th>
+<th>Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="day-08-pytorch-under-the-hood.html">Day 8: PyTorch Under the Hood</a></td>
+<td><a href="day-10-custom-cpp-extensions.html">Day 10: Custom C++ Extensions</a></td>
+<td><a href="README.html">Week 2: PyTorch Internals</a></td>
+<td>Phase I: Foundations</td>
+<td><a href="../../STUDY-PLAN.html">Curriculum Home</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>A 7B parameter model in fp16 occupies ~14 GB. Training it with Adam optimizer states,
+gradients, and activations can require 4–6× that. When you hit OOM on a 40 GB A100,
+the bottleneck is rarely total memory — it's <strong>fragmentation</strong> in the caching allocator.
+Understanding how PyTorch manages GPU memory lets you fit larger batches, debug OOM
+errors in minutes instead of hours, and make informed tradeoffs with gradient
+checkpointing.</p>
+<hr />
+<h2 id="1-the-cuda-caching-allocator">1. The CUDA Caching Allocator</h2>
+<p>PyTorch does <strong>not</strong> call <code>cudaMalloc</code> / <code>cudaFree</code> for every tensor. These CUDA
+calls are expensive (~1 ms each) and synchronize the device. Instead, PyTorch uses
+a <strong>caching allocator</strong> that maintains a free-list of previously allocated blocks.</p>
+<pre><code>cudaMalloc lifecycle (without caching):
+───────────────────────────────────────
+  alloc 256MB → [cudaMalloc: 1.2ms + sync]
+  free  256MB → [cudaFree:  0.8ms + sync]
+  alloc 256MB → [cudaMalloc: 1.2ms + sync]   ← pays again!
+
+PyTorch caching allocator:
+──────────────────────────
+  alloc 256MB → [cudaMalloc: 1.2ms]           ← first time only
+  free  256MB → [moved to free list: ~0μs]
+  alloc 256MB → [found in free list: ~0μs]    ← instant reuse!
+</code></pre>
+<h3 id="11-memory-pools">1.1 Memory Pools</h3>
+<p>The allocator maintains two pools, separated by block size:</p>
+<pre><code>┌─────────────────────────────────────────────┐
+│           CUDA Caching Allocator            │
+├──────────────────┬──────────────────────────┤
+│   Small Pool     │     Large Pool           │
+│   (≤ 1 MB)       │     (&gt; 1 MB)             │
+│                  │                          │
+│  ┌────┐ ┌────┐  │  ┌──────────┐ ┌────────┐ │
+│  │512B│ │ 1K │  │  │  2 MB    │ │ 20 MB  │ │
+│  └────┘ └────┘  │  └──────────┘ └────────┘ │
+│  ┌────┐ ┌────┐  │  ┌──────────┐            │
+│  │256B│ │768B│  │  │  512 MB  │  (segments │
+│  └────┘ └────┘  │  └──────────┘   from     │
+│                  │                cudaMalloc)│
+├──────────────────┴──────────────────────────┤
+│  Segment: large contiguous cudaMalloc chunk  │
+│  Block:   sub-region within a segment        │
+└─────────────────────────────────────────────┘
+</code></pre>
+<p><strong>Segments</strong> are the actual <code>cudaMalloc</code> allocations (typically 2 MB or 20 MB+).
+<strong>Blocks</strong> are carved out of segments to satisfy individual tensor requests.</p>
+<hr />
+<h2 id="2-block-splitting-and-merging">2. Block Splitting and Merging</h2>
+<p>When a tensor is allocated, the allocator finds the smallest free block that fits.
+If the block is significantly larger than needed, it <strong>splits</strong>:</p>
+<pre><code>Before allocation of 3 MB:
+┌──────────────────────────────┐
+│        Free: 8 MB            │
+└──────────────────────────────┘
+
+After split:
+┌───────────┬──────────────────┐
+│ Used: 3MB │   Free: 5 MB     │
+└───────────┴──────────────────┘
+
+After freeing the 3 MB tensor:
+┌───────────┬──────────────────┐
+│ Free: 3MB │   Free: 5 MB     │
+└───────────┴──────────────────┘
+        ↓ merge adjacent free blocks
+┌──────────────────────────────┐
+│        Free: 8 MB            │
+└──────────────────────────────┘
+</code></pre>
+<h3 id="21-when-merging-fails-fragmentation">2.1 When Merging Fails → Fragmentation</h3>
+<p>The problem arises when free blocks are <strong>not adjacent</strong>:</p>
+<pre><code>Fragmented state — 6 MB free but cannot allocate 4 MB:
+
+┌──────┬──────┬──────┬──────┬──────┬──────┐
+│Used  │Free  │Used  │Free  │Used  │Free  │
+│ 2MB  │ 2MB  │ 2MB  │ 2MB  │ 2MB  │ 2MB  │
+└──────┴──────┴──────┴──────┴──────┴──────┘
+         ↑              ↑              ↑
+    Can't merge — non-adjacent free blocks
+
+Total free: 6 MB, but max contiguous: 2 MB → OOM for 4 MB request!
+</code></pre>
+<p>This is the <strong>#1 cause</strong> of unexpected OOM errors in training.</p>
+<hr />
+<h2 id="3-inspecting-memory-state">3. Inspecting Memory State</h2>
+<h3 id="31-basic-statistics">3.1 Basic Statistics</h3>
+<pre><code class="language-python">import torch
+
+x = torch.randn(1000, 1000, device='cuda')  # ~4 MB
+
+print(f&quot;Allocated:  {torch.cuda.memory_allocated() / 1e6:.1f} MB&quot;)
+print(f&quot;Reserved:   {torch.cuda.memory_reserved() / 1e6:.1f} MB&quot;)
+print(f&quot;Max alloc:  {torch.cuda.max_memory_allocated() / 1e6:.1f} MB&quot;)
+
+# allocated = memory used by tensors
+# reserved  = memory held by caching allocator (≥ allocated)
+# The gap (reserved - allocated) = free blocks in the cache
+</code></pre>
+<h3 id="32-detailed-statistics">3.2 Detailed Statistics</h3>
+<pre><code class="language-python">stats = torch.cuda.memory_stats()
+
+# Key fields:
+print(f&quot;Active blocks:     {stats['active.all.current']}&quot;)
+print(f&quot;Active bytes:      {stats['active_bytes.all.current'] / 1e6:.1f} MB&quot;)
+print(f&quot;Allocated segments:{stats['segment.all.current']}&quot;)
+print(f&quot;Num allocs:        {stats['allocation.all.current']}&quot;)
+print(f&quot;Num OOM retries:   {stats.get('num_oom_retries', 0)}&quot;)
+
+# Fragmentation indicator:
+reserved = torch.cuda.memory_reserved()
+allocated = torch.cuda.memory_allocated()
+frag_ratio = 1.0 - (allocated / reserved) if reserved &gt; 0 else 0
+print(f&quot;Fragmentation:     {frag_ratio:.1%}&quot;)
+# &gt; 30% fragmentation = likely OOM risk
+</code></pre>
+<h3 id="33-memory-snapshot-pytorch-21">3.3 Memory Snapshot (PyTorch 2.1+)</h3>
+<pre><code class="language-python"># Record a full memory snapshot for visualization
+torch.cuda.memory._record_memory_history(max_entries=100000)
+
+# ... run your training step ...
+model(x).sum().backward()
+optimizer.step()
+
+# Save snapshot
+torch.cuda.memory._dump_snapshot(&quot;memory_snapshot.pickle&quot;)
+torch.cuda.memory._record_memory_history(enabled=None)  # stop
+
+# Visualize at: https://pytorch.org/memory_viz
+# Upload the .pickle file → interactive timeline
+</code></pre>
+<p>The snapshot shows every allocation/free event with Python stack traces,
+letting you identify exactly which line of code caused fragmentation.</p>
+<hr />
+<h2 id="4-oom-debugging-workflow">4. OOM Debugging Workflow</h2>
+<p>When you hit <code>CUDA out of memory</code>, follow this checklist:</p>
+<pre><code>Step 1: Is it a real capacity problem?
+─────────────────────────────────────
+  total_params = sum(p.numel() for p in model.parameters())
+  param_bytes  = total_params * 4  # fp32
+  # Add: gradients (1x), optimizer (2x for Adam)
+  # Add: activations (batch_size × layers × hidden²)
+  # Compare to GPU memory
+
+Step 2: Check fragmentation
+───────────────────────────
+  torch.cuda.memory_stats()['num_alloc_retries']  # &gt; 0 = fragmentation
+  reserved - allocated  # large gap = fragmentation
+
+Step 3: Try max_split_size_mb
+─────────────────────────────
+  # Prevents the allocator from splitting large blocks
+  PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
+
+Step 4: Nuclear option — empty cache
+─────────────────────────────────────
+  torch.cuda.empty_cache()  # returns all free blocks to CUDA
+  # Only helps if fragmentation was the issue
+  # Does NOT free tensors still referenced in Python
+
+Step 5: Record memory snapshot
+──────────────────────────────
+  # Use the snapshot tool from §3.3 to find the culprit
+</code></pre>
+<h3 id="41-the-max_split_size_mb-knob">4.1 The <code>max_split_size_mb</code> Knob</h3>
+<pre><code>Without max_split_size_mb (default):
+  Request 4 MB from a 20 MB block → split into [4 MB used][16 MB free]
+
+With max_split_size_mb=128:
+  Request 4 MB from a 200 MB block → DON'T split, waste 196 MB
+  BUT: the 200 MB block stays contiguous for future large allocations!
+</code></pre>
+<p>Set via environment variable:</p>
+<pre><code class="language-bash">export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
+# OR
+export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64,garbage_collection_threshold:0.8
+</code></pre>
+<p><strong>Tradeoff:</strong> Higher values reduce fragmentation but waste more memory per allocation.</p>
+<hr />
+<h2 id="5-gradient-checkpointing">5. Gradient Checkpointing</h2>
+<p>Gradient checkpointing (activation checkpointing) is a <strong>compute-memory tradeoff</strong>:
+instead of saving all intermediate activations for backward, recompute them on the fly.</p>
+<h3 id="51-memory-analysis">5.1 Memory Analysis</h3>
+<p>For a transformer with $L$ layers, hidden size $H$, sequence length $S$, batch $B$:</p>
+<p>$$M_{\text{activations}} \approx L \times B \times S \times H \times 4 \text{ bytes (fp32)}$$</p>
+<p>For a 24-layer model with $H=1024$, $S=2048$, $B=8$:</p>
+<p>$$M = 24 \times 8 \times 2048 \times 1024 \times 4 \approx 1.5 \text{ GB}$$</p>
+<p>With checkpointing every $\sqrt{L}$ layers:</p>
+<p>$$M_{\text{checkpoint}} \approx \sqrt{L} \times B \times S \times H \times 4 \approx 310 \text{ MB}$$</p>
+<p><strong>Saves ~5× memory, costs ~33% extra compute</strong> (one extra forward pass per segment).</p>
+<h3 id="52-implementation">5.2 Implementation</h3>
+<pre><code class="language-python">import torch
+from torch.utils.checkpoint import checkpoint
+
+class CheckpointedTransformer(torch.nn.Module):
+    def __init__(self, num_layers=24, d_model=1024):
+        super().__init__()
+        self.layers = torch.nn.ModuleList([
+            torch.nn.TransformerEncoderLayer(d_model, nhead=16)
+            for _ in range(num_layers)
+        ])
+
+    def forward(self, x):
+        for layer in self.layers:
+            # Recompute this layer's activations during backward
+            x = checkpoint(layer, x, use_reentrant=False)
+        return x
+
+# Memory comparison:
+model_no_ckpt = CheckpointedTransformer().cuda()
+model_ckpt    = CheckpointedTransformer().cuda()
+
+x = torch.randn(8, 2048, 1024, device='cuda')
+torch.cuda.reset_peak_memory_stats()
+
+# Without checkpointing — stores all activations
+y = model_no_ckpt(x).sum()
+y.backward()
+peak_no_ckpt = torch.cuda.max_memory_allocated()
+
+torch.cuda.reset_peak_memory_stats()
+
+# With checkpointing — recomputes activations
+y = model_ckpt(x).sum()
+y.backward()
+peak_ckpt = torch.cuda.max_memory_allocated()
+
+print(f&quot;Without checkpointing: {peak_no_ckpt / 1e9:.2f} GB&quot;)
+print(f&quot;With checkpointing:    {peak_ckpt / 1e9:.2f} GB&quot;)
+</code></pre>
+<h3 id="53-selective-checkpointing">5.3 Selective Checkpointing</h3>
+<p>Not all layers benefit equally. Checkpoint layers with <strong>large activation tensors</strong>
+but <strong>cheap recomputation</strong>:</p>
+<pre><code class="language-python"># Checkpoint every other layer (common heuristic)
+def forward(self, x):
+    for i, layer in enumerate(self.layers):
+        if i % 2 == 0:  # checkpoint even layers
+            x = checkpoint(layer, x, use_reentrant=False)
+        else:
+            x = layer(x)
+    return x
+</code></pre>
+<hr />
+<h2 id="6-memory-timeline-diagram">6. Memory Timeline Diagram</h2>
+<p>A typical training step's memory timeline:</p>
+<pre><code>GPU Memory
+ ▲
+ │                    ┌─── backward starts
+ │         ┌─ peak   │      gradients accumulate
+ │         │         ▼      activations freed
+ │    ┌────┤    ┌────────┐
+ │    │act.│    │gradients│
+ │    │    │    │ + recomp│
+ │   ┌┤    │    │        │   ┌──── optimizer step
+ │   ││    │    │        │   │  (momentary 2× for Adam states)
+ │  ┌┤│    │    │        ├───┤
+ │  │││    │    │        │   │
+ │──┤│├────┤────┤────────┤───┼──── params + optimizer states (constant)
+ │  │params│    │        │   │
+ └──┴┴─────┴────┴────────┴───┴───▶ time
+    fwd         bwd         opt
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-memory-profiling-30-min">Exercise 1: Memory Profiling (30 min)</h3>
+<pre><code class="language-python"># Profile peak memory of a ResNet-50 forward + backward pass
+# at different batch sizes. Plot batch_size vs peak_memory.
+
+import torch
+import torchvision.models as models
+
+model = models.resnet50().cuda()
+results = []
+
+for bs in [1, 2, 4, 8, 16, 32, 64]:
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+
+    try:
+        x = torch.randn(bs, 3, 224, 224, device='cuda')
+        y = model(x).sum()
+        y.backward()
+        peak = torch.cuda.max_memory_allocated() / 1e9
+        results.append((bs, peak))
+        print(f&quot;BS={bs:3d}: {peak:.2f} GB&quot;)
+        del x, y
+    except RuntimeError as e:
+        print(f&quot;BS={bs:3d}: OOM!&quot;)
+        break
+
+# QUESTION: Is peak memory linear in batch size? Why or why not?
+</code></pre>
+<h3 id="exercise-2-fragmentation-experiment-30-min">Exercise 2: Fragmentation Experiment (30 min)</h3>
+<pre><code class="language-python"># Deliberately create fragmentation and measure its effect.
+
+import torch
+
+def create_fragmentation():
+    &quot;&quot;&quot;Allocate alternating tensors, free every other one.&quot;&quot;&quot;
+    tensors = []
+    for i in range(100):
+        t = torch.randn(1000, 1000, device='cuda')  # ~4 MB each
+        tensors.append(t)
+
+    # Free even-indexed tensors → creates holes
+    for i in range(0, 100, 2):
+        tensors[i] = None
+
+    # Now try to allocate a single large tensor
+    reserved = torch.cuda.memory_reserved()
+    allocated = torch.cuda.memory_allocated()
+    free_in_cache = reserved - allocated
+    print(f&quot;Free in cache: {free_in_cache / 1e6:.0f} MB&quot;)
+
+    try:
+        big = torch.randn(25000, 1000, device='cuda')  # ~100 MB
+        print(&quot;Large allocation succeeded&quot;)
+        del big
+    except RuntimeError:
+        print(&quot;Large allocation FAILED (fragmentation!)&quot;)
+
+    return tensors
+
+held = create_fragmentation()
+</code></pre>
+<h3 id="exercise-3-checkpoint-vs-no-checkpoint-20-min">Exercise 3: Checkpoint vs No-Checkpoint (20 min)</h3>
+<pre><code class="language-python"># Measure the compute-memory tradeoff of gradient checkpointing
+# on a simple MLP with 20 layers.
+
+import torch
+import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
+import time
+
+class DeepMLP(nn.Module):
+    def __init__(self, width=4096, depth=20, use_ckpt=False):
+        super().__init__()
+        self.use_ckpt = use_ckpt
+        self.layers = nn.ModuleList(
+            [nn.Linear(width, width) for _ in range(depth)]
+        )
+
+    def forward(self, x):
+        for layer in self.layers:
+            if self.use_ckpt:
+                x = checkpoint(lambda l, inp: torch.relu(l(inp)),
+                              layer, x, use_reentrant=False)
+            else:
+                x = torch.relu(layer(x))
+        return x
+
+for ckpt in [False, True]:
+    model = DeepMLP(use_ckpt=ckpt).cuda()
+    x = torch.randn(64, 4096, device='cuda')
+
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize()
+    t0 = time.time()
+
+    y = model(x).sum()
+    y.backward()
+
+    torch.cuda.synchronize()
+    elapsed = time.time() - t0
+    peak = torch.cuda.max_memory_allocated() / 1e9
+
+    print(f&quot;Checkpoint={ckpt!s:5s}: {peak:.2f} GB, {elapsed:.3f}s&quot;)
+    del model, x, y
+    torch.cuda.empty_cache()
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Caching allocator</strong> avoids expensive <code>cudaMalloc</code>/<code>cudaFree</code> calls by reusing
+   freed blocks from an internal free-list</li>
+<li><strong>Fragmentation</strong>, not capacity, causes most OOM errors — free memory exists but
+   isn't contiguous</li>
+<li><strong><code>torch.cuda.memory_stats()</code></strong> and <strong>memory snapshots</strong> are your primary debugging
+   tools; <code>nvidia-smi</code> shows reserved, not allocated</li>
+<li><strong><code>max_split_size_mb</code></strong> reduces fragmentation by preventing excessive block splitting</li>
+<li><strong>Gradient checkpointing</strong> trades ~33% extra compute for ~$\sqrt{L}/L$ memory savings
+   on activations</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://pytorch.org/docs/stable/notes/cuda.html#memory-management">PyTorch CUDA Memory Management docs</a></li>
+<li><a href="https://pytorch.org/docs/stable/torch_cuda_memory.html">Understanding CUDA Memory Usage (PyTorch tutorial)</a></li>
+<li><a href="https://arxiv.org/abs/1604.06174">Gradient Checkpointing paper (Chen et al. 2016)</a></li>
+<li><a href="https://pytorch.org/docs/stable/notes/cuda.html#environment-variables">PYTORCH_CUDA_ALLOC_CONF reference</a></li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p><strong>Day 10: Custom C++ Extensions &amp; pybind11</strong> — We'll write a custom CUDA kernel
+(fused bias + GELU), bind it to Python using PyTorch's extension mechanism, register
+it with the dispatcher, and implement the backward pass for autograd integration.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-08-pytorch-under-the-hood.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 8: PyTorch Under the Hood</a>
+            <a href="day-10-custom-cpp-extensions.html" class="text-emerald-600 hover:text-emerald-800">Day 10: Custom C++ Extensions &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 29: TVM Architecture Overview - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 5: TVM Foundations</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-29-tvm-architecture-overview">Day 29: TVM Architecture Overview</h1>
+<blockquote>
+<p><strong>Phase III · Week 5 · Day 29 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"TVM's thesis: the best compiler is one that can learn. By combining classic compiler techniques with machine-learning-driven search, TVM finds optimizations no human would write by hand."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="../week-04/day-28-stop-and-reflect-2.html">Day 28: Stop &amp; Reflect #2</a></td>
+<td style="text-align: left;"><a href="day-30-relay-ir.html">Day 30: Relay IR</a></td>
+<td style="text-align: left;"><a href="README.html">Week 5: TVM Foundations</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>In Phase II you learned how PyTorch's compiler stack works — TorchDynamo captures graphs, AOTAutograd differentiates them, and Inductor lowers to Triton kernels. That stack is tightly coupled to PyTorch and NVIDIA GPUs. <strong>Apache TVM</strong> takes a fundamentally different approach: it's a <em>framework-agnostic</em>, <em>hardware-agnostic</em> compiler that can import models from PyTorch, TensorFlow, ONNX, and more, then compile them for CPUs, GPUs, mobile, browsers, and bare-metal MCUs. TVM pioneered the idea of <strong>learning-based compiler optimization</strong> — using ML to search the space of possible program transformations. Understanding TVM gives you the mental model for every modern ML compiler that followed.</p>
+<hr />
+<h2 id="1-where-tvm-sits-in-the-ecosystem">1. Where TVM Sits in the Ecosystem</h2>
+<h3 id="the-ml-compiler-landscape-2024">The ML Compiler Landscape (2024)</h3>
+<pre><code>Framework-Specific                  Framework-Agnostic
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  torch.compile / Inductor              Apache TVM ◄── today
+  XLA (JAX/TF)                          ONNX Runtime
+  TF-Lite                               TensorRT (NVIDIA only)
+  Core ML (Apple)                       MLIR (infrastructure)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Key difference:
+  torch.compile: &quot;How do I make THIS PyTorch model fast on THIS GPU?&quot;
+  TVM:           &quot;How do I make ANY model fast on ANY hardware?&quot;
+</code></pre>
+<h3 id="tvms-unique-position">TVM's Unique Position</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Feature</th>
+<th style="text-align: left;">torch.compile</th>
+<th style="text-align: left;">XLA</th>
+<th style="text-align: left;">TVM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Input frameworks</td>
+<td style="text-align: left;">PyTorch only</td>
+<td style="text-align: left;">JAX, TF</td>
+<td style="text-align: left;">PyTorch, TF, ONNX, MXNet, …</td>
+</tr>
+<tr>
+<td style="text-align: left;">Target hardware</td>
+<td style="text-align: left;">NVIDIA GPU, CPU</td>
+<td style="text-align: left;">TPU, GPU, CPU</td>
+<td style="text-align: left;">CPU, GPU, ARM, RISC-V, FPGA, MCU</td>
+</tr>
+<tr>
+<td style="text-align: left;">Optimization</td>
+<td style="text-align: left;">Heuristic + Triton</td>
+<td style="text-align: left;">HLO passes</td>
+<td style="text-align: left;">ML-driven search (AutoTVM, MetaSchedule)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Deployment</td>
+<td style="text-align: left;">Python runtime</td>
+<td style="text-align: left;">XLA runtime</td>
+<td style="text-align: left;">Lightweight C runtime (~100 KB)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Open-source</td>
+<td style="text-align: left;">Meta</td>
+<td style="text-align: left;">Google</td>
+<td style="text-align: left;">Apache Foundation</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-the-tvm-full-stack-architecture">2. The TVM Full-Stack Architecture</h2>
+<p>This is the central diagram for all of Phase III. Every lesson in Weeks 5–7 maps to a layer here.</p>
+<pre><code>                    ┌─────────────────────────────────┐
+                    │        ML Frameworks            │
+                    │  PyTorch  TF  ONNX  MXNet  ...  │
+                    └──────────────┬──────────────────┘
+                                   │  Frontend Importers
+                                   ▼
+              ┌────────────────────────────────────────────┐
+              │               Relay IR                     │
+              │  • Functional graph-level IR               │
+              │  • Type system (Tensor, Tuple, Function)   │
+              │  • High-level optimizations                │
+              │    (FuseOps, FoldConstant, AlterLayout)    │
+              └──────────────────┬─────────────────────────┘
+                                 │  Lowering
+                                 ▼
+              ┌────────────────────────────────────────────┐
+              │         Tensor Expression (TE)             │
+              │  • DSL for defining computations           │
+              │  • compute(), placeholder(), reduce()      │
+              │  • Schedule primitives (split, tile, …)    │
+              └──────────────────┬─────────────────────────┘
+                                 │  Lowering
+                                 ▼
+              ┌────────────────────────────────────────────┐
+              │            TensorIR (TIR)                  │
+              │  • Low-level loop-based IR                 │
+              │  • Explicit buffers, indices, loops        │
+              │  • Target-specific transformations         │
+              │  • Directly maps to hardware instructions  │
+              └──────────────────┬─────────────────────────┘
+                                 │  Code generation
+                                 ▼
+              ┌────────────────────────────────────────────┐
+              │            Target Backends                 │
+              │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────────┐  │
+              │  │ LLVM │ │ CUDA │ │ Metal│ │ microTVM │  │
+              │  │(x86, │ │ PTX  │ │OpenCL│ │ (C, bare │  │
+              │  │ ARM) │ │      │ │      │ │  metal)  │  │
+              │  └──────┘ └──────┘ └──────┘ └──────────┘  │
+              └──────────────────┬─────────────────────────┘
+                                 │
+                                 ▼
+              ┌────────────────────────────────────────────┐
+              │           TVM Runtime                      │
+              │  • Lightweight (~100 KB for edge)          │
+              │  • Graph executor or VM executor           │
+              │  • RPC for remote execution/profiling      │
+              │  • Runs on Linux, Android, WASM, MCU       │
+              └────────────────────────────────────────────┘
+</code></pre>
+<h3 id="layer-responsibilities">Layer Responsibilities</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Layer</th>
+<th style="text-align: left;">What It Does</th>
+<th style="text-align: left;">Analogous to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Frontend</strong></td>
+<td style="text-align: left;">Import model → Relay graph</td>
+<td style="text-align: left;">TorchDynamo</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Relay</strong></td>
+<td style="text-align: left;">Graph-level optimization (fusion, layout, constant folding)</td>
+<td style="text-align: left;">FX Graph + AOTAutograd</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>TE</strong></td>
+<td style="text-align: left;">Define tensor computations declaratively</td>
+<td style="text-align: left;">Halide compute</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>TIR</strong></td>
+<td style="text-align: left;">Low-level loop nests, buffer management</td>
+<td style="text-align: left;">LLVM IR / Triton IR</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Codegen</strong></td>
+<td style="text-align: left;">Emit target-specific code (CUDA, LLVM, C)</td>
+<td style="text-align: left;">Inductor codegen</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Runtime</strong></td>
+<td style="text-align: left;">Execute compiled model on device</td>
+<td style="text-align: left;"><code>torch.cuda</code> runtime</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-key-design-decisions">3. Key Design Decisions</h2>
+<h3 id="31-separation-of-compute-and-schedule">3.1 Separation of Compute and Schedule</h3>
+<p>TVM inherits Halide's core idea: <strong>what</strong> to compute is separate from <strong>how</strong> to compute it.</p>
+<pre><code class="language-python"># WHAT: a matrix multiply (compute definition)
+A = te.placeholder((M, K), name=&quot;A&quot;)
+B = te.placeholder((K, N), name=&quot;B&quot;)
+k = te.reduce_axis((0, K), name=&quot;k&quot;)
+C = te.compute((M, N), lambda i, j: te.sum(A[i, k] * B[k, j], axis=k), name=&quot;C&quot;)
+
+# HOW: optimization schedule (can be changed independently!)
+s = te.create_schedule(C.op)
+xo, xi = s[C].split(C.op.axis[0], factor=32)
+yo, yi = s[C].split(C.op.axis[1], factor=32)
+s[C].reorder(xo, yo, xi, yi)
+s[C].vectorize(yi)
+</code></pre>
+<p>This separation means:
+- <strong>Same algorithm, different schedules</strong> → different hardware targets
+- <strong>Schedules can be auto-tuned</strong> by search algorithms
+- The compute definition is a mathematical specification — always correct</p>
+<h3 id="32-learning-based-optimization">3.2 Learning-Based Optimization</h3>
+<p>Traditional compilers use hand-written heuristics. TVM uses <strong>ML models</strong> to predict the best schedule:</p>
+<pre><code>Traditional compiler:              TVM:
+┌──────────┐                      ┌──────────┐
+│ Program  │                      │ Program  │
+└────┬─────┘                      └────┬─────┘
+     │                                 │
+     ▼                                 ▼
+┌──────────────┐               ┌─────────────────┐
+│ Hand-written │               │ Generate 1000s  │
+│ heuristics   │               │ of candidate    │
+│ (if/else)    │               │ schedules       │
+└────┬─────────┘               └────┬────────────┘
+     │                              │
+     ▼                              ▼
+┌────────┐                  ┌──────────────────┐
+│ Output │                  │ Measure on real   │
+└────────┘                  │ hardware (or cost │
+                            │ model prediction) │
+                            └────┬─────────────┘
+                                 │
+                                 ▼
+                          ┌──────────────┐
+                          │ Best schedule│
+                          └──────────────┘
+</code></pre>
+<h3 id="33-lightweight-runtime">3.3 Lightweight Runtime</h3>
+<p>TVM compiles models into shared libraries that can run with a minimal C runtime:</p>
+<ul>
+<li>No Python dependency at inference time</li>
+<li>Runtime is ~100 KB (compare: PyTorch runtime is ~1 GB)</li>
+<li>Supports RPC for remote execution on phones, boards, etc.</li>
+</ul>
+<hr />
+<h2 id="4-installation">4. Installation</h2>
+<h3 id="option-a-pip-install-recommended-for-learning">Option A: pip install (recommended for learning)</h3>
+<pre><code class="language-bash"># CPU-only build (fastest install, sufficient for this curriculum)
+pip install apache-tvm
+
+# With CUDA support
+pip install apache-tvm-cu12   # CUDA 12.x
+
+# Verify installation
+python -c &quot;import tvm; print(tvm.__version__)&quot;
+</code></pre>
+<h3 id="option-b-build-from-source-for-development">Option B: Build from Source (for development)</h3>
+<pre><code class="language-bash">git clone --recursive https://github.com/apache/tvm.git
+cd tvm
+mkdir build &amp;&amp; cd build
+
+# Configure
+cp ../cmake/config.cmake .
+# Edit config.cmake: set USE_LLVM, USE_CUDA as needed
+cmake ..
+make -j$(nproc)
+
+# Python package
+cd ../python
+pip install -e .
+</code></pre>
+<h3 id="option-c-docker">Option C: Docker</h3>
+<pre><code class="language-bash">docker pull tlcpack/ci-gpu:latest
+docker run -it --gpus all tlcpack/ci-gpu:latest bash
+</code></pre>
+<h3 id="verify-full-stack">Verify Full Stack</h3>
+<pre><code class="language-python">import tvm
+from tvm import relay, te
+import numpy as np
+
+print(f&quot;TVM version: {tvm.__version__}&quot;)
+print(f&quot;LLVM enabled: {tvm.runtime.enabled('llvm')}&quot;)
+print(f&quot;CUDA enabled: {tvm.runtime.enabled('cuda')}&quot;)
+print(f&quot;Available targets: {tvm.target.Target.list_kinds()}&quot;)
+</code></pre>
+<hr />
+<h2 id="5-first-model-compile-resnet-18-from-onnx">5. First Model Compile: ResNet-18 from ONNX</h2>
+<p>This exercise walks through the complete TVM pipeline for a real model.</p>
+<h3 id="step-1-export-resnet-18-to-onnx">Step 1: Export ResNet-18 to ONNX</h3>
+<pre><code class="language-python">import torch
+import torchvision
+
+# Get pretrained ResNet-18
+model = torchvision.models.resnet18(weights=&quot;IMAGENET1K_V1&quot;)
+model.eval()
+
+# Export to ONNX
+dummy_input = torch.randn(1, 3, 224, 224)
+torch.onnx.export(model, dummy_input, &quot;resnet18.onnx&quot;,
+                  input_names=[&quot;input&quot;],
+                  output_names=[&quot;output&quot;],
+                  dynamic_axes={&quot;input&quot;: {0: &quot;batch&quot;}})
+</code></pre>
+<h3 id="step-2-import-into-tvm-via-relay">Step 2: Import into TVM via Relay</h3>
+<pre><code class="language-python">import onnx
+import tvm
+from tvm import relay
+
+# Load ONNX model
+onnx_model = onnx.load(&quot;resnet18.onnx&quot;)
+
+# Convert to Relay IR
+shape_dict = {&quot;input&quot;: (1, 3, 224, 224)}
+mod, params = relay.frontend.from_onnx(onnx_model, shape_dict)
+
+# Inspect the Relay module
+print(type(mod))          # tvm.IRModule
+print(mod[&quot;main&quot;])        # The main function in Relay IR
+
+# You'll see something like:
+# fn (%input: Tensor[(1, 3, 224, 224), float32],
+#     %v193: Tensor[(64, 3, 7, 7), float32],  ← conv weights
+#     ...) {
+#   %0 = nn.conv2d(%input, %v193, strides=[2, 2], padding=[3, 3, 3, 3], ...);
+#   %1 = nn.batch_norm(%0, ...);
+#   ...
+# }
+</code></pre>
+<h3 id="step-3-compile-for-cpu">Step 3: Compile for CPU</h3>
+<pre><code class="language-python"># Set target (CPU with LLVM)
+target = tvm.target.Target(&quot;llvm -mcpu=native&quot;)
+
+# Apply standard optimization passes and compile
+with tvm.transform.PassContext(opt_level=3):
+    lib = relay.build(mod, target=target, params=params)
+
+# What just happened:
+# 1. Relay passes ran (FuseOps, FoldConstant, AlterOpLayout, ...)
+# 2. Each fused op was lowered through TE → TIR
+# 3. TIR was compiled via LLVM to native x86 code
+# 4. Result: a shared library with the compiled model
+</code></pre>
+<h3 id="step-4-run-inference">Step 4: Run Inference</h3>
+<pre><code class="language-python">from tvm.contrib import graph_executor
+import numpy as np
+
+# Create runtime executor
+dev = tvm.cpu(0)
+executor = graph_executor.GraphModule(lib[&quot;default&quot;](dev))
+
+# Prepare input (ImageNet normalization)
+input_data = np.random.randn(1, 3, 224, 224).astype(&quot;float32&quot;)
+executor.set_input(&quot;input&quot;, tvm.nd.array(input_data))
+
+# Run inference
+executor.run()
+
+# Get output
+output = executor.get_output(0).numpy()
+print(f&quot;Output shape: {output.shape}&quot;)       # (1, 1000)
+print(f&quot;Top-5 classes: {output[0].argsort()[-5:][::-1]}&quot;)
+</code></pre>
+<h3 id="step-5-benchmark">Step 5: Benchmark</h3>
+<pre><code class="language-python">import timeit
+
+# TVM benchmark
+def tvm_inference():
+    executor.set_input(&quot;input&quot;, tvm.nd.array(input_data))
+    executor.run()
+
+tvm_time = timeit.timeit(tvm_inference, number=100) / 100
+print(f&quot;TVM CPU:     {tvm_time*1000:.2f} ms&quot;)
+
+# PyTorch baseline for comparison
+with torch.no_grad():
+    pt_input = torch.from_numpy(input_data)
+    # Warm up
+    for _ in range(10):
+        model(pt_input)
+
+    pt_time = timeit.timeit(lambda: model(pt_input), number=100) / 100
+    print(f&quot;PyTorch CPU: {pt_time*1000:.2f} ms&quot;)
+    print(f&quot;Speedup:     {pt_time/tvm_time:.2f}x&quot;)
+
+# Typical result (varies by CPU):
+#   TVM CPU:     8.3 ms   (with opt_level=3)
+#   PyTorch CPU: 14.1 ms  (eager mode)
+#   Speedup:     1.70x
+</code></pre>
+<hr />
+<h2 id="6-understanding-what-happened-under-the-hood">6. Understanding What Happened Under the Hood</h2>
+<h3 id="the-compilation-pipeline-in-detail">The Compilation Pipeline in Detail</h3>
+<pre><code class="language-python"># We can inspect each stage:
+
+# 1. After Relay passes (before lowering)
+with tvm.transform.PassContext(opt_level=3):
+    mod_optimized = relay.transform.InferType()(mod)
+    mod_optimized = relay.transform.FuseOps(fuse_opt_level=2)(mod_optimized)
+    print(&quot;After FuseOps:&quot;)
+    print(mod_optimized[&quot;main&quot;])
+
+# 2. Inspect the TIR for a specific fused function
+# (requires building with debug info)
+</code></pre>
+<h3 id="pass-pipeline-at-opt_level3">Pass Pipeline at opt_level=3</h3>
+<p>TVM applies these Relay passes in sequence:</p>
+<pre><code>opt_level=3 pass pipeline:
+────────────────────────────────────────────────────────
+  1. SimplifyInference        ← Fold BatchNorm into Conv
+  2. FoldConstant             ← Evaluate constant expressions
+  3. FoldScaleAxis            ← Propagate scale factors
+  4. CanonicalizeOps          ← Normalize op representations
+  5. AlterOpLayout            ← NCHW → NCHW8c (for AVX)
+  6. FuseOps                  ← Fuse element-wise + reduce chains
+  7. InferType                ← Re-infer types after transforms
+────────────────────────────────────────────────────────
+</code></pre>
+<h3 id="operator-fusion-example">Operator Fusion Example</h3>
+<pre><code>Before FuseOps:                  After FuseOps:
+┌──────┐                         ┌─────────────────────┐
+│Conv2D│                         │    Fused Function    │
+└──┬───┘                         │  Conv2D + BN + ReLU  │
+   │                             │  (single kernel)     │
+┌──▼────────┐                    └─────────────────────┘
+│BatchNorm  │
+└──┬────────┘          Memory traffic: 3 reads → 1 read
+   │                   Kernel launches: 3 → 1
+┌──▼───┐
+│ ReLU │
+└──────┘
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-compile-and-benchmark-different-opt_levels">Exercise 1: Compile and Benchmark Different opt_levels</h3>
+<pre><code class="language-python">import tvm
+from tvm import relay
+import onnx
+import timeit
+import numpy as np
+
+onnx_model = onnx.load(&quot;resnet18.onnx&quot;)
+mod, params = relay.frontend.from_onnx(onnx_model, {&quot;input&quot;: (1, 3, 224, 224)})
+target = tvm.target.Target(&quot;llvm -mcpu=native&quot;)
+
+for opt_level in [0, 1, 2, 3]:
+    with tvm.transform.PassContext(opt_level=opt_level):
+        lib = relay.build(mod, target=target, params=params)
+
+    dev = tvm.cpu(0)
+    executor = graph_executor.GraphModule(lib[&quot;default&quot;](dev))
+    input_data = np.random.randn(1, 3, 224, 224).astype(&quot;float32&quot;)
+
+    def run():
+        executor.set_input(&quot;input&quot;, tvm.nd.array(input_data))
+        executor.run()
+
+    # Warm up
+    for _ in range(10):
+        run()
+
+    time_ms = timeit.timeit(run, number=50) / 50 * 1000
+    print(f&quot;opt_level={opt_level}: {time_ms:.2f} ms&quot;)
+
+# Expected output:
+#   opt_level=0: ~25 ms  (no optimization)
+#   opt_level=1: ~18 ms  (basic fusion)
+#   opt_level=2: ~12 ms  (layout transforms)
+#   opt_level=3: ~8 ms   (all optimizations)
+</code></pre>
+<h3 id="exercise-2-inspect-the-relay-ir">Exercise 2: Inspect the Relay IR</h3>
+<pre><code class="language-python"># Print the full Relay IR
+print(mod[&quot;main&quot;])
+
+# Count the number of operations
+def count_ops(expr):
+    ops = {}
+    def visit(node):
+        if isinstance(node, tvm.relay.Call):
+            op_name = str(node.op)
+            ops[op_name] = ops.get(op_name, 0) + 1
+    tvm.relay.analysis.post_order_visit(mod[&quot;main&quot;], visit)
+    return ops
+
+op_counts = count_ops(mod[&quot;main&quot;])
+for op, count in sorted(op_counts.items(), key=lambda x: -x[1]):
+    print(f&quot;  {op}: {count}&quot;)
+# Expected: nn.conv2d: 20, nn.batch_norm: 20, nn.relu: 17, ...
+</code></pre>
+<h3 id="exercise-3-export-and-load-compiled-model">Exercise 3: Export and Load Compiled Model</h3>
+<pre><code class="language-python"># Save compiled model
+lib.export_library(&quot;resnet18_tvm.so&quot;)
+
+# Later, load without Python model definition:
+loaded_lib = tvm.runtime.load_module(&quot;resnet18_tvm.so&quot;)
+executor = graph_executor.GraphModule(loaded_lib[&quot;default&quot;](tvm.cpu(0)))
+
+# This .so file can run on any machine with TVM runtime
+# No PyTorch, no ONNX, no Python model code needed!
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>TVM is framework-agnostic and hardware-agnostic</strong> — import from any framework, deploy to any target</li>
+<li><strong>The stack has clear layers</strong>: Frontend → Relay (graph) → TE (compute) → TIR (loops) → Codegen → Runtime</li>
+<li><strong>Compute/schedule separation</strong> (from Halide) is the key design decision — the same algorithm can be optimized differently for different hardware</li>
+<li><strong>Learning-based optimization</strong> distinguishes TVM from traditional compilers — ML models guide the search for optimal schedules</li>
+<li><strong>Lightweight runtime</strong> (~100 KB) enables deployment on edge devices, phones, browsers, and MCUs</li>
+<li><strong>At opt_level=3</strong>, TVM applies operator fusion, constant folding, layout transformation, and batch norm folding — yielding 1.5–3× speedup over eager PyTorch on CPU</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://arxiv.org/abs/1802.00751">TVM: An Automated End-to-End Optimizing Compiler for Deep Learning</a> — the original paper (Chen et al., 2018)</li>
+<li><a href="https://tvm.apache.org/docs/">Apache TVM Documentation</a> — official docs</li>
+<li><a href="https://tvm.apache.org/docs/arch/index.html">TVM Design and Architecture</a> — architectural overview</li>
+<li><a href="https://mlc.ai/">MLC.ai Course</a> — Tianqi Chen's Machine Learning Compilation course (uses TVM)</li>
+<li><a href="https://arxiv.org/abs/1805.08166">Learning to Optimize Tensor Programs</a> — the AutoTVM paper</li>
+</ul>
+<hr />
+<h2 id="tomorrow">Tomorrow</h2>
+<p><strong>Day 30: Relay IR</strong> — We'll dive deep into TVM's graph-level intermediate representation. You'll learn Relay's type system, how to construct programs with let-bindings and pattern matching, and how frontend importers translate framework-specific ops into Relay's functional IR.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="../week-04/day-28-stop-and-reflect-2.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 28: Stop & Reflect #2</a>
+            <a href="day-30-relay-ir.html" class="text-emerald-600 hover:text-emerald-800">Day 30: Relay IR &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

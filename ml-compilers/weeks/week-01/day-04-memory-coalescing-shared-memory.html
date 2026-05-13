@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 4: Memory Coalescing & Shared Memory - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 1: GPU Architecture & CUDA</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-4-memory-coalescing-shared-memory">Day 4: Memory Coalescing &amp; Shared Memory</h1>
+<blockquote>
+<p><strong>Phase I — GPU Foundations &amp; CUDA</strong> · Week 1 · Day 4 of 70</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Previous</th>
+<th>Next</th>
+<th>Week</th>
+<th>Phase</th>
+<th>Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="day-03-cuda-programming-basics.html">Day 3: CUDA Programming Basics</a></td>
+<td><a href="day-05-cuda-profiling-roofline.html">Day 5: CUDA Profiling &amp; Roofline</a></td>
+<td><a href="../week-01/">Week 1</a></td>
+<td><a href="../../#phase-i">Phase I</a></td>
+<td><a href="../../STUDY-PLAN.html">Curriculum Home</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>On an A100, global memory bandwidth is 2 TB/s — but only if threads access memory in the right pattern. A naively-coded kernel can achieve under 100 GB/s, leaving 95% of bandwidth on the table. Memory coalescing and shared memory are the two most impactful optimizations you'll ever learn for GPU code. Compilers like Triton auto-tile into shared memory — understanding the underlying mechanics lets you debug and improve what they generate.</p>
+<hr />
+<h2 id="1-global-memory-transaction-mechanics">1. Global Memory Transaction Mechanics</h2>
+<h3 id="11-cache-lines-and-sectors">1.1 Cache Lines and Sectors</h3>
+<p>When a warp (32 threads) executes a load instruction, the hardware coalesces their addresses into <strong>memory transactions</strong>:</p>
+<pre><code>L1 cache line: 128 bytes  (L1 is per-SM)
+L2 sector:      32 bytes  (L2 is shared across SMs)
+
+One 128-byte L1 line = 4 × 32-byte L2 sectors
+</code></pre>
+<p>For <code>float</code> (4 bytes), a perfectly coalesced warp load touches:
+$$32 \text{ threads} \times 4 \text{ bytes} = 128 \text{ bytes} = 1 \text{ cache line}$$</p>
+<h3 id="12-coalesced-vs-uncoalesced-access">1.2 Coalesced vs Uncoalesced Access</h3>
+<pre><code>COALESCED — threads access consecutive addresses:
+
+Thread:   t0    t1    t2    t3   ...  t31
+Address:  [0]   [1]   [2]   [3]  ...  [31]
+          └──────────────────────────────┘
+                  1 transaction (128 B)
+
+STRIDED — threads skip elements (stride = 2):
+
+Thread:   t0    t1    t2    t3   ...  t31
+Address:  [0]   [2]   [4]   [6]  ...  [62]
+          └──────────────────────────────────────┘
+                  2 transactions (256 B loaded, 128 B used)
+                  → 50% bandwidth utilization
+
+RANDOM — scattered addresses:
+
+Thread:   t0     t1     t2     t3    ...  t31
+Address:  [174]  [3]    [891]  [42]  ...  [507]
+          └─ up to 32 transactions (1024 B loaded, 128 B used) ─┘
+                  → 12.5% bandwidth utilization
+</code></pre>
+<h3 id="13-the-cost-formula">1.3 The Cost Formula</h3>
+<p>Effective bandwidth utilization:</p>
+<p>$$\eta = \frac{\text{bytes actually needed}}{\text{bytes actually transferred}} = \frac{128}{T \times 32}$$</p>
+<p>where $T$ is the number of 32-byte L2 sectors touched by the warp.</p>
+<hr />
+<h2 id="2-aos-vs-soa-the-layout-that-matters">2. AoS vs SoA — The Layout That Matters</h2>
+<h3 id="21-array-of-structures-aos">2.1 Array of Structures (AoS)</h3>
+<pre><code class="language-c">struct Particle { float x, y, z, w; };  // 16 bytes
+Particle particles[N];  // AoS layout
+</code></pre>
+<p>Memory layout:</p>
+<pre><code>[x0 y0 z0 w0 | x1 y1 z1 w1 | x2 y2 z2 w2 | ...]
+</code></pre>
+<p>When 32 threads each read <code>.x</code>:</p>
+<pre><code>Thread 0 reads particles[0].x   → byte offset 0
+Thread 1 reads particles[1].x   → byte offset 16
+Thread 2 reads particles[2].x   → byte offset 32
+...
+Stride = 16 bytes → 4 transactions instead of 1
+Bandwidth utilization: 25%
+</code></pre>
+<h3 id="22-structure-of-arrays-soa">2.2 Structure of Arrays (SoA)</h3>
+<pre><code class="language-c">struct Particles {
+    float *x, *y, *z, *w;
+};
+</code></pre>
+<p>Memory layout:</p>
+<pre><code>x: [x0 x1 x2 x3 ... xN]
+y: [y0 y1 y2 y3 ... yN]
+z: [z0 z1 z2 z3 ... zN]
+w: [w0 w1 w2 w3 ... wN]
+</code></pre>
+<p>When 32 threads each read <code>x[tid]</code>:</p>
+<pre><code>Thread 0 reads x[0]   → byte offset 0
+Thread 1 reads x[1]   → byte offset 4
+Thread 2 reads x[2]   → byte offset 8
+...
+Stride = 4 bytes → 1 transaction. PERFECT coalescing.
+</code></pre>
+<h3 id="23-performance-comparison">2.3 Performance Comparison</h3>
+<pre><code>Kernel: update position += velocity * dt
+
+AoS:  Effective BW =  410 GB/s  (A100 peak: 2039 GB/s)
+SoA:  Effective BW = 1840 GB/s
+
+Speedup from layout change alone: 4.5×
+</code></pre>
+<hr />
+<h2 id="3-shared-memory">3. Shared Memory</h2>
+<h3 id="31-what-is-shared-memory">3.1 What Is Shared Memory?</h3>
+<p>Shared memory is a <strong>programmer-managed L1 cache</strong> — fast SRAM on each SM, shared among all threads in a block.</p>
+<pre><code>┌─────────────── SM ───────────────┐
+│                                  │
+│  ┌─────────┐   ┌──────────────┐  │
+│  │ Warp 0  │   │   Shared     │  │
+│  │ Warp 1  │◄─►│   Memory     │  │
+│  │ Warp 2  │   │  (up to 164  │  │
+│  │  ...    │   │    KB/SM)    │  │
+│  └─────────┘   └──────────────┘  │
+│         │              │         │
+│         └───── L1 ─────┘         │
+│                │                 │
+└────────────────┼─────────────────┘
+                 │
+           L2 Cache (global)
+                 │
+           HBM (global memory)
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Global Memory</th>
+<th>Shared Memory</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Latency</td>
+<td>~400 cycles</td>
+<td>~20 cycles</td>
+</tr>
+<tr>
+<td>Bandwidth (per SM)</td>
+<td>~100 GB/s</td>
+<td>~4 TB/s</td>
+</tr>
+<tr>
+<td>Size</td>
+<td>40–80 GB</td>
+<td>48–164 KB/SM</td>
+</tr>
+<tr>
+<td>Scope</td>
+<td>All threads</td>
+<td>Block only</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-declaration-usage">3.2 Declaration &amp; Usage</h3>
+<pre><code class="language-cuda">// Static allocation (compile-time size)
+__shared__ float tile[32][32];
+
+// Dynamic allocation (runtime size)
+extern __shared__ float sdata[];
+// Launch: kernel&lt;&lt;&lt;grid, block, shared_bytes&gt;&gt;&gt;(...)
+</code></pre>
+<h3 id="33-the-tiling-pattern">3.3 The Tiling Pattern</h3>
+<p>The fundamental shared memory pattern:</p>
+<pre><code>1. Load a tile from global memory into shared memory (coalesced!)
+2. __syncthreads()  ← ensure all threads finished loading
+3. Compute using shared memory (fast, repeated access OK)
+4. __syncthreads()  ← ensure all threads finished computing
+5. Write results back to global memory (coalesced!)
+</code></pre>
+<hr />
+<h2 id="4-bank-conflicts">4. Bank Conflicts</h2>
+<h3 id="41-shared-memory-banks">4.1 Shared Memory Banks</h3>
+<p>Shared memory is divided into <strong>32 banks</strong> (one per warp lane). Successive 4-byte words map to successive banks:</p>
+<pre><code>Address:  0    4    8   12   ...  124  128  132
+Bank:     0    1    2    3   ...   31    0    1
+</code></pre>
+<ul>
+<li><strong>No conflict</strong>: each thread accesses a different bank → 1 cycle</li>
+<li><strong>N-way conflict</strong>: N threads hit the same bank → serialized to N cycles</li>
+<li><strong>Broadcast</strong>: all threads read the <em>same</em> address → 1 cycle (special case)</li>
+</ul>
+<h3 id="42-common-conflict-pattern-column-access">4.2 Common Conflict Pattern — Column Access</h3>
+<pre><code class="language-cuda">__shared__ float tile[32][32];
+
+// Row access: tile[threadIdx.x][0] → stride 32 → bank 0 always!
+// ALL 32 threads hit bank 0 → 32-way conflict!
+</code></pre>
+<h3 id="43-fix-padding">4.3 Fix: Padding</h3>
+<pre><code class="language-cuda">__shared__ float tile[32][32 + 1];  // +1 padding column
+
+// Now stride between rows = 33 floats
+// Thread k accesses bank (k * 33) % 32 = k * 1 % 32 → all different!
+// 0-way conflict. Free speedup.
+</code></pre>
+<p>Bank conflict effect on a matrix transpose kernel:</p>
+<pre><code>Without padding:  380 GB/s  (32-way bank conflicts)
+With padding:    1590 GB/s  (zero bank conflicts)
+
+Speedup: 4.2×
+</code></pre>
+<hr />
+<h2 id="5-complete-example-matrix-transpose">5. Complete Example: Matrix Transpose</h2>
+<h3 id="51-naive-transpose-uncoalesced-writes">5.1 Naive Transpose (Uncoalesced Writes)</h3>
+<pre><code class="language-cuda">__global__ void transpose_naive(float *out, const float *in,
+                                int width, int height) {
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    if (col &lt; width &amp;&amp; row &lt; height) {
+        out[col * height + row] = in[row * width + col];
+        //  ^^^^^^^^^^^^^^^^^^^    ^^^^^^^^^^^^^^^^^^
+        //  strided writes!        coalesced reads
+    }
+}
+</code></pre>
+<h3 id="52-shared-memory-transpose-coalesced-everything">5.2 Shared Memory Transpose (Coalesced Everything)</h3>
+<pre><code class="language-cuda">#define TILE_DIM 32
+#define BLOCK_ROWS 8
+
+__global__ void transpose_smem(float *out, const float *in,
+                               int width, int height) {
+    __shared__ float tile[TILE_DIM][TILE_DIM + 1]; // +1 for padding
+
+    int x = blockIdx.x * TILE_DIM + threadIdx.x;
+    int y = blockIdx.y * TILE_DIM + threadIdx.y;
+
+    // Load tile — coalesced reads from 'in'
+    for (int j = 0; j &lt; TILE_DIM; j += BLOCK_ROWS) {
+        if (x &lt; width &amp;&amp; (y + j) &lt; height) {
+            tile[threadIdx.y + j][threadIdx.x] = in[(y + j) * width + x];
+        }
+    }
+    __syncthreads();
+
+    // Write transposed tile — coalesced writes to 'out'
+    x = blockIdx.y * TILE_DIM + threadIdx.x;  // swapped block indices
+    y = blockIdx.x * TILE_DIM + threadIdx.y;
+
+    for (int j = 0; j &lt; TILE_DIM; j += BLOCK_ROWS) {
+        if (x &lt; height &amp;&amp; (y + j) &lt; width) {
+            out[(y + j) * height + x] = tile[threadIdx.x][threadIdx.y + j];
+            //                               ^^^^^^^^^^^ transposed indexing
+        }
+    }
+}
+</code></pre>
+<h3 id="53-performance-summary-4096-4096-a100">5.3 Performance Summary (4096 × 4096, A100)</h3>
+<pre><code>Version                  | Effective BW | % of Peak
+─────────────────────────┼──────────────┼──────────
+Naive (uncoalesced)      |   380 GB/s   |    19%
+Shared memory (no pad)   |   920 GB/s   |    45%
+Shared memory (+1 pad)   |  1590 GB/s   |    78%
+cuBLAS geam              |  1710 GB/s   |    84%
+</code></pre>
+<hr />
+<h2 id="6-synchronization-deep-dive">6. Synchronization Deep Dive</h2>
+<h3 id="61-__syncthreads">6.1 <code>__syncthreads()</code></h3>
+<p>Barrier for <strong>all threads in a block</strong>. Every thread must reach it before any thread proceeds.</p>
+<pre><code class="language-cuda">// WRONG — divergent syncthreads → undefined behavior
+if (threadIdx.x &lt; 16) {
+    __syncthreads();  // ← only half the block reaches this!
+}
+
+// CORRECT — all threads reach the same barrier
+__syncthreads();
+if (threadIdx.x &lt; 16) {
+    // safe to use shared data written by all threads
+}
+</code></pre>
+<h3 id="62-__syncwarpmask">6.2 <code>__syncwarp(mask)</code></h3>
+<p>Lightweight sync within a warp (32 threads). Useful for warp-level primitives:</p>
+<pre><code class="language-cuda">// Warp-level reduction (no shared memory needed)
+float val = input[tid];
+for (int offset = 16; offset &gt; 0; offset &gt;&gt;= 1) {
+    val += __shfl_down_sync(0xFFFFFFFF, val, offset);
+}
+// Thread 0 of each warp now has the partial sum
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<ol>
+<li>
+<p><strong>Coalescing experiment</strong>: Write a kernel that reads a float array with stride 1, 2, 4, 8, 16, 32. Measure effective bandwidth for each. Plot the curve.</p>
+</li>
+<li>
+<p><strong>AoS → SoA conversion</strong>: Convert a particle simulation kernel from AoS to SoA layout. Measure the bandwidth improvement with <code>nsight compute</code>.</p>
+</li>
+<li>
+<p><strong>Bank conflict detector</strong>: Write a shared-memory kernel that deliberately creates 2-way, 4-way, 8-way, and 32-way bank conflicts. Use <code>nsight compute</code> to verify the <code>l1tex__data_bank_conflicts_pipe_lsu_mem_shared</code> metric.</p>
+</li>
+<li>
+<p><strong>Optimized transpose</strong>: Implement the tiled transpose from Section 5.2. Try tile sizes 16×16 and 32×32. Compare against <code>cublasSgeam</code>.</p>
+</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li>A warp's memory access pattern determines how many <strong>128-byte cache line transactions</strong> are needed — aim for exactly one.</li>
+<li><strong>SoA layout</strong> is almost always better than AoS for GPU kernels — it directly enables coalescing.</li>
+<li>Shared memory is ~20× faster than global memory and acts as a <strong>programmer-managed cache</strong>.</li>
+<li><strong>Padding</strong> (<code>float tile[32][33]</code>) eliminates bank conflicts for free.</li>
+<li>The tiling pattern — load coalesced → sync → compute from shared → sync → store coalesced — is the single most important GPU optimization pattern.</li>
+<li><code>__syncthreads()</code> must be reached by <strong>all</strong> threads in a block — never place it inside divergent branches.</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#shared-memory">CUDA C++ Programming Guide — Shared Memory</a></li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#memory-optimizations">CUDA C++ Best Practices — Memory Optimizations</a></li>
+<li>Volkov &amp; Demmel, "Benchmarking GPUs to Tune Dense Linear Algebra" (SC'08)</li>
+<li>Ruetsch &amp; Micikevicius, "Optimizing Matrix Transpose in CUDA" — <a href="https://developer.nvidia.com/blog/efficient-matrix-transpose-cuda-cc/">NVIDIA Technical Report</a></li>
+</ul>
+<hr />
+<blockquote>
+<p><strong>Tomorrow</strong>: <a href="day-05-cuda-profiling-roofline.html">Day 5 — CUDA Profiling &amp; Roofline Model</a>. You'll learn to use <code>nsight compute</code> and <code>nsight systems</code> to measure exactly where your kernels sit on the roofline — and what to do about it.</p>
+</blockquote>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-03-cuda-programming-basics.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 3: CUDA Programming Basics</a>
+            <a href="day-05-cuda-profiling-roofline.html" class="text-emerald-600 hover:text-emerald-800">Day 5: CUDA Profiling & Roofline &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 45: ONNX Runtime Deep Dive - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 7: TVM Advanced & MLC</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-45-onnx-runtime-deep-dive">Day 45: ONNX Runtime Deep Dive</h1>
+<blockquote>
+<p><strong>Phase III · Week 7 · Day 45 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The best deployment framework isn't the one with the most optimizations — it's the one that runs everywhere your models need to go."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-44-xla-stablehlo.html">Day 44: XLA &amp; StableHLO</a></td>
+<td style="text-align: left;"><a href="day-46-mlc-llm.html">Day 46: MLC-LLM</a></td>
+<td style="text-align: left;"><a href="README.html">Week 7: TVM Advanced &amp; MLC</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p><strong>ONNX Runtime (ORT)</strong> is the most widely deployed ML inference engine in production. It powers inference at Microsoft (Azure ML, Office, Bing, Xbox), Hugging Face, and thousands of companies. While TVM and XLA focus on compilation to optimized kernels, ORT takes a pragmatic approach: <strong>partition the model graph across the best available backend for each subgraph</strong> — CUDA for some ops, TensorRT for others, CPU for the rest. This "best tool for each op" philosophy, combined with the ONNX standard format, makes ORT the go-to for deploying trained models. Understanding ORT's architecture reveals a different design philosophy from compiler-centric approaches.</p>
+<hr />
+<h2 id="1-ort-architecture-overview">1. ORT Architecture Overview</h2>
+<h3 id="the-execution-model">The Execution Model</h3>
+<pre><code>ONNX Runtime Architecture
+══════════════════════════
+
+  ┌─────────────────────────────────────────────┐
+  │              ONNX Model (.onnx)              │
+  │  (framework-agnostic graph + weights)        │
+  └────────────────────┬────────────────────────┘
+                       │
+  ┌────────────────────▼────────────────────────┐
+  │            Graph Optimization                │
+  │  Level 1: Basic (const folding, dead code)   │
+  │  Level 2: Extended (fusion, layout)          │
+  │  Level 99: Layout optimization               │
+  └────────────────────┬────────────────────────┘
+                       │
+  ┌────────────────────▼────────────────────────┐
+  │          Graph Partitioning                  │
+  │  Assign subgraphs to Execution Providers     │
+  │                                              │
+  │  ┌──────┐ ┌──────────┐ ┌────────┐ ┌──────┐ │
+  │  │TensoRT│ │   CUDA   │ │OpenVINO│ │ CPU  │ │
+  │  │ EP    │ │   EP     │ │  EP    │ │ EP   │ │
+  │  └──┬───┘ └────┬─────┘ └───┬────┘ └──┬───┘ │
+  └─────┼──────────┼───────────┼─────────┼─────┘
+        │          │           │         │
+  ┌─────▼──────────▼───────────▼─────────▼─────┐
+  │            Execution Engine                  │
+  │  • Sequential or parallel execution          │
+  │  • Memory planning (arena allocator)         │
+  │  • Kernel dispatch                           │
+  └──────────────────────────────────────────────┘
+</code></pre>
+<h3 id="key-design-principles">Key Design Principles</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Principle</th>
+<th style="text-align: left;">Implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Format-first</strong></td>
+<td style="text-align: left;">ONNX is the input — no tracing or re-compilation</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Best backend per op</strong></td>
+<td style="text-align: left;">Graph partitioning across Execution Providers</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Incremental optimization</strong></td>
+<td style="text-align: left;">Three levels of graph transforms</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Zero-copy where possible</strong></td>
+<td style="text-align: left;">Arena allocator with memory reuse patterns</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Backward compatible</strong></td>
+<td style="text-align: left;">Old models run on new ORT versions</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-graph-optimization-pipeline">2. Graph Optimization Pipeline</h2>
+<h3 id="optimization-levels">Optimization Levels</h3>
+<p>ORT applies graph transformations in three levels, from safe to aggressive:</p>
+<pre><code class="language-python">import onnxruntime as ort
+
+# Configure optimization level
+options = ort.SessionOptions()
+
+# Level 0: No optimization (debugging)
+options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+
+# Level 1: Basic (always safe)
+#   • Constant folding
+#   • Dead node elimination
+#   • Redundant node elimination
+options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
+
+# Level 2: Extended (may change numerics slightly)
+#   • Operator fusion (Conv+BN, MatMul+Add, etc.)
+#   • Attention fusion
+#   • GELU fusion
+#   • Layer normalization fusion
+options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+
+# Level 99: All optimizations including layout transforms
+options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+session = ort.InferenceSession(&quot;model.onnx&quot;, options)
+</code></pre>
+<h3 id="key-fusion-patterns">Key Fusion Patterns</h3>
+<pre><code>ORT Fusion Patterns (selected)
+══════════════════════════════
+
+1. Conv + BatchNorm → FusedConv
+   ┌──────┐   ┌────┐           ┌──────────┐
+   │ Conv │──→│ BN │    ═══→   │ FusedConv│  (BN folded into Conv)
+   └──────┘   └────┘           └──────────┘
+
+2. MatMul + Add → FusedMatMul (Gemm)
+   ┌────────┐   ┌─────┐        ┌──────────────┐
+   │ MatMul │──→│ Add │  ═══→  │ FusedGemm    │
+   └────────┘   └─────┘        │ (α·A·B + β·C)│
+                                └──────────────┘
+
+3. Multi-Head Attention Fusion
+   ┌────┐ ┌────┐ ┌────┐
+   │ Wq │ │ Wk │ │ Wv │
+   └──┬─┘ └──┬─┘ └──┬─┘        ┌──────────────────┐
+      │      │      │    ═══→  │ MultiHeadAttention│
+   ┌──▼──────▼──────▼──┐       │ (single fused op) │
+   │  QKV + softmax +  │       └──────────────────┘
+   │  weighted sum      │
+   └────────────────────┘
+
+4. LayerNorm Fusion
+   ┌──────┐ ┌──────┐ ┌──────┐
+   │ReduceMean │→│ Sub │→│ Pow │→...   ═══→  ┌───────────┐
+   │      │→│ Div │→│ Mul │→│ Add │          │ LayerNorm │
+   └──────┘ └─────┘ └─────┘ └─────┘          └───────────┘
+
+5. GELU Approximation Fusion
+   x * 0.5 * (1 + tanh(√(2/π) * (x + 0.044715 * x³)))
+   ═══→  BiasGelu(x, bias)
+</code></pre>
+<hr />
+<h2 id="3-execution-providers-eps">3. Execution Providers (EPs)</h2>
+<h3 id="the-ep-architecture">The EP Architecture</h3>
+<p>Execution Providers are pluggable backends. ORT queries them in priority order — each EP claims the subgraphs it can handle:</p>
+<pre><code>Graph Partitioning with Execution Providers
+════════════════════════════════════════════
+
+  Full Model Graph:
+  ┌────┐   ┌────┐   ┌────────┐   ┌──────┐   ┌────┐
+  │Conv│──→│BN  │──→│Attention│──→│Custom│──→│Soft│
+  └────┘   └────┘   └────────┘   │  Op  │   │max │
+                                  └──────┘   └────┘
+
+  EP Priority: TensorRT &gt; CUDA &gt; CPU
+
+  TensorRT claims:  Conv+BN (as fused engine)
+  CUDA claims:      Attention, Softmax
+  CPU fallback:     Custom Op (not supported by GPU EPs)
+
+  Result:
+  ┌─── TensorRT EP ───┐  ┌──── CUDA EP ────┐  ┌─ CPU EP ─┐
+  │ Conv+BN (engine)   │→│ Attention, Soft  │→│ CustomOp │
+  └────────────────────┘  └─────────────────┘  └──────────┘
+       GPU memory              GPU memory         CPU mem
+                     ↕ data transfer ↕
+</code></pre>
+<h3 id="available-execution-providers">Available Execution Providers</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">EP</th>
+<th style="text-align: left;">Target Hardware</th>
+<th style="text-align: left;">Key Advantage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>CPUExecutionProvider</code></td>
+<td style="text-align: left;">Any CPU</td>
+<td style="text-align: left;">Always available, baseline</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>CUDAExecutionProvider</code></td>
+<td style="text-align: left;">NVIDIA GPU</td>
+<td style="text-align: left;">cuDNN/cuBLAS integration</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>TensorrtExecutionProvider</code></td>
+<td style="text-align: left;">NVIDIA GPU</td>
+<td style="text-align: left;">INT8/FP16, layer fusion engine</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>OpenVINOExecutionProvider</code></td>
+<td style="text-align: left;">Intel CPU/GPU/VPU</td>
+<td style="text-align: left;">Intel-optimized, edge devices</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>DirectMLExecutionProvider</code></td>
+<td style="text-align: left;">Windows GPU</td>
+<td style="text-align: left;">Any DirectX 12 GPU</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>CoreMLExecutionProvider</code></td>
+<td style="text-align: left;">Apple Silicon</td>
+<td style="text-align: left;">Neural Engine access</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>QNNExecutionProvider</code></td>
+<td style="text-align: left;">Qualcomm NPU</td>
+<td style="text-align: left;">Mobile (Snapdragon)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>ROCmExecutionProvider</code></td>
+<td style="text-align: left;">AMD GPU</td>
+<td style="text-align: left;">MIOpen/rocBLAS</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>AzureExecutionProvider</code></td>
+<td style="text-align: left;">Azure cloud</td>
+<td style="text-align: left;">Remote inference</td>
+</tr>
+</tbody>
+</table>
+<h3 id="configuring-eps">Configuring EPs</h3>
+<pre><code class="language-python">import onnxruntime as ort
+
+# Priority list: try TensorRT first, fall back to CUDA, then CPU
+providers = [
+    ('TensorrtExecutionProvider', {
+        'trt_max_workspace_size': 2 * 1024 * 1024 * 1024,  # 2GB
+        'trt_fp16_enable': True,
+        'trt_engine_cache_enable': True,
+        'trt_engine_cache_path': './trt_cache/',
+    }),
+    ('CUDAExecutionProvider', {
+        'device_id': 0,
+        'arena_extend_strategy': 'kNextPowerOfTwo',
+        'gpu_mem_limit': 4 * 1024 * 1024 * 1024,  # 4GB
+        'cudnn_conv_algo_search': 'EXHAUSTIVE',
+    }),
+    'CPUExecutionProvider',
+]
+
+session = ort.InferenceSession(&quot;model.onnx&quot;, providers=providers)
+
+# Check which EP each node is assigned to
+for node in session.get_providers():
+    print(node)
+</code></pre>
+<hr />
+<h2 id="4-memory-management">4. Memory Management</h2>
+<h3 id="arena-allocator">Arena Allocator</h3>
+<p>ORT uses an arena-based allocator to minimize memory allocation overhead:</p>
+<pre><code>ORT Memory Arena
+════════════════
+
+  Pool Structure (pre-allocated chunks):
+  ┌──────────────────────────────────────┐
+  │            Arena (e.g., 256 MB)       │
+  │  ┌────┐┌────────┐┌──┐┌──────┐┌────┐ │
+  │  │used││  free  ││us││ free ││used│ │
+  │  │ 4MB││  12MB  ││2M││  8MB ││ 4MB│ │
+  │  └────┘└────────┘└──┘└──────┘└────┘ │
+  └──────────────────────────────────────┘
+
+  Allocation strategy:
+  1. Best-fit from existing free blocks
+  2. If no fit: extend arena (kNextPowerOfTwo)
+  3. Freed blocks are returned to pool, not to OS
+
+  Memory Reuse Patterns:
+  ┌──────────────────────────────────────────┐
+  │  Execution order:  A → B → C → D → E    │
+  │                                          │
+  │  A's buffer: [████]                      │
+  │  B's buffer:       [████████]            │
+  │  C reuses A:  [████]      ← same addr   │
+  │  D's buffer:               [████]        │
+  │  E reuses B:       [████████]← reused    │
+  └──────────────────────────────────────────┘
+</code></pre>
+<h3 id="memory-optimization-patterns">Memory Optimization Patterns</h3>
+<pre><code class="language-python">options = ort.SessionOptions()
+
+# Enable memory pattern optimization
+options.enable_mem_pattern = True
+
+# Enable memory arena shrinkage (reduce peak memory)
+options.enable_mem_reuse = True
+
+# Set execution mode
+options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL  # or ORT_PARALLEL
+
+# Limit intra-op threads (e.g., for server deployment)
+options.intra_op_num_threads = 4
+options.inter_op_num_threads = 2
+</code></pre>
+<hr />
+<h2 id="5-ort-vs-tvm-deployment-trade-offs">5. ORT vs TVM: Deployment Trade-offs</h2>
+<h3 id="architectural-differences">Architectural Differences</h3>
+<pre><code>ORT Approach                    TVM Approach
+════════════                    ════════════
+
+  Model.onnx                    Model (any framework)
+      │                              │
+  ┌───▼────────┐               ┌─────▼──────┐
+  │ Graph Opt  │               │ Import to   │
+  │ (rewrites) │               │ Relay/Relax │
+  └───┬────────┘               └─────┬──────┘
+      │                              │
+  ┌───▼────────┐               ┌─────▼──────┐
+  │ Partition  │               │ Compile +   │
+  │ to EPs     │  vs.          │ Auto-Tune   │ 
+  └───┬────────┘               └─────┬──────┘
+      │                              │
+  ┌───▼────────┐               ┌─────▼──────┐
+  │ Call vendor │               │ Generate   │
+  │ libraries  │               │ custom     │
+  │ (cuDNN,    │               │ kernels    │
+  │  TensorRT) │               │            │
+  └────────────┘               └────────────┘
+
+  ORT: &quot;Best library for each op&quot;
+  TVM: &quot;Best generated kernel for each op&quot;
+</code></pre>
+<h3 id="when-to-choose-each">When to Choose Each</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Scenario</th>
+<th style="text-align: left;">Choose ORT</th>
+<th style="text-align: left;">Choose TVM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Quick deployment</strong></td>
+<td style="text-align: left;">✅ Drop in ONNX, done</td>
+<td style="text-align: left;">Needs tuning time</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>NVIDIA GPU</strong></td>
+<td style="text-align: left;">✅ cuDNN/TRT tuned</td>
+<td style="text-align: left;">Good, less mature</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Custom hardware</strong></td>
+<td style="text-align: left;">❌ Needs EP impl</td>
+<td style="text-align: left;">✅ Write schedule</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Edge / MCU</strong></td>
+<td style="text-align: left;">Limited (mobile EPs)</td>
+<td style="text-align: left;">✅ µTVM, bare metal</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Transformer models</strong></td>
+<td style="text-align: left;">✅ Built-in attention fusion</td>
+<td style="text-align: left;">✅ Auto-tuned</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Model variety</strong></td>
+<td style="text-align: left;">✅ 300+ ONNX ops</td>
+<td style="text-align: left;">Some ops need impl</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Latency-critical</strong></td>
+<td style="text-align: left;">✅ TRT EP very fast</td>
+<td style="text-align: left;">✅ After tuning</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Cross-platform</strong></td>
+<td style="text-align: left;">✅ Windows/Linux/Mac</td>
+<td style="text-align: left;">✅ Linux-focused</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-hands-on-exercises">6. Hands-On Exercises</h2>
+<h3 id="exercise-1-export-and-optimize-a-model-30-min">Exercise 1: Export and Optimize a Model (30 min)</h3>
+<pre><code class="language-python">import torch
+import torch.nn as nn
+import onnxruntime as ort
+import numpy as np
+
+# 1. Define a model
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model=256, nhead=8):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(d_model, nhead, batch_first=True)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.ff = nn.Sequential(
+            nn.Linear(d_model, d_model * 4),
+            nn.GELU(),
+            nn.Linear(d_model * 4, d_model),
+        )
+        self.norm2 = nn.LayerNorm(d_model)
+
+    def forward(self, x):
+        attn_out, _ = self.attn(x, x, x)
+        x = self.norm1(x + attn_out)
+        x = self.norm2(x + self.ff(x))
+        return x
+
+model = TransformerBlock().eval()
+dummy = torch.randn(1, 16, 256)
+
+# 2. Export to ONNX
+torch.onnx.export(
+    model, dummy, &quot;transformer_block.onnx&quot;,
+    input_names=[&quot;input&quot;],
+    output_names=[&quot;output&quot;],
+    dynamic_axes={&quot;input&quot;: {0: &quot;batch&quot;, 1: &quot;seq_len&quot;}},
+    opset_version=17,
+)
+
+# 3. Load with different optimization levels and compare
+for level_name, level in [
+    (&quot;DISABLED&quot;, ort.GraphOptimizationLevel.ORT_DISABLE_ALL),
+    (&quot;BASIC&quot;, ort.GraphOptimizationLevel.ORT_ENABLE_BASIC),
+    (&quot;EXTENDED&quot;, ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED),
+    (&quot;ALL&quot;, ort.GraphOptimizationLevel.ORT_ENABLE_ALL),
+]:
+    opts = ort.SessionOptions()
+    opts.graph_optimization_level = level
+    # Save optimized model to inspect changes
+    opts.optimized_model_filepath = f&quot;optimized_{level_name}.onnx&quot;
+    sess = ort.InferenceSession(&quot;transformer_block.onnx&quot;, opts,
+                                providers=[&quot;CPUExecutionProvider&quot;])
+    print(f&quot;{level_name}: loaded successfully&quot;)
+
+# 4. Compare: count nodes in original vs optimized
+import onnx
+for name in [&quot;transformer_block&quot;, &quot;optimized_ALL&quot;]:
+    m = onnx.load(f&quot;{name}.onnx&quot;)
+    print(f&quot;{name}: {len(m.graph.node)} nodes&quot;)
+</code></pre>
+<h3 id="exercise-2-profile-ort-inference-20-min">Exercise 2: Profile ORT Inference (20 min)</h3>
+<pre><code class="language-python">import onnxruntime as ort
+import numpy as np
+import json
+
+# Enable profiling
+options = ort.SessionOptions()
+options.enable_profiling = True
+options.profile_file_prefix = &quot;ort_profile&quot;
+
+session = ort.InferenceSession(
+    &quot;transformer_block.onnx&quot;, options,
+    providers=[&quot;CPUExecutionProvider&quot;]
+)
+
+# Run inference
+input_data = np.random.randn(4, 32, 256).astype(np.float32)
+for _ in range(10):
+    session.run(None, {&quot;input&quot;: input_data})
+
+# Get profiling results
+profile_file = session.end_profiling()
+print(f&quot;Profile saved to: {profile_file}&quot;)
+
+# Parse and display top-10 slowest ops
+with open(profile_file) as f:
+    events = json.load(f)
+
+kernel_events = [e for e in events if e.get(&quot;cat&quot;) == &quot;Node&quot;]
+kernel_events.sort(key=lambda e: e.get(&quot;dur&quot;, 0), reverse=True)
+
+print(&quot;\nTop 10 slowest operations:&quot;)
+print(f&quot;{'Op Name':&lt;40} {'Duration (µs)':&gt;12}&quot;)
+print(&quot;-&quot; * 54)
+for e in kernel_events[:10]:
+    print(f&quot;{e['name']:&lt;40} {e['dur']:&gt;12}&quot;)
+</code></pre>
+<h3 id="exercise-3-multi-ep-deployment-20-min">Exercise 3: Multi-EP Deployment (20 min)</h3>
+<pre><code class="language-python">import onnxruntime as ort
+import numpy as np
+
+# Check available execution providers
+print(&quot;Available EPs:&quot;, ort.get_available_providers())
+
+# Compare performance across EPs
+model_path = &quot;transformer_block.onnx&quot;
+input_data = np.random.randn(8, 64, 256).astype(np.float32)
+
+for ep in ort.get_available_providers():
+    try:
+        session = ort.InferenceSession(model_path, providers=[ep])
+        # Warmup
+        for _ in range(5):
+            session.run(None, {&quot;input&quot;: input_data})
+
+        # Benchmark
+        import time
+        t0 = time.perf_counter()
+        for _ in range(100):
+            session.run(None, {&quot;input&quot;: input_data})
+        elapsed = (time.perf_counter() - t0) / 100
+
+        print(f&quot;{ep:&lt;35} {elapsed*1000:.2f} ms/inference&quot;)
+    except Exception as e:
+        print(f&quot;{ep:&lt;35} FAILED: {e}&quot;)
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>ORT's philosophy is "best backend per op"</strong> — it partitions the graph across Execution Providers rather than generating all kernels from scratch</li>
+<li><strong>Three optimization levels</strong> (Basic, Extended, All) apply increasingly aggressive fusion patterns including attention fusion, GELU fusion, and LayerNorm fusion</li>
+<li><strong>Execution Providers</strong> are pluggable backends — TensorRT, CUDA, OpenVINO, CoreML, DirectML — each claiming subgraphs they can optimize best</li>
+<li><strong>Graph partitioning</strong> means ORT handles heterogeneous hardware naturally — different parts of the model run on different accelerators</li>
+<li><strong>Arena-based memory management</strong> with memory reuse patterns minimizes allocation overhead in production serving</li>
+<li><strong>ORT vs TVM</strong>: ORT excels at quick deployment with vendor-optimized libraries; TVM excels at generating custom kernels for novel hardware or maximum per-op performance</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://onnxruntime.ai/docs/reference/high-level-design.html">ONNX Runtime Architecture</a> — official design docs</li>
+<li><a href="https://onnxruntime.ai/docs/execution-providers/">Execution Providers Guide</a> — all EPs with configs</li>
+<li><a href="https://onnxruntime.ai/docs/performance/model-optimizations/graph-optimizations.html">Graph Optimizations in ORT</a> — optimization details</li>
+<li><a href="https://onnxruntime.ai/docs/genai/">ONNX Runtime for LLMs (GenAI)</a> — ORT for generative AI</li>
+<li><a href="https://onnx.ai/onnx/operators/">ONNX Spec (opset 21)</a> — all supported operations</li>
+<li><a href="https://onnxruntime.ai/docs/performance/tune-performance.html">ORT Performance Tuning Guide</a> — production tips</li>
+</ul>
+<hr />
+<h2 id="tomorrow-mlc-llm">Tomorrow: MLC-LLM</h2>
+<p>Day 46 explores <strong>MLC-LLM</strong> — the TVM team's project for compiling large language models to run everywhere, from NVIDIA GPUs to iPhones to web browsers. You'll see how TVM's Relax IR, auto-tuning, and quantization combine to make Llama and other LLMs portable across any hardware.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-44-xla-stablehlo.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 44: XLA & StableHLO</a>
+            <a href="day-46-mlc-llm.html" class="text-emerald-600 hover:text-emerald-800">Day 46: MLC-LLM &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

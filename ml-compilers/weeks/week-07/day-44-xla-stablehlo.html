@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 44: XLA & StableHLO - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 7: TVM Advanced & MLC</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-44-xla-stablehlo">Day 44: XLA &amp; StableHLO</h1>
+<blockquote>
+<p><strong>Phase III · Week 7 · Day 44 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The fastest code is the code that doesn't exist — XLA's job is to fuse away everything unnecessary."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-43-mlir-for-ml.html">Day 43: MLIR for ML</a></td>
+<td style="text-align: left;"><a href="day-45-onnx-runtime-deep-dive.html">Day 45: ONNX Runtime Deep Dive</a></td>
+<td style="text-align: left;"><a href="README.html">Week 7: TVM Advanced &amp; MLC</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p><strong>XLA</strong> (Accelerated Linear Algebra) is the production ML compiler that powers JAX, TensorFlow, and PyTorch/XLA at Google scale. When you <code>jit</code> a JAX function, XLA is what turns your Python into fused GPU kernels. XLA introduced many ideas that other compilers adopted: operation fusion, buffer assignment, layout optimization, and algebraic simplification. <strong>StableHLO</strong> extracts XLA's IR (HLO) into a portable MLIR dialect, enabling models compiled for XLA to also target IREE, Torch-MLIR, and other backends. Understanding XLA teaches you how a battle-tested production compiler works and where it excels compared to TVM.</p>
+<hr />
+<h2 id="1-xla-architecture-overview">1. XLA Architecture Overview</h2>
+<h3 id="the-xla-compilation-pipeline">The XLA Compilation Pipeline</h3>
+<pre><code>XLA Compilation Pipeline
+═════════════════════════
+
+  JAX / TensorFlow / PyTorch-XLA
+         │
+    ┌────▼──────────────────┐
+    │  HLO (High-Level Ops) │  ← Framework-independent IR
+    │  • MatMul, Conv, Reduce│     ~150 operations
+    │  • Shape inference     │
+    └────┬──────────────────┘
+         │
+    ┌────▼──────────────────┐
+    │  HLO Optimization      │  ← Platform-independent passes
+    │  • Algebraic simp.     │     (~100 passes)
+    │  • Op fusion           │
+    │  • Common subexpr.     │
+    │  • Layout assignment   │
+    └────┬──────────────────┘
+         │
+    ┌────▼──────────────────┐
+    │  Buffer Assignment     │  ← Memory planning
+    │  • Live range analysis │
+    │  • Buffer reuse        │
+    │  • Alias analysis      │
+    └────┬──────────────────┘
+         │
+    ┌────▼──────────────────┐
+    │  Code Generation       │  ← Platform-specific
+    │  ┌────────┬──────────┐ │
+    │  │GPU     │CPU       │ │
+    │  │(LLVM→  │(LLVM→    │ │
+    │  │ PTX)   │ native)  │ │
+    │  └────────┴──────────┘ │
+    └────────────────────────┘
+</code></pre>
+<h3 id="hlo-the-core-ir">HLO: The Core IR</h3>
+<p>HLO (High-Level Operations) is XLA's main IR. It's a dataflow graph of ~150 operations:</p>
+<pre><code>// HLO text format for: y = relu(matmul(A, B) + bias)
+
+HloModule matmul_relu
+
+ENTRY main {
+  %A    = f32[64,128] parameter(0)
+  %B    = f32[128,256] parameter(1)
+  %bias = f32[256] parameter(2)
+
+  // Matrix multiply
+  %dot  = f32[64,256] dot(%A, %B),
+            lhs_contracting_dims={1},
+            rhs_contracting_dims={0}
+
+  // Broadcast bias to match dot output shape
+  %bcast = f32[64,256] broadcast(%bias), dimensions={1}
+
+  // Add bias
+  %add  = f32[64,256] add(%dot, %bcast)
+
+  // ReLU = max(0, x)
+  %zero = f32[] constant(0)
+  %zero_bcast = f32[64,256] broadcast(%zero)
+  ROOT %relu = f32[64,256] maximum(%add, %zero_bcast)
+}
+</code></pre>
+<h3 id="hlo-operation-categories">HLO Operation Categories</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Category</th>
+<th style="text-align: left;">Examples</th>
+<th style="text-align: left;">Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Element-wise</td>
+<td style="text-align: left;"><code>add</code>, <code>multiply</code>, <code>exp</code>, <code>maximum</code></td>
+<td style="text-align: left;">~40</td>
+</tr>
+<tr>
+<td style="text-align: left;">Reduction</td>
+<td style="text-align: left;"><code>reduce</code>, <code>reduce-window</code></td>
+<td style="text-align: left;">~5</td>
+</tr>
+<tr>
+<td style="text-align: left;">Data movement</td>
+<td style="text-align: left;"><code>broadcast</code>, <code>transpose</code>, <code>reshape</code>, <code>gather</code>, <code>scatter</code></td>
+<td style="text-align: left;">~15</td>
+</tr>
+<tr>
+<td style="text-align: left;">Linear algebra</td>
+<td style="text-align: left;"><code>dot</code>, <code>convolution</code>, <code>triangular-solve</code></td>
+<td style="text-align: left;">~10</td>
+</tr>
+<tr>
+<td style="text-align: left;">Control flow</td>
+<td style="text-align: left;"><code>conditional</code>, <code>while</code>, <code>call</code></td>
+<td style="text-align: left;">~5</td>
+</tr>
+<tr>
+<td style="text-align: left;">Communication</td>
+<td style="text-align: left;"><code>all-reduce</code>, <code>all-gather</code>, <code>collective-permute</code></td>
+<td style="text-align: left;">~10</td>
+</tr>
+<tr>
+<td style="text-align: left;">Custom</td>
+<td style="text-align: left;"><code>custom-call</code> (escape hatch to libraries)</td>
+<td style="text-align: left;">1</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-xlas-key-optimization-passes">2. XLA's Key Optimization Passes</h2>
+<h3 id="operator-fusion-xlas-superpower">Operator Fusion — XLA's Superpower</h3>
+<p>XLA's fusion is aggressive and rule-based. It classifies ops and fuses them to eliminate memory round-trips:</p>
+<pre><code>Fusion Example: matmul + bias + relu → one kernel
+══════════════════════════════════════════════════
+
+  Before fusion (3 kernels, 2 intermediate buffers):
+
+  ┌──────┐    buf1    ┌──────┐    buf2    ┌──────┐
+  │ dot  │ ────────→ │ add  │ ────────→ │ max  │
+  └──────┘           └──────┘           └──────┘
+      3 kernel launches
+      2 × 64 × 256 × 4 = 128 KB wasted memory traffic
+
+  After fusion (1 kernel, 0 intermediate buffers):
+
+  ┌─────────────────────────────┐
+  │  fused_computation {        │
+  │    %dot  = dot(A, B)        │
+  │    %add  = add(%dot, bias)  │  ← All in registers
+  │    %relu = max(%add, 0)     │
+  │  }                          │
+  └─────────────────────────────┘
+      1 kernel launch, data stays in registers/shared memory
+</code></pre>
+<h3 id="fusion-categories-in-xla">Fusion Categories in XLA</h3>
+<pre><code class="language-python"># XLA classifies ops for fusion decisions:
+
+# 1. kLoop: element-wise ops that iterate over output shape
+#    add, multiply, exp, tanh, broadcast, reshape
+#    → Can be fused freely with other kLoop ops
+
+# 2. kInput: ops that iterate over an input shape (reductions)
+#    reduce, reduce-window
+#    → Consumer of reduction can fuse in
+
+# 3. kOutput: ops that define the output (like scatter)
+#    → Producers can fuse into kOutput
+
+# Fusion rule: merge ops when it reduces memory traffic
+# without creating too-large kernels
+</code></pre>
+<h3 id="algebraic-simplification">Algebraic Simplification</h3>
+<pre><code>XLA Algebraic Rewrites (selected examples):
+════════════════════════════════════════════
+
+  x + 0         → x
+  x * 1         → x
+  x * 0         → broadcast(0)
+  x - x         → broadcast(0)
+  max(relu(x))  → relu(x)
+  transpose(transpose(x, p), p⁻¹) → x
+  reshape(reshape(x, s1), s2) → reshape(x, s2)
+  broadcast(scalar) + broadcast(scalar) → broadcast(scalar + scalar)
+  dot(A, identity) → A
+  slice(concat(a,b), [0:len_a]) → a
+</code></pre>
+<h3 id="buffer-assignment">Buffer Assignment</h3>
+<p>XLA solves the <strong>memory allocation problem</strong> for the entire computation graph:</p>
+<p>$$\text{minimize } \sum_{i} \text{size}(buffer_i) \quad \text{s.t. } \text{live}(b_i) \cap \text{live}(b_j) = \emptyset \implies b_i, b_j \text{ can share}$$</p>
+<pre><code>Buffer Reuse Example
+════════════════════
+
+  Timeline:  ────t1────t2────t3────t4────t5────
+
+  buf_A:     [████████████]                    (live t1-t2)
+  buf_B:     [████████████████████]            (live t1-t3)
+  buf_C:              [████████████]           (live t2-t3)
+  buf_D:                       [████████████]  (live t3-t5)
+
+  Allocation plan (3 buffers → 2 physical):
+  physical_0:  buf_A ──────── buf_D           (reuse after A dies)
+  physical_1:  buf_B ──────── (freed)
+  physical_2:  buf_C ──────── (freed)
+
+  Result: peak memory reduced by ~33%
+</code></pre>
+<hr />
+<h2 id="3-jax-xla-the-compilation-flow">3. JAX + XLA: The Compilation Flow</h2>
+<h3 id="tracing-a-jax-computation-through-xla">Tracing a JAX Computation Through XLA</h3>
+<pre><code class="language-python">import jax
+import jax.numpy as jnp
+
+@jax.jit
+def layer(x, w, b):
+    &quot;&quot;&quot;Linear + ReLU layer.&quot;&quot;&quot;
+    return jax.nn.relu(x @ w + b)
+
+# Create inputs
+x = jnp.ones((4, 8))
+w = jnp.ones((8, 16))
+b = jnp.ones((16,))
+
+# First call: traces, compiles via XLA, caches
+result = layer(x, w, b)
+
+# Inspect the HLO
+hlo = jax.xla_computation(layer)(x, w, b)
+print(hlo.as_hlo_text())  # Human-readable HLO
+
+# Get optimized HLO (after all passes)
+compiled = jax.jit(layer).lower(x, w, b).compile()
+print(compiled.as_text())  # Optimized + fused HLO
+</code></pre>
+<h3 id="examining-xlas-decisions">Examining XLA's Decisions</h3>
+<pre><code class="language-python"># See which ops XLA fused together
+import jax
+
+def matmul_gelu(x, w):
+    h = x @ w
+    return h * 0.5 * (1.0 + jax.lax.erf(h / jnp.sqrt(2.0)))
+
+lowered = jax.jit(matmul_gelu).lower(
+    jnp.ones((32, 64)), jnp.ones((64, 128))
+)
+
+# Print HLO with fusion boundaries marked
+compiled = lowered.compile()
+
+# Cost analysis: see memory and FLOP estimates
+analysis = compiled.cost_analysis()
+print(f&quot;FLOPs: {analysis[0].get('flops', 'N/A')}&quot;)
+print(f&quot;Bytes accessed: {analysis[0].get('bytes accessed', 'N/A')}&quot;)
+</code></pre>
+<h3 id="xla-compilation-stages-diagram">XLA Compilation Stages Diagram</h3>
+<pre><code>jax.jit(f)(x)
+     │
+     │  1. Abstract evaluation (shape/dtype only)
+     ▼
+  Jaxpr (JAX's internal trace IR)
+     │
+     │  2. jaxpr → HLO conversion
+     ▼
+  Unoptimized HLO
+     │
+     │  3. ~100 optimization passes
+     │     • Algebraic simplification
+     │     • Fusion
+     │     • Layout assignment (NHWC → NCHW, etc.)
+     │     • Batch normalization decomposition
+     ▼
+  Optimized HLO
+     │
+     │  4. Buffer assignment
+     ▼
+  HLO + memory plan
+     │
+     │  5. Code generation (GPU: LLVM → PTX → cubin)
+     ▼
+  Executable (cached for same shapes/dtypes)
+</code></pre>
+<hr />
+<h2 id="4-stablehlo-the-portable-ml-dialect">4. StableHLO: The Portable ML Dialect</h2>
+<h3 id="what-is-stablehlo">What Is StableHLO?</h3>
+<p>StableHLO extracts XLA's HLO operations into a <strong>versioned, portable MLIR dialect</strong> with backward compatibility guarantees:</p>
+<pre><code>StableHLO's Position in the Ecosystem
+══════════════════════════════════════
+
+  PyTorch ──→ Torch-MLIR ──→ StableHLO ──→ XLA (GPU/TPU)
+                                 │
+  JAX ────→ jax2stablehlo ──→──→├──→ IREE (CPU/GPU/Vulkan)
+                                 │
+  TF ─────→ tf2stablehlo ──→──→└──→ Torch-MLIR (back to PyTorch)
+
+  Key property: StableHLO is the INTERCHANGE FORMAT
+  • Versioned: programs from v1.0 still work in v2.0
+  • ~120 operations covering all ML needs
+  • Serializable: save compiled programs to disk
+</code></pre>
+<h3 id="stablehlo-example">StableHLO Example</h3>
+<pre><code class="language-mlir">// StableHLO for: relu(matmul(A, B) + bias)
+
+func.func @matmul_relu_bias(
+    %A: tensor&lt;64x128xf32&gt;,
+    %B: tensor&lt;128x256xf32&gt;,
+    %bias: tensor&lt;256xf32&gt;) -&gt; tensor&lt;64x256xf32&gt; {
+
+  // Matrix multiply
+  %dot = stablehlo.dot_general %A, %B,
+    contracting_dims = [1] x [0]
+    : (tensor&lt;64x128xf32&gt;, tensor&lt;128x256xf32&gt;)
+    -&gt; tensor&lt;64x256xf32&gt;
+
+  // Broadcast bias
+  %bias_bcast = stablehlo.broadcast_in_dim %bias,
+    dims = [1] : (tensor&lt;256xf32&gt;) -&gt; tensor&lt;64x256xf32&gt;
+
+  // Add
+  %add = stablehlo.add %dot, %bias_bcast
+    : tensor&lt;64x256xf32&gt;
+
+  // ReLU
+  %zero = stablehlo.constant dense&lt;0.0&gt; : tensor&lt;64x256xf32&gt;
+  %relu = stablehlo.maximum %add, %zero
+    : tensor&lt;64x256xf32&gt;
+
+  return %relu : tensor&lt;64x256xf32&gt;
+}
+</code></pre>
+<h3 id="the-openxla-project">The OpenXLA Project</h3>
+<p>OpenXLA is the umbrella project unifying XLA's components as open-source:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Component</th>
+<th style="text-align: left;">Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>XLA</strong></td>
+<td style="text-align: left;">The compiler (HLO optimization + codegen)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>StableHLO</strong></td>
+<td style="text-align: left;">Portable MLIR dialect for ML</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PJRT</strong></td>
+<td style="text-align: left;">Plugin interface for hardware backends</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Shardy</strong></td>
+<td style="text-align: left;">Automatic SPMD partitioning</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>IREE</strong></td>
+<td style="text-align: left;">Lightweight deployment runtime</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-xla-vs-tvm-when-to-choose-which">5. XLA vs TVM: When to Choose Which</h2>
+<h3 id="decision-framework">Decision Framework</h3>
+<pre><code>                    ┌──────────────────────────┐
+                    │  What's your framework?  │
+                    └────────┬─────────────────┘
+                             │
+                 ┌───────────┴───────────┐
+                 │                       │
+            ┌────▼────┐           ┌──────▼──────┐
+            │ JAX/TF  │           │PyTorch/ONNX │
+            └────┬────┘           └──────┬──────┘
+                 │                       │
+          ┌──────▼──────┐        ┌───────▼───────┐
+          │ XLA (native)│        │ Target HW?    │
+          │ Best choice │        └──┬──────┬─────┘
+          └─────────────┘           │      │
+                              ┌─────▼──┐ ┌─▼──────┐
+                              │Standard│ │Custom / │
+                              │GPU/CPU │ │Edge/DSA │
+                              └───┬────┘ └───┬─────┘
+                                  │          │
+                            ┌─────▼───┐ ┌───▼──────┐
+                            │torch.   │ │  TVM     │
+                            │compile  │ │(broadest │
+                            │or ORT   │ │ HW)      │
+                            └─────────┘ └──────────┘
+</code></pre>
+<h3 id="head-to-head-comparison">Head-to-Head Comparison</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Dimension</th>
+<th style="text-align: left;">XLA</th>
+<th style="text-align: left;">TVM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Primary use</strong></td>
+<td style="text-align: left;">JAX/TF production</td>
+<td style="text-align: left;">Cross-framework, cross-HW</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Fusion</strong></td>
+<td style="text-align: left;">Rule-based, very aggressive</td>
+<td style="text-align: left;">Schedule-guided</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Auto-tuning</strong></td>
+<td style="text-align: left;">Limited (layout, tile hints)</td>
+<td style="text-align: left;">Extensive (MetaSchedule)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Hardware</strong></td>
+<td style="text-align: left;">CPU, GPU, TPU</td>
+<td style="text-align: left;">CPU, GPU, FPGA, MCU, DSA</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Dynamic shapes</strong></td>
+<td style="text-align: left;">Bounded, recompiles per shape</td>
+<td style="text-align: left;">Symbolic shapes (Relax)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Deployment</strong></td>
+<td style="text-align: left;">Tied to XLA runtime</td>
+<td style="text-align: left;">Lightweight TVM runtime</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Maturity</strong></td>
+<td style="text-align: left;">Production at Google scale</td>
+<td style="text-align: left;">Production at diverse sites</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>SPMD/sharding</strong></td>
+<td style="text-align: left;">Native (GSPMD/Shardy)</td>
+<td style="text-align: left;">Community efforts</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Debugging</strong></td>
+<td style="text-align: left;">HLO dumps, profiler</td>
+<td style="text-align: left;">TVMScript, debugger</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-hands-on-exercises">6. Hands-On Exercises</h2>
+<h3 id="exercise-1-trace-xla-compilation-30-min">Exercise 1: Trace XLA Compilation (30 min)</h3>
+<pre><code class="language-python">import jax
+import jax.numpy as jnp
+import os
+
+# Enable XLA debug output
+os.environ['XLA_FLAGS'] = '--xla_dump_to=/tmp/xla_dump --xla_dump_hlo_as_text'
+
+@jax.jit
+def transformer_block(x, wq, wk, wv, wo):
+    &quot;&quot;&quot;Simplified self-attention.&quot;&quot;&quot;
+    q = x @ wq  # [B, S, D]
+    k = x @ wk
+    v = x @ wv
+
+    # Scaled dot-product attention
+    d_k = q.shape[-1]
+    scores = (q @ k.transpose(0, 2, 1)) / jnp.sqrt(d_k)
+    weights = jax.nn.softmax(scores, axis=-1)
+    attn = weights @ v
+
+    return attn @ wo
+
+# Run to trigger compilation
+B, S, D = 2, 16, 64
+x = jnp.ones((B, S, D))
+wq = wk = wv = wo = jnp.ones((D, D))
+result = transformer_block(x, wq, wk, wv, wo)
+
+# Now examine /tmp/xla_dump/ for:
+# 1. module_XXXX.before_optimizations.txt  (original HLO)
+# 2. module_XXXX.after_optimizations.txt   (fused HLO)
+# Compare the two — count how many fused computations XLA created
+</code></pre>
+<h3 id="exercise-2-stablehlo-round-trip-20-min">Exercise 2: StableHLO Round-Trip (20 min)</h3>
+<pre><code class="language-python">import jax
+import jax.numpy as jnp
+
+def gelu(x):
+    return x * 0.5 * (1.0 + jax.lax.erf(x / jnp.sqrt(2.0)))
+
+# Export to StableHLO
+lowered = jax.jit(gelu).lower(jnp.ones((4, 8)))
+stablehlo_text = lowered.as_text(&quot;stablehlo&quot;)
+print(stablehlo_text)
+
+# Questions to answer:
+# 1. How many stablehlo ops are in the unoptimized program?
+# 2. What does the sqrt(2) become? (constant folded?)
+# 3. How does stablehlo.erf compare to the JAX op?
+</code></pre>
+<h3 id="exercise-3-xla-vs-eager-benchmark-20-min">Exercise 3: XLA vs Eager Benchmark (20 min)</h3>
+<pre><code class="language-python">import jax
+import jax.numpy as jnp
+import time
+
+def mlp(x, w1, b1, w2, b2):
+    h = jax.nn.relu(x @ w1 + b1)
+    return h @ w2 + b2
+
+# Inputs
+x  = jnp.ones((256, 512))
+w1 = jnp.ones((512, 1024))
+b1 = jnp.ones((1024,))
+w2 = jnp.ones((1024, 256))
+b2 = jnp.ones((256,))
+
+# Eager (no JIT)
+jax.config.update(&quot;jax_disable_jit&quot;, True)
+_ = mlp(x, w1, b1, w2, b2).block_until_ready()
+t0 = time.perf_counter()
+for _ in range(100):
+    _ = mlp(x, w1, b1, w2, b2).block_until_ready()
+eager_time = (time.perf_counter() - t0) / 100
+jax.config.update(&quot;jax_disable_jit&quot;, False)
+
+# JIT (XLA compiled)
+jit_mlp = jax.jit(mlp)
+_ = jit_mlp(x, w1, b1, w2, b2).block_until_ready()  # warmup
+t0 = time.perf_counter()
+for _ in range(100):
+    _ = jit_mlp(x, w1, b1, w2, b2).block_until_ready()
+jit_time = (time.perf_counter() - t0) / 100
+
+print(f&quot;Eager: {eager_time*1000:.2f} ms&quot;)
+print(f&quot;XLA JIT: {jit_time*1000:.2f} ms&quot;)
+print(f&quot;Speedup: {eager_time/jit_time:.1f}x&quot;)
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>XLA</strong> is a production ML compiler powering JAX and TensorFlow — it compiles HLO dataflow graphs into fused GPU/TPU/CPU kernels</li>
+<li><strong>Operator fusion</strong> is XLA's core strength — it classifies ops (kLoop, kInput, kOutput) and aggressively merges them to eliminate memory traffic</li>
+<li><strong>Buffer assignment</strong> solves a global memory allocation problem, reusing buffers across the computation graph based on liveness analysis</li>
+<li><strong>StableHLO</strong> is the portable MLIR dialect that extracts HLO semantics with versioning guarantees — it's the interchange format for the OpenXLA ecosystem</li>
+<li><strong>JAX ↔ XLA</strong> is seamless: <code>jax.jit</code> traces to Jaxpr, converts to HLO, optimizes through ~100 passes, and generates target code</li>
+<li><strong>XLA vs TVM</strong>: XLA excels at JAX/TF with aggressive fusion on GPU/TPU; TVM excels at cross-framework, cross-hardware deployment with auto-tuning</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://openxla.org/xla/architecture">XLA Architecture (OpenXLA)</a> — official docs</li>
+<li><a href="https://github.com/openxla/stablehlo/blob/main/docs/spec.html">StableHLO Specification</a> — op semantics</li>
+<li><a href="https://jax.readthedocs.io/en/latest/notebooks/thinking_in_jax.html">JAX Internals: How JIT Works</a> — tracing model</li>
+<li><a href="https://openxla.org/xla/operation_semantics">XLA Operation Semantics</a> — all HLO ops</li>
+<li><a href="https://openxla.org/xla/pjrt_integration">PJRT Plugin Interface</a> — hardware backend API</li>
+<li><a href="https://github.com/openxla/xla/tree/main/xla/service/gpu">XLA GPU Fusion Heuristics (source)</a> — implementation</li>
+</ul>
+<hr />
+<h2 id="tomorrow-onnx-runtime-deep-dive">Tomorrow: ONNX Runtime Deep Dive</h2>
+<p>Day 45 dives into <strong>ONNX Runtime</strong> — the inference engine that powers production deployment at Microsoft and beyond. You'll explore its graph partitioning strategy, execution providers (CUDA, TensorRT, OpenVINO), operator fusion passes, and understand when ORT beats TVM for deployment.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-43-mlir-for-ml.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 43: MLIR for ML</a>
+            <a href="day-45-onnx-runtime-deep-dive.html" class="text-emerald-600 hover:text-emerald-800">Day 45: ONNX Runtime Deep Dive &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

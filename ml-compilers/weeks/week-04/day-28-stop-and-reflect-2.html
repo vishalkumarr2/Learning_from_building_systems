@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 28: Stop & Reflect #2 - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 4: Triton & Kernel Engineering</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-28-stop-reflect-2">Day 28: Stop &amp; Reflect #2</h1>
+<blockquote>
+<p><strong>Phase II · Week 4 · Day 28 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"A compiler is a pipeline of lowering steps, each trading generality for specificity. If you can trace an operation from Python source to GPU instructions, you understand the whole stack."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-27-custom-triton-backend.html">Day 27: Custom Triton Backend</a></td>
+<td style="text-align: left;"><a href="../week-05/day-29-tvm-architecture-overview.html">Day 29: TVM Architecture Overview</a></td>
+<td style="text-align: left;"><a href="README.html">Week 4: Triton &amp; Kernel Engineering</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase II: Compiler Fundamentals</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>This is the end of Phase II. Over the past two weeks, you've gone from Python-level graph capture to GPU-level Triton kernels. Before moving to TVM and the broader compiler ecosystem, we consolidate everything into a single mental model. The goal: you should be able to trace any PyTorch operation from <code>model(x)</code> through every compiler stage down to the Triton kernel that runs on hardware.</p>
+<hr />
+<h2 id="1-the-complete-map-python-gpu">1. The Complete Map: Python → GPU</h2>
+<pre><code>Layer 0: USER CODE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  @torch.compile
+  def model(x):
+      return F.gelu(x @ W + b)
+
+        │  torch.compile decorator
+        ▼
+
+Layer 1: TORCHDYNAMO (Graph Capture)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  • Intercepts Python bytecode via PEP 523
+  • Traces into FX Graph (symbolic execution)
+  • Inserts guards (dtype, shape, device, value)
+  • Handles graph breaks (unsupported ops → subgraphs)
+
+  Output: FX Graph with high-level ATen ops
+          call_function  aten.mm.default     (x, W)
+          call_function  aten.add.Tensor     (mm, b)
+          call_function  aten.gelu.default   (add)
+
+        │  Sent to AOTAutograd
+        ▼
+
+Layer 2: AOTAUTOGRAD (Differentiation)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  • Splits graph into forward + backward
+  • Decomposes high-level ops into primitives
+    gelu → mul, erf, add, mul (5 primitive ops)
+  • Produces joint forward/backward graph
+
+  Output: Decomposed FX Graph (ATen primitives only)
+          aten.mm, aten.add, aten.mul, aten.erf, ...
+
+        │  Passed to backend (default: Inductor)
+        ▼
+
+Layer 3: TORCHINDUCTOR (Compilation)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  3a. Lowering:   ATen ops → Inductor IR nodes
+                  (Pointwise, Reduction, ExternKernel)
+
+  3b. Fusion:     Group fusable nodes
+                  pointwise + pointwise → 1 kernel
+                  mm stays as ExternKernel (unfused)
+
+  3c. Scheduling: Choose loop ordering, block sizes
+                  Handle reduction strategies
+
+  3d. Codegen:    Emit Triton source code (GPU)
+                  or C++/OpenMP code (CPU)
+
+  Output: triton_poi_fused_add_mul_erf_0.py
+          + wrapper code orchestrating kernel launches
+
+        │  Triton JIT compiler
+        ▼
+
+Layer 4: TRITON COMPILER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  • Triton IR → Triton GPU IR → LLVM IR → PTX
+  • Block-level ops → thread-level scheduling
+  • Auto-manages shared memory, coalescing
+  • Applies autotuning for block sizes
+
+  Output: PTX assembly (→ cubin via ptxas)
+
+        │  CUDA driver
+        ▼
+
+Layer 5: GPU HARDWARE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  • SMs execute warps of 32 threads
+  • L1/L2 cache hierarchy
+  • HBM bandwidth: 1-3 TB/s
+  • Compute: hundreds of TFLOPS
+</code></pre>
+<hr />
+<h2 id="2-concept-map-how-everything-connects">2. Concept Map: How Everything Connects</h2>
+<pre><code>                    ┌───────────────────────┐
+                    │   Python Source Code   │
+                    └───────────┬───────────┘
+                                │
+                    ┌───────────▼───────────┐
+                    │    FX Graph (ATen)     │◄── Day 15-17: FX framework
+                    │  nodes, edges, ops    │    Day 18-19: passes &amp; transforms
+                    └───────────┬───────────┘
+                                │
+              ┌─────────────────┼─────────────────┐
+              │                 │                   │
+    ┌─────────▼──────┐  ┌──────▼───────┐  ┌───────▼───────┐
+    │   Dynamo       │  │  AOTAutograd  │  │ Graph Breaks  │
+    │   (capture)    │  │  (grad split) │  │ (subgraphs)   │
+    │   Day 25       │  │  Day 25       │  │ Day 25        │
+    └─────────┬──────┘  └──────┬───────┘  └───────────────┘
+              │                │
+              └────────┬───────┘
+                       │
+             ┌─────────▼─────────┐
+             │  Decomposed Graph  │◄── primitives only
+             │  (ATen primitives) │    no gelu, layer_norm
+             └─────────┬─────────┘
+                       │
+         ┌─────────────┼──────────────┐
+         │             │              │
+  ┌──────▼──────┐ ┌───▼────┐  ┌──────▼──────┐
+  │  Inductor   │ │ Custom │  │  Other      │
+  │  (default)  │ │Backend │  │  Backends   │
+  │  Day 26     │ │Day 27  │  │  (TRT,etc.) │
+  └──────┬──────┘ └───┬────┘  └─────────────┘
+         │            │
+         └─────┬──────┘
+               │
+    ┌──────────▼──────────┐
+    │   Inductor IR       │◄── Pointwise, Reduction,
+    │   (loop-level)      │    ExternKernel, Template
+    └──────────┬──────────┘
+               │
+    ┌──────────▼──────────┐
+    │   Fusion Groups     │◄── minimize kernels &amp; memory
+    └──────────┬──────────┘
+               │
+    ┌──────────▼──────────┐
+    │   Triton Source      │◄── Day 22-24: Triton language
+    │   (Python)           │    blocks, masks, tiling
+    └──────────┬──────────┘
+               │
+    ┌──────────▼──────────┐
+    │   Triton Compiler    │◄── IR → LLVM → PTX
+    └──────────┬──────────┘
+               │
+    ┌──────────▼──────────┐
+    │   GPU Execution      │◄── warps, SMs, HBM
+    └─────────────────────┘
+</code></pre>
+<hr />
+<h2 id="3-key-mental-models">3. Key Mental Models</h2>
+<h3 id="mental-model-1-the-lowering-ladder">Mental Model 1: The Lowering Ladder</h3>
+<p>Every compiler is a series of lowering steps. Each step trades generality for specificity:</p>
+<pre><code>Generality          ←──────────────────────→          Specificity
+
+  Python            FX Graph         Inductor IR       Triton        PTX
+  ──────            ────────         ──────────        ──────        ───
+  • Any code        • Tensor ops     • Loop nests      • Blocks      • Instructions
+  • Dynamic         • Static shapes  • Memory layout   • Masks       • Registers
+  • Objects         • No objects     • Fusion groups   • Tiling      • Warps
+  • Control flow    • DAG only       • Scheduled       • JIT'd       • Native
+</code></pre>
+<p><strong>Key insight:</strong> information is <em>lost</em> at each step (you can't reconstruct arbitrary Python from PTX), but the remaining information is enough for the next stage to make good decisions.</p>
+<h3 id="mental-model-2-the-fusion-funnel">Mental Model 2: The Fusion Funnel</h3>
+<pre><code>     N separate operations
+     ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐
+     │op│ │op│ │op│ │op│ │op│ │op│    6 ops, 6 kernel launches
+     └──┘ └──┘ └──┘ └──┘ └──┘ └──┘    12 memory round-trips
+                    │
+                fusion
+                    │
+              ┌─────┴─────┐
+              │ fused_kern │ │extern│    2 kernel launches
+              │ (4 ops)    │ │(mm)  │    4 memory round-trips
+              └────────────┘ └──────┘
+</code></pre>
+<p>Fusion is the single most impactful optimization. It reduces:
+- Kernel launch overhead: $O(n) \to O(1)$
+- Memory traffic: from $2n \times \text{tensor_size}$ to $2 \times \text{tensor_size}$
+- The roofline shifts from memory-bound to compute-bound</p>
+<h3 id="mental-model-3-the-guard-compile-cache-loop">Mental Model 3: The Guard-Compile-Cache Loop</h3>
+<pre><code>  First call:                    Second call (same shape):
+  ┌─────────┐                    ┌─────────┐
+  │ Dynamo  │──▶ trace ──▶ compile ──▶ cache     │ Dynamo  │──▶ check guards
+  └─────────┘         (slow, ~1s)      │   hit   └─────────┘        │
+                                       ▼                            ▼
+                                   ┌───────┐                   ┌───────┐
+                                   │cached │                   │cached │
+                                   │kernel │                   │kernel │ ← fast!
+                                   └───────┘                   └───────┘
+
+  Different shape:
+  ┌─────────┐
+  │ Dynamo  │──▶ check guards ──▶ FAIL ──▶ recompile ──▶ new cache entry
+  └─────────┘
+</code></pre>
+<hr />
+<h2 id="4-self-check-quiz-10-questions">4. Self-Check Quiz (10 Questions)</h2>
+<p>Test yourself before checking the answers. Write your answers first, then compare.</p>
+<h3 id="questions">Questions</h3>
+<p><strong>Q1:</strong> What are the three stages of <code>torch.compile</code>'s pipeline, and what does each produce?</p>
+<p><strong>Q2:</strong> What is a "graph break" and why does it reduce optimization opportunities?</p>
+<p><strong>Q3:</strong> In this code, how many Triton kernels will Inductor generate?</p>
+<pre><code class="language-python">@torch.compile
+def f(x, W):
+    y = x @ W           # matmul
+    y = y + 1            # add
+    y = torch.relu(y)    # relu
+    y = y * 0.5          # mul
+    return y.sum()       # sum
+</code></pre>
+<p><strong>Q4:</strong> Why does AOTAutograd decompose <code>torch.gelu()</code> into primitive ops?</p>
+<p><strong>Q5:</strong> What is the difference between a <code>Pointwise</code> kernel and a <code>Reduction</code> kernel in Inductor's codegen?</p>
+<p><strong>Q6:</strong> In Triton, what does <code>tl.program_id(0)</code> return and how does it relate to the CUDA concept of <code>blockIdx.x</code>?</p>
+<p><strong>Q7:</strong> You write a custom <code>torch.compile</code> backend. What is the function signature it must implement?</p>
+<p><strong>Q8:</strong> The fused kernel for <code>y = relu(x * 2 + 1)</code> loads from memory once and stores once. Without fusion, how many loads and stores would there be?</p>
+<p><strong>Q9:</strong> What does <code>torch._inductor.config.debug = True</code> do, and where does the output go?</p>
+<p><strong>Q10:</strong> When should you write a custom <code>torch.compile</code> backend instead of a custom lowering?</p>
+<hr />
+<h3 id="answers">Answers</h3>
+<details>
+<summary><strong>Click to reveal answers</strong></summary>
+
+**A1:** (1) **TorchDynamo** — captures Python into an FX Graph of ATen ops. (2) **AOTAutograd** — splits into forward/backward graphs and decomposes high-level ops into primitives. (3) **TorchInductor** — lowers to Inductor IR, fuses, schedules, and generates Triton/C++ code.
+
+**A2:** A graph break occurs when Dynamo encounters an operation it can't trace symbolically (e.g., `print()`, data-dependent `if`, unsupported Python). It splits the graph into subgraphs, each compiled separately. This prevents fusion across the break boundary and adds Python overhead between subgraphs.
+
+**A3:** **Three kernels:** (1) ExternKernel for `mm` (calls cuBLAS), (2) Fused pointwise kernel for `add + relu + mul`, (3) Reduction kernel for `sum`. The `mm` acts as a fusion barrier — the pointwise ops after it fuse together, and `sum` is a different kernel type (reduction).
+
+**A4:** So that Inductor can fuse the primitive ops with neighboring operations. Inductor doesn't need special-case code for `gelu` — it just sees `mul`, `erf`, `add`, `mul` and fuses them like any other pointwise chain. This composability is the key insight.
+
+**A5:** A **Pointwise** kernel has a 1:1 mapping between input and output elements — each program instance processes a block of elements independently. A **Reduction** kernel collapses one or more dimensions, requiring an accumulation loop within each program instance (and potentially cross-block reduction for large dimensions).
+
+**A6:** `tl.program_id(0)` returns the index of the current *program instance* in the grid's first dimension. It's semantically equivalent to CUDA's `blockIdx.x`. Each program instance processes one *block* of data (unlike CUDA where each thread processes one element).
+
+**A7:** `def my_backend(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable` — it receives the FX graph and concrete example inputs, and returns a callable that takes the same inputs and produces the outputs.
+
+**A8:** Without fusion, three separate kernels:
+- Kernel 1 (`x * 2`): 1 load + 1 store
+- Kernel 2 (`+ 1`): 1 load + 1 store  
+- Kernel 3 (`relu`): 1 load + 1 store
+Total: **3 loads, 3 stores** (6 memory ops vs. 2 with fusion — a 3× reduction).
+
+**A9:** It tells Inductor to write the generated Triton/C++ source code to disk (in `/tmp/torchinductor_$USER/`) and print additional debug information. You can inspect the actual generated kernels, wrapper code, and fusion decisions.
+
+**A10:** Use a **custom lowering** when you want to change how a *single op* is translated to Inductor IR (it stays within Inductor's fusion and scheduling). Use a **custom backend** when you need to change *fusion decisions, scheduling, or code generation strategy* — things that require replacing Inductor's pipeline, not just one op within it.
+
+</details>
+
+<hr />
+<h2 id="5-phase-ii-concept-connections">5. Phase II Concept Connections</h2>
+<p>Map each concept to where it lives in the pipeline:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Concept</th>
+<th style="text-align: left;">Pipeline Stage</th>
+<th style="text-align: left;">Key Insight</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">FX Graph</td>
+<td style="text-align: left;">Dynamo output / IR</td>
+<td style="text-align: left;">DAG of tensor ops, no Python control flow</td>
+</tr>
+<tr>
+<td style="text-align: left;">Graph Breaks</td>
+<td style="text-align: left;">Dynamo</td>
+<td style="text-align: left;">Split graph → fewer fusion opportunities</td>
+</tr>
+<tr>
+<td style="text-align: left;">Guards</td>
+<td style="text-align: left;">Dynamo</td>
+<td style="text-align: left;">Control caching and recompilation</td>
+</tr>
+<tr>
+<td style="text-align: left;">Decomposition</td>
+<td style="text-align: left;">AOTAutograd</td>
+<td style="text-align: left;">High-level → primitives enables fusion</td>
+</tr>
+<tr>
+<td style="text-align: left;">Forward/Backward split</td>
+<td style="text-align: left;">AOTAutograd</td>
+<td style="text-align: left;">Autograd runs ahead-of-time, not at runtime</td>
+</tr>
+<tr>
+<td style="text-align: left;">Lowering</td>
+<td style="text-align: left;">Inductor Stage 1</td>
+<td style="text-align: left;">ATen ops → Inductor IR nodes</td>
+</tr>
+<tr>
+<td style="text-align: left;">Fusion</td>
+<td style="text-align: left;">Inductor Stage 2</td>
+<td style="text-align: left;">Multiple ops → single kernel</td>
+</tr>
+<tr>
+<td style="text-align: left;">Scheduling</td>
+<td style="text-align: left;">Inductor Stage 3</td>
+<td style="text-align: left;">Loop ordering, block sizes, reductions</td>
+</tr>
+<tr>
+<td style="text-align: left;">Codegen</td>
+<td style="text-align: left;">Inductor Stage 4</td>
+<td style="text-align: left;">IR → Triton source code</td>
+</tr>
+<tr>
+<td style="text-align: left;">Block programming</td>
+<td style="text-align: left;">Triton</td>
+<td style="text-align: left;">Programs process blocks, not elements</td>
+</tr>
+<tr>
+<td style="text-align: left;">Autotuning</td>
+<td style="text-align: left;">Triton</td>
+<td style="text-align: left;">Search over BLOCK_SIZE, num_warps, etc.</td>
+</tr>
+<tr>
+<td style="text-align: left;">Tiling</td>
+<td style="text-align: left;">Triton (matmul)</td>
+<td style="text-align: left;">Fit sub-blocks into SRAM for data reuse</td>
+</tr>
+<tr>
+<td style="text-align: left;">Flash Attention</td>
+<td style="text-align: left;">Triton pattern</td>
+<td style="text-align: left;">Online softmax + tiling = $O(N)$ memory</td>
+</tr>
+<tr>
+<td style="text-align: left;">Custom backend</td>
+<td style="text-align: left;">torch.compile API</td>
+<td style="text-align: left;">Replace or augment Inductor</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-ready-for-tvm-checklist">6. "Ready for TVM" Checklist</h2>
+<p>Before moving to Phase III (TVM, MLIR, and the broader compiler ecosystem), verify you can confidently answer these:</p>
+<pre><code>□ I can explain the full torch.compile pipeline (3 stages + Triton)
+□ I can read an FX graph and identify ops, shapes, and data flow
+□ I can write an FX graph transformation pass
+□ I can write a Triton kernel for a pointwise operation
+□ I can write a Triton kernel for matrix multiplication (tiled)
+□ I understand why tiling improves arithmetic intensity
+□ I can explain how Flash Attention achieves O(N) memory
+□ I know what Inductor's fusion decisions look like and why
+□ I can read Inductor-generated Triton code
+□ I can register a custom torch.compile backend
+□ I understand guards, graph breaks, and recompilation
+□ I know when to use a custom lowering vs. a custom backend
+</code></pre>
+<p><strong>If you checked 10+:</strong> You're ready for TVM. Phase III will feel like a natural extension.</p>
+<p><strong>If you checked 7–9:</strong> Review the gaps. Re-read the specific day's material and redo one exercise.</p>
+<p><strong>If you checked &lt;7:</strong> Spend today's remaining time on the weakest areas. Consider re-doing Day 22 (Triton basics) or Day 25 (torch.compile) exercises before moving on.</p>
+<hr />
+<h2 id="7-reflection-prompts">7. Reflection Prompts</h2>
+<p>Spend 10 minutes journaling on these. Writing forces clarity.</p>
+<ol>
+<li>
+<p><strong>What was the single most surprising thing you learned in Phase II?</strong> Was it how much work <code>torch.compile</code> does behind a single decorator? How Triton manages to be competitive with CUDA? Something else?</p>
+</li>
+<li>
+<p><strong>Which concept felt hardest to internalize?</strong> Graph breaks and guards? Triton's block model? Inductor fusion rules? Identifying the hard parts tells you where to invest more time.</p>
+</li>
+<li>
+<p><strong>Can you explain the full pipeline to a colleague?</strong> Try it out loud: "When you call <code>torch.compile</code>, first Dynamo..." If you get stuck, that's the gap to fill.</p>
+</li>
+<li>
+<p><strong>What would you build with these tools?</strong> A custom kernel for your workload? A profiling backend? A specialized fusion pass? Having a project in mind makes Phase III more concrete.</p>
+</li>
+<li>
+<p><strong>How does this connect to your broader goals?</strong> Whether you're building ML infrastructure, optimizing models for production, or working on compiler research — where does this knowledge plug in?</p>
+</li>
+</ol>
+<hr />
+<h2 id="phase-ii-summary-what-you-learned">Phase II Summary: What You Learned</h2>
+<pre><code>Week 3 (Days 15-21): Compiler Infrastructure
+──────────────────────────────────────────────
+  • FX Graph representation and tracing
+  • Writing compiler passes (constant folding, DCE, pattern matching)
+  • Operator fusion theory and practice
+  • Shape propagation and type inference
+  • Mini-project: building an FX optimization pass
+
+Week 4 (Days 22-28): Triton &amp; Kernel Engineering
+──────────────────────────────────────────────────
+  • Triton's block-based programming model
+  • Matrix multiplication with tiling and SRAM reuse
+  • Flash Attention algorithm and implementation
+  • torch.compile internals (Dynamo → AOTAutograd → Inductor)
+  • Inductor code generation and fusion
+  • Writing custom torch.compile backends
+  • This reflection (connecting it all together)
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Compilers are lowering pipelines</strong> — each stage translates a higher-level representation into a lower one, making decisions that shape performance.</li>
+<li><strong>Fusion is king</strong> — the single most impactful optimization in ML compilers. Everything else (tiling, scheduling, autotuning) is secondary.</li>
+<li><strong>The FX graph is the lingua franca</strong> — Dynamo, AOTAutograd, Inductor, and custom backends all communicate through FX graphs. Mastering graph manipulation is the highest-leverage skill.</li>
+<li><strong>Triton is the GPU sweet spot</strong> — 80-95% of CUDA performance, 3-5× less code, Python-native. This is why Inductor targets it.</li>
+<li><strong>torch.compile is composable</strong> — you don't have to replace the whole stack. Custom lowerings, graph transforms, and backend composition let you intervene at the right level.</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><strong>Phase II blog post:</strong> Jason Ansel — "The PyTorch Compiler" (PyTorch Conference 2023)</li>
+<li><strong>Triton paper:</strong> Tillet et al., "Triton: An Intermediate Language and Compiler for Tiled Neural Network Computations" (2019)</li>
+<li><strong>Flash Attention paper:</strong> Dao et al., "FlashAttention: Fast and Memory-Efficient Exact Attention" (2022)</li>
+<li><strong>Inductor design:</strong> <a href="https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-target-backends/747">dev-discuss.pytorch.org — TorchInductor overview</a></li>
+<li><strong>Compiler textbooks:</strong> Cooper &amp; Torczon, "Engineering a Compiler" (for classical foundations)</li>
+</ul>
+<hr />
+<h2 id="next-phase-iii">Next: Phase III</h2>
+<p><strong>Day 29</strong> begins Phase III with <strong>TVM Architecture Overview</strong>. TVM takes the compiler ideas we've learned — IR, passes, scheduling, code generation — and applies them to a broader set of hardware targets: CPUs, GPUs, FPGAs, custom accelerators. Where Inductor is PyTorch-specific, TVM is framework-agnostic and hardware-agnostic. The patterns you've learned transfer directly.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-27-custom-triton-backend.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 27: Custom Triton Backend</a>
+            <a href="../week-05/day-29-tvm-architecture-overview.html" class="text-emerald-600 hover:text-emerald-800">Day 29: TVM Architecture Overview &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

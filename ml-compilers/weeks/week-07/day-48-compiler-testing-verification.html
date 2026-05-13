@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 48: Compiler Testing & Verification - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 7: TVM Advanced & MLC</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-48-compiler-testing-verification">Day 48: Compiler Testing &amp; Verification</h1>
+<blockquote>
+<p><strong>Phase III · Week 7 · Day 48 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"A compiler that's fast but wrong is worse than no compiler at all — you won't even know when it's lying to you."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-47-contributing-to-tvm.html">Day 47: Contributing to TVM</a></td>
+<td style="text-align: left;"><a href="day-49-stop-and-reflect-4.html">Day 49: Stop &amp; Reflect #4</a></td>
+<td style="text-align: left;"><a href="README.html">Week 7: TVM Advanced &amp; MLC</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>ML compilers transform high-level models into low-level code through dozens of passes — operator fusion, constant folding, quantization, tiling, vectorization, memory planning. Each pass can introduce bugs: a fused kernel may silently drop a channel, a schedule may produce an out-of-bounds access that corrupts memory, or a quantization step may introduce catastrophic numerical drift. Unlike application bugs that crash visibly, <strong>compiler bugs produce wrong numbers silently</strong>. Your model runs, reports 92% accuracy, but it's actually 85% — and you don't discover the gap until production. This lesson covers the testing strategies that prevent this: numerical comparison, fuzzing, differential testing, and TVM's specific testing infrastructure.</p>
+<hr />
+<h2 id="1-the-correctness-problem-in-ml-compilers">1. The Correctness Problem in ML Compilers</h2>
+<h3 id="why-ml-compiler-bugs-are-especially-dangerous">Why ML Compiler Bugs Are Especially Dangerous</h3>
+<pre><code>ML Compiler Bug Taxonomy
+════════════════════════
+
+  Type 1: Crash Bugs (easy to detect)
+  ├── Segfault in generated code
+  ├── Shape mismatch assertion
+  └── Out-of-memory during compilation
+      Detection: automatic (program crashes)
+
+  Type 2: Silent Numerical Bugs (DANGEROUS)
+  ├── Fused kernel produces slightly wrong output
+  ├── Quantization rounds in wrong direction
+  ├── Memory layout mismatch (NCHW vs NHWC swap)
+  └── Reduction over wrong axis
+      Detection: requires explicit numerical validation
+
+  Type 3: Performance Bugs (subtle)
+  ├── Schedule produces correct but slow code
+  ├── Missed fusion opportunity
+  └── Suboptimal memory access pattern
+      Detection: requires benchmarking against baseline
+
+  The danger spectrum:
+  ┌──────────────────────────────────────────────────────┐
+  │  Easy to detect              Hard to detect          │
+  │  ←──────────────────────────────────────────────→    │
+  │  Crash    Shape error    1% drift    0.01% drift     │
+  │    ✓         ✓             ✗              ✗✗         │
+  │                                                      │
+  │  A 0.01% per-layer drift across 100 layers =         │
+  │  1 − 0.9999^100 ≈ 1% total error — enough to        │
+  │  flip classification decisions silently               │
+  └──────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="numerical-error-sources">Numerical Error Sources</h3>
+<pre><code>Sources of Numerical Divergence
+═══════════════════════════════
+
+  1. Floating-point non-associativity:
+     (a + b) + c  ≠  a + (b + c)  in IEEE 754
+
+     Example: sum([1e8, 1.0, -1e8])
+       Left-to-right:  (1e8 + 1.0) + (-1e8) = 0.0  ← WRONG
+       Right-to-left:  1e8 + (1.0 + (-1e8)) = 1.0  ← CORRECT
+
+  2. Reduction order changes after tiling/parallelization:
+     Sequential: s = x[0] + x[1] + x[2] + ... + x[N]
+     Tiled:      s = (x[0]+...+x[31]) + (x[32]+...+x[63]) + ...
+     → Different rounding at each partial sum
+
+  3. FMA (fused multiply-add) availability:
+     With FMA:  a*b + c  (single rounding)
+     Without:   tmp = a*b (round), tmp + c (round again)
+     → Results differ by up to 1 ULP
+
+  4. Mixed precision accumulation:
+     FP16 input × FP16 input → FP32 accumulator → FP16 output
+     vs
+     FP16 input × FP16 input → FP16 accumulator → FP16 output
+     → Catastrophic difference for large reductions
+</code></pre>
+<p>The relative error from these sources follows:</p>
+<p>$$\epsilon_{\text{total}} \leq n \cdot \epsilon_{\text{machine}} \cdot \kappa(A)$$</p>
+<p>where $n$ is the number of operations, $\epsilon_{\text{machine}}$ is machine epsilon ($\approx 5.96 \times 10^{-8}$ for FP32, $\approx 9.77 \times 10^{-4}$ for FP16), and $\kappa(A)$ is the condition number of the computation.</p>
+<hr />
+<h2 id="2-numerical-comparison-getting-allclose-right">2. Numerical Comparison: Getting <code>allclose</code> Right</h2>
+<h3 id="the-allclose-function">The <code>allclose</code> Function</h3>
+<p>The standard numerical comparison checks:</p>
+<p>$$|a - b| \leq \text{atol} + \text{rtol} \cdot |b|$$</p>
+<pre><code class="language-python">import numpy as np
+
+def smart_allclose(actual, expected, dtype=&quot;float32&quot;):
+    &quot;&quot;&quot;Choose tolerances based on dtype and operation type.&quot;&quot;&quot;
+    tolerances = {
+        # (atol, rtol)
+        &quot;float64&quot;: (1e-12, 1e-10),
+        &quot;float32&quot;: (1e-5,  1e-5),
+        &quot;float16&quot;: (1e-2,  1e-2),
+        &quot;bfloat16&quot;: (1e-1,  1e-1),   # BF16 has only 7-bit mantissa
+        &quot;int8&quot;:    (1,     0),        # Integer: exact or ±1
+        &quot;int32&quot;:   (0,     0),        # Integer: must be exact
+    }
+    atol, rtol = tolerances.get(dtype, (1e-5, 1e-5))
+    return np.allclose(actual, expected, atol=atol, rtol=rtol)
+</code></pre>
+<h3 id="tolerance-selection-guide">Tolerance Selection Guide</h3>
+<pre><code>Tolerance Decision Matrix
+═════════════════════════
+
+  Operation          │ float32 atol │ float16 atol │ Why
+  ───────────────────┼──────────────┼──────────────┼──────────────────
+  Element-wise (relu)│ 1e-7         │ 1e-3         │ No accumulation
+  MatMul (small K)   │ 1e-5         │ 5e-2         │ K additions
+  MatMul (K=4096)    │ 1e-4         │ 5e-1         │ Many additions
+  Convolution        │ 1e-4         │ 5e-2         │ K*R*S additions
+  BatchNorm          │ 1e-4         │ 1e-1         │ Variance computation
+  Softmax            │ 1e-5         │ 5e-2         │ exp + reduce
+  LayerNorm          │ 1e-4         │ 1e-1         │ Mean + variance
+  Full model (e2e)   │ 1e-3         │ 5e-1         │ Error compounds
+
+  Rule of thumb for FP32:
+  atol ≈ sqrt(K) × 1e-7  where K = number of accumulated terms
+
+  For FP16 with FP32 accumulation:
+  atol ≈ sqrt(K) × 1e-4
+</code></pre>
+<h3 id="common-pitfalls">Common Pitfalls</h3>
+<pre><code class="language-python"># PITFALL 1: Using default tolerances for all dtypes
+# BAD:
+np.testing.assert_allclose(fp16_result, reference)  # atol=0, rtol=1e-7
+# → Almost always fails for FP16!
+
+# GOOD:
+np.testing.assert_allclose(fp16_result, reference, atol=1e-2, rtol=1e-2)
+
+
+# PITFALL 2: Comparing against wrong reference
+# BAD: comparing TVM output against PyTorch output
+#   (both are approximate — which is &quot;correct&quot;?)
+# GOOD: compare against high-precision reference
+ref_fp64 = compute_reference(inputs.astype(&quot;float64&quot;)).astype(&quot;float32&quot;)
+
+
+# PITFALL 3: Ignoring output scale
+# BAD: fixed atol for outputs of different magnitudes
+# Consider: output values range from 1e-6 to 1e6
+np.testing.assert_allclose(result, ref, atol=1e-5)
+# → Passes for large values, fails for small values
+
+# GOOD: use relative tolerance + small absolute tolerance
+np.testing.assert_allclose(result, ref, rtol=1e-5, atol=1e-7)
+</code></pre>
+<hr />
+<h2 id="3-testing-strategies">3. Testing Strategies</h2>
+<h3 id="the-testing-pyramid-for-ml-compilers">The Testing Pyramid for ML Compilers</h3>
+<pre><code>ML Compiler Testing Pyramid
+════════════════════════════
+
+              ┌──────────────┐
+              │  Model-Level │  Full ResNet/BERT: slow but
+              │   (E2E)      │  catches integration bugs
+              └──────┬───────┘
+                     │
+           ┌─────────▼──────────┐
+           │  Operator-Level     │  Single conv2d/matmul:
+           │  (Integration)      │  catches numerical bugs
+           └─────────┬──────────┘
+                     │
+      ┌──────────────▼──────────────┐
+      │      Pass-Level (Unit)       │  Single pass on toy IR:
+      │                              │  catches transform bugs
+      └──────────────┬──────────────┘
+                     │
+  ┌──────────────────▼──────────────────┐
+  │        IR Construction (Unit)        │  Build/validate IR nodes:
+  │                                      │  catches API/type bugs
+  └─────────────────────────────────────┘
+
+  Coverage target per level:
+  • IR construction:   &gt;90% (fast, cheap)
+  • Pass-level:        &gt;80% per pass
+  • Operator-level:    all ops × 2+ dtypes
+  • Model-level:       top-10 models (ResNet, BERT, GPT-2, etc.)
+</code></pre>
+<h3 id="unit-test-pass-correctness">Unit Test: Pass Correctness</h3>
+<pre><code class="language-python">import tvm
+from tvm import relay
+
+def test_fuse_ops_preserves_semantics():
+    &quot;&quot;&quot;FuseOps must not change computation results.&quot;&quot;&quot;
+    # Build a graph: conv2d → relu → conv2d → relu
+    data = relay.var(&quot;data&quot;, shape=(1, 3, 32, 32), dtype=&quot;float32&quot;)
+    w1 = relay.var(&quot;w1&quot;, shape=(16, 3, 3, 3), dtype=&quot;float32&quot;)
+    w2 = relay.var(&quot;w2&quot;, shape=(32, 16, 3, 3), dtype=&quot;float32&quot;)
+
+    conv1 = relay.nn.conv2d(data, w1, padding=(1, 1))
+    relu1 = relay.nn.relu(conv1)
+    conv2 = relay.nn.conv2d(relu1, w2, padding=(1, 1))
+    relu2 = relay.nn.relu(conv2)
+
+    mod_before = tvm.IRModule.from_expr(relu2)
+
+    # Run FuseOps
+    mod_after = relay.transform.FuseOps(fuse_opt_level=2)(mod_before)
+
+    # Compile and run both versions
+    np_data = np.random.uniform(-1, 1, (1, 3, 32, 32)).astype(&quot;float32&quot;)
+    np_w1 = np.random.uniform(-0.1, 0.1, (16, 3, 3, 3)).astype(&quot;float32&quot;)
+    np_w2 = np.random.uniform(-0.1, 0.1, (32, 16, 3, 3)).astype(&quot;float32&quot;)
+
+    def run_mod(mod):
+        with tvm.transform.PassContext(opt_level=0):  # no extra opts
+            lib = relay.build(mod, target=&quot;llvm&quot;)
+        rt = tvm.contrib.graph_executor.GraphModule(lib[&quot;default&quot;](tvm.cpu()))
+        rt.set_input(&quot;data&quot;, np_data)
+        rt.set_input(&quot;w1&quot;, np_w1)
+        rt.set_input(&quot;w2&quot;, np_w2)
+        rt.run()
+        return rt.get_output(0).numpy()
+
+    out_before = run_mod(mod_before)
+    out_after = run_mod(mod_after)
+
+    # Must be bitwise identical (same dtype, same target)
+    np.testing.assert_array_equal(out_before, out_after)
+</code></pre>
+<h3 id="operator-level-testing-pattern">Operator-Level Testing Pattern</h3>
+<pre><code class="language-python">@tvm.testing.parametrize_targets(&quot;llvm&quot;, &quot;cuda&quot;)
+def test_matmul_against_numpy(target, dev):
+    &quot;&quot;&quot;Test matmul correctness across backends against NumPy reference.&quot;&quot;&quot;
+    M, K, N = 128, 256, 64
+
+    a = relay.var(&quot;a&quot;, shape=(M, K), dtype=&quot;float32&quot;)
+    b = relay.var(&quot;b&quot;, shape=(K, N), dtype=&quot;float32&quot;)
+    out = relay.nn.dense(a, relay.op.transpose(b))
+
+    mod = tvm.IRModule.from_expr(out)
+    with tvm.transform.PassContext(opt_level=3):
+        lib = relay.build(mod, target=target)
+
+    rt = tvm.contrib.graph_executor.GraphModule(lib[&quot;default&quot;](dev))
+
+    a_np = np.random.uniform(-1, 1, (M, K)).astype(&quot;float32&quot;)
+    b_np = np.random.uniform(-1, 1, (K, N)).astype(&quot;float32&quot;)
+
+    rt.set_input(&quot;a&quot;, a_np)
+    rt.set_input(&quot;b&quot;, b_np)
+    rt.run()
+    tvm_out = rt.get_output(0).numpy()
+
+    # NumPy reference (uses higher-precision accumulation internally)
+    ref = a_np @ b_np
+
+    # Tolerance scales with K (number of accumulated terms)
+    atol = np.sqrt(K) * 1e-6
+    np.testing.assert_allclose(tvm_out, ref, atol=atol, rtol=1e-5)
+</code></pre>
+<hr />
+<h2 id="4-fuzzing-ml-compilers">4. Fuzzing ML Compilers</h2>
+<h3 id="what-fuzzing-catches">What Fuzzing Catches</h3>
+<p>Fuzzing generates random (but valid) programs to find crashes and miscompilations:</p>
+<pre><code>Fuzzing Strategy for ML Compilers
+══════════════════════════════════
+
+  Graph Fuzzer: generates random Relay/Relax programs
+  ┌────────────────────────────────────────────────────┐
+  │  1. Pick random ops (conv2d, relu, add, reshape)   │
+  │  2. Connect with valid shapes                      │
+  │  3. Assign random dtypes                           │
+  │  4. Compile with different opt_levels              │
+  │  5. Compare outputs against reference              │
+  └────────────────────────────────────────────────────┘
+
+  Schedule Fuzzer: generates random TIR schedules
+  ┌────────────────────────────────────────────────────┐
+  │  1. Take known-correct TIR PrimFunc                │
+  │  2. Apply random schedule transforms               │
+  │     (split, reorder, vectorize, parallelize)       │
+  │  3. Compile and run                                │
+  │  4. Compare output against unscheduled version     │
+  └────────────────────────────────────────────────────┘
+
+  What fuzzing catches:
+  ✓ Segfaults in generated code (bounds violations)
+  ✓ Assertion failures in compilation passes
+  ✓ Shape inference bugs (invalid intermediate shapes)
+  ✓ Memory layout mismatches between passes
+  ✓ Numerical divergence from reference
+</code></pre>
+<h3 id="simple-graph-fuzzer">Simple Graph Fuzzer</h3>
+<pre><code class="language-python">import random
+import tvm
+from tvm import relay
+import numpy as np
+
+def generate_random_graph(depth=5, seed=42):
+    &quot;&quot;&quot;Generate a random but valid Relay graph for fuzz testing.&quot;&quot;&quot;
+    rng = random.Random(seed)
+    shape = (1, rng.choice([3, 16, 32, 64]), 8, 8)
+    x = relay.var(&quot;input&quot;, shape=shape, dtype=&quot;float32&quot;)
+    current = x
+    channels = shape[1]
+
+    for _ in range(depth):
+        op = rng.choice([&quot;conv2d&quot;, &quot;relu&quot;, &quot;add_const&quot;, &quot;pool&quot;])
+        if op == &quot;conv2d&quot;:
+            out_c = rng.choice([16, 32, 64])
+            w = relay.var(f&quot;w_{rng.randint(0,999)}&quot;, shape=(out_c, channels, 3, 3))
+            current = relay.nn.conv2d(current, w, padding=(1, 1), channels=out_c)
+            channels = out_c
+        elif op == &quot;relu&quot;:
+            current = relay.nn.relu(current)
+        elif op == &quot;add_const&quot;:
+            bias = relay.const(np.random.randn(1, channels, 1, 1).astype(&quot;float32&quot;))
+            current = relay.add(current, bias)
+        elif op == &quot;pool&quot;:
+            current = relay.nn.avg_pool2d(current, pool_size=(2, 2),
+                                           strides=(1, 1), padding=(0, 0))
+    return relay.Function(relay.analysis.free_vars(current), current)
+
+
+def fuzz_compile_and_check(n_programs=100):
+    &quot;&quot;&quot;Fuzz-test the compiler with random programs.&quot;&quot;&quot;
+    failures = []
+    for seed in range(n_programs):
+        try:
+            func = generate_random_graph(depth=4, seed=seed)
+            mod = tvm.IRModule.from_expr(func)
+            # Compile at max optimization
+            with tvm.transform.PassContext(opt_level=3):
+                lib = relay.build(mod, target=&quot;llvm&quot;)
+            # Also compile at opt_level=0 and compare
+            with tvm.transform.PassContext(opt_level=0):
+                lib_ref = relay.build(mod, target=&quot;llvm&quot;)
+            # If both compile, check outputs match
+            # (exercise left to reader to fill in runtime comparison)
+        except Exception as e:
+            failures.append((seed, str(e)))
+
+    print(f&quot;Fuzzed {n_programs} programs, {len(failures)} failures&quot;)
+    for seed, err in failures[:5]:
+        print(f&quot;  Seed {seed}: {err[:80]}&quot;)
+</code></pre>
+<hr />
+<h2 id="5-differential-testing-across-backends">5. Differential Testing Across Backends</h2>
+<h3 id="the-strategy">The Strategy</h3>
+<p>Differential testing compiles the <strong>same program</strong> for different targets and compares:</p>
+<pre><code>Differential Testing Architecture
+══════════════════════════════════
+
+  Input: Relay model + random test data
+         │
+    ┌────▼────────────────────────────────────────────┐
+    │           Same Relay IR (frozen)                 │
+    └────┬──────────┬──────────┬──────────┬───────────┘
+         │          │          │          │
+    ┌────▼───┐ ┌────▼───┐ ┌────▼───┐ ┌────▼───┐
+    │  LLVM  │ │  CUDA  │ │ Vulkan │ │ OpenCL │
+    │ (CPU)  │ │ (GPU)  │ │ (GPU)  │ │ (GPU)  │
+    └────┬───┘ └────┬───┘ └────┬───┘ └────┬───┘
+         │          │          │          │
+    ┌────▼───┐ ┌────▼───┐ ┌────▼───┐ ┌────▼───┐
+    │  out_0 │ │  out_1 │ │  out_2 │ │  out_3 │
+    └────┬───┘ └────┬───┘ └────┬───┘ └────┬───┘
+         │          │          │          │
+         └──────────┴──────────┴──────────┘
+                         │
+                    ┌────▼────────────────────────┐
+                    │  Pairwise allclose checks    │
+                    │  with dtype-appropriate tol  │
+                    │                              │
+                    │  If ANY pair disagrees:      │
+                    │  → Bug in one of the backends│
+                    │  → Use CPU as reference      │
+                    └─────────────────────────────┘
+</code></pre>
+<h3 id="implementation">Implementation</h3>
+<pre><code class="language-python">import tvm
+from tvm import relay
+import numpy as np
+
+
+def differential_test_model(mod, params, targets, test_inputs):
+    &quot;&quot;&quot;Run the same model on multiple backends and compare outputs.&quot;&quot;&quot;
+    outputs = {}
+    for target_str in targets:
+        target = tvm.target.Target(target_str)
+        try:
+            dev = tvm.device(target_str, 0)
+            if not dev.exist:
+                continue
+        except Exception:
+            continue
+
+        with tvm.transform.PassContext(opt_level=3):
+            lib = relay.build(mod, target=target, params=params)
+
+        rt = tvm.contrib.graph_executor.GraphModule(lib[&quot;default&quot;](dev))
+        for name, data in test_inputs.items():
+            rt.set_input(name, data)
+        rt.run()
+        outputs[target_str] = rt.get_output(0).numpy()
+
+    # Pairwise comparison (use CPU as reference)
+    ref_target = &quot;llvm&quot;
+    if ref_target not in outputs:
+        return  # Can't test without CPU baseline
+
+    ref = outputs[ref_target]
+    for target_str, out in outputs.items():
+        if target_str == ref_target:
+            continue
+        max_diff = np.max(np.abs(out - ref))
+        rel_diff = np.max(np.abs(out - ref) / (np.abs(ref) + 1e-10))
+        print(f&quot;{ref_target} vs {target_str}: &quot;
+              f&quot;max_abs_diff={max_diff:.2e}, max_rel_diff={rel_diff:.2e}&quot;)
+        np.testing.assert_allclose(
+            out, ref, atol=1e-4, rtol=1e-4,
+            err_msg=f&quot;Mismatch between {ref_target} and {target_str}&quot;
+        )
+
+
+# Usage:
+# differential_test_model(
+#     mod, params,
+#     targets=[&quot;llvm&quot;, &quot;cuda&quot;, &quot;vulkan&quot;],
+#     test_inputs={&quot;data&quot;: np.random.randn(1, 3, 224, 224).astype(&quot;float32&quot;)}
+# )
+</code></pre>
+<hr />
+<h2 id="6-tvms-testing-infrastructure">6. TVM's Testing Infrastructure</h2>
+<h3 id="key-testing-utilities">Key Testing Utilities</h3>
+<pre><code class="language-python">import tvm.testing
+
+# 1. Parametrize across targets (skips unavailable ones)
+@tvm.testing.parametrize_targets(&quot;llvm&quot;, &quot;cuda&quot;, &quot;vulkan&quot;)
+def test_my_op(target, dev):
+    pass  # dev is automatically created for target
+
+# 2. Check numerical equality with good defaults
+tvm.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-5)
+
+# 3. Known failure marking (for work-in-progress)
+@tvm.testing.known_failing_targets(&quot;vulkan&quot;)
+def test_broken_on_vulkan(target, dev):
+    pass
+
+# 4. Requires specific hardware
+@tvm.testing.requires_cuda
+def test_cuda_specific():
+    pass
+
+@tvm.testing.requires_gpu
+def test_any_gpu():
+    pass
+
+# 5. Fixture for common model loading
+@tvm.testing.parametrize_targets
+def test_resnet(target, dev):
+    mod, params = relay.testing.resnet.get_workload(
+        num_layers=18, batch_size=1
+    )
+    with tvm.transform.PassContext(opt_level=3):
+        lib = relay.build(mod, target, params=params)
+    # ... run and validate
+</code></pre>
+<h3 id="ci-pipeline-structure">CI Pipeline Structure</h3>
+<pre><code>TVM CI Matrix
+═════════════
+
+  Job                 │ What it tests                    │ Time
+  ────────────────────┼──────────────────────────────────┼──────
+  lint                │ clang-format, pylint, mypy       │ ~3 min
+  build-cpu           │ cmake + ninja (CPU-only)         │ ~10 min
+  build-gpu           │ cmake + ninja (CUDA enabled)     │ ~15 min
+  test-cpu            │ pytest tests/ (no GPU required)  │ ~30 min
+  test-gpu            │ pytest tests/ (CUDA + cuDNN)     │ ~45 min
+  test-arm            │ Cross-compile + QEMU             │ ~20 min
+  docs                │ Sphinx build + link check        │ ~10 min
+  ────────────────────┼──────────────────────────────────┼──────
+  Total (sequential)  │                                  │ ~2.5 hr
+  Total (parallel CI) │                                  │ ~50 min
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-tolerance-experiment-20-min">Exercise 1: Tolerance Experiment (20 min)</h3>
+<pre><code class="language-python">import numpy as np
+
+# Compute a large reduction in float32 and float16
+K = 4096
+a = np.random.randn(K).astype(&quot;float32&quot;)
+
+sum_sequential = np.float32(0.0)
+for x in a:
+    sum_sequential += np.float32(x)
+
+sum_numpy = np.sum(a)  # uses pairwise summation internally
+
+print(f&quot;Sequential sum:  {sum_sequential}&quot;)
+print(f&quot;NumPy sum:       {sum_numpy}&quot;)
+print(f&quot;Abs difference:  {abs(sum_sequential - sum_numpy)}&quot;)
+
+# Repeat in float16 — observe much larger divergence
+a16 = a.astype(&quot;float16&quot;)
+sum16_seq = np.float16(0.0)
+for x in a16:
+    sum16_seq += np.float16(x)
+sum16_np = np.sum(a16)
+print(f&quot;\nFP16 sequential: {sum16_seq}&quot;)
+print(f&quot;FP16 NumPy:      {sum16_np}&quot;)
+print(f&quot;FP16 abs diff:   {abs(float(sum16_seq) - float(sum16_np))}&quot;)
+</code></pre>
+<h3 id="exercise-2-write-a-differential-test-30-min">Exercise 2: Write a Differential Test (30 min)</h3>
+<p>Take any Relay model (use <code>relay.testing.resnet.get_workload</code>) and:
+1. Compile for <code>"llvm"</code> and <code>"llvm -mcpu=skylake-avx512"</code> (different instruction sets)
+2. Run both with the same random input
+3. Compare outputs — are they identical? Why or why not?</p>
+<h3 id="exercise-3-build-a-mini-fuzzer-30-min">Exercise 3: Build a Mini Fuzzer (30 min)</h3>
+<p>Extend the graph fuzzer from Section 4:
+- Add <code>batch_norm</code>, <code>sigmoid</code>, and <code>concat</code> ops
+- Track the maximum absolute difference between opt_level=0 and opt_level=3
+- Report which random seeds produce the largest divergence</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Silent numerical bugs</strong> are the most dangerous compiler defects — the model runs fine but produces subtly wrong answers</li>
+<li><strong>Tolerance selection is not trivial</strong> — use $\text{atol} \approx \sqrt{K} \cdot \epsilon_{\text{machine}}$ where $K$ is the accumulation depth</li>
+<li><strong>Differential testing</strong> (same IR, different backends) catches backend-specific codegen bugs without needing a ground-truth oracle</li>
+<li><strong>Fuzzing</strong> generates random valid programs to find crashes and miscompilations that handwritten tests miss</li>
+<li><strong>TVM's <code>tvm.testing</code> module</strong> provides parametric target testing, hardware guards, and numerical comparison utilities out of the box</li>
+<li><strong>Every optimization pass should be tested</strong> both for correctness (output matches) and for idempotency (applying the pass twice gives the same result as once)</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://tvm.apache.org/docs/contribute/ci.html">TVM Testing Guide</a> — CI and testing infrastructure</li>
+<li><a href="https://embed.cs.utah.edu/csmith/">Csmith: A Randomized Compiler Testing Tool</a> — seminal work in compiler fuzzing</li>
+<li><a href="https://dl.acm.org/doi/10.1145/1993316.1993532">Finding and Understanding Bugs in C Compilers (Yang et al., 2011)</a> — foundational differential testing paper</li>
+<li><a href="https://arxiv.org/abs/1805.00089">DeepTest (ICSE 2018)</a> — testing DNN systems</li>
+<li><a href="https://ieeexplore.ieee.org/document/8766229">IEEE 754 Floating Point Standard</a> — precision guarantees</li>
+<li><a href="https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html">What Every Computer Scientist Should Know About Floating-Point Arithmetic (Goldberg)</a> — essential reading</li>
+</ul>
+<hr />
+<h2 id="tomorrow-stop-reflect-4">Tomorrow: Stop &amp; Reflect #4</h2>
+<p>Day 49 is a <strong>consolidation day</strong> marking the end of Phase III. You'll build a full concept map of the TVM stack, create a comparison matrix (TVM vs XLA vs Triton vs ORT vs MLIR ecosystem), take a self-assessment quiz, and verify you're ready for Phase IV's focus on inference optimization and deployment.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-47-contributing-to-tvm.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 47: Contributing to Apache TVM</a>
+            <a href="day-49-stop-and-reflect-4.html" class="text-emerald-600 hover:text-emerald-800">Day 49: Stop & Reflect #4 &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

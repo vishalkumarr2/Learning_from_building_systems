@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 26: TorchInductor Code Generation - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 4: Triton & Kernel Engineering</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-26-torchinductor-code-generation">Day 26: TorchInductor Code Generation</h1>
+<blockquote>
+<p><strong>Phase II · Week 4 · Day 26 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"Inductor is where abstract math meets real hardware. Its job is deceptively simple: take a graph of tensor operations and produce the fastest possible Triton kernel. The magic is in the decisions it makes along the way — what to fuse, how to schedule, and what shape the generated code takes."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-25-torch-compile-internals.html">Day 25: torch.compile Internals</a></td>
+<td style="text-align: left;"><a href="day-27-custom-triton-backend.html">Day 27: Custom Triton Backend</a></td>
+<td style="text-align: left;"><a href="README.html">Week 4: Triton &amp; Kernel Engineering</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase II: Compiler Fundamentals</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Yesterday we traced the full <code>torch.compile</code> pipeline end-to-end. Today we zoom into <strong>Stage 3 — Inductor</strong> and study how it actually turns an FX graph into Triton source code. This is where every fusion decision, memory layout choice, and scheduling trade-off lives. Understanding Inductor's codegen lets you: (1) read the generated Triton to diagnose performance issues, (2) write custom lowerings when Inductor's defaults are suboptimal, and (3) understand <em>why</em> certain patterns run fast and others don't.</p>
+<hr />
+<h2 id="1-inductors-internal-pipeline">1. Inductor's Internal Pipeline</h2>
+<p>The Inductor backend receives an FX graph of ATen primitives from AOTAutograd. It transforms that graph through four stages before emitting code:</p>
+<pre><code>FX Graph (ATen ops)
+     │
+     ▼
+┌──────────────────────────────────────────────────────┐
+│  1. LOWERING                                          │
+│  ─────────────────                                    │
+│  ATen ops → Inductor IR nodes                         │
+│  aten.add → pointwise(lambda x, y: x + y)            │
+│  aten.sum → reduction(lambda x, y: x + y, init=0)    │
+│  aten.mm  → extern_kernel(triton_matmul)              │
+│                                                       │
+│  Registry: torch._inductor.lowering                   │
+└──────────────────────┬───────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│  2. FUSION                                            │
+│  ──────────────                                       │
+│  Group IR nodes into SchedulerNode clusters            │
+│  Rules:                                               │
+│    • pointwise + pointwise → fuse (always)            │
+│    • pointwise + reduction → fuse (same shape)        │
+│    • reduction + pointwise → fuse (broadcast ok)      │
+│    • extern kernels → never fuse                      │
+│                                                       │
+│  Goal: minimize kernel launches &amp; memory traffic      │
+└──────────────────────┬───────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│  3. SCHEDULING                                        │
+│  ─────────────────                                    │
+│  For each fused group:                                │
+│    • Choose loop ordering (row-major vs column-major) │
+│    • Determine block sizes and grid dimensions        │
+│    • Handle reductions (single-block vs multi-block)  │
+│    • Insert synchronization points                    │
+│                                                       │
+│  Key file: torch._inductor.scheduler                  │
+└──────────────────────┬───────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│  4. CODE GENERATION                                   │
+│  ──────────────────────                               │
+│  Emit Triton Python source (GPU) or C++ (CPU)         │
+│  Compile via Triton JIT or gcc/clang                  │
+│  Cache in __pycache__/torch_inductor/                 │
+│                                                       │
+│  Key file: torch._inductor.codegen.triton             │
+└──────────────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="2-lowering-aten-inductor-ir">2. Lowering: ATen → Inductor IR</h2>
+<p>Lowering translates each ATen operation into an Inductor IR node. The registry maps operation names to lowering functions:</p>
+<pre><code class="language-python"># Simplified view of how lowerings are registered
+# (from torch/_inductor/lowering.py)
+
+@register_lowering(aten.add)
+def lower_add(a, b):
+    return pointwise(
+        args=[a, b],
+        fn=lambda x, y: ops.add(x, y),
+    )
+
+@register_lowering(aten.sum, type_promotion_kind=None)
+def lower_sum(x, dims, keepdim=False):
+    return reduction(
+        x,
+        reduction_type=&quot;sum&quot;,
+        dims=dims,
+        keepdim=keepdim,
+    )
+</code></pre>
+<h3 id="inductor-ir-node-types">Inductor IR Node Types</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">IR Node</th>
+<th style="text-align: left;">Description</th>
+<th style="text-align: left;">Example Ops</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>Pointwise</code></td>
+<td style="text-align: left;">Element-wise, same output shape</td>
+<td style="text-align: left;">add, mul, relu, sin, cast</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>Reduction</code></td>
+<td style="text-align: left;">Collapses dimension(s)</td>
+<td style="text-align: left;">sum, mean, amax, argmax</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>TensorBox</code></td>
+<td style="text-align: left;">Wraps a storage + layout</td>
+<td style="text-align: left;">inputs, constants</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>ExternKernel</code></td>
+<td style="text-align: left;">Calls pre-compiled kernel</td>
+<td style="text-align: left;">mm, conv2d, SDPA</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>TemplateKernel</code></td>
+<td style="text-align: left;">Specialized Triton template</td>
+<td style="text-align: left;">fused GEMM + epilogue</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>FallbackKernel</code></td>
+<td style="text-align: left;">Runs via ATen (no codegen)</td>
+<td style="text-align: left;">unsupported ops</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-ops-namespace">The ops Namespace</h3>
+<p>Inside a lowering function, <code>ops.*</code> provides a hardware-neutral set of operations:</p>
+<pre><code class="language-python"># ops.* is Inductor's &quot;virtual instruction set&quot;
+ops.add(x, y)           # addition
+ops.mul(x, y)           # multiplication
+ops.maximum(x, y)       # element-wise max
+ops.where(cond, a, b)   # conditional select
+ops.exp(x)              # exponential
+ops.log(x)              # natural log
+ops.to_dtype(x, dtype)  # type cast
+ops.load(name, index)   # memory load
+ops.store(name, index, val)  # memory store
+</code></pre>
+<p>These get translated to Triton intrinsics during code generation:
+- <code>ops.add(x, y)</code> → <code>x + y</code>
+- <code>ops.maximum(x, y)</code> → <code>tl.maximum(x, y)</code>
+- <code>ops.exp(x)</code> → <code>tl.exp(x)</code></p>
+<hr />
+<h2 id="3-fusion-the-schedulers-key-decision">3. Fusion: The Scheduler's Key Decision</h2>
+<p>Fusion is Inductor's most impactful optimization. Each fusion eliminates a kernel launch (~5 µs) and an entire round-trip to global memory.</p>
+<h3 id="fusion-cost-model">Fusion Cost Model</h3>
+<pre><code>Memory traffic WITHOUT fusion:         WITH fusion:
+─────────────────────────               ────────────────
+Kernel 1: y = x * 2                     Kernel 1 (fused):
+  Load x:    N × 4 bytes                  Load x:    N × 4 bytes
+  Store y:   N × 4 bytes                  Store z:   N × 2 bytes
+Kernel 2: z = relu(y).half()             ────────────────
+  Load y:    N × 4 bytes                 Total: N × 6 bytes
+  Store z:   N × 2 bytes
+─────────────────────                   
+Total: N × 14 bytes                     Savings: 57% less memory traffic
+                                        + 1 fewer kernel launch
+</code></pre>
+<h3 id="fusion-rules">Fusion Rules</h3>
+<pre><code class="language-python"># Inductor's fusion decision tree (simplified):
+
+def can_fuse(node_a, node_b):
+    # Rule 1: both must be schedulable (not extern)
+    if is_extern(node_a) or is_extern(node_b):
+        return False
+
+    # Rule 2: no circular dependencies
+    if creates_cycle(node_a, node_b):
+        return False
+
+    # Rule 3: compatible iteration ranges
+    if not compatible_ranges(node_a, node_b):
+        return False
+
+    # Rule 4: pointwise+pointwise always fuses
+    if is_pointwise(node_a) and is_pointwise(node_b):
+        return True
+
+    # Rule 5: reduction fusion requires matching dims
+    if is_reduction(node_a) or is_reduction(node_b):
+        return check_reduction_compatibility(node_a, node_b)
+
+    return False
+</code></pre>
+<h3 id="what-blocks-fusion">What Blocks Fusion</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Blocker</th>
+<th style="text-align: left;">Why</th>
+<th style="text-align: left;">Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Extern kernel</td>
+<td style="text-align: left;">Pre-compiled, can't inline</td>
+<td style="text-align: left;"><code>torch.mm</code>, <code>conv2d</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Shape mismatch</td>
+<td style="text-align: left;">Different iteration domains</td>
+<td style="text-align: left;"><code>(B,M,K)</code> op + <code>(B,N)</code> op</td>
+</tr>
+<tr>
+<td style="text-align: left;">Circular dependency</td>
+<td style="text-align: left;">A depends on B and B on A</td>
+<td style="text-align: left;">Rare, usually a graph issue</td>
+</tr>
+<tr>
+<td style="text-align: left;">Reduction boundary</td>
+<td style="text-align: left;">Reduction output feeds non-matching op</td>
+<td style="text-align: left;"><code>sum(x, dim=1)</code> → <code>(B,)</code> + <code>(B,M)</code> op</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-kernel-categories-in-generated-code">4. Kernel Categories in Generated Code</h2>
+<p>Inductor generates three kinds of Triton kernels:</p>
+<h3 id="41-pointwise-kernels">4.1 Pointwise Kernels</h3>
+<p>The simplest and most common. One program instance per block of elements:</p>
+<pre><code class="language-python"># Generated by Inductor for: y = relu(x * 2 + 1).half()
+@triton.jit
+def triton_poi_fused_mul_add_relu_to_half_0(
+    in_ptr0,      # input tensor
+    out_ptr0,     # output tensor
+    xnumel,       # total number of elements
+    XBLOCK: tl.constexpr,
+):
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)
+    xmask = xindex &lt; xnumel
+
+    x0 = tl.load(in_ptr0 + xindex, xmask)
+    x1 = x0 * 2.0                           # mul
+    x2 = x1 + 1.0                           # add
+    x3 = tl.maximum(x2, 0.0)                # relu
+    x4 = x3.to(tl.float16)                  # cast
+    tl.store(out_ptr0 + xindex, x4, xmask)
+</code></pre>
+<p><strong>Naming convention:</strong> <code>triton_poi_fused_{op_names}_{kernel_id}</code></p>
+<h3 id="42-reduction-kernels">4.2 Reduction Kernels</h3>
+<p>Handle operations that collapse dimensions. Two-level: in-block reduce, then cross-block:</p>
+<pre><code class="language-python"># Generated for: y = x.sum(dim=1)  where x is (M, N)
+@triton.jit
+def triton_red_fused_sum_0(
+    in_ptr0,
+    out_ptr0,
+    xnumel,       # outer dimension (M)
+    rnumel,       # reduction dimension (N)
+    XBLOCK: tl.constexpr,
+    RBLOCK: tl.constexpr,
+):
+    xindex = tl.program_id(0) * XBLOCK + tl.arange(0, XBLOCK)
+    xmask = xindex &lt; xnumel
+
+    accumulator = tl.zeros([XBLOCK, RBLOCK], dtype=tl.float32)
+    for roffset in range(0, rnumel, RBLOCK):
+        rindex = roffset + tl.arange(0, RBLOCK)
+        rmask = rindex &lt; rnumel
+
+        tmp = tl.load(
+            in_ptr0 + (xindex[:, None] * rnumel + rindex[None, :]),
+            xmask[:, None] &amp; rmask[None, :],
+        )
+        accumulator += tmp
+
+    result = tl.sum(accumulator, axis=1)
+    tl.store(out_ptr0 + xindex, result, xmask)
+</code></pre>
+<p><strong>Naming convention:</strong> <code>triton_red_fused_{op_names}_{kernel_id}</code></p>
+<h3 id="43-template-kernels">4.3 Template Kernels</h3>
+<p>For complex patterns (GEMM + epilogue), Inductor uses hand-written Triton templates:</p>
+<pre><code class="language-python"># Template: GEMM + bias + ReLU
+# (used when Inductor detects: linear(x) followed by fused pointwise)
+#
+# These live in torch/_inductor/codegen/triton_templates/
+# and are specialized at codegen time with concrete shapes
+</code></pre>
+<p><strong>Naming convention:</strong> <code>triton_tem_{template_name}_{kernel_id}</code></p>
+<hr />
+<h2 id="5-reading-generated-code">5. Reading Generated Code</h2>
+<p>The most practical Inductor skill: reading what it actually produces.</p>
+<pre><code class="language-python">import torch
+
+# Tell Inductor to write generated code to disk
+torch._inductor.config.debug = True
+
+@torch.compile
+def layer_norm_gelu(x, weight, bias):
+    x = torch.layer_norm(x, [x.shape[-1]], weight, bias)
+    return torch.nn.functional.gelu(x)
+
+x = torch.randn(32, 128, device=&quot;cuda&quot;)
+w = torch.randn(128, device=&quot;cuda&quot;)
+b = torch.randn(128, device=&quot;cuda&quot;)
+out = layer_norm_gelu(x, w, b)
+</code></pre>
+<pre><code class="language-bash"># Find the generated code
+TORCH_LOGS=&quot;output_code&quot; python script.py 2&gt;&amp;1 | head -100
+
+# Or look in the cache directory:
+ls /tmp/torchinductor_$USER/
+# ├── triton/
+# │   ├── 0/
+# │   │   ├── triton_poi_fused_...py     ← generated Triton kernels
+# │   │   └── triton_red_fused_...py
+# │   └── ...
+# └── wrapper_code/
+#     └── ...py                           ← wrapper that calls kernels
+</code></pre>
+<h3 id="the-wrapper-code">The Wrapper Code</h3>
+<p>Inductor generates two things: Triton kernels <em>and</em> a Python wrapper that orchestrates them:</p>
+<pre><code class="language-python"># Simplified wrapper (auto-generated by Inductor)
+def call(args):
+    arg0, arg1, arg2 = args   # x, weight, bias
+
+    # Allocate output buffer
+    buf0 = empty_strided((32, 128), (128, 1), device='cuda', dtype=torch.float32)
+
+    # Launch fused layer_norm + gelu kernel
+    triton_red_fused_native_layer_norm_gelu_0.run(
+        arg0, arg1, arg2, buf0,
+        32,          # xnumel (batch)
+        128,         # rnumel (hidden dim)
+        grid=grid(32),
+        XBLOCK=1,
+        RBLOCK=128,
+    )
+
+    return (buf0,)
+</code></pre>
+<hr />
+<h2 id="6-writing-custom-lowerings">6. Writing Custom Lowerings</h2>
+<p>When Inductor's default lowering for an op is suboptimal, you can register your own:</p>
+<pre><code class="language-python">import torch
+from torch._inductor.lowering import register_lowering, pointwise
+from torch._inductor import ir
+
+# Custom lowering for a hypothetical fused op
+@register_lowering(torch.ops.mylib.fused_silu)
+def lower_fused_silu(x):
+    &quot;&quot;&quot;SiLU(x) = x * sigmoid(x) as a single pointwise kernel.&quot;&quot;&quot;
+
+    def fn(x):
+        # ops.* expressions get compiled to Triton intrinsics
+        sigmoid_x = ops.sigmoid(x)
+        return ops.mul(x, sigmoid_x)
+
+    return pointwise(
+        args=[x],
+        fn=fn,
+    )
+</code></pre>
+<h3 id="when-to-write-a-custom-lowering">When to Write a Custom Lowering</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Scenario</th>
+<th style="text-align: left;">Default Inductor Behavior</th>
+<th style="text-align: left;">Custom Lowering Benefit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Fused activation</td>
+<td style="text-align: left;">Separate mul + sigmoid</td>
+<td style="text-align: left;">Single pass, 2× less memory</td>
+</tr>
+<tr>
+<td style="text-align: left;">Custom dtype logic</td>
+<td style="text-align: left;">Falls back to ATen</td>
+<td style="text-align: left;">Stays in Triton</td>
+</tr>
+<tr>
+<td style="text-align: left;">Approximate math</td>
+<td style="text-align: left;">Uses <code>tl.exp</code> (exact)</td>
+<td style="text-align: left;">Use fast-math approximation</td>
+</tr>
+<tr>
+<td style="text-align: left;">Domain-specific op</td>
+<td style="text-align: left;">FallbackKernel (no fusion)</td>
+<td style="text-align: left;">Enables fusion with neighbors</td>
+</tr>
+</tbody>
+</table>
+<h3 id="testing-your-lowering">Testing Your Lowering</h3>
+<pre><code class="language-python">import torch
+
+# Register the custom op first (via torch.library)
+@torch.library.custom_op(&quot;mylib::fused_silu&quot;, mutates_args=())
+def fused_silu(x: torch.Tensor) -&gt; torch.Tensor:
+    return x * torch.sigmoid(x)  # eager fallback
+
+@fused_silu.register_fake
+def fused_silu_fake(x):
+    return torch.empty_like(x)
+
+# Now test with torch.compile
+@torch.compile
+def model(x):
+    return torch.ops.mylib.fused_silu(x)
+
+x = torch.randn(1024, device=&quot;cuda&quot;)
+result = model(x)
+expected = x * torch.sigmoid(x)
+assert torch.allclose(result, expected, atol=1e-5)
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-read-generated-code-20-min">Exercise 1: Read Generated Code (20 min)</h3>
+<pre><code class="language-python">import torch
+
+torch._inductor.config.debug = True
+
+@torch.compile
+def f(x):
+    y = x.cos()
+    y = y + 1.0
+    y = y * x.sin()
+    return y.sum()
+
+x = torch.randn(1024, device=&quot;cuda&quot;)
+result = f(x)
+
+# TODO:
+# 1. Set TORCH_LOGS=&quot;output_code&quot; and run
+# 2. Find the generated Triton kernel(s)
+# 3. How many kernels were generated? Why?
+# 4. Identify which ops were fused together
+# 5. What is the reduction strategy for sum()?
+</code></pre>
+<h3 id="exercise-2-fusion-experiment-25-min">Exercise 2: Fusion Experiment (25 min)</h3>
+<pre><code class="language-python">import torch
+import torch._inductor.config as inductor_config
+
+# Compare fusion vs no-fusion
+inductor_config.debug = True
+
+@torch.compile
+def fused_chain(x):
+    y = x * 2
+    y = y + 1
+    y = torch.relu(y)
+    y = y.half()
+    return y
+
+@torch.compile
+def broken_chain(x):
+    y = x * 2
+    y = y + 1
+    z = torch.mm(y, y.T)   # extern kernel breaks the chain
+    z = torch.relu(z)
+    z = z.half()
+    return z
+
+x = torch.randn(256, 256, device=&quot;cuda&quot;)
+
+# TODO:
+# 1. Run both functions, inspect generated code
+# 2. Count kernels in each case
+# 3. Why does mm break the fusion chain?
+# 4. Measure wallclock time difference
+</code></pre>
+<h3 id="exercise-3-custom-lowering-30-min">Exercise 3: Custom Lowering (30 min)</h3>
+<pre><code class="language-python">import torch
+from torch._inductor.lowering import register_lowering, pointwise
+
+# Implement a custom lowering for &quot;squared ReLU&quot;:
+#   squared_relu(x) = relu(x)^2
+#
+# Default Inductor: relu and square are separate pointwise nodes
+# (they'll fuse anyway — but this exercise teaches the mechanics)
+
+# Step 1: Define the custom op
+@torch.library.custom_op(&quot;mylib::squared_relu&quot;, mutates_args=())
+def squared_relu(x: torch.Tensor) -&gt; torch.Tensor:
+    return torch.relu(x) ** 2
+
+@squared_relu.register_fake
+def squared_relu_fake(x):
+    return torch.empty_like(x)
+
+# Step 2: TODO — write the custom lowering
+# @register_lowering(torch.ops.mylib.squared_relu)
+# def lower_squared_relu(x):
+#     ...
+
+# Step 3: Verify
+@torch.compile
+def model(x):
+    return torch.ops.mylib.squared_relu(x)
+
+x = torch.randn(1024, device=&quot;cuda&quot;)
+result = model(x)
+expected = torch.relu(x) ** 2
+print(f&quot;Correct: {torch.allclose(result, expected)}&quot;)
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Four-stage pipeline</strong> — Inductor transforms ATen ops through lowering → fusion → scheduling → code generation, each stage narrowing the abstraction.</li>
+<li><strong>Lowerings map ATen → IR</strong> — Every supported ATen op has a lowering function that expresses it in terms of <code>ops.*</code> primitives. Custom lowerings let you override defaults.</li>
+<li><strong>Fusion is the biggest win</strong> — Merging pointwise ops into a single kernel reduces kernel launches and memory traffic by $n\times$ for $n$ fused ops.</li>
+<li><strong>Three kernel types</strong> — Pointwise (<code>poi</code>), reduction (<code>red</code>), and template (<code>tem</code>) kernels handle different iteration patterns.</li>
+<li><strong>Read the generated code</strong> — <code>TORCH_LOGS="output_code"</code> and <code>torch._inductor.config.debug = True</code> are your best debugging tools.</li>
+<li><strong>Extern kernels break fusion</strong> — <code>mm</code>, <code>conv2d</code>, and other pre-compiled kernels act as fusion barriers, splitting the graph into separate kernel groups.</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><strong>Inductor source code:</strong> <code>torch/_inductor/</code> — start with <code>compile_fx.py</code>, <code>lowering.py</code>, <code>scheduler.py</code></li>
+<li><strong>Inductor design doc:</strong> <a href="https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-target-backends/747">dev-discuss.pytorch.org — TorchInductor overview</a></li>
+<li><strong>Custom ops + torch.compile:</strong> <a href="https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html">pytorch.org/tutorials/advanced/custom_ops_landing_page.html</a></li>
+<li><strong>Triton code generation internals:</strong> <code>torch/_inductor/codegen/triton.py</code></li>
+<li><strong>Mark Saroufim's Inductor walkthrough:</strong> YouTube — "PyTorch Compiler Stack" (2024)</li>
+</ul>
+<hr />
+<h2 id="tomorrow">Tomorrow</h2>
+<p><strong>Day 27</strong> takes us from reading Inductor's generated code to <strong>writing our own torch.compile backend</strong>. We'll use the backend API to intercept the FX graph and generate custom Triton kernels, learning when to customize vs. let Inductor do its thing.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-25-torch-compile-internals.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 25: torch.compile Internals</a>
+            <a href="day-27-custom-triton-backend.html" class="text-emerald-600 hover:text-emerald-800">Day 27: Custom Triton Backend &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

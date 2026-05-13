@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 53: TensorRT Optimization - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 8: Model Formats & Runtimes</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-53-tensorrt-optimization">Day 53: TensorRT Optimization</h1>
+<blockquote>
+<p><strong>Phase IV · Week 8 · Day 53 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"TensorRT doesn't run your model — it rebuilds it from scratch for the GPU you have right now."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-52-knowledge-distillation.html">Day 52: Knowledge Distillation</a></td>
+<td style="text-align: left;"><a href="day-54-inference-on-cpu.html">Day 54: Inference on CPU</a></td>
+<td style="text-align: left;"><a href="README.html">Week 8: Model Formats &amp; Runtimes</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase IV: Inference &amp; Deployment</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>You've exported to ONNX, pruned weights, distilled knowledge. Now what? The model still needs to <strong>execute</strong> on real hardware, and generic frameworks leave enormous performance on the table. TensorRT is NVIDIA's production inference optimizer — it takes your model, fuses layers, selects optimal kernels, calibrates precision, and plans memory layout specifically for <strong>your GPU architecture</strong>. A ResNet-50 that runs at 200 img/s in PyTorch can reach 5000+ img/s in TensorRT. For LLMs, TensorRT-LLM achieves 2–5× the throughput of vanilla HuggingFace inference. Understanding TensorRT's architecture — parser, builder, optimizer, runtime — is essential for anyone deploying NVIDIA GPU inference at scale.</p>
+<hr />
+<h2 id="1-tensorrt-architecture">1. TensorRT Architecture</h2>
+<pre><code>TensorRT Pipeline — From Model to Engine
+══════════════════════════════════════════════════════════════════════
+
+  ┌─────────────┐     ┌─────────────┐     ┌─────────────────────┐
+  │  ONNX Model │     │   Parser    │     │      Network        │
+  │  (.onnx)    │────▶│  (parses    │────▶│   Definition        │
+  │             │     │   to IR)    │     │  (INetworkDefinition)│
+  └─────────────┘     └─────────────┘     └──────────┬──────────┘
+                                                      │
+                                                      ▼
+  ┌─────────────┐     ┌─────────────┐     ┌──────────────────────┐
+  │  Serialized │     │   Runtime   │     │      Builder         │
+  │  Engine     │◀────│  (loads &amp;   │◀────│   (optimizes &amp;       │
+  │  (.engine)  │     │   executes) │     │    builds engine)    │
+  └─────────────┘     └──────┬──────┘     └──────────────────────┘
+                             │
+                             ▼                 Builder optimizations:
+                    ┌────────────────┐         ┌─────────────────────┐
+                    │  Inference     │         │ • Layer fusion       │
+                    │  Context       │         │ • Kernel auto-tuning │
+                    │  (per-request) │         │ • Precision selection │
+                    └────────────────┘         │ • Memory planning    │
+                                               │ • Tensor reformatting│
+                                               └─────────────────────┘
+</code></pre>
+<hr />
+<h2 id="2-layer-fusion">2. Layer Fusion</h2>
+<p>TensorRT fuses multiple operations into single, optimized kernels:</p>
+<h3 id="21-common-fusion-patterns">2.1 Common Fusion Patterns</h3>
+<pre><code>Layer Fusion Examples
+══════════════════════════════════════════════════════════
+
+  Before Fusion:                    After Fusion:
+  ┌──────┐ ┌──────┐ ┌──────┐      ┌──────────────────┐
+  │ Conv │→│  BN  │→│ ReLU │  ──▶ │ ConvBNReLU       │  1 kernel
+  └──────┘ └──────┘ └──────┘      │ (fused)          │
+                                   └──────────────────┘
+
+  ┌──────┐ ┌──────┐ ┌──────┐      ┌──────────────────┐
+  │MatMul│→│ Add  │→│ ReLU │  ──▶ │ GemmReLU         │  1 kernel
+  └──────┘ └──────┘ └──────┘      │ (fused)          │
+                                   └──────────────────┘
+
+  ┌──────┐   ┌──────┐             ┌──────────────────┐
+  │  QKV │ → │Softmax│→ V mul ──▶ │ FlashAttention   │  1 kernel
+  └──────┘   └──────┘             │ (fused MHA)      │
+                                   └──────────────────┘
+
+  ┌──────┐ ┌──────┐               ┌──────────────────┐
+  │ Conv │→│ Conv │   (1×1→3×3)──▶│ Fused Conv       │  1 kernel
+  └──────┘ └──────┘               │ (depthwise sep)  │
+                                   └──────────────────┘
+</code></pre>
+<h3 id="22-why-fusion-matters">2.2 Why Fusion Matters</h3>
+<p>Each kernel launch has overhead: ~5–10μs for launch + memory read/write for intermediate tensors:</p>
+<p>$$T_{\text{unfused}} = \sum_{i=1}^{N} (T_{\text{launch}_i} + T_{\text{compute}_i} + T_{\text{memory}_i})$$</p>
+<p>$$T_{\text{fused}} = T_{\text{launch}} + T_{\text{compute}} + T_{\text{memory}}$$</p>
+<p>For a Conv-BN-ReLU sequence:
+- <strong>Unfused</strong>: 3 kernel launches, 3 memory round-trips = ~30μs overhead + 3× DRAM bandwidth
+- <strong>Fused</strong>: 1 kernel launch, intermediates stay in registers/shared memory = ~10μs overhead</p>
+<hr />
+<h2 id="3-precision-calibration">3. Precision Calibration</h2>
+<p>TensorRT supports FP32, FP16, and INT8 precision. INT8 requires <strong>calibration</strong> to find optimal quantization ranges.</p>
+<h3 id="31-precision-hierarchy">3.1 Precision Hierarchy</h3>
+<pre><code>Precision Modes &amp; Performance
+══════════════════════════════════════════════════════════
+
+  Precision    Bits    Tensor Core    Relative Speed    Accuracy
+  ─────────    ────    ───────────    ──────────────    ────────
+  FP32          32     ✗              1×                Baseline
+  TF32          19     ✓ (Ampere+)    2×                ~FP32
+  FP16          16     ✓              4×                ~FP32 (mixed)
+  BF16          16     ✓ (Ampere+)    4×                ~FP32
+  FP8           8      ✓ (Hopper+)    8×                ~FP16
+  INT8           8     ✓              8×                Requires calibration
+  INT4           4     ✓ (Ada+)       16×               LLM weights only
+</code></pre>
+<h3 id="32-int8-calibration">3.2 INT8 Calibration</h3>
+<p>Calibration finds the optimal clipping range $[\alpha, \beta]$ for each tensor:</p>
+<p>$$x_{\text{quantized}} = \text{round}\left(\frac{x - \alpha}{\beta - \alpha} \times 255\right)$$</p>
+<p>TensorRT offers multiple calibration algorithms:</p>
+<table>
+<thead>
+<tr>
+<th>Calibrator</th>
+<th>Method</th>
+<th>Best For</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>IInt8EntropyCalibrator2</code></td>
+<td>KL divergence minimization</td>
+<td>CNNs, general models</td>
+</tr>
+<tr>
+<td><code>IInt8MinMaxCalibrator</code></td>
+<td>Min/max range</td>
+<td>When outliers are rare</td>
+</tr>
+<tr>
+<td><code>IInt8Percentile</code></td>
+<td>Percentile clipping</td>
+<td>Models with outlier activations</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-python">import tensorrt as trt
+
+class Int8Calibrator(trt.IInt8EntropyCalibrator2):
+    def __init__(self, data_loader, cache_file=&quot;calibration.cache&quot;):
+        super().__init__()
+        self.data_loader = iter(data_loader)
+        self.cache_file = cache_file
+        self.device_input = cuda.mem_alloc(32 * 3 * 224 * 224 * 4)
+
+    def get_batch_size(self): return 32
+
+    def get_batch(self, names):
+        try:
+            batch = next(self.data_loader)
+            cuda.memcpy_htod(self.device_input, batch.numpy().ravel())
+            return [int(self.device_input)]
+        except StopIteration:
+            return None
+
+    def read_calibration_cache(self):
+        try: return open(self.cache_file, &quot;rb&quot;).read()
+        except FileNotFoundError: return None
+
+    def write_calibration_cache(self, cache):
+        open(self.cache_file, &quot;wb&quot;).write(cache)
+</code></pre>
+<hr />
+<h2 id="4-building-and-running-a-tensorrt-engine">4. Building and Running a TensorRT Engine</h2>
+<h3 id="41-full-pipeline-onnx-engine-inference">4.1 Full Pipeline: ONNX → Engine → Inference</h3>
+<pre><code class="language-python">import tensorrt as trt
+import pycuda.driver as cuda
+import pycuda.autoinit
+import numpy as np
+
+TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+
+def build_engine(onnx_path, precision=&quot;fp16&quot;, max_batch=8):
+    builder = trt.Builder(TRT_LOGGER)
+    network = builder.create_network(
+        1 &lt;&lt; int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+    )
+    parser = trt.OnnxParser(network, TRT_LOGGER)
+    with open(onnx_path, &quot;rb&quot;) as f:
+        parser.parse(f.read())
+
+    config = builder.create_builder_config()
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 &lt;&lt; 30)
+
+    if precision == &quot;fp16&quot;:
+        config.set_flag(trt.BuilderFlag.FP16)
+    elif precision == &quot;int8&quot;:
+        config.set_flag(trt.BuilderFlag.INT8)
+        config.int8_calibrator = Int8Calibrator(calibration_loader)
+
+    # Dynamic shapes
+    profile = builder.create_optimization_profile()
+    profile.set_shape(&quot;input&quot;,
+        min=(1, 3, 224, 224), opt=(4, 3, 224, 224), max=(max_batch, 3, 224, 224))
+    config.add_optimization_profile(profile)
+
+    # Build &amp; serialize
+    engine_bytes = builder.build_serialized_network(network, config)
+    with open(&quot;model.engine&quot;, &quot;wb&quot;) as f:
+        f.write(engine_bytes)
+    return trt.Runtime(TRT_LOGGER).deserialize_cuda_engine(engine_bytes)
+
+
+Inference allocates device memory, copies input HtoD, executes asynchronously, copies output DtoH, then synchronizes. TensorRT engines are **GPU-specific** — rebuild for each target GPU and TensorRT version (use timing caches to speed rebuilds).
+
+---
+
+## 5. Profiling with trtexec
+
+`trtexec` is TensorRT's CLI tool for benchmarking and profiling:
+
+```bash
+# Basic benchmark: ONNX → engine → benchmark
+trtexec --onnx=resnet50.onnx \
+        --fp16 \
+        --workspace=4096 \
+        --warmUp=500 \
+        --iterations=1000 \
+        --verbose
+
+# Output:
+# [07/15/2025-10:30:45] [I] === Performance summary ===
+# [I] Throughput: 4892.31 qps
+# [I] Latency: min = 0.189 ms, max = 0.312 ms, mean = 0.204 ms
+# [I] GPU Compute Time: min = 0.181 ms, max = 0.295 ms, mean = 0.196 ms
+
+# INT8 calibration with data
+trtexec --onnx=resnet50.onnx \
+        --int8 \
+        --calib=/path/to/calibration_data \
+        --saveEngine=resnet50_int8.engine
+
+# Dynamic batch shapes
+trtexec --onnx=model.onnx \
+        --minShapes=input:1x3x224x224 \
+        --optShapes=input:8x3x224x224 \
+        --maxShapes=input:32x3x224x224 \
+        --fp16
+
+# Layer-level profiling
+trtexec --loadEngine=model.engine \
+        --dumpProfile \
+        --exportProfile=profile.json
+</code></pre>
+<p>The profile output shows per-layer time, percentage, and precision. Look for <strong>compute-bound</strong> layers (benefit from INT8) vs <strong>memory-bound</strong> layers (benefit from smaller weights, not lower precision).</p>
+<hr />
+<h2 id="6-tensorrt-llm-for-transformer-inference">6. TensorRT-LLM for Transformer Inference</h2>
+<p>TensorRT-LLM extends TensorRT with <strong>LLM-specific optimizations</strong>:</p>
+<p>TensorRT-LLM pipeline: <strong>Model Definition</strong> (Python API with quantization annotations) → <strong>trtllm-build</strong> (compiles with LLM fusions) → <strong>C++ Executor</strong> (paged KV cache, in-flight batching, tensor/pipeline parallelism, beam search, speculative decoding, FP8/INT4).</p>
+<pre><code class="language-bash"># Convert checkpoint → build engine with LLM optimizations
+python convert_checkpoint.py --model_dir /models/llama-2-7b \
+    --output_dir /engines/llama-7b-ckpt --dtype float16
+
+trtllm-build --checkpoint_dir /engines/llama-7b-ckpt \
+    --output_dir /engines/llama-7b-engine --gemm_plugin float16 \
+    --max_batch_size 64 --max_seq_len 4096 --paged_kv_cache enable
+</code></pre>
+<h3 id="62-torch_tensorrt-pytorch-integration">6.2 torch_tensorrt — PyTorch Integration</h3>
+<p>For simpler models, use TensorRT directly within PyTorch:</p>
+<pre><code class="language-python">import torch
+import torch_tensorrt
+
+model = torchvision.models.resnet50(pretrained=True).eval().cuda()
+example_input = torch.randn(1, 3, 224, 224).cuda()
+
+# Compile with torch_tensorrt
+optimized = torch_tensorrt.compile(
+    model,
+    inputs=[
+        torch_tensorrt.Input(
+            min_shape=[1, 3, 224, 224],
+            opt_shape=[8, 3, 224, 224],
+            max_shape=[32, 3, 224, 224],
+            dtype=torch.float16,
+        )
+    ],
+    enabled_precisions={torch.float16},
+    workspace_size=1 &lt;&lt; 30,
+)
+
+# Use like a normal PyTorch module
+output = optimized(example_input.half())
+
+# Save as TorchScript for deployment
+torch.jit.save(optimized, &quot;resnet50_trt.ts&quot;)
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-end-to-end-tensorrt-pipeline-30-min">Exercise 1: End-to-End TensorRT Pipeline (30 min)</h3>
+<ol>
+<li>Export ResNet-50 from PyTorch to ONNX (opset 17, dynamic batch)</li>
+<li>Build TensorRT engines at FP32, FP16, and INT8</li>
+<li>Benchmark all three with <code>trtexec</code> — record throughput and latency</li>
+<li>Compare accuracy on 1000 ImageNet validation images</li>
+</ol>
+<h3 id="exercise-2-layer-profiling-20-min">Exercise 2: Layer Profiling (20 min)</h3>
+<ol>
+<li>Run <code>trtexec --dumpProfile</code> on your FP16 engine</li>
+<li>Identify the top-3 slowest layers</li>
+<li>For each: is it compute-bound or memory-bound? (Check arithmetic intensity)</li>
+<li>Would INT8 help the memory-bound layers? Why or why not?</li>
+</ol>
+<h3 id="exercise-3-dynamic-batching-15-min">Exercise 3: Dynamic Batching (15 min)</h3>
+<ol>
+<li>Build an engine with <code>minShapes=1</code>, <code>optShapes=16</code>, <code>maxShapes=64</code></li>
+<li>Measure latency at batch sizes 1, 4, 16, 32, 64</li>
+<li>Plot latency vs batch size — where does the GPU saturate?</li>
+<li>Calculate throughput (images/second) at each batch size</li>
+</ol>
+<h3 id="exercise-4-torch_tensorrt-integration-15-min">Exercise 4: torch_tensorrt Integration (15 min)</h3>
+<pre><code class="language-python"># Compare inference speed:
+# 1. Vanilla PyTorch (FP32)
+# 2. PyTorch with torch.compile (inductor)
+# 3. torch_tensorrt (FP16)
+# Measure with torch.cuda.Event for accurate GPU timing
+start = torch.cuda.Event(enable_timing=True)
+end = torch.cuda.Event(enable_timing=True)
+
+start.record()
+for _ in range(100):
+    output = model(input_tensor)
+end.record()
+torch.cuda.synchronize()
+print(f&quot;Time: {start.elapsed_time(end) / 100:.2f} ms&quot;)
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>TensorRT rebuilds your model</strong> — it's not just running your graph; it fuses layers, selects kernels, and plans memory for your specific GPU</li>
+<li><strong>Layer fusion eliminates overhead</strong> — Conv+BN+ReLU becomes one kernel, reducing launch overhead and DRAM round-trips by 3×</li>
+<li><strong>INT8 needs calibration</strong> — entropy-based calibration finds optimal quantization ranges; 100–500 representative samples is usually sufficient</li>
+<li><strong>Engines are GPU-specific</strong> — rebuild for each target GPU and TensorRT version; use timing caches to speed up rebuilds</li>
+<li><strong>trtexec is your profiling tool</strong> — layer-level profiling identifies bottlenecks; <code>--dumpProfile</code> shows where time goes</li>
+<li><strong>TensorRT-LLM is the LLM path</strong> — paged KV cache, in-flight batching, tensor parallelism, and FP8 quantization for transformer inference at scale</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/">TensorRT Developer Guide</a></li>
+<li><a href="https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#performance-best-practices">TensorRT Best Practices Guide</a></li>
+<li><a href="https://github.com/NVIDIA/TensorRT-LLM">TensorRT-LLM (GitHub)</a></li>
+<li><a href="https://pytorch.org/TensorRT/">torch_tensorrt Documentation</a></li>
+<li><a href="https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#trtexec">trtexec Reference</a></li>
+<li><a href="https://docs.nvidia.com/deeplearning/performance/index.html">NVIDIA Deep Learning Performance Guide</a></li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p><strong>Day 54: Inference on CPU</strong> — Not every deployment has a GPU. You'll learn ONNX Runtime's CPU execution providers, Intel OpenVINO, ARM compute library, XNNPACK for mobile, and how to squeeze maximum throughput from x86 and ARM CPUs using vectorization, thread scheduling, and operator-level optimizations.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-52-knowledge-distillation.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 52: Knowledge Distillation</a>
+            <a href="day-54-inference-on-cpu.html" class="text-emerald-600 hover:text-emerald-800">Day 54: Inference on CPU &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

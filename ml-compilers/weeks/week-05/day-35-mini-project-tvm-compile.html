@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 35: Mini-Project — End-to-End TVM Compilation - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 5: TVM Foundations</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-35-mini-project-end-to-end-tvm-compilation">Day 35: Mini-Project — End-to-End TVM Compilation</h1>
+<blockquote>
+<p><strong>Phase III · Week 5 · Day 35 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The measure of a compiler isn't its IR — it's the wall-clock time on real hardware. Today you measure."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-34-tvm-runtime-deployment.html">Day 34: TVM Runtime &amp; Deployment</a></td>
+<td style="text-align: left;"><a href="../week-06/day-36-autotvm-autoscheduler.html">Day 36: AutoTVM &amp; AutoScheduler</a></td>
+<td style="text-align: left;"><a href="README.html">Week 5: TVM Foundations</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>This is the capstone for Week 5. You've learned the full TVM stack layer by layer: Relay (graph IR), TE (compute declarations), TIR (low-level loops), schedules (transformations), and the runtime (deployment). Today you wire them together end-to-end on a real model — MobileNetV2 — and answer the question every engineer asks: <strong>"Is it actually faster?"</strong> You'll import from PyTorch, apply Relay optimizations, compile for GPU, benchmark against PyTorch eager and <code>torch.compile</code>, and profile to understand where time is spent.</p>
+<hr />
+<h2 id="project-overview">Project Overview</h2>
+<pre><code>┌──────────────────────────────────────────────────────────────┐
+│                  End-to-End Pipeline                          │
+│                                                              │
+│  PyTorch Model     Relay IR        Optimized       Target    │
+│  (MobileNetV2) ──▶ (graph) ──▶   Relay IR    ──▶  Module    │
+│                    import     optimization passes   build    │
+│                                                              │
+│  Benchmark:  PyTorch Eager  vs  torch.compile  vs  TVM      │
+└──────────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="what-youll-build">What You'll Build</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Step</th>
+<th style="text-align: left;">Tool</th>
+<th style="text-align: left;">Output</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">1. Export model</td>
+<td style="text-align: left;">PyTorch + <code>torch.jit.trace</code></td>
+<td style="text-align: left;">TorchScript / ONNX</td>
+</tr>
+<tr>
+<td style="text-align: left;">2. Import to Relay</td>
+<td style="text-align: left;"><code>relay.frontend.from_pytorch</code></td>
+<td style="text-align: left;">Relay IR module</td>
+</tr>
+<tr>
+<td style="text-align: left;">3. Optimize</td>
+<td style="text-align: left;"><code>relay.build_module.bind_params_by_name</code> + passes</td>
+<td style="text-align: left;">Optimized Relay</td>
+</tr>
+<tr>
+<td style="text-align: left;">4. Compile</td>
+<td style="text-align: left;"><code>relay.build()</code></td>
+<td style="text-align: left;">Runtime Module</td>
+</tr>
+<tr>
+<td style="text-align: left;">5. Benchmark</td>
+<td style="text-align: left;"><code>time_evaluator</code> + manual timing</td>
+<td style="text-align: left;">Latency numbers</td>
+</tr>
+<tr>
+<td style="text-align: left;">6. Profile</td>
+<td style="text-align: left;"><code>debug_executor</code></td>
+<td style="text-align: left;">Per-operator breakdown</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="step-1-export-mobilenetv2-from-pytorch">Step 1: Export MobileNetV2 from PyTorch</h2>
+<pre><code class="language-python">import torch
+import torchvision.models as models
+import numpy as np
+
+# Load pretrained MobileNetV2
+model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.DEFAULT)
+model.eval()
+
+# Create dummy input
+input_shape = (1, 3, 224, 224)
+dummy_input = torch.randn(input_shape)
+
+# Trace the model (captures the computation graph)
+traced_model = torch.jit.trace(model, dummy_input)
+
+# Verify correctness
+with torch.no_grad():
+    pt_output = model(dummy_input).numpy()
+    traced_output = traced_model(dummy_input).numpy()
+    np.testing.assert_allclose(pt_output, traced_output, atol=1e-5)
+    print(f&quot;Model traced successfully. Output shape: {pt_output.shape}&quot;)
+</code></pre>
+<h3 id="why-mobilenetv2">Why MobileNetV2?</h3>
+<ul>
+<li>Representative of production mobile/edge models</li>
+<li>Uses depthwise separable convolutions (interesting for scheduling)</li>
+<li>Small enough to iterate quickly (~3.4M params, ~300M FLOPs)</li>
+<li>Well-studied — easy to find reference benchmarks</li>
+</ul>
+<hr />
+<h2 id="step-2-import-into-relay">Step 2: Import into Relay</h2>
+<pre><code class="language-python">import tvm
+from tvm import relay
+
+# Convert TorchScript → Relay
+input_name = &quot;input0&quot;
+shape_list = [(input_name, input_shape)]
+mod, params = relay.frontend.from_pytorch(traced_model, shape_list)
+
+# Inspect the Relay IR (first 50 lines)
+print(mod.astext()[:2000])
+</code></pre>
+<h3 id="what-the-importer-does">What the Importer Does</h3>
+<pre><code>TorchScript IR                         Relay IR
+━━━━━━━━━━━━━━                         ━━━━━━━━
+%x = aten::conv2d(%input, %w, %b)  →   %0 = nn.conv2d(%input, %w, ...)
+%y = aten::batch_norm(%x, ...)     →   %1 = nn.batch_norm(%0, ...)
+%z = aten::relu_(%y)               →   %2 = nn.relu(%1)
+%out = aten::adaptive_avg_pool2d   →   %3 = nn.adaptive_avg_pool2d(...)
+</code></pre>
+<p>Each PyTorch op maps to a Relay operator. The importer preserves the graph structure, constant-folds weights, and infers tensor shapes.</p>
+<hr />
+<h2 id="step-3-apply-relay-optimization-passes">Step 3: Apply Relay Optimization Passes</h2>
+<pre><code class="language-python"># Standard optimization pipeline
+target = tvm.target.Target(&quot;cuda -arch=sm_80&quot;)  # adjust for your GPU
+# For CPU: target = tvm.target.Target(&quot;llvm -mcpu=native&quot;)
+
+with tvm.transform.PassContext(opt_level=3):
+    # opt_level=3 enables:
+    #   - Operator fusion (conv2d + bn + relu → single kernel)
+    #   - Constant folding (precompute batch norm parameters)
+    #   - Layout optimization (NCHW → NCHW4c for vectorization)
+    #   - Dead code elimination
+    #   - Common subexpression elimination
+    lib = relay.build(mod, target=target, params=params)
+
+print(f&quot;Compiled successfully for {target}&quot;)
+</code></pre>
+<h3 id="understanding-opt_level">Understanding opt_level</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Level</th>
+<th style="text-align: left;">Passes Enabled</th>
+<th style="text-align: left;">Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">0</td>
+<td style="text-align: left;">Type inference only</td>
+<td style="text-align: left;">Baseline, no optimization</td>
+</tr>
+<tr>
+<td style="text-align: left;">1</td>
+<td style="text-align: left;">+ Constant folding, dead code elimination</td>
+<td style="text-align: left;">Minor speedup</td>
+</tr>
+<tr>
+<td style="text-align: left;">2</td>
+<td style="text-align: left;">+ Operator fusion</td>
+<td style="text-align: left;">Major speedup (fewer kernel launches)</td>
+</tr>
+<tr>
+<td style="text-align: left;">3</td>
+<td style="text-align: left;">+ Layout optimization, all passes</td>
+<td style="text-align: left;">Full optimization</td>
+</tr>
+<tr>
+<td style="text-align: left;">4</td>
+<td style="text-align: left;">+ Experimental passes</td>
+<td style="text-align: left;">Bleeding edge</td>
+</tr>
+</tbody>
+</table>
+<h3 id="fusion-visualization">Fusion Visualization</h3>
+<p>Before fusion (many small kernels):</p>
+<pre><code>conv2d ──▶ batch_norm ──▶ relu ──▶ conv2d ──▶ batch_norm ──▶ relu
+  │            │           │          │            │           │
+  ▼            ▼           ▼          ▼            ▼           ▼
+kernel 1    kernel 2    kernel 3   kernel 4    kernel 5    kernel 6
+</code></pre>
+<p>After fusion (fewer, larger kernels):</p>
+<pre><code>conv2d_bn_relu ──────────────────▶ conv2d_bn_relu
+       │                                  │
+       ▼                                  ▼
+    kernel 1                           kernel 2
+</code></pre>
+<p>$$\text{Speedup}_{\text{fusion}} \propto \frac{\text{kernel launches (before)}}{\text{kernel launches (after)}} \times \frac{\text{memory traffic (before)}}{\text{memory traffic (after)}}$$</p>
+<hr />
+<h2 id="step-4-run-inference-verify-correctness">Step 4: Run Inference &amp; Verify Correctness</h2>
+<pre><code class="language-python">from tvm.contrib import graph_executor
+
+# Create runtime executor
+dev = tvm.cuda(0)  # or tvm.cpu(0) for CPU target
+m = graph_executor.GraphModule(lib[&quot;default&quot;](dev))
+
+# Prepare input
+input_data = dummy_input.numpy()
+m.set_input(input_name, tvm.nd.array(input_data, dev))
+
+# Run inference
+m.run()
+
+# Get output and verify against PyTorch
+tvm_output = m.get_output(0).numpy()
+np.testing.assert_allclose(pt_output, tvm_output, rtol=1e-4, atol=1e-4)
+print(&quot;✓ TVM output matches PyTorch (rtol=1e-4)&quot;)
+print(f&quot;  Top-5 classes: {np.argsort(tvm_output[0])[-5:][::-1]}&quot;)
+</code></pre>
+<hr />
+<h2 id="step-5-benchmark-tvm-vs-pytorch">Step 5: Benchmark — TVM vs PyTorch</h2>
+<h3 id="pytorch-eager-baseline">PyTorch Eager Baseline</h3>
+<pre><code class="language-python">import time
+
+# Warm up
+with torch.no_grad():
+    for _ in range(10):
+        _ = model(dummy_input.cuda())  # or .cpu()
+torch.cuda.synchronize()
+
+# Benchmark
+n_runs = 100
+torch.cuda.synchronize()
+start = time.perf_counter()
+with torch.no_grad():
+    for _ in range(n_runs):
+        _ = model(dummy_input.cuda())
+torch.cuda.synchronize()
+pt_eager_ms = (time.perf_counter() - start) / n_runs * 1000
+print(f&quot;PyTorch Eager:   {pt_eager_ms:.2f} ms&quot;)
+</code></pre>
+<h3 id="torchcompile-baseline">torch.compile Baseline</h3>
+<pre><code class="language-python">compiled_model = torch.compile(model, mode=&quot;max-autotune&quot;)
+
+# Warm up (includes compilation)
+with torch.no_grad():
+    for _ in range(10):
+        _ = compiled_model(dummy_input.cuda())
+torch.cuda.synchronize()
+
+# Benchmark
+torch.cuda.synchronize()
+start = time.perf_counter()
+with torch.no_grad():
+    for _ in range(n_runs):
+        _ = compiled_model(dummy_input.cuda())
+torch.cuda.synchronize()
+pt_compile_ms = (time.perf_counter() - start) / n_runs * 1000
+print(f&quot;torch.compile:   {pt_compile_ms:.2f} ms&quot;)
+</code></pre>
+<h3 id="tvm-benchmark">TVM Benchmark</h3>
+<pre><code class="language-python"># TVM's built-in benchmarking (handles warmup + statistics)
+ftimer = m.module.time_evaluator(&quot;run&quot;, dev, number=100, repeat=5)
+prof_result = ftimer()
+tvm_ms = np.mean(prof_result.results) * 1000
+tvm_std = np.std(prof_result.results) * 1000
+print(f&quot;TVM (opt_level=3): {tvm_ms:.2f} ± {tvm_std:.2f} ms&quot;)
+</code></pre>
+<h3 id="results-summary">Results Summary</h3>
+<pre><code class="language-python">print(&quot;\n&quot; + &quot;=&quot;*55)
+print(f&quot;{'Backend':&lt;25} {'Latency (ms)':&gt;12} {'Speedup':&gt;10}&quot;)
+print(&quot;=&quot;*55)
+print(f&quot;{'PyTorch Eager':&lt;25} {pt_eager_ms:&gt;12.2f} {'1.00x':&gt;10}&quot;)
+print(f&quot;{'torch.compile':&lt;25} {pt_compile_ms:&gt;12.2f} {pt_eager_ms/pt_compile_ms:&gt;9.2f}x&quot;)
+print(f&quot;{'TVM (opt_level=3)':&lt;25} {tvm_ms:&gt;12.2f} {pt_eager_ms/tvm_ms:&gt;9.2f}x&quot;)
+print(&quot;=&quot;*55)
+</code></pre>
+<p>Expected results (A100 GPU, MobileNetV2, batch=1):</p>
+<pre><code>═══════════════════════════════════════════════════════
+Backend                   Latency (ms)    Speedup
+═══════════════════════════════════════════════════════
+PyTorch Eager                     2.10      1.00x
+torch.compile                     1.40      1.50x
+TVM (opt_level=3)                 1.25      1.68x
+═══════════════════════════════════════════════════════
+</code></pre>
+<blockquote>
+<p><strong>Note</strong>: Your numbers will vary by GPU, driver, and TVM version. The relative ranking is more important than absolute numbers. TVM without auto-tuning (Week 6) often trails torch.compile on NVIDIA GPUs — auto-tuning closes the gap significantly.</p>
+</blockquote>
+<hr />
+<h2 id="step-6-profile-with-tvms-debug-executor">Step 6: Profile with TVM's Debug Executor</h2>
+<pre><code class="language-python">from tvm.contrib.debugger import debug_executor
+
+# Build with debug info
+m_debug = debug_executor.create(
+    lib.get_graph_json(), lib, dev
+)
+m_debug.set_input(input_name, tvm.nd.array(input_data, dev))
+
+# Profile all operators
+m_debug.run()
+
+# Get per-node timing (sorted by time)
+node_times = m_debug.profile()
+print(node_times)
+</code></pre>
+<h3 id="interpreting-the-profile">Interpreting the Profile</h3>
+<pre><code>Node Name                    Time (ms)    %Total    Calls
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fused_nn_conv2d_add_relu_0      0.18      14.4%       1
+fused_nn_conv2d_add_relu_1      0.15      12.0%       1
+fused_nn_conv2d_add_2           0.12       9.6%       1
+fused_nn_contrib_depthwise_0    0.09       7.2%       1
+...
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total                           1.25     100.0%      52
+</code></pre>
+<p><strong>What to look for</strong>:
+- Are the top operators fused? (good: <code>fused_nn_conv2d_add_relu</code>)
+- Any surprisingly slow operators? (candidate for custom schedule)
+- Many tiny operators? (fusion opportunities missed)</p>
+<hr />
+<h2 id="step-7-export-for-deployment">Step 7: Export for Deployment</h2>
+<pre><code class="language-python"># Save the compiled model for production
+lib.export_library(&quot;mobilenetv2_cuda.tar&quot;)
+print(&quot;Exported: mobilenetv2_cuda.tar&quot;)
+
+# Verify the exported model works
+loaded_lib = tvm.runtime.load_module(&quot;mobilenetv2_cuda.tar&quot;)
+m_loaded = graph_executor.GraphModule(loaded_lib[&quot;default&quot;](dev))
+m_loaded.set_input(input_name, tvm.nd.array(input_data, dev))
+m_loaded.run()
+loaded_output = m_loaded.get_output(0).numpy()
+np.testing.assert_allclose(tvm_output, loaded_output, atol=1e-6)
+print(&quot;✓ Exported model produces identical output&quot;)
+</code></pre>
+<hr />
+<h2 id="bonus-cpu-compilation-with-layout-optimization">Bonus: CPU Compilation with Layout Optimization</h2>
+<pre><code class="language-python"># Compile the same model for CPU with AVX-512
+target_cpu = tvm.target.Target(&quot;llvm -mcpu=skylake-avx512&quot;)
+
+with tvm.transform.PassContext(opt_level=3):
+    lib_cpu = relay.build(mod, target=target_cpu, params=params)
+
+dev_cpu = tvm.cpu(0)
+m_cpu = graph_executor.GraphModule(lib_cpu[&quot;default&quot;](dev_cpu))
+m_cpu.set_input(input_name, tvm.nd.array(input_data, dev_cpu))
+
+ftimer_cpu = m_cpu.module.time_evaluator(&quot;run&quot;, dev_cpu, number=50, repeat=3)
+cpu_ms = np.mean(ftimer_cpu().results) * 1000
+print(f&quot;TVM CPU (AVX-512): {cpu_ms:.2f} ms&quot;)
+</code></pre>
+<h3 id="layout-optimization-on-cpu">Layout Optimization on CPU</h3>
+<p>TVM's <code>AlterOpLayout</code> pass transforms data layouts for better vectorization:</p>
+<pre><code>NCHW (default)              NCHWc (TVM optimized, c=16)
+━━━━━━━━━━━━━━              ━━━━━━━━━━━━━━━━━━━━━━━━━━
+Shape: (1, 64, 56, 56)      Shape: (1, 4, 56, 56, 16)
+                             └──── 64/16 = 4 outer groups
+                                   16 channels packed for
+                                   AVX-512 (16 × float32)
+</code></pre>
+<p>$$\text{NCHW} \rightarrow \text{NCHW}_{c} : \quad C_{\text{outer}} = \lfloor C / c \rfloor, \quad C_{\text{inner}} = c$$</p>
+<hr />
+<h2 id="hands-on-challenges">Hands-On Challenges</h2>
+<h3 id="challenge-1-batch-size-sweep-20-min">Challenge 1: Batch Size Sweep (20 min)</h3>
+<p>Benchmark TVM vs PyTorch at batch sizes [1, 4, 16, 64]. Plot latency and throughput (images/sec). At what batch size does TVM's advantage peak?</p>
+<h3 id="challenge-2-model-comparison-30-min">Challenge 2: Model Comparison (30 min)</h3>
+<p>Repeat the pipeline for ResNet-50 and EfficientNet-B0. Which model benefits most from TVM compilation? Why?</p>
+<h3 id="challenge-3-target-comparison-20-min">Challenge 3: Target Comparison (20 min)</h3>
+<p>If you have both CPU and GPU, compile MobileNetV2 for both and compare. What's the CPU-GPU crossover batch size (where GPU becomes faster)?</p>
+<h3 id="challenge-4-inspect-fusion-decisions-20-min">Challenge 4: Inspect Fusion Decisions (20 min)</h3>
+<pre><code class="language-python"># Dump the optimized Relay IR to see fusion decisions
+with tvm.transform.PassContext(opt_level=3):
+    mod_opt, _ = relay.optimize(mod, target=target, params=params)
+print(mod_opt.astext()[:5000])
+# Count fused functions — how many separate kernels does TVM produce?
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>The full TVM pipeline</strong>: PyTorch → TorchScript → Relay import → optimization passes → <code>relay.build()</code> → runtime execution</li>
+<li><strong><code>opt_level=3</code></strong> enables operator fusion, constant folding, and layout optimization — the three biggest wins</li>
+<li><strong>Operator fusion</strong> reduces kernel launches and memory traffic — often the single largest optimization</li>
+<li><strong>TVM without auto-tuning</strong> is competitive but may trail <code>torch.compile</code> on NVIDIA GPUs; auto-tuning (Week 6) closes the gap</li>
+<li><strong><code>time_evaluator()</code></strong> handles proper benchmarking (warmup, statistics); never use raw <code>time.time()</code> for GPU code</li>
+<li><strong><code>debug_executor</code></strong> gives per-operator profiling to identify bottlenecks and verify fusion</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://tvm.apache.org/docs/how_to/compile_models/from_pytorch.html">Compile PyTorch Models (TVM tutorial)</a> — official import guide</li>
+<li><a href="https://tvm.apache.org/docs/how_to/work_with_relay/index.html">Relay Optimization Passes</a> — complete pass reference</li>
+<li><a href="https://tvm.apache.org/docs/reference/api/python/runtime.html#tvm.runtime.Module.time_evaluator">TVM Benchmarking Best Practices</a> — <code>time_evaluator</code> API</li>
+<li><a href="https://arxiv.org/abs/1801.04381">MobileNetV2: Inverted Residuals and Linear Bottlenecks</a> — the model architecture paper</li>
+</ul>
+<hr />
+<h2 id="week-5-complete">Week 5 Complete!</h2>
+<p>You now understand the full TVM stack: Relay for graph-level IR and passes, TE for declarative compute definitions, TIR for low-level loop-explicit code, schedules for performance transformations, and the runtime for deployment. <strong>Next week</strong> (Week 6) you'll learn how to <strong>automate</strong> the schedule search with AutoTVM and MetaSchedule — letting ML optimize the compiler itself.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-34-tvm-runtime-deployment.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 34: TVM Runtime & Deployment</a>
+            <a href="../week-06/day-36-autotvm-autoscheduler.html" class="text-emerald-600 hover:text-emerald-800">Day 36: AutoTVM & AutoScheduler &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

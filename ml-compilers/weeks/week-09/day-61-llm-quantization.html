@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 61: LLM Quantization — GPTQ, AWQ, GGUF - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 9: LLM Serving Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-61-llm-quantization-gptq-awq-gguf">Day 61: LLM Quantization — GPTQ, AWQ, GGUF</h1>
+<blockquote>
+<p><strong>Phase IV · Week 9 · Day 61 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The difference between a 140 GB model that needs a cluster and a 4 GB model that runs on a laptop is quantization. Same knowledge, different precision."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-60-speculative-decoding.html">Day 60: Speculative Decoding</a></td>
+<td style="text-align: left;"><a href="day-62-serving-frameworks-comparison.html">Day 62: Serving Frameworks Comparison</a></td>
+<td style="text-align: left;"><a href="README.html">Week 9: LLM Serving Systems</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase IV: Inference &amp; Deployment</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>A 70B-parameter LLM in FP16 weighs ~140 GB — that's two A100-80GBs just for weights alone, before any KV cache. Quantizing to INT4 shrinks it to ~35 GB, fitting on a single GPU with room to spare. But LLMs aren't ordinary neural networks: they exhibit <strong>activation outliers</strong> — channels where values are 100× larger than average — that make naive quantization catastrophic. Specialized methods like GPTQ, AWQ, and GGUF solve this problem, each with different tradeoffs between accuracy, speed, and flexibility. Understanding these methods is essential because quantization is the single highest-impact deployment optimization: it simultaneously reduces memory, increases throughput, and lowers cost.</p>
+<hr />
+<h2 id="1-why-llms-break-naive-quantization">1. Why LLMs Break Naive Quantization</h2>
+<p>Standard per-tensor INT8 quantization works well for CNNs and small transformers. It fails for LLMs because of <strong>outlier channels</strong> discovered by Dettmers et al. (LLM.int8(), 2022):</p>
+<pre><code>Activation Outlier Problem in LLMs
+═══════════════════════════════════════════════════════════════
+
+  Normal activations (99.9% of channels):
+  ┌─────────────────────────────────────────┐
+  │ Values: [-0.5, 0.3, -0.1, 0.4, -0.2]   │  Range: ±1
+  └─────────────────────────────────────────┘
+
+  Outlier channels (0.1% of channels, but CRITICAL):
+  ┌─────────────────────────────────────────┐
+  │ Values: [-60.0, 80.0, -45.0, 120.0]     │  Range: ±120
+  └─────────────────────────────────────────┘
+
+  Naive per-tensor INT8 quantization:
+  ┌─────────────────────────────────────────────────────────┐
+  │  Scale = 120 / 127 ≈ 0.945                              │
+  │                                                          │
+  │  Normal:  0.3 / 0.945 = 0.32 → round to 0               │
+  │  Normal: -0.5 / 0.945 = -0.53 → round to -1             │
+  │  Outlier: 120.0 / 0.945 = 127 → maps correctly          │
+  │                                                          │
+  │  Problem: Normal values get quantized to {-1, 0, 1}!     │
+  │  → 99.9% of activations lose almost all information      │
+  └─────────────────────────────────────────────────────────┘
+
+  Solution approaches:
+  ┌────────────────┐  ┌──────────────┐  ┌─────────────────┐
+  │  LLM.int8()    │  │    GPTQ      │  │      AWQ        │
+  │  Mixed FP16/   │  │  Hessian-    │  │  Protect salient│
+  │  INT8 by       │  │  guided      │  │  weights by     │
+  │  channel       │  │  rounding    │  │  activation     │
+  └────────────────┘  └──────────────┘  └─────────────────┘
+</code></pre>
+<p>The key insight: these outliers carry disproportionate information. Removing 6 outlier dimensions from a 5120-dim hidden state (0.12%) can drop accuracy by 20+ perplexity points.</p>
+<hr />
+<h2 id="2-gptq-hessian-based-weight-quantization">2. GPTQ — Hessian-Based Weight Quantization</h2>
+<p>GPTQ (Frantar et al., 2023) quantizes weights <strong>layer by layer</strong>, using second-order information (the Hessian) to minimize the quantization error:</p>
+<p>$$\min_{\hat{W}} \|WX - \hat{W}X\|_2^2$$</p>
+<p>where $X$ is a calibration dataset, $W$ is the original weight, and $\hat{W}$ is the quantized weight.</p>
+<h3 id="the-obq-gptq-pipeline">The OBQ → GPTQ Pipeline</h3>
+<p>GPTQ builds on Optimal Brain Quantization (OBQ). For each weight column, it:</p>
+<ol>
+<li>Quantizes one weight to the nearest grid point</li>
+<li>Computes the error from that rounding</li>
+<li><strong>Distributes the error</strong> across remaining un-quantized weights using the inverse Hessian</li>
+</ol>
+<p>$$\delta_F = -\frac{w_q - \text{quant}(w_q)}{[H_F^{-1}]_{qq}} \cdot (H_F^{-1})_{:,q}$$</p>
+<pre><code class="language-python">import torch
+import torch.nn as nn
+
+def gptq_quantize_layer(
+    weight: torch.Tensor,     # [out_features, in_features]
+    hessian: torch.Tensor,    # [in_features, in_features]  = X @ X^T
+    bits: int = 4,
+    group_size: int = 128,
+    block_size: int = 128,    # columns processed together
+):
+    &quot;&quot;&quot;Simplified GPTQ quantization for one linear layer.
+
+    Args:
+        weight: Original FP16 weight matrix
+        hessian: H = 2 * X @ X^T from calibration data
+        bits: Target bit width (typically 4)
+        group_size: Number of columns sharing a scale factor
+        block_size: Columns processed in one Cholesky block
+    &quot;&quot;&quot;
+    W = weight.clone().float()
+    n_rows, n_cols = W.shape
+
+    # Quantization grid for N bits
+    qmin, qmax = 0, 2**bits - 1  # asymmetric: [0, 15] for 4-bit
+
+    # Cholesky decomposition of Hessian (with damping)
+    damp = 0.01 * torch.diag(hessian).mean()
+    H = hessian + damp * torch.eye(n_cols, device=W.device)
+    H_inv = torch.linalg.cholesky(H)
+    H_inv = torch.cholesky_inverse(H_inv)
+
+    quantized = torch.zeros_like(W)
+    scales = torch.zeros(n_rows, n_cols // group_size, device=W.device)
+    zeros = torch.zeros_like(scales)
+
+    # Process columns in blocks
+    for block_start in range(0, n_cols, block_size):
+        block_end = min(block_start + block_size, n_cols)
+
+        W_block = W[:, block_start:block_end].clone()
+        H_block = H_inv[block_start:block_end, block_start:block_end]
+        error = torch.zeros_like(W_block)
+
+        for col in range(block_end - block_start):
+            global_col = block_start + col
+
+            # Compute per-group scale
+            group_idx = global_col // group_size
+            if global_col % group_size == 0:
+                group_end = min(global_col + group_size, n_cols)
+                w_group = W[:, global_col:group_end]
+                s = (w_group.max(dim=1).values - w_group.min(dim=1).values) / qmax
+                z = torch.round(-w_group.min(dim=1).values / s)
+                scales[:, group_idx] = s
+                zeros[:, group_idx] = z
+
+            s = scales[:, group_idx]
+            z = zeros[:, group_idx]
+
+            # Quantize this column
+            w_col = W_block[:, col]
+            q_col = torch.clamp(torch.round(w_col / s + z), qmin, qmax)
+            quantized[:, global_col] = q_col
+
+            # Compute rounding error
+            w_hat = (q_col - z) * s
+            err = (w_col - w_hat) / H_block[col, col]
+
+            # Distribute error to remaining columns in this block
+            W_block[:, col+1:] -= err.unsqueeze(1) * H_block[col, col+1:].unsqueeze(0)
+
+        # Distribute block error to remaining columns
+        W[:, block_end:] -= error @ H_inv[block_start:block_end, block_end:]
+
+    return quantized, scales, zeros
+</code></pre>
+<h3 id="gptq-performance">GPTQ Performance</h3>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>Bits</th>
+<th>Perplexity (Wiki2)</th>
+<th>Size</th>
+<th>Speed (A100)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LLaMA-2 7B FP16</td>
+<td>16</td>
+<td>5.47</td>
+<td>13.5 GB</td>
+<td>1.0×</td>
+</tr>
+<tr>
+<td>LLaMA-2 7B GPTQ</td>
+<td>4</td>
+<td>5.63 (+0.16)</td>
+<td>3.9 GB</td>
+<td>2.8×</td>
+</tr>
+<tr>
+<td>LLaMA-2 7B GPTQ</td>
+<td>3</td>
+<td>6.29 (+0.82)</td>
+<td>3.0 GB</td>
+<td>3.2×</td>
+</tr>
+<tr>
+<td>LLaMA-2 70B FP16</td>
+<td>16</td>
+<td>3.32</td>
+<td>137 GB</td>
+<td>1.0×</td>
+</tr>
+<tr>
+<td>LLaMA-2 70B GPTQ</td>
+<td>4</td>
+<td>3.48 (+0.16)</td>
+<td>37 GB</td>
+<td>3.5×</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-awq-activation-aware-weight-quantization">3. AWQ — Activation-Aware Weight Quantization</h2>
+<p>AWQ (Lin et al., 2024) observes that <strong>not all weights are equally important</strong>. Weights connected to large-magnitude activation channels carry more information and should be quantized more carefully:</p>
+<p>$$\text{Quantization error} \propto |w \cdot s_x|$$</p>
+<p>where $s_x$ is the average activation magnitude for that channel.</p>
+<pre><code>AWQ Core Insight
+═══════════════════════════════════════════════════════════════
+
+  Weight matrix W: [out_features × in_features]
+  Activation magnitudes per channel: s = mean(|X|, dim=batch)
+
+  Channel importance = |weight| × |activation|
+
+  ┌──────────────────────────────────────────────────────────┐
+  │  Channel 42:   w = 0.02,  s_x = 0.3   → impact: 0.006  │  Low
+  │  Channel 107:  w = 0.05,  s_x = 80.0  → impact: 4.0    │  HIGH!
+  │  Channel 512:  w = 3.00,  s_x = 0.1   → impact: 0.3    │  Medium
+  └──────────────────────────────────────────────────────────┘
+
+  AWQ strategy: Scale up salient channels BEFORE quantizing
+  ─────────────────────────────────────────────────────────
+  For salient channel i:
+    w_i' = w_i × α       (scale weight UP → more quantization levels)
+    x_i' = x_i / α       (scale activation DOWN → preserves W·X)
+
+  Net effect: W' · X' = W · X  (mathematically equivalent)
+  But salient weights now use more of the INT4 range!
+</code></pre>
+<p>The scale factor $\alpha$ per channel is found by grid search:</p>
+<p>$$\alpha^* = \arg\min_\alpha \|Q(W \cdot \text{diag}(\alpha)) \cdot \text{diag}(\alpha)^{-1} \cdot X - W \cdot X\|$$</p>
+<pre><code class="language-python">def awq_compute_scales(
+    weight: torch.Tensor,    # [out, in]
+    activations: torch.Tensor,  # [n_samples, in]
+    bits: int = 4,
+    grid_size: int = 20,
+):
+    &quot;&quot;&quot;Find optimal per-channel scaling factors for AWQ.
+
+    Key insight: scale up important channels before quantizing,
+    scale down activations to compensate → same output, better precision.
+    &quot;&quot;&quot;
+    n_samples = activations.shape[0]
+    in_features = weight.shape[1]
+
+    # Channel importance = average activation magnitude
+    act_scales = activations.abs().mean(dim=0)  # [in_features]
+
+    # Original output for reference
+    original_out = weight @ activations.T  # [out, n_samples]
+
+    best_scales = torch.ones(in_features, device=weight.device)
+    best_error = float('inf')
+
+    # Grid search over scale exponents
+    for ratio in torch.linspace(0, 1, grid_size):
+        # Scale = act_scales^ratio (only scales important channels)
+        scales = act_scales.pow(ratio).clamp(min=1e-4)
+
+        # Scale weights up, quantize, scale back
+        w_scaled = weight * scales.unsqueeze(0)
+        w_quant = pseudo_quantize(w_scaled, bits=bits)
+        w_dequant = w_quant / scales.unsqueeze(0)
+
+        # Measure error on calibration data
+        quant_out = w_dequant @ activations.T
+        error = (original_out - quant_out).pow(2).mean()
+
+        if error &lt; best_error:
+            best_error = error
+            best_scales = scales.clone()
+
+    return best_scales
+
+def pseudo_quantize(w: torch.Tensor, bits: int = 4, group_size: int = 128):
+    &quot;&quot;&quot;Simulate quantization (quantize then dequantize).&quot;&quot;&quot;
+    qmax = 2**bits - 1
+    # Per-group quantization
+    orig_shape = w.shape
+    w = w.reshape(-1, group_size)
+    w_min = w.min(dim=1, keepdim=True).values
+    w_max = w.max(dim=1, keepdim=True).values
+    scale = (w_max - w_min) / qmax
+    w_q = torch.round((w - w_min) / scale).clamp(0, qmax)
+    w_deq = w_q * scale + w_min
+    return w_deq.reshape(orig_shape)
+</code></pre>
+<h3 id="awq-vs-gptq">AWQ vs GPTQ</h3>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>GPTQ</th>
+<th>AWQ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Approach</td>
+<td>Hessian-guided rounding + error compensation</td>
+<td>Activation-aware channel scaling</td>
+</tr>
+<tr>
+<td>Calibration</td>
+<td>~128 samples, ~5 min for 7B</td>
+<td>~128 samples, ~2 min for 7B</td>
+</tr>
+<tr>
+<td>Accuracy (4-bit)</td>
+<td>Very good</td>
+<td>Slightly better on most benchmarks</td>
+</tr>
+<tr>
+<td>Speed (inference)</td>
+<td>Fast (optimized kernels)</td>
+<td>Fast (AutoAWQ kernels)</td>
+</tr>
+<tr>
+<td>Robustness</td>
+<td>Can be sensitive to calibration data</td>
+<td>More robust across domains</td>
+</tr>
+<tr>
+<td>Key advantage</td>
+<td>Error redistribution across weights</td>
+<td>Protects salient channels</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-gguf-format-and-llamacpp-quantization">4. GGUF Format and llama.cpp Quantization</h2>
+<p>GGUF (GPT-Generated Unified Format) is the native format for llama.cpp, designed for <strong>CPU and edge inference</strong>. It supports a rich menu of quantization types:</p>
+<pre><code>GGUF Quantization Types — The Precision Ladder
+═══════════════════════════════════════════════════════════════
+
+  Type      Bits   Size/7B    Perplexity   Use Case
+  ─────────────────────────────────────────────────────────
+  F16       16.0   13.5 GB    5.47         Reference baseline
+  Q8_0       8.5    7.2 GB    5.48         Near-lossless
+  Q6_K       6.6    5.5 GB    5.50         Best quality below 8-bit
+  Q5_K_M     5.7    4.8 GB    5.52         ★ Best accuracy/size ratio
+  Q5_K_S     5.5    4.6 GB    5.54         Slightly smaller
+  Q4_K_M     4.8    4.1 GB    5.63         ★ Most popular choice
+  Q4_K_S     4.6    3.9 GB    5.68         Good for smaller RAM
+  Q4_0       4.5    3.8 GB    5.72         Basic 4-bit (legacy)
+  Q3_K_M     3.9    3.3 GB    6.15         Noticeable degradation
+  Q3_K_S     3.5    3.0 GB    6.42         Aggressive compression
+  Q2_K       3.3    2.8 GB    8.50         Research only
+  IQ4_XS     4.3    3.7 GB    5.60         ★ imatrix, best &lt;4GB
+  IQ3_XXS    3.1    2.6 GB    6.80         imatrix, extreme
+  IQ2_XXS    2.1    1.8 GB   12.00         Pushing limits
+  ─────────────────────────────────────────────────────────
+
+  K-quants: &quot;K&quot; = k-means clustering for optimal quantization levels
+  S/M/L:    Small/Medium/Large — more bits for attention layers
+  IQ:       Importance-matrix guided quantization (imatrix)
+
+  ┌────────────────────────────────────────────────────────┐
+  │  Rule of thumb:                                        │
+  │  • Plenty of RAM → Q5_K_M (best quality per GB)        │
+  │  • Tight RAM     → Q4_K_M (sweet spot)                 │
+  │  • Extreme edge  → IQ4_XS with imatrix                 │
+  └────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="k-quant-architecture">K-Quant Architecture</h3>
+<p>K-quants don't use uniform bit width — they allocate more bits to sensitive layers:</p>
+<pre><code>K-Quant Mixed Precision Strategy
+═══════════════════════════════════════════════════════════════
+
+  Q4_K_M allocation for a 32-layer transformer:
+
+  Layer Type          Bits   Why
+  ──────────────────────────────────────────────────
+  Embedding           6      First/last layers are sensitive
+  Attention Q,K       4      Can tolerate some noise
+  Attention V         5      Values carry content information
+  Attention Output    5      Aggregation layer, moderate
+  FFN Gate/Up         4      Largest matrices, most savings
+  FFN Down            5      Output projection, moderate
+  Final LayerNorm     32     Tiny, keep full precision
+  LM Head             6      Classification layer, sensitive
+  ──────────────────────────────────────────────────
+
+  Result: &quot;4-bit&quot; model actually uses 4.8 bits average
+  → Q4_K_M vs Q4_0: same name, 0.1 better perplexity
+</code></pre>
+<h3 id="quantizing-with-llamacpp">Quantizing with llama.cpp</h3>
+<pre><code class="language-bash"># Step 1: Convert HuggingFace model to GGUF
+python convert_hf_to_gguf.py \
+    /models/llama-2-7b-hf \
+    --outfile llama-2-7b-f16.gguf \
+    --outtype f16
+
+# Step 2: Quantize (basic)
+./llama-quantize llama-2-7b-f16.gguf llama-2-7b-Q4_K_M.gguf Q4_K_M
+
+# Step 3: Quantize with importance matrix (better quality!)
+# First, generate importance matrix from calibration data
+./llama-imatrix \
+    -m llama-2-7b-f16.gguf \
+    -f wiki.train.raw \
+    -o imatrix.dat \
+    --chunks 200
+
+# Then quantize using importance data
+./llama-quantize \
+    --imatrix imatrix.dat \
+    llama-2-7b-f16.gguf \
+    llama-2-7b-IQ4_XS.gguf \
+    IQ4_XS
+
+# Step 4: Test perplexity
+./llama-perplexity \
+    -m llama-2-7b-Q4_K_M.gguf \
+    -f wiki.test.raw
+</code></pre>
+<hr />
+<h2 id="5-squeezellm-and-quip-beyond-standard-quantization">5. SqueezeLLM and QuIP# — Beyond Standard Quantization</h2>
+<h3 id="squeezellm-non-uniform-quantization">SqueezeLLM — Non-Uniform Quantization</h3>
+<p>SqueezeLLM (Kim et al., 2024) observes that weight distributions are non-uniform and uses <strong>k-means clustering</strong> to find optimal quantization centroids instead of uniform grid points:</p>
+<p>$$\min_{\{c_1, \ldots, c_{2^b}\}} \sum_i s_i \cdot (w_i - c_{k_i})^2$$</p>
+<p>where $s_i$ is the sensitivity (Hessian diagonal) and $c_{k_i}$ is the nearest centroid.</p>
+<pre><code>Uniform vs Non-Uniform Quantization
+═══════════════════════════════════════════════════════════════
+
+  Weight distribution (typical LLM layer):
+                    ▄▄
+                   ▄██▄
+                  ▄████▄
+                 ▄██████▄
+                ▄████████▄
+           ▄▄▄▄██████████▄▄▄▄
+  ─────────────────────────────────────── value
+         -0.1        0        +0.1
+
+  Uniform 4-bit (16 levels):
+  ──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──
+    Evenly spaced → wastes levels on sparse tails
+
+  Non-uniform (k-means, 16 centroids):
+  ─────────┼┼┼┼┼┼┼┼┼┼┼┼──────┼──────┼──
+           More levels where data is dense
+           → 0.1-0.3 perplexity improvement
+</code></pre>
+<h3 id="quip-incoherence-processing">QuIP# — Incoherence Processing</h3>
+<p>QuIP# (Tseng et al., 2024) randomizes the weight matrix with orthogonal transformations to spread outliers, enabling near-optimal 2-bit quantization:</p>
+<p>$$W_{\text{quantized}} = Q_{\text{lattice}}(U^T W V)$$</p>
+<p>where $U, V$ are random orthogonal (Hadamard) matrices and $Q_{\text{lattice}}$ is E8 lattice quantization.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>2-bit PPL</th>
+<th>3-bit PPL</th>
+<th>4-bit PPL</th>
+<th>Speed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GPTQ</td>
+<td>107.3</td>
+<td>6.29</td>
+<td>5.63</td>
+<td>Fast</td>
+</tr>
+<tr>
+<td>AWQ</td>
+<td>—</td>
+<td>6.15</td>
+<td>5.60</td>
+<td>Fast</td>
+</tr>
+<tr>
+<td>SqueezeLLM</td>
+<td>—</td>
+<td>5.95</td>
+<td>5.54</td>
+<td>Moderate</td>
+</tr>
+<tr>
+<td>QuIP#</td>
+<td>8.33</td>
+<td>5.72</td>
+<td>5.49</td>
+<td>Slow</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-benchmarking-accuracy-vs-speed-vs-memory">6. Benchmarking: Accuracy vs Speed vs Memory</h2>
+<pre><code class="language-python">&quot;&quot;&quot;Quantization benchmark framework for LLMs.&quot;&quot;&quot;
+
+import time
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from datasets import load_dataset
+import numpy as np
+
+def measure_perplexity(model, tokenizer, dataset_name=&quot;wikitext&quot;, split=&quot;test&quot;):
+    &quot;&quot;&quot;Measure perplexity on standard benchmark.&quot;&quot;&quot;
+    dataset = load_dataset(&quot;wikitext&quot;, &quot;wikitext-2-raw-v1&quot;, split=split)
+    encodings = tokenizer(&quot;\n\n&quot;.join(dataset[&quot;text&quot;]), return_tensors=&quot;pt&quot;)
+
+    max_length = model.config.max_position_embeddings
+    stride = 512
+    seq_len = encodings.input_ids.size(1)
+
+    nlls = []
+    for begin in range(0, seq_len, stride):
+        end = min(begin + max_length, seq_len)
+        input_ids = encodings.input_ids[:, begin:end].to(model.device)
+        target_ids = input_ids.clone()
+        target_ids[:, :-stride] = -100  # mask context
+
+        with torch.no_grad():
+            outputs = model(input_ids, labels=target_ids)
+            nlls.append(outputs.loss.item())
+
+    ppl = np.exp(np.mean(nlls))
+    return ppl
+
+def measure_throughput(model, tokenizer, prompt=&quot;Hello&quot;, n_tokens=128, n_runs=5):
+    &quot;&quot;&quot;Measure tokens/second generation speed.&quot;&quot;&quot;
+    input_ids = tokenizer(prompt, return_tensors=&quot;pt&quot;).input_ids.to(model.device)
+
+    # Warmup
+    with torch.no_grad():
+        model.generate(input_ids, max_new_tokens=10, do_sample=False)
+
+    times = []
+    for _ in range(n_runs):
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+        with torch.no_grad():
+            model.generate(input_ids, max_new_tokens=n_tokens, do_sample=False)
+        torch.cuda.synchronize()
+        times.append(time.perf_counter() - start)
+
+    avg_time = np.mean(times)
+    tokens_per_sec = n_tokens / avg_time
+    return tokens_per_sec, avg_time
+
+def benchmark_report(results: dict):
+    &quot;&quot;&quot;Print comparison table.&quot;&quot;&quot;
+    print(f&quot;{'Method':&lt;15} {'PPL':&gt;8} {'Tok/s':&gt;8} {'Size GB':&gt;8} {'VRAM GB':&gt;8}&quot;)
+    print(&quot;─&quot; * 50)
+    for name, r in results.items():
+        print(f&quot;{name:&lt;15} {r['ppl']:&gt;8.2f} {r['tps']:&gt;8.1f} &quot;
+              f&quot;{r['size_gb']:&gt;8.1f} {r['vram_gb']:&gt;8.1f}&quot;)
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-gptq-quantization-with-autogptq">Exercise 1: GPTQ Quantization with AutoGPTQ</h3>
+<pre><code class="language-python">&quot;&quot;&quot;Quantize a model with GPTQ and measure quality.&quot;&quot;&quot;
+# pip install auto-gptq transformers
+
+from transformers import AutoTokenizer
+from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
+
+model_name = &quot;meta-llama/Llama-2-7b-hf&quot;
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+# Configure quantization
+quantize_config = BaseQuantizeConfig(
+    bits=4,
+    group_size=128,
+    desc_act=True,       # Use activation order (slower but better)
+    damp_percent=0.01,   # Hessian damping
+)
+
+# Load and quantize
+model = AutoGPTQForCausalLM.from_pretrained(model_name, quantize_config)
+model.quantize(
+    examples=[tokenizer(&quot;Example calibration text&quot;, return_tensors=&quot;pt&quot;)],
+    batch_size=1,
+)
+model.save_quantized(&quot;llama-7b-gptq-4bit&quot;)
+</code></pre>
+<h3 id="exercise-2-awq-quantization">Exercise 2: AWQ Quantization</h3>
+<pre><code class="language-python">&quot;&quot;&quot;Quantize with AWQ and compare to GPTQ.&quot;&quot;&quot;
+# pip install autoawq
+
+from awq import AutoAWQForCausalLM
+from transformers import AutoTokenizer
+
+model_name = &quot;meta-llama/Llama-2-7b-hf&quot;
+
+model = AutoAWQForCausalLM.from_pretrained(model_name)
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+quant_config = {
+    &quot;zero_point&quot;: True,
+    &quot;q_group_size&quot;: 128,
+    &quot;w_bit&quot;: 4,
+    &quot;version&quot;: &quot;GEMM&quot;,   # GEMM or GEMV kernel
+}
+
+model.quantize(tokenizer, quant_config=quant_config)
+model.save_quantized(&quot;llama-7b-awq-4bit&quot;)
+</code></pre>
+<h3 id="exercise-tasks">Exercise Tasks</h3>
+<ol>
+<li><strong>Head-to-head comparison</strong>: Quantize the same model with GPTQ and AWQ at 4-bit. Compare perplexity on WikiText-2, MMLU accuracy, and generation speed. Which wins for which metric?</li>
+<li><strong>GGUF exploration</strong>: Convert a model to GGUF, create Q4_K_M and Q5_K_M variants. Measure perplexity and tokens/second on CPU with llama.cpp. When is Q5_K_M worth the extra memory?</li>
+<li><strong>Calibration sensitivity</strong>: Run GPTQ with 32, 128, and 512 calibration samples. Does more data always help? Try calibration from different domains (code vs Wikipedia vs chat).</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>LLMs have activation outliers</strong> — 0.1% of channels carry 100× larger values, making naive quantization catastrophic</li>
+<li><strong>GPTQ uses Hessian-guided error redistribution</strong> — quantization error at one weight is compensated by adjusting remaining weights</li>
+<li><strong>AWQ protects salient channels by scaling</strong> — mathematically equivalent transformation that gives important weights more quantization levels</li>
+<li><strong>GGUF K-quants allocate bits non-uniformly</strong> — attention value projections and embeddings get more bits than FFN gate matrices</li>
+<li><strong>4-bit quantization typically costs 0.1-0.3 perplexity</strong> on a 7B model — a 3.5× size reduction for minimal quality loss</li>
+<li><strong>QuIP# enables viable 2-bit quantization</strong> through incoherence processing, but at significant speed cost</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><strong>Frantar et al., "GPTQ: Accurate Post-Training Quantization for Generative Pre-Trained Transformers"</strong> (ICLR 2023)</li>
+<li><strong>Lin et al., "AWQ: Activation-aware Weight Quantization for On-Device LLM Compression"</strong> (MLSys 2024)</li>
+<li><strong>Dettmers et al., "LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale"</strong> (NeurIPS 2022)</li>
+<li><strong>Kim et al., "SqueezeLLM: Dense-and-Sparse Quantization"</strong> (ICML 2024)</li>
+<li><strong>Tseng et al., "QuIP#: Even Better LLM Quantization with Hadamard Incoherence"</strong> (2024)</li>
+<li><strong>llama.cpp GGUF documentation</strong>: github.com/ggerganov/llama.cpp</li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p>You now know how to make models smaller. But which framework should you actually deploy them with? <strong>Day 62: Serving Frameworks Comparison</strong> puts vLLM, TensorRT-LLM, TGI, SGLang, llama.cpp, and Triton side-by-side — architecture, performance, GPU strategies, and when each one wins.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-60-speculative-decoding.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 60: Speculative Decoding</a>
+            <a href="day-62-serving-frameworks-comparison.html" class="text-emerald-600 hover:text-emerald-800">Day 62: Serving Frameworks Comparison &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

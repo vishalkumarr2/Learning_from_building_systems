@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 41: TVM Unity & Relax - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 6: TVM Tuning & Backends</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-41-tvm-unity-relax">Day 41: TVM Unity &amp; Relax</h1>
+<blockquote>
+<p><strong>Phase III · Week 6 · Day 41 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The best IRs aren't designed to be permanent — they're designed to be composable, so the next one can build on what came before."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-40-tvm-for-edge-devices.html">Day 40: TVM for Edge Devices</a></td>
+<td style="text-align: left;"><a href="day-42-stop-and-reflect-3.html">Day 42: Stop &amp; Reflect #3</a></td>
+<td style="text-align: left;"><a href="README.html">Week 6: TVM Tuning &amp; Backends</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>TVM's original design split the compiler into distinct layers — Relay for graph-level IR, TE for compute declarations, TIR for low-level loops — each with its own abstraction and tooling. This served well, but created friction: Relay can't express dynamic shapes naturally, TE schedules can't compose with TIR transforms, and adding a new abstraction layer requires threading it through every pass. <strong>TVM Unity</strong> is the initiative to unify these layers into a single, composable framework. <strong>Relax</strong> is the new graph-level IR born from this effort, designed from scratch with first-class dynamic shapes, dataflow blocks, and direct interoperability with TIR. Understanding Unity and Relax shows you where TVM (and the ML compiler field) is headed.</p>
+<hr />
+<h2 id="1-the-problem-with-the-current-stack">1. The Problem with the Current Stack</h2>
+<h3 id="relays-pain-points">Relay's Pain Points</h3>
+<p>Relay was a breakthrough when introduced (2018), but the ML landscape has evolved:</p>
+<pre><code>Current TVM Stack — Layered but Rigid
+═══════════════════════════════════════
+
+   ┌──────────────────────────────────┐
+   │         Relay (Graph IR)          │  ← FP types, static shapes, 
+   │  • Functional, pure              │     limited dynamism
+   │  • Type-checked, shape-inferred  │
+   └──────────┬───────────────────────┘
+              │ Lower (one-way door)
+   ┌──────────▼───────────────────────┐
+   │     TE (Tensor Expression)        │  ← Separate language, 
+   │  • Compute + Schedule             │     can't inspect Relay context
+   │  • Generates TIR                  │
+   └──────────┬───────────────────────┘
+              │ Compile
+   ┌──────────▼───────────────────────┐
+   │        TIR (Low-Level IR)         │  ← No way to &quot;look up&quot; at Relay
+   │  • Loops, buffers, intrinsics     │     graph structure
+   │  • Target-specific transforms     │
+   └──────────────────────────────────┘
+
+   Problems:
+   ✗ Dynamic shapes require workarounds (Any, shape_func)
+   ✗ TE schedules are isolated from graph context
+   ✗ Cross-layer optimization is hard (e.g., layout + tiling)
+   ✗ Adding a new abstraction = rewriting passes
+</code></pre>
+<h3 id="concrete-limitations">Concrete Limitations</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Issue</th>
+<th style="text-align: left;">Relay Behavior</th>
+<th style="text-align: left;">Real-World Need</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Dynamic batch</td>
+<td style="text-align: left;">Requires <code>Any</code> + <code>shape_func</code> hacks</td>
+<td style="text-align: left;">LLMs: batch size varies per request</td>
+</tr>
+<tr>
+<td style="text-align: left;">Dynamic sequence length</td>
+<td style="text-align: left;">Relay can't reason about it natively</td>
+<td style="text-align: left;">Transformers: seq_len is fundamental</td>
+</tr>
+<tr>
+<td style="text-align: left;">Cross-layer optimization</td>
+<td style="text-align: left;">TE can't see Relay graph</td>
+<td style="text-align: left;">Layout + tiling should co-optimize</td>
+</tr>
+<tr>
+<td style="text-align: left;">Custom operator fusion</td>
+<td style="text-align: left;">Must write Relay fusion patterns</td>
+<td style="text-align: left;">Want TIR-level custom fusion rules</td>
+</tr>
+<tr>
+<td style="text-align: left;">Debugging</td>
+<td style="text-align: left;">Relay and TIR have separate debugging</td>
+<td style="text-align: left;">Need unified tracing across layers</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-tvm-unity-vision">2. TVM Unity Vision</h2>
+<h3 id="the-core-insight">The Core Insight</h3>
+<p>Instead of <em>separate</em> IRs that communicate through lowering, Unity proposes a <strong>single IR ecosystem</strong> where different abstraction levels coexist and compose:</p>
+<pre><code>TVM Unity — Composable Abstractions
+════════════════════════════════════
+
+   ┌──────────────────────────────────────────────┐
+   │            Relax (Graph + Dataflow)            │
+   │                                                │
+   │  R.call_tir(                                   │
+   │    tir_matmul,     ← Direct TIR reference      │
+   │    [A, B], out     ← Explicit memory            │
+   │  )                                              │
+   │                                                │
+   │  ┌──────────────────────────────────────┐      │
+   │  │         TIR (Low-Level)               │      │
+   │  │  @T.prim_func                         │      │
+   │  │  def tir_matmul(A, B, C):             │      │
+   │  │    for i, j, k in T.grid(M, N, K):    │      │
+   │  │      C[i, j] += A[i, k] * B[k, j]    │      │
+   │  └──────────────────────────────────────┘      │
+   │                                                │
+   │  Key: Relax and TIR live in the SAME module    │
+   │  and can be transformed TOGETHER               │
+   └──────────────────────────────────────────────┘
+</code></pre>
+<h3 id="unity-principles">Unity Principles</h3>
+<ol>
+<li><strong>Co-existence</strong> — Relax (high-level) and TIR (low-level) functions live in the same <code>IRModule</code></li>
+<li><strong>Interoperability</strong> — Relax can call TIR functions directly via <code>call_tir</code></li>
+<li><strong>Incremental lowering</strong> — Lower one function at a time, not all-or-nothing</li>
+<li><strong>First-class dynamic shapes</strong> — Shape expressions are part of the type system</li>
+<li><strong>TVMScript everywhere</strong> — A single Python-based syntax for Relax, TIR, and transforms</li>
+</ol>
+<hr />
+<h2 id="3-relax-the-next-generation-ir">3. Relax: The Next-Generation IR</h2>
+<h3 id="key-design-differences-from-relay">Key Design Differences from Relay</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Feature</th>
+<th style="text-align: left;">Relay</th>
+<th style="text-align: left;">Relax</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Shape representation</td>
+<td style="text-align: left;">Inferred statically, <code>Any</code> for dynamic</td>
+<td style="text-align: left;">First-class symbolic shapes (<code>m</code>, <code>n</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Execution model</td>
+<td style="text-align: left;">Pure functional (copy semantics)</td>
+<td style="text-align: left;">Dataflow blocks (explicit mutation regions)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Memory management</td>
+<td style="text-align: left;">Implicit (compiler decides)</td>
+<td style="text-align: left;">Explicit allocation via <code>R.builtin.alloc_tensor</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">TIR integration</td>
+<td style="text-align: left;">Lowering pass (one-way)</td>
+<td style="text-align: left;"><code>call_tir</code> (direct reference, composable)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Syntax</td>
+<td style="text-align: left;">Relay text format</td>
+<td style="text-align: left;">TVMScript (Python-native)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Custom ops</td>
+<td style="text-align: left;">Register externally</td>
+<td style="text-align: left;">Inline TIR or <code>call_packed</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="relax-program-structure">Relax Program Structure</h3>
+<pre><code class="language-python">from tvm.script import relax as R, tir as T
+import tvm
+
+@tvm.script.ir_module
+class MyModule:
+    # TIR function: low-level matmul kernel
+    @T.prim_func
+    def matmul(
+        A: T.Buffer((T.int64(128), T.int64(256)), &quot;float32&quot;),
+        B: T.Buffer((T.int64(256), T.int64(512)), &quot;float32&quot;),
+        C: T.Buffer((T.int64(128), T.int64(512)), &quot;float32&quot;),
+    ):
+        for i, j, k in T.grid(128, 256, 512):
+            with T.block(&quot;matmul&quot;):
+                vi, vj, vk = T.axis.remap(&quot;SSR&quot;, [i, j, k])
+                with T.init():
+                    C[vi, vj] = T.float32(0)
+                C[vi, vj] += A[vi, vk] * B[vk, vj]
+
+    # Relax function: high-level graph
+    @R.function
+    def main(
+        x: R.Tensor((128, 256), dtype=&quot;float32&quot;),
+        w: R.Tensor((256, 512), dtype=&quot;float32&quot;),
+    ) -&gt; R.Tensor((128, 512), dtype=&quot;float32&quot;):
+        with R.dataflow():
+            # Allocate output buffer explicitly
+            out = R.call_tir(
+                MyModule.matmul,  # Direct TIR reference
+                [x, w],
+                out_sinfo=R.Tensor((128, 512), dtype=&quot;float32&quot;),
+            )
+            y = R.nn.relu(out)
+            R.output(y)
+        return y
+</code></pre>
+<h3 id="dataflow-blocks">Dataflow Blocks</h3>
+<p>Relax introduces <strong>dataflow blocks</strong> to delineate where the compiler can freely reorder and optimize:</p>
+<pre><code class="language-python">@R.function
+def transformer_layer(x: R.Tensor, w_q: R.Tensor, w_k: R.Tensor,
+                      w_v: R.Tensor, w_o: R.Tensor):
+    with R.dataflow():
+        # Inside a dataflow block:
+        # ✓ Compiler can reorder operations
+        # ✓ Compiler can fuse operations
+        # ✓ No side effects allowed
+        q = R.matmul(x, w_q)
+        k = R.matmul(x, w_k)
+        v = R.matmul(x, w_v)
+        attn = R.nn.attention(q, k, v)
+        out = R.matmul(attn, w_o)
+        R.output(out)
+
+    # Outside dataflow block:
+    # ✓ Side effects allowed (print, assert, control flow)
+    # ✗ Compiler won't reorder across block boundaries
+    R.print(out.shape)
+    return out
+</code></pre>
+<hr />
+<h2 id="4-first-class-dynamic-shapes">4. First-Class Dynamic Shapes</h2>
+<h3 id="the-breakthrough">The Breakthrough</h3>
+<p>Relay's <code>Any</code> was a placeholder — the compiler couldn't reason about it. Relax makes shape variables <strong>symbolic</strong>:</p>
+<pre><code class="language-python">@R.function
+def dynamic_matmul(
+    x: R.Tensor((&quot;m&quot;, &quot;k&quot;), dtype=&quot;float32&quot;),  # m, k are symbolic
+    w: R.Tensor((&quot;k&quot;, &quot;n&quot;), dtype=&quot;float32&quot;),   # k must match
+) -&gt; R.Tensor((&quot;m&quot;, &quot;n&quot;), dtype=&quot;float32&quot;):     # output shape is m×n
+    with R.dataflow():
+        out = R.matmul(x, w)
+        R.output(out)
+    return out
+</code></pre>
+<p>The shape algebra is part of the type system:</p>
+<p>$$\text{matmul}: \mathbb{R}^{m \times k} \times \mathbb{R}^{k \times n} \rightarrow \mathbb{R}^{m \times n}$$</p>
+<pre><code>Shape inference in Relax:
+
+  x: Tensor[m, k]   w: Tensor[k, n]
+           \             /
+            \           /
+          matmul(x, w)
+               │
+               ▼
+       result: Tensor[m, n]     ← symbolic, not &quot;Any&quot;!
+               │
+         reshape(result, (m*n,))
+               │
+               ▼
+       flat: Tensor[m*n]        ← symbolic arithmetic works
+</code></pre>
+<h3 id="why-this-matters-for-llms">Why This Matters for LLMs</h3>
+<p>Large language models have dynamic shapes everywhere:</p>
+<pre><code class="language-python">@R.function
+def llm_forward(
+    tokens: R.Tensor((&quot;batch&quot;, &quot;seq_len&quot;), dtype=&quot;int32&quot;),
+    kv_cache: R.Tensor((&quot;batch&quot;, &quot;num_heads&quot;, &quot;past_len&quot;, &quot;head_dim&quot;), 
+                        dtype=&quot;float32&quot;),
+):
+    # Relax tracks: new_len = past_len + seq_len
+    # This enables the compiler to:
+    # 1. Pre-allocate KV cache correctly
+    # 2. Generate specialized kernels for different seq_len
+    # 3. Apply optimizations that depend on shape relationships
+    ...
+</code></pre>
+<hr />
+<h2 id="5-tvmscript-a-unified-syntax">5. TVMScript: A Unified Syntax</h2>
+<p>TVMScript provides a single Python-like syntax for both Relax and TIR:</p>
+<pre><code class="language-python">from tvm.script import ir as I, relax as R, tir as T
+
+@I.ir_module
+class ConvReLUModule:
+    &quot;&quot;&quot;A module with both TIR kernels and Relax graph.&quot;&quot;&quot;
+
+    @T.prim_func(private=True)
+    def conv2d_nchw(
+        data: T.Buffer((1, 3, 224, 224), &quot;float32&quot;),
+        weight: T.Buffer((16, 3, 3, 3), &quot;float32&quot;),
+        output: T.Buffer((1, 16, 222, 222), &quot;float32&quot;),
+    ):
+        for n, c, h, w, rc, rh, rw in T.grid(1, 16, 222, 222, 3, 3, 3):
+            with T.block(&quot;conv&quot;):
+                vn, vc, vh, vw = T.axis.remap(&quot;SSSS&quot;, [n, c, h, w])
+                vrc, vrh, vrw = T.axis.remap(&quot;RRR&quot;, [rc, rh, rw])
+                with T.init():
+                    output[vn, vc, vh, vw] = T.float32(0)
+                output[vn, vc, vh, vw] += (
+                    data[vn, vrc, vh + vrh, vw + vrw] *
+                    weight[vc, vrc, vrh, vrw]
+                )
+
+    @R.function
+    def main(
+        x: R.Tensor((1, 3, 224, 224), dtype=&quot;float32&quot;),
+        w: R.Tensor((16, 3, 3, 3), dtype=&quot;float32&quot;),
+    ) -&gt; R.Tensor((1, 16, 222, 222), dtype=&quot;float32&quot;):
+        with R.dataflow():
+            conv_out = R.call_tir(
+                ConvReLUModule.conv2d_nchw,
+                [x, w],
+                out_sinfo=R.Tensor((1, 16, 222, 222), dtype=&quot;float32&quot;),
+            )
+            relu_out = R.nn.relu(conv_out)
+            R.output(relu_out)
+        return relu_out
+</code></pre>
+<h3 id="comparison-relay-vs-relax-syntax">Comparison: Relay vs Relax Syntax</h3>
+<pre><code class="language-python"># ─── Relay (old) ─────────────────────────────────
+relay_mod = tvm.IRModule()
+x = relay.var(&quot;x&quot;, shape=(1, 784), dtype=&quot;float32&quot;)
+w = relay.var(&quot;w&quot;, shape=(784, 10), dtype=&quot;float32&quot;)
+y = relay.nn.dense(x, w)
+y = relay.nn.softmax(y)
+relay_mod[&quot;main&quot;] = relay.Function([x, w], y)
+
+# ─── Relax (new) ─────────────────────────────────
+@I.ir_module
+class RelaxMod:
+    @R.function
+    def main(
+        x: R.Tensor((1, 784), &quot;float32&quot;),
+        w: R.Tensor((784, 10), &quot;float32&quot;),
+    ):
+        with R.dataflow():
+            y = R.matmul(x, w)
+            z = R.nn.softmax(y)
+            R.output(z)
+        return z
+</code></pre>
+<hr />
+<h2 id="6-migration-path-current-status">6. Migration Path &amp; Current Status</h2>
+<h3 id="relay-relax-migration">Relay → Relax Migration</h3>
+<pre><code>Migration Strategy
+══════════════════
+
+  Phase 1: Coexistence (current)
+  ┌──────────────────────────────────┐
+  │  Relay frontend importers still  │
+  │  work. Convert Relay → Relax     │
+  │  using relay_translator.         │
+  └──────────────────────────────────┘
+            │
+  Phase 2: Relax-first (in progress)
+  ┌──────────────────────────────────┐
+  │  New features built on Relax.    │
+  │  Relay maintained but frozen.    │
+  │  New model importers target      │
+  │  Relax directly.                 │
+  └──────────────────────────────────┘
+            │
+  Phase 3: Relay deprecated (future)
+  ┌──────────────────────────────────┐
+  │  Relay kept for backward compat. │
+  │  All active development on Relax │
+  └──────────────────────────────────┘
+</code></pre>
+<h3 id="converting-relay-to-relax">Converting Relay to Relax</h3>
+<pre><code class="language-python">from tvm.relax.testing import relay_translator
+
+# Existing Relay module
+relay_mod, params = relay.frontend.from_pytorch(scripted_model, input_shapes)
+
+# Convert to Relax
+relax_mod = relay_translator.from_relay(
+    relay_mod[&quot;main&quot;],
+    target=tvm.target.Target(&quot;llvm&quot;),
+    relay_params=params,
+)
+
+# Now you can use Relax passes and features
+# including dynamic shapes, dataflow blocks, etc.
+</code></pre>
+<h3 id="what-works-today-as-of-2026">What Works Today (as of 2026)</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Feature</th>
+<th style="text-align: left;">Status</th>
+<th style="text-align: left;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">TVMScript for Relax</td>
+<td style="text-align: left;">✅ Stable</td>
+<td style="text-align: left;">Full syntax support</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>call_tir</code> integration</td>
+<td style="text-align: left;">✅ Stable</td>
+<td style="text-align: left;">Relax ↔ TIR interop</td>
+</tr>
+<tr>
+<td style="text-align: left;">Dynamic shapes</td>
+<td style="text-align: left;">✅ Stable</td>
+<td style="text-align: left;">Symbolic shape inference</td>
+</tr>
+<tr>
+<td style="text-align: left;">Relay → Relax translator</td>
+<td style="text-align: left;">✅ Stable</td>
+<td style="text-align: left;">Most models convert cleanly</td>
+</tr>
+<tr>
+<td style="text-align: left;">MetaSchedule + Relax</td>
+<td style="text-align: left;">✅ Stable</td>
+<td style="text-align: left;">Auto-tuning for Relax modules</td>
+</tr>
+<tr>
+<td style="text-align: left;">PyTorch → Relax (direct)</td>
+<td style="text-align: left;">✅ Stable</td>
+<td style="text-align: left;">Via <code>relax.frontend.from_pytorch</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">ONNX → Relax (direct)</td>
+<td style="text-align: left;">✅ Stable</td>
+<td style="text-align: left;">Via <code>relax.frontend.from_onnx</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">LLM support (PagedKVCache)</td>
+<td style="text-align: left;">✅ Stable</td>
+<td style="text-align: left;">Dynamic seq + paged attention</td>
+</tr>
+<tr>
+<td style="text-align: left;">µTVM + Relax</td>
+<td style="text-align: left;">🔄 In progress</td>
+<td style="text-align: left;">AOT for microcontrollers</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-write-a-relax-module-20-min">Exercise 1: Write a Relax Module (20 min)</h3>
+<pre><code class="language-python">from tvm.script import ir as I, relax as R, tir as T
+import tvm
+
+# TODO: Create a Relax module with:
+# 1. A TIR prim_func for element-wise add
+# 2. A Relax function that calls it via call_tir
+# 3. Build and run it
+
+@I.ir_module
+class AddModule:
+    @T.prim_func(private=True)
+    def elemwise_add(
+        A: T.Buffer((128,), &quot;float32&quot;),
+        B: T.Buffer((128,), &quot;float32&quot;),
+        C: T.Buffer((128,), &quot;float32&quot;),
+    ):
+        for i in range(128):
+            with T.block(&quot;add&quot;):
+                vi = T.axis.spatial(128, i)
+                C[vi] = A[vi] + B[vi]
+
+    @R.function
+    def main(
+        a: R.Tensor((128,), &quot;float32&quot;),
+        b: R.Tensor((128,), &quot;float32&quot;),
+    ) -&gt; R.Tensor((128,), &quot;float32&quot;):
+        with R.dataflow():
+            c = R.call_tir(
+                AddModule.elemwise_add, [a, b],
+                out_sinfo=R.Tensor((128,), &quot;float32&quot;),
+            )
+            R.output(c)
+        return c
+
+# Build and test
+target = tvm.target.Target(&quot;llvm&quot;)
+mod = tvm.relax.transform.LegalizeOps()(AddModule)
+ex = tvm.relax.build(AddModule, target)
+vm = tvm.relax.VirtualMachine(ex, tvm.cpu())
+
+import numpy as np
+a = tvm.nd.array(np.ones(128, dtype=&quot;float32&quot;))
+b = tvm.nd.array(np.ones(128, dtype=&quot;float32&quot;) * 2)
+result = vm[&quot;main&quot;](a, b)
+print(result.numpy())  # Should be all 3.0
+</code></pre>
+<h3 id="exercise-2-dynamic-shapes-in-relax-20-min">Exercise 2: Dynamic Shapes in Relax (20 min)</h3>
+<pre><code class="language-python"># Create a module that handles dynamic batch size
+@I.ir_module
+class DynamicBatchModule:
+    @R.function
+    def main(
+        x: R.Tensor((&quot;batch&quot;, 784), &quot;float32&quot;),
+        w: R.Tensor((784, 10), &quot;float32&quot;),
+    ) -&gt; R.Tensor((&quot;batch&quot;, 10), &quot;float32&quot;):
+        with R.dataflow():
+            y = R.matmul(x, w)
+            z = R.nn.softmax(y, axis=-1)
+            R.output(z)
+        return z
+
+# TODO: Build this module, then test with batch=1, batch=4, batch=16
+# Verify that the same compiled module handles all batch sizes
+</code></pre>
+<h3 id="exercise-3-compare-relay-and-relax-20-min">Exercise 3: Compare Relay and Relax (20 min)</h3>
+<pre><code class="language-python"># Take the MobileNetV2 model from Day 35
+# 1. Import via relay.frontend.from_pytorch
+# 2. Convert to Relax via relay_translator
+# 3. Print both IRs — observe the structural differences
+# 4. Compile both and verify identical outputs
+
+# Bonus: Try adding dynamic batch to the Relax version
+# (which would be painful or impossible in Relay)
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>TVM Unity</strong> unifies Relay, TE, and TIR into a single composable framework — different abstraction levels coexist in one <code>IRModule</code></li>
+<li><strong>Relax</strong> replaces Relay with first-class symbolic shapes, dataflow blocks, and explicit <code>call_tir</code> integration</li>
+<li><strong>Dynamic shapes</strong> are no longer a workaround — shape variables like <code>("batch", "seq_len")</code> are part of the type system and support symbolic arithmetic</li>
+<li><strong>Dataflow blocks</strong> mark regions where the compiler can freely optimize, while code outside blocks can have side effects</li>
+<li><strong>TVMScript</strong> provides a single Python-native syntax for both Relax and TIR, making the whole stack readable and writable as Python</li>
+<li><strong>Migration</strong> from Relay is incremental — existing Relay models can be translated to Relax, and both coexist during the transition</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://tvm.apache.org/2021/12/15/tvm-unity">TVM Unity: The Next Step in ML Compilation</a> — vision blog post</li>
+<li><a href="https://github.com/apache/tvm-rfcs/blob/main/rfcs/0089-relax.html">Relax: TVM's Next-Gen Graph-Level IR (RFC)</a> — design rationale</li>
+<li><a href="https://mlc.ai/mlc-llm/">MLC-LLM: LLM Compilation with Relax</a> — real-world Relax usage for LLMs</li>
+<li><a href="https://tvm.apache.org/docs/reference/api/python/script.html">TVMScript Documentation</a> — syntax reference</li>
+<li><a href="https://mlc.ai/">Machine Learning Compilation (MLC) Course</a> — comprehensive course using Relax</li>
+<li><a href="https://tvm.apache.org/docs/reference/api/python/relax/index.html">Relax API Reference</a> — detailed API docs</li>
+</ul>
+<hr />
+<h2 id="tomorrow-stop-reflect-3">Tomorrow: Stop &amp; Reflect #3</h2>
+<p>Day 42 is your third reflection checkpoint. You'll build a concept map linking everything from Weeks 5–6 (Relay → TE → TIR → tuning → BYOC → quantization → edge → Relax), take a 10-question self-check quiz, and develop a decision framework for choosing between TVM, <code>torch.compile</code>, Triton, and ONNX Runtime.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-40-tvm-for-edge-devices.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 40: TVM for Edge Devices</a>
+            <a href="day-42-stop-and-reflect-3.html" class="text-emerald-600 hover:text-emerald-800">Day 42: Stop & Reflect #3 &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

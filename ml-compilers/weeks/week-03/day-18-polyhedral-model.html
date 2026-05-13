@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18: The Polyhedral Model - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 3: IR & Compiler Passes</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-18-the-polyhedral-model">Day 18: The Polyhedral Model</h1>
+<blockquote>
+<p><strong>Phase II · Week 3 · Day 18 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The polyhedral model turns 'can I legally reorder these loops?' from a gut feeling into a theorem you can prove with linear algebra."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-17-graph-level-optimizations.html">Day 17: Graph-Level Optimizations</a></td>
+<td style="text-align: left;"><a href="day-19-loop-tiling-scheduling.html">Day 19: Loop Tiling &amp; Scheduling</a></td>
+<td style="text-align: left;"><a href="README.html">Week 3: IRs &amp; Passes</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase II: Compiler Fundamentals</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Graph-level optimizations decide <strong>which</strong> operators to fuse. But once you've decided to fuse a <code>matmul + bias + relu</code> into one kernel, you still need to decide <strong>how to execute the loops</strong> inside that kernel — which loop goes outermost, how to tile for cache, whether to parallelize across GPU threads. The <strong>polyhedral model</strong> is the mathematical framework that tells you which loop transformations are <strong>legal</strong> (preserve correctness) and which are <strong>profitable</strong> (improve performance). TVM, Halide, MLIR's Affine dialect, and Pluto all build on this foundation.</p>
+<hr />
+<h2 id="1-the-problem-loop-nest-optimization">1. The Problem: Loop Nest Optimization</h2>
+<p>Consider matrix multiply — three nested loops with a specific data access pattern:</p>
+<pre><code class="language-c">// Naive matmul: C[i][j] += A[i][k] * B[k][j]
+for (int i = 0; i &lt; M; i++)
+  for (int j = 0; j &lt; N; j++)
+    for (int k = 0; k &lt; K; k++)
+      C[i][j] += A[i][k] * B[k][j];
+</code></pre>
+<p>Questions a compiler must answer:
+1. Can we <strong>reorder</strong> loops (e.g., <code>i,k,j</code> instead of <code>i,j,k</code>)?
+2. Can we <strong>tile</strong> loops (e.g., process 32×32 blocks)?
+3. Can we <strong>parallelize</strong> the outer loop?
+4. Can we <strong>vectorize</strong> the inner loop?</p>
+<p>The polyhedral model answers all of these by modeling the computation as a <strong>geometric object</strong> in an integer lattice.</p>
+<hr />
+<h2 id="2-three-components-of-the-polyhedral-model">2. Three Components of the Polyhedral Model</h2>
+<h3 id="2a-iteration-domain">2a. Iteration Domain</h3>
+<p>The set of all loop iterations, represented as an <strong>integer polyhedron</strong> — a set of integer points bounded by affine inequalities.</p>
+<p>For the matmul above:</p>
+<p>$$\mathcal{D}_S = \{(i, j, k) \in \mathbb{Z}^3 \mid 0 \leq i < M, \; 0 \leq j < N, \; 0 \leq k < K\}$$</p>
+<p>This is a 3D rectangular box in iteration space:</p>
+<pre><code>        k ▲
+          │    ┌────────────┐
+          │   /            /│
+     K ───┤  /            / │
+          │ /            /  │
+          │┌────────────┐   │
+          ││            │   │
+          ││  Iteration │  /
+          ││   Domain   │ / N
+          ││            │/
+          │└────────────┘
+          └──────────────────▶ j
+         /
+        / i
+       ▼
+       M
+</code></pre>
+<h3 id="2b-access-relations-array-subscripts">2b. Access Relations (Array Subscripts)</h3>
+<p>Each memory access is an <strong>affine function</strong> of the loop iterators:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Statement: <code>C[i][j] += A[i][k] * B[k][j]</code></th>
+<th style="text-align: left;">Access</th>
+<th style="text-align: left;">Affine Map</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Read A</td>
+<td style="text-align: left;">$A[i][k]$</td>
+<td style="text-align: left;">$(i, j, k) \mapsto (i, k)$</td>
+</tr>
+<tr>
+<td style="text-align: left;">Read B</td>
+<td style="text-align: left;">$B[k][j]$</td>
+<td style="text-align: left;">$(i, j, k) \mapsto (k, j)$</td>
+</tr>
+<tr>
+<td style="text-align: left;">Read/Write C</td>
+<td style="text-align: left;">$C[i][j]$</td>
+<td style="text-align: left;">$(i, j, k) \mapsto (i, j)$</td>
+</tr>
+</tbody>
+</table>
+<p>In matrix form, the access to $A[i][k]$:</p>
+<p>$$\begin{pmatrix} \text{row} \\ \text{col} \end{pmatrix} = \begin{pmatrix} 1 & 0 & 0 \\ 0 & 0 & 1 \end{pmatrix} \begin{pmatrix} i \\ j \\ k \end{pmatrix}$$</p>
+<h3 id="2c-schedule-execution-order">2c. Schedule (Execution Order)</h3>
+<p>A <strong>schedule</strong> maps each iteration point to a <strong>timestamp</strong> — when it should execute. The original schedule for <code>i,j,k</code> order:</p>
+<p>$$\theta(i, j, k) = (i, j, k)$$</p>
+<p>Meaning: iteration $(i, j, k)$ executes at time $(i, j, k)$ in lexicographic order. A different schedule, say loop order <code>i,k,j</code>:</p>
+<p>$$\theta'(i, j, k) = (i, k, j)$$</p>
+<p>A schedule is <strong>legal</strong> if it preserves all data dependencies.</p>
+<hr />
+<h2 id="3-dependence-analysis">3. Dependence Analysis</h2>
+<p>Two iterations <strong>depend</strong> on each other if they access the same memory location and at least one is a write. For matmul:</p>
+<pre><code class="language-c">C[i][j] += A[i][k] * B[k][j];
+//  ^^ write                       ^^ same statement, different k
+</code></pre>
+<p>Iteration $(i, j, k_1)$ and $(i, j, k_2)$ both write to $C[i][j]$, creating a <strong>dependence</strong>:</p>
+<p>$$\delta = (i, j, k_2) - (i, j, k_1) = (0, 0, k_2 - k_1)$$</p>
+<p>The dependence vector is $(0, 0, +)$ — positive in the $k$ direction. This means:
+- <strong>Loops $i$ and $j$ are independent</strong> — can be freely reordered, parallelized, or tiled
+- <strong>Loop $k$ carries a dependence</strong> — iterations must execute in $k$-order (or use atomic reduction)</p>
+<pre><code>  Dependence Analysis for Matmul
+  ───────────────────────────────
+  Statement S: C[i][j] += A[i][k] * B[k][j]
+
+  Dependencies (S → S):
+    Flow (RAW):  (i,j,k) → (i,j,k+1)  on C[i][j]
+    direction:   (0, 0, +)
+
+  Conclusion:
+    i-loop: parallelizable  ✓
+    j-loop: parallelizable  ✓
+    k-loop: reduction (must be sequential or atomic)
+
+  Legal loop orders: any permutation that keeps k innermost
+    ✓  i, j, k          ✓  j, i, k
+    ✗  k, i, j  (would violate k-dependence if k is now parallel)
+</code></pre>
+<h3 id="the-legality-test">The Legality Test</h3>
+<p>A schedule $\theta'$ is legal if and only if, for every dependence $(s_1, s_2)$ with dependence vector $\delta$:</p>
+<p>$$\theta'(s_2) - \theta'(s_1) \succ \mathbf{0} \quad \text{(lexicographically positive)}$$</p>
+<p>This ensures that the dependent iteration $s_2$ always executes after $s_1$.</p>
+<hr />
+<h2 id="4-affine-transformations">4. Affine Transformations</h2>
+<p>Any loop transformation expressible as an affine function of the original iterators is a <strong>polyhedral transformation</strong>:</p>
+<h3 id="loop-interchange">Loop Interchange</h3>
+<p>Swap loop $i$ and $j$:</p>
+<p>$$T_{\text{interchange}} = \begin{pmatrix} 0 & 1 & 0 \\ 1 & 0 & 0 \\ 0 & 0 & 1 \end{pmatrix}, \quad \begin{pmatrix} i' \\ j' \\ k' \end{pmatrix} = T \begin{pmatrix} i \\ j \\ k \end{pmatrix} = \begin{pmatrix} j \\ i \\ k \end{pmatrix}$$</p>
+<h3 id="loop-tiling-strip-mining-interchange">Loop Tiling (Strip-Mining + Interchange)</h3>
+<p>Split loop $i$ into blocks of size $B$:</p>
+<p>$$i = B \cdot i_o + i_i, \quad 0 \leq i_i < B$$</p>
+<p>The tiled loop nest <code>io, jo, ii, ji, k</code>:</p>
+<pre><code class="language-c">for (int io = 0; io &lt; M/B; io++)
+  for (int jo = 0; jo &lt; N/B; jo++)
+    for (int ii = 0; ii &lt; B; ii++)
+      for (int ji = 0; ji &lt; B; ji++)
+        for (int k = 0; k &lt; K; k++)
+          C[io*B+ii][jo*B+ji] += A[io*B+ii][k] * B[k][jo*B+ji];
+</code></pre>
+<p>This is an affine transformation from $(i, j, k) \to (i_o, j_o, i_i, j_i, k)$:</p>
+<p>$$i_o = \lfloor i / B \rfloor, \quad i_i = i \mod B, \quad j_o = \lfloor j / B \rfloor, \quad j_i = j \mod B$$</p>
+<h3 id="loop-skewing">Loop Skewing</h3>
+<p>Used to expose parallelism in wavefront patterns:</p>
+<p>$$\begin{pmatrix} i' \\ j' \end{pmatrix} = \begin{pmatrix} 1 & 0 \\ 1 & 1 \end{pmatrix} \begin{pmatrix} i \\ j \end{pmatrix}$$</p>
+<p>This transforms a diagonal dependence pattern into one where outer iterations are independent.</p>
+<hr />
+<h2 id="5-isl-the-integer-set-library">5. ISL: The Integer Set Library</h2>
+<p><strong>ISL</strong> is the standard library for polyhedral operations. TVM, MLIR, Pluto, and PPCG all use it.</p>
+<pre><code class="language-python"># Python bindings (islpy)
+import islpy as isl
+
+# Define an iteration domain
+domain = isl.Set(&quot;{ S[i,j,k] : 0 &lt;= i &lt; 128 and 0 &lt;= j &lt; 128 and 0 &lt;= k &lt; 64 }&quot;)
+print(f&quot;Domain: {domain}&quot;)
+print(f&quot;Dimension: {domain.dim(isl.dim_type.set)}&quot;)
+
+# Define an access relation
+read_A = isl.Map(&quot;{ S[i,j,k] -&gt; A[i,k] }&quot;)
+print(f&quot;Read A: {read_A}&quot;)
+
+# Apply domain to get accessed elements
+accessed = read_A.intersect_domain(domain)
+accessed_set = accessed.range()
+print(f&quot;A elements accessed: {accessed_set}&quot;)
+
+# Define a schedule (original order i,j,k)
+schedule = isl.Map(&quot;{ S[i,j,k] -&gt; [i,j,k] }&quot;)
+
+# Define a tiled schedule
+tiled = isl.Map(&quot;{ S[i,j,k] -&gt; [floor(i/32), floor(j/32), i - 32*floor(i/32), j - 32*floor(j/32), k] }&quot;)
+print(f&quot;Tiled schedule: {tiled}&quot;)
+</code></pre>
+<h3 id="dependence-analysis-with-isl">Dependence Analysis with ISL</h3>
+<pre><code class="language-python"># Dependence: S(i,j,k) writes C[i,j], S(i,j,k') reads C[i,j] where k' &gt; k
+write_C = isl.Map(&quot;{ S[i,j,k] -&gt; C[i,j] }&quot;)
+read_C = isl.Map(&quot;{ S[i,j,k] -&gt; C[i,j] }&quot;)
+
+# RAW dependence: same C element, source before sink
+# In ISL notation:
+dep = isl.Map(&quot;{ S[i,j,k] -&gt; S[i,j,k'] : k' &gt; k and 0 &lt;= k &lt; 64 and 0 &lt;= k' &lt; 64 }&quot;)
+print(f&quot;Dependence: {dep}&quot;)
+
+# Check if a transformation is legal:
+# New schedule must map source before sink for all dependencies
+</code></pre>
+<hr />
+<h2 id="6-connection-to-tvm-schedule-primitives">6. Connection to TVM Schedule Primitives</h2>
+<p>TVM's schedule primitives are <strong>polyhedral transformations</strong> with user-friendly names:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">TVM Primitive</th>
+<th style="text-align: left;">Polyhedral Transformation</th>
+<th style="text-align: left;">Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>split(i, 32)</code></td>
+<td style="text-align: left;">Strip-mine axis $i$ by factor 32</td>
+<td style="text-align: left;">Creates <code>i_outer, i_inner</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>reorder(j, i)</code></td>
+<td style="text-align: left;">Loop interchange</td>
+<td style="text-align: left;">Swaps execution order</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>tile(i, j, 32, 32)</code></td>
+<td style="text-align: left;">2D strip-mine + interchange</td>
+<td style="text-align: left;">Creates <code>io, jo, ii, ji</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>fuse(i, j)</code></td>
+<td style="text-align: left;">Collapse dimensions</td>
+<td style="text-align: left;">Linearize two loops</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>parallel(i)</code></td>
+<td style="text-align: left;">Mark as independent</td>
+<td style="text-align: left;">Execute on threads</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>vectorize(i)</code></td>
+<td style="text-align: left;">Mark innermost as SIMD</td>
+<td style="text-align: left;">Use vector instructions</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>compute_at(B, i)</code></td>
+<td style="text-align: left;">Change producer schedule</td>
+<td style="text-align: left;">Fuse producer into consumer loop</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-python"># TVM example (conceptual)
+import tvm
+from tvm import te
+
+M, N, K = 1024, 1024, 1024
+A = te.placeholder((M, K), name='A')
+B = te.placeholder((K, N), name='B')
+k = te.reduce_axis((0, K), name='k')
+C = te.compute((M, N), lambda i, j: te.sum(A[i, k] * B[k, j], axis=k), name='C')
+
+s = te.create_schedule(C.op)
+
+# Polyhedral transformations via TVM API
+i, j = s[C].op.axis
+k, = s[C].op.reduce_axis
+
+# Tile: strip-mine i and j
+io, ii = s[C].split(i, factor=32)
+jo, ji = s[C].split(j, factor=32)
+
+# Reorder: interchange for locality
+s[C].reorder(io, jo, ii, ji, k)
+
+# Parallelize outer loops
+s[C].parallel(io)
+
+# Vectorize innermost
+s[C].vectorize(ji)
+
+print(tvm.lower(s, [A, B, C], simple_mode=True))
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-dependence-vectors-by-hand-20-min">Exercise 1: Dependence Vectors by Hand (20 min)</h3>
+<p>For each loop nest, determine the dependence vectors and which loops can be parallelized:</p>
+<pre><code class="language-c">// (a) Element-wise: Y[i] = X[i] * 2
+for (int i = 0; i &lt; N; i++)
+    Y[i] = X[i] * 2;
+
+// (b) Stencil: Y[i] = X[i-1] + X[i] + X[i+1]
+for (int i = 1; i &lt; N-1; i++)
+    Y[i] = X[i-1] + X[i] + X[i+1];
+
+// (c) Scan (prefix sum): Y[i] = Y[i-1] + X[i]
+for (int i = 1; i &lt; N; i++)
+    Y[i] = Y[i-1] + X[i];
+
+// (d) 2D convolution
+for (int i = 0; i &lt; H; i++)
+  for (int j = 0; j &lt; W; j++)
+    for (int ki = 0; ki &lt; 3; ki++)
+      for (int kj = 0; kj &lt; 3; kj++)
+        O[i][j] += I[i+ki][j+kj] * K[ki][kj];
+</code></pre>
+<p>Expected answers:
+| Case | Deps | Parallelizable? |
+|:-----|:-----|:---------------|
+| (a) | None (X≠Y) | Fully parallel |
+| (b) | ? | ? |
+| (c) | ? | ? |
+| (d) | ? | ? |</p>
+<h3 id="exercise-2-tiling-a-matrix-multiply-25-min">Exercise 2: Tiling a Matrix Multiply (25 min)</h3>
+<pre><code class="language-python">import numpy as np
+import time
+
+def matmul_naive(A, B):
+    M, K = A.shape
+    _, N = B.shape
+    C = np.zeros((M, N))
+    for i in range(M):
+        for j in range(N):
+            for k in range(K):
+                C[i][j] += A[i][k] * B[k][j]
+    return C
+
+def matmul_tiled(A, B, block=32):
+    M, K = A.shape
+    _, N = B.shape
+    C = np.zeros((M, N))
+    for io in range(0, M, block):
+        for jo in range(0, N, block):
+            for ko in range(0, K, block):
+                # Tile bounds
+                ie = min(io + block, M)
+                je = min(jo + block, N)
+                ke = min(ko + block, K)
+                for ii in range(io, ie):
+                    for ji in range(jo, je):
+                        for ki in range(ko, ke):
+                            C[ii][ji] += A[ii][ki] * B[ki][ji]
+    return C
+
+# Test correctness and measure performance
+N = 256  # Keep small for pure Python
+A = np.random.randn(N, N)
+B = np.random.randn(N, N)
+
+t0 = time.perf_counter()
+C1 = matmul_naive(A, B)
+t_naive = time.perf_counter() - t0
+
+t0 = time.perf_counter()
+C2 = matmul_tiled(A, B, block=32)
+t_tiled = time.perf_counter() - t0
+
+print(f&quot;Naive:  {t_naive:.3f}s&quot;)
+print(f&quot;Tiled:  {t_tiled:.3f}s&quot;)
+print(f&quot;Speedup: {t_naive/t_tiled:.2f}x&quot;)
+print(f&quot;Correct: {np.allclose(C1, C2)}&quot;)
+</code></pre>
+<h3 id="exercise-3-isl-exploration-optional-20-min">Exercise 3: ISL Exploration (Optional, 20 min)</h3>
+<pre><code class="language-python"># pip install islpy
+import islpy as isl
+
+# 1. Create the iteration domain for 2D convolution
+#    i: 0..63, j: 0..63, ki: 0..2, kj: 0..2
+domain = isl.Set(&quot;{ S[i,j,ki,kj] : 0&lt;=i&lt;64 and 0&lt;=j&lt;64 and 0&lt;=ki&lt;3 and 0&lt;=kj&lt;3 }&quot;)
+
+# 2. Write the access relation for I[i+ki][j+kj]
+access_I = isl.Map(&quot;{ S[i,j,ki,kj] -&gt; I[i+ki, j+kj] }&quot;)
+
+# 3. What is the footprint? (set of I elements accessed)
+footprint = access_I.intersect_domain(domain).range()
+print(f&quot;I footprint: {footprint}&quot;)
+# Should be { I[r,c] : 0 &lt;= r &lt;= 66 and 0 &lt;= c &lt;= 66 }
+
+# 4. Create a tiled schedule
+tiled = isl.Map(&quot;{ S[i,j,ki,kj] -&gt; [floor(i/8), floor(j/8), &quot;
+                &quot;i - 8*floor(i/8), j - 8*floor(j/8), ki, kj] }&quot;)
+
+# 5. What is the data reuse within one tile?
+# Compute the I footprint for a single tile (io=0, jo=0)
+tile_domain = isl.Set(&quot;{ S[i,j,ki,kj] : 0&lt;=i&lt;8 and 0&lt;=j&lt;8 and 0&lt;=ki&lt;3 and 0&lt;=kj&lt;3 }&quot;)
+tile_footprint = access_I.intersect_domain(tile_domain).range()
+print(f&quot;Tile footprint: {tile_footprint}&quot;)
+# Should be { I[r,c] : 0 &lt;= r &lt;= 10 and 0 &lt;= c &lt;= 10 } = 11x11 = 121 elements
+# But total accesses = 8*8*3*3 = 576 → reuse ratio = 576/121 ≈ 4.8x
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Iteration domains</strong> are integer polyhedra — sets of loop iterations bounded by affine constraints</li>
+<li><strong>Access relations</strong> map iterations to array elements via affine functions — these determine data reuse and locality</li>
+<li><strong>Schedules</strong> assign timestamps to iterations — different schedules = different loop orders, all expressible as affine transforms</li>
+<li><strong>Dependence analysis</strong> determines which schedules are legal — a transformation is safe iff it preserves the lexicographic ordering of dependent iterations</li>
+<li><strong>TVM's schedule primitives</strong> (<code>split</code>, <code>reorder</code>, <code>tile</code>, <code>fuse</code>) are exactly polyhedral transformations with user-friendly APIs</li>
+<li><strong>ISL</strong> is the standard computational geometry library underpinning TVM, MLIR, Pluto, and other polyhedral tools</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Bastoul, C. — <em>Code Generation in the Polyhedral Model Is Easier Than You Think</em> (PACT 2004)</li>
+<li>Verdoolaege, S. — <em>isl: An Integer Set Library for the Polyhedral Model</em> (ICMS 2010)</li>
+<li>Bondhugula, U. et al. — <em>A Practical Automatic Polyhedral Parallelizer and Locality Optimizer</em> (PLDI 2008) — the Pluto algorithm</li>
+<li>Grosser, T. et al. — <em>Polly — Performing Polyhedral Optimizations on a Low-Level Intermediate Representation</em> (2012)</li>
+<li>Ragan-Kelley, J. et al. — <em>Halide: A Language and Compiler for Optimizing Parallelism, Locality, and Recomputation</em> (PLDI 2013)</li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p><strong>Day 19</strong> puts the polyhedral model to work with <strong>loop tiling and scheduling</strong> — we'll tile matrix multiply for L1/L2 cache, implement multi-level tiling strategies, explore TVM's <code>AutoScheduler</code> (Ansor), and see how autotuning searches the space of legal schedules to find hardware-optimal configurations automatically.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-17-graph-level-optimizations.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 17: Graph-Level Optimizations</a>
+            <a href="day-19-loop-tiling-scheduling.html" class="text-emerald-600 hover:text-emerald-800">Day 19: Loop Tiling & Scheduling &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

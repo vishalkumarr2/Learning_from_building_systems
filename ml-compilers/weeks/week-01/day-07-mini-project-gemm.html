@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 7: Mini-Project — Profile & Optimize a GEMM - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 1: GPU Architecture & CUDA</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-7-mini-project-profile-optimize-a-gemm">Day 7: Mini-Project — Profile &amp; Optimize a GEMM</h1>
+<blockquote>
+<p><strong>Phase I — GPU Foundations &amp; CUDA</strong> · Week 1 · Day 7 of 70</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Previous</th>
+<th>Next</th>
+<th>Week</th>
+<th>Phase</th>
+<th>Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="day-06-matrix-multiply-naive-to-tiled.html">Day 6: Matrix Multiply — Naive to Tiled</a></td>
+<td><a href="../week-02/day-08-pytorch-under-the-hood.html">Day 8: PyTorch Under the Hood</a></td>
+<td><a href="../week-01/">Week 1</a></td>
+<td><a href="../../#phase-i">Phase I</a></td>
+<td><a href="../../STUDY-PLAN.html">Curriculum Home</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>This is your Week 1 capstone. You'll consolidate every concept — CUDA execution model, memory coalescing, shared memory tiling, register blocking, profiling, and roofline analysis — into a single, complete project. By the end, you'll have a benchmarked portfolio piece and the muscle memory to approach any GPU optimization problem systematically.</p>
+<hr />
+<h2 id="1-project-overview">1. Project Overview</h2>
+<h3 id="11-deliverables">1.1 Deliverables</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Deliverable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>4 GEMM kernels</strong></td>
+<td>Naive, tiled, register-blocked, double-buffered</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Benchmarking harness</strong></td>
+<td>Timing, correctness check, GFLOPS calculation</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Nsight Compute profiles</strong></td>
+<td>One <code>.ncu-rep</code> per kernel</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Roofline plot</strong></td>
+<td>All 4 kernels + cuBLAS on one chart</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Analysis writeup</strong></td>
+<td>Bottleneck diagnosis per version</td>
+</tr>
+</tbody>
+</table>
+<h3 id="12-project-structure">1.2 Project Structure</h3>
+<pre><code>gemm-project/
+├── Makefile
+├── include/
+│   └── common.h          # error checking, timing utilities
+├── src/
+│   ├── naive.cu           # Version 1
+│   ├── tiled.cu           # Version 2
+│   ├── reg_blocked.cu     # Version 3
+│   ├── double_buffer.cu   # Version 4
+│   └── benchmark.cu       # Main driver
+├── scripts/
+│   ├── profile.sh         # ncu profiling commands
+│   └── plot_roofline.py   # Roofline visualization
+├── results/
+│   ├── benchmark.csv      # Timing results
+│   └── roofline.png       # Generated plot
+└── README.md              # Analysis writeup
+</code></pre>
+<hr />
+<h2 id="2-common-utilities">2. Common Utilities</h2>
+<h3 id="21-includecommonh">2.1 include/common.h</h3>
+<pre><code class="language-cuda">#pragma once
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;cuda_runtime.h&gt;
+#include &lt;cublas_v2.h&gt;
+
+#define CUDA_CHECK(call) do { \
+    cudaError_t e = (call); \
+    if (e != cudaSuccess) { \
+        fprintf(stderr, &quot;CUDA error %s:%d: %s\n&quot;, \
+                __FILE__, __LINE__, cudaGetErrorString(e)); \
+        exit(1); \
+    } \
+} while(0)
+
+#define CUBLAS_CHECK(call) do { \
+    cublasStatus_t s = (call); \
+    if (s != CUBLAS_STATUS_SUCCESS) { \
+        fprintf(stderr, &quot;cuBLAS error %s:%d: %d\n&quot;, \
+                __FILE__, __LINE__, (int)s); \
+        exit(1); \
+    } \
+} while(0)
+
+// Initialize matrix with random values
+void init_matrix(float *mat, int rows, int cols) {
+    for (int i = 0; i &lt; rows * cols; i++) {
+        mat[i] = (float)(rand() % 100) / 100.0f;
+    }
+}
+
+// Check correctness against reference
+float check_result(const float *test, const float *ref, int N) {
+    float max_err = 0.0f;
+    for (int i = 0; i &lt; N; i++) {
+        float err = fabsf(test[i] - ref[i]);
+        float rel = err / fmaxf(fabsf(ref[i]), 1e-7f);
+        if (rel &gt; max_err) max_err = rel;
+    }
+    return max_err;
+}
+
+// GPU timing utility
+struct GpuTimer {
+    cudaEvent_t start, stop;
+    GpuTimer() {
+        cudaEventCreate(&amp;start);
+        cudaEventCreate(&amp;stop);
+    }
+    ~GpuTimer() {
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+    }
+    void begin() { cudaEventRecord(start); }
+    float end() {
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        float ms;
+        cudaEventElapsedTime(&amp;ms, start, stop);
+        return ms;
+    }
+};
+
+// Calculate GFLOPS
+float calc_gflops(int M, int N, int K, float ms) {
+    double flops = 2.0 * M * N * K;
+    return (float)(flops / (ms * 1e6));  // ms → GFLOPS
+}
+</code></pre>
+<hr />
+<h2 id="3-the-four-kernel-versions">3. The Four Kernel Versions</h2>
+<h3 id="31-version-1-naive">3.1 Version 1: Naive</h3>
+<pre><code class="language-cuda">// src/naive.cu
+#include &quot;common.h&quot;
+
+__global__ void sgemm_naive(const float *A, const float *B, float *C,
+                            int M, int N, int K) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (row &lt; M &amp;&amp; col &lt; N) {
+        float sum = 0.0f;
+        for (int k = 0; k &lt; K; k++) {
+            sum += A[row * K + k] * B[k * N + col];
+        }
+        C[row * N + col] = sum;
+    }
+}
+
+void launch_naive(const float *A, const float *B, float *C,
+                  int M, int N, int K) {
+    dim3 block(16, 16);
+    dim3 grid((N + 15) / 16, (M + 15) / 16);
+    sgemm_naive&lt;&lt;&lt;grid, block&gt;&gt;&gt;(A, B, C, M, N, K);
+}
+</code></pre>
+<h3 id="32-version-2-shared-memory-tiled">3.2 Version 2: Shared Memory Tiled</h3>
+<pre><code class="language-cuda">// src/tiled.cu
+#include &quot;common.h&quot;
+#define TILE 32
+
+__global__ void sgemm_tiled(const float *A, const float *B, float *C,
+                            int M, int N, int K) {
+    __shared__ float As[TILE][TILE];
+    __shared__ float Bs[TILE][TILE];
+
+    int row = blockIdx.y * TILE + threadIdx.y;
+    int col = blockIdx.x * TILE + threadIdx.x;
+    float sum = 0.0f;
+
+    for (int t = 0; t &lt; (K + TILE - 1) / TILE; t++) {
+        int a_col = t * TILE + threadIdx.x;
+        int b_row = t * TILE + threadIdx.y;
+
+        As[threadIdx.y][threadIdx.x] = (row &lt; M &amp;&amp; a_col &lt; K)
+            ? A[row * K + a_col] : 0.0f;
+        Bs[threadIdx.y][threadIdx.x] = (b_row &lt; K &amp;&amp; col &lt; N)
+            ? B[b_row * N + col] : 0.0f;
+
+        __syncthreads();
+
+        #pragma unroll
+        for (int k = 0; k &lt; TILE; k++) {
+            sum += As[threadIdx.y][k] * Bs[k][threadIdx.x];
+        }
+        __syncthreads();
+    }
+
+    if (row &lt; M &amp;&amp; col &lt; N) {
+        C[row * N + col] = sum;
+    }
+}
+
+void launch_tiled(const float *A, const float *B, float *C,
+                  int M, int N, int K) {
+    dim3 block(TILE, TILE);
+    dim3 grid((N + TILE - 1) / TILE, (M + TILE - 1) / TILE);
+    sgemm_tiled&lt;&lt;&lt;grid, block&gt;&gt;&gt;(A, B, C, M, N, K);
+}
+</code></pre>
+<h3 id="33-version-3-register-blocked-44">3.3 Version 3: Register Blocked (4×4)</h3>
+<pre><code class="language-cuda">// src/reg_blocked.cu
+#include &quot;common.h&quot;
+#define BM 64
+#define BN 64
+#define BK 16
+#define TM 4
+#define TN 4
+
+__global__ void sgemm_reg_blocked(const float *A, const float *B, float *C,
+                                  int M, int N, int K) {
+    __shared__ float As[BK][BM];
+    __shared__ float Bs[BK][BN];
+
+    // Thread indices
+    int tx = threadIdx.x;  // 0..15
+    int ty = threadIdx.y;  // 0..15
+
+    int row_base = blockIdx.y * BM + ty * TM;
+    int col_base = blockIdx.x * BN + tx * TN;
+
+    // Register accumulators
+    float c[TM][TN] = {};
+
+    int num_tiles = (K + BK - 1) / BK;
+    for (int t = 0; t &lt; num_tiles; t++) {
+        // Load tiles cooperatively
+        // Each thread loads TM elements of A and TN elements of B
+        for (int i = 0; i &lt; TM; i++) {
+            int a_row = row_base + i;
+            int a_col = t * BK + tx;
+            As[tx &lt; BK ? tx : 0][ty * TM + i] =
+                (a_row &lt; M &amp;&amp; (t * BK + tx) &lt; K)
+                ? A[a_row * K + t * BK + tx] : 0.0f;
+        }
+        for (int i = 0; i &lt; TN; i++) {
+            int b_row = t * BK + ty;
+            int b_col = col_base + i;
+            Bs[ty &lt; BK ? ty : 0][tx * TN + i] =
+                (b_row &lt; K &amp;&amp; b_col &lt; N)
+                ? B[b_row * N + b_col] : 0.0f;
+        }
+        __syncthreads();
+
+        // Compute with register reuse
+        for (int k = 0; k &lt; BK; k++) {
+            float a[TM], b[TN];
+            #pragma unroll
+            for (int i = 0; i &lt; TM; i++) a[i] = As[k][ty * TM + i];
+            #pragma unroll
+            for (int i = 0; i &lt; TN; i++) b[i] = Bs[k][tx * TN + i];
+
+            #pragma unroll
+            for (int ri = 0; ri &lt; TM; ri++) {
+                #pragma unroll
+                for (int rj = 0; rj &lt; TN; rj++) {
+                    c[ri][rj] += a[ri] * b[rj];
+                }
+            }
+        }
+        __syncthreads();
+    }
+
+    // Store results
+    for (int ri = 0; ri &lt; TM; ri++) {
+        for (int rj = 0; rj &lt; TN; rj++) {
+            int r = row_base + ri;
+            int cc = col_base + rj;
+            if (r &lt; M &amp;&amp; cc &lt; N) {
+                C[r * N + cc] = c[ri][rj];
+            }
+        }
+    }
+}
+</code></pre>
+<h3 id="34-version-4-double-buffering">3.4 Version 4: Double Buffering</h3>
+<p>Double buffering overlaps the <strong>next tile's load</strong> with the <strong>current tile's compute</strong>:</p>
+<pre><code>Tile t:     LOAD tile t+1   |||   COMPUTE tile t
+Tile t+1:   LOAD tile t+2   |||   COMPUTE tile t+1
+
+Pipeline: load and compute happen concurrently
+</code></pre>
+<pre><code class="language-cuda">// src/double_buffer.cu — key difference from Version 3
+// Use two sets of shared memory buffers and alternate
+
+__shared__ float As[2][BK][BM];  // double buffer
+__shared__ float Bs[2][BK][BN];
+
+int cur = 0;  // current buffer index
+
+// Pre-load first tile into buffer 0
+load_tile(As[0], Bs[0], A, B, t=0, ...);
+__syncthreads();
+
+for (int t = 0; t &lt; num_tiles - 1; t++) {
+    int nxt = 1 - cur;
+
+    // Load next tile into alternate buffer (overlaps with compute)
+    load_tile(As[nxt], Bs[nxt], A, B, t+1, ...);
+
+    // Compute from current buffer
+    compute_tile(c, As[cur], Bs[cur]);
+
+    __syncthreads();
+    cur = nxt;
+}
+
+// Compute last tile
+compute_tile(c, As[cur], Bs[cur]);
+</code></pre>
+<hr />
+<h2 id="4-benchmarking-harness">4. Benchmarking Harness</h2>
+<h3 id="41-srcbenchmarkcu">4.1 src/benchmark.cu</h3>
+<pre><code class="language-cuda">#include &quot;common.h&quot;
+
+// Forward declarations
+void launch_naive(const float*, const float*, float*, int, int, int);
+void launch_tiled(const float*, const float*, float*, int, int, int);
+void launch_reg_blocked(const float*, const float*, float*, int, int, int);
+void launch_double_buffer(const float*, const float*, float*, int, int, int);
+
+int main() {
+    const int sizes[] = {512, 1024, 2048, 4096};
+    const int n_sizes = sizeof(sizes) / sizeof(sizes[0]);
+    const int warmup = 3, repeats = 10;
+
+    printf(&quot;%-6s %-12s %-12s %-12s %-12s %-12s\n&quot;,
+           &quot;Size&quot;, &quot;Naive&quot;, &quot;Tiled&quot;, &quot;RegBlock&quot;, &quot;DblBuffer&quot;, &quot;cuBLAS&quot;);
+    printf(&quot;%-6s %-12s %-12s %-12s %-12s %-12s\n&quot;,
+           &quot;&quot;, &quot;(GFLOPS)&quot;, &quot;(GFLOPS)&quot;, &quot;(GFLOPS)&quot;, &quot;(GFLOPS)&quot;, &quot;(GFLOPS)&quot;);
+
+    for (int s = 0; s &lt; n_sizes; s++) {
+        int M = sizes[s], N = sizes[s], K = sizes[s];
+        size_t bytes = M * N * sizeof(float);
+
+        // Allocate
+        float *h_A = (float*)malloc(M * K * sizeof(float));
+        float *h_B = (float*)malloc(K * N * sizeof(float));
+        float *h_C = (float*)malloc(bytes);
+        float *h_ref = (float*)malloc(bytes);
+        init_matrix(h_A, M, K);
+        init_matrix(h_B, K, N);
+
+        float *d_A, *d_B, *d_C;
+        CUDA_CHECK(cudaMalloc(&amp;d_A, M * K * sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&amp;d_B, K * N * sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&amp;d_C, bytes));
+        CUDA_CHECK(cudaMemcpy(d_A, h_A, M*K*sizeof(float), cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_B, h_B, K*N*sizeof(float), cudaMemcpyHostToDevice));
+
+        // cuBLAS reference
+        cublasHandle_t handle;
+        CUBLAS_CHECK(cublasCreate(&amp;handle));
+        float alpha = 1.0f, beta = 0.0f;
+
+        GpuTimer timer;
+
+        // Benchmark cuBLAS
+        for (int i = 0; i &lt; warmup; i++)
+            cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                        N, M, K, &amp;alpha, d_B, N, d_A, K, &amp;beta, d_C, N);
+        timer.begin();
+        for (int i = 0; i &lt; repeats; i++)
+            cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                        N, M, K, &amp;alpha, d_B, N, d_A, K, &amp;beta, d_C, N);
+        float cublas_ms = timer.end() / repeats;
+        float cublas_gf = calc_gflops(M, N, K, cublas_ms);
+
+        // Save reference result
+        CUDA_CHECK(cudaMemcpy(h_ref, d_C, bytes, cudaMemcpyDeviceToHost));
+
+        // Helper macro for benchmarking each version
+        #define BENCH(name, launch_fn) \
+            for (int i = 0; i &lt; warmup; i++) launch_fn(d_A, d_B, d_C, M, N, K); \
+            timer.begin(); \
+            for (int i = 0; i &lt; repeats; i++) launch_fn(d_A, d_B, d_C, M, N, K); \
+            float name##_ms = timer.end() / repeats; \
+            float name##_gf = calc_gflops(M, N, K, name##_ms); \
+            CUDA_CHECK(cudaMemcpy(h_C, d_C, bytes, cudaMemcpyDeviceToHost)); \
+            float name##_err = check_result(h_C, h_ref, M * N);
+
+        BENCH(naive, launch_naive);
+        BENCH(tiled, launch_tiled);
+        BENCH(regbl, launch_reg_blocked);
+        BENCH(dblbf, launch_double_buffer);
+
+        printf(&quot;%-6d %-12.1f %-12.1f %-12.1f %-12.1f %-12.1f\n&quot;,
+               M, naive_gf, tiled_gf, regbl_gf, dblbf_gf, cublas_gf);
+
+        // Cleanup
+        cublasDestroy(handle);
+        cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
+        free(h_A); free(h_B); free(h_C); free(h_ref);
+    }
+    return 0;
+}
+</code></pre>
+<h3 id="42-makefile">4.2 Makefile</h3>
+<pre><code class="language-makefile">NVCC = nvcc
+CFLAGS = -O3 -arch=sm_80  # sm_80 for A100
+LDFLAGS = -lcublas
+
+SRCS = src/naive.cu src/tiled.cu src/reg_blocked.cu \
+       src/double_buffer.cu src/benchmark.cu
+
+all: benchmark
+
+benchmark: $(SRCS) include/common.h
+    $(NVCC) $(CFLAGS) -I include $(SRCS) -o $@ $(LDFLAGS)
+
+profile: benchmark
+    bash scripts/profile.sh
+
+clean:
+    rm -f benchmark results/*.ncu-rep
+</code></pre>
+<hr />
+<h2 id="5-expected-results">5. Expected Results</h2>
+<h3 id="51-performance-table-a100-fp32">5.1 Performance Table (A100, FP32)</h3>
+<pre><code>Size   Naive       Tiled       RegBlock    DblBuffer   cuBLAS
+       (GFLOPS)    (GFLOPS)    (GFLOPS)    (GFLOPS)    (GFLOPS)
+──────────────────────────────────────────────────────────────────
+ 512     180         650        1800        2100        3500
+1024     250        1800        5500        6800        9800
+2048     310        2900        8500       10200       15200
+4096     350        3800       11500       13200       18500
+</code></pre>
+<h3 id="52-profiling-metrics-40964096">5.2 Profiling Metrics (4096×4096)</h3>
+<pre><code>Metric              Naive    Tiled    RegBlock  DblBuffer  cuBLAS
+─────────────────────────────────────────────────────────────────
+SM Throughput (%)     12       45        72        81       94
+Mem Throughput (%)    95       87        45        38       22
+Occupancy (%)        100       50        25        25       varies
+Dominant Stall     mem_dep  mem_dep  not_sel   not_sel  math_pipe
+</code></pre>
+<hr />
+<h2 id="6-roofline-plot-script">6. Roofline Plot Script</h2>
+<h3 id="61-scriptsplot_rooflinepy">6.1 scripts/plot_roofline.py</h3>
+<pre><code class="language-python">#!/usr/bin/env python3
+&quot;&quot;&quot;Generate roofline plot from benchmark results.&quot;&quot;&quot;
+import matplotlib.pyplot as plt
+import numpy as np
+import csv
+
+# A100 specs
+PEAK_FLOPS = 19500  # GFLOPS FP32
+PEAK_BW = 2039      # GB/s
+
+def plot_roofline(results_csv='results/benchmark.csv'):
+    ai = np.logspace(-1, 3, 1000)
+    roofline = np.minimum(PEAK_FLOPS, PEAK_BW * ai)
+    ridge = PEAK_FLOPS / PEAK_BW
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+    ax.loglog(ai, roofline, 'b-', lw=2.5, label='Roofline (FP32)')
+    ax.axvline(ridge, color='gray', ls='--', alpha=0.4,
+               label=f'Ridge = {ridge:.1f} FLOP/B')
+
+    # For GEMM, AI = N/6 (square matrices FP32)
+    kernels = {
+        'Naive':       (683, 350,   'rs'),
+        'Tiled':       (683, 3800,  'g^'),
+        'Reg-Blocked': (683, 11500, 'bD'),
+        'Dbl-Buffer':  (683, 13200, 'mp'),
+        'cuBLAS':      (683, 18500, 'k*'),
+    }
+
+    for name, (k_ai, k_gf, fmt) in kernels.items():
+        ax.plot(k_ai, k_gf, fmt, markersize=12, label=name)
+
+    ax.set_xlabel('Arithmetic Intensity (FLOP/Byte)', fontsize=13)
+    ax.set_ylabel('Performance (GFLOPS)', fontsize=13)
+    ax.set_title('Roofline Analysis — GEMM Optimization (A100, 4096³)', fontsize=14)
+    ax.legend(fontsize=11, loc='lower right')
+    ax.grid(True, which='both', alpha=0.3)
+    ax.set_xlim(0.1, 2000)
+    ax.set_ylim(100, 25000)
+    plt.tight_layout()
+    plt.savefig('results/roofline.png', dpi=150)
+    print(&quot;Saved results/roofline.png&quot;)
+    plt.show()
+
+if __name__ == '__main__':
+    plot_roofline()
+</code></pre>
+<hr />
+<h2 id="7-reflection-checklist">7. Reflection Checklist</h2>
+<p>After completing the project, verify you can answer these questions:</p>
+<h3 id="gpu-architecture-days-1-2">GPU Architecture (Days 1-2)</h3>
+<ul>
+<li>[ ] What is an SM? How many are on the GPU you used?</li>
+<li>[ ] What is a warp? Why does warp size = 32 matter?</li>
+<li>[ ] Draw the GPU memory hierarchy (registers → shared → L1 → L2 → HBM)</li>
+</ul>
+<h3 id="cuda-programming-day-3">CUDA Programming (Day 3)</h3>
+<ul>
+<li>[ ] Write the global thread index formula for 1D and 2D grids</li>
+<li>[ ] Why do we need bounds checking (<code>if (idx &lt; N)</code>)?</li>
+<li>[ ] What happens if you forget <code>cudaFree()</code>?</li>
+</ul>
+<h3 id="memory-coalescing-day-4">Memory Coalescing (Day 4)</h3>
+<ul>
+<li>[ ] What is a 128-byte cache line transaction?</li>
+<li>[ ] Why is SoA better than AoS on GPUs?</li>
+<li>[ ] What does the <code>+1</code> padding trick do for bank conflicts?</li>
+</ul>
+<h3 id="profiling-day-5">Profiling (Day 5)</h3>
+<ul>
+<li>[ ] When to use Nsight Systems vs Nsight Compute?</li>
+<li>[ ] What is arithmetic intensity? Calculate it for vector add.</li>
+<li>[ ] If SM throughput is 90% and memory throughput is 20%, is the kernel compute-bound or memory-bound?</li>
+</ul>
+<h3 id="gemm-optimization-day-6">GEMM Optimization (Day 6)</h3>
+<ul>
+<li>[ ] Why does the naive GEMM read each A element $N$ times?</li>
+<li>[ ] How does tiling reduce global memory traffic by $T\times$?</li>
+<li>[ ] Why does register blocking help even though total FLOPs don't change?</li>
+</ul>
+<h3 id="integration-day-7">Integration (Day 7)</h3>
+<ul>
+<li>[ ] Place all 4 kernels + cuBLAS on the roofline. Are they where you expect?</li>
+<li>[ ] What is the dominant bottleneck for each version?</li>
+<li>[ ] What optimization would you try next to close the gap to cuBLAS?</li>
+</ul>
+<hr />
+<h2 id="8-stretch-goals">8. Stretch Goals</h2>
+<p>If you finish early, try these extensions:</p>
+<ol>
+<li>
+<p><strong>FP16 GEMM</strong>: Convert to <code>__half</code> types. How does performance change? What's the new peak?</p>
+</li>
+<li>
+<p><strong>Tensor Core GEMM</strong>: Use <code>wmma</code> (Warp Matrix Multiply-Accumulate) API for 16×16×16 tiles. See <a href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#wmma">CUDA wmma docs</a>.</p>
+</li>
+<li>
+<p><strong>Non-square matrices</strong>: Test with $M=1, N=4096, K=4096$ (GEMV). How does performance degrade? Why?</p>
+</li>
+<li>
+<p><strong>Autotuning</strong>: Write a Python script that sweeps TILE, BM, BN, BK, TM, TN and finds the best configuration for a given GPU.</p>
+</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li>A systematic optimization workflow — <strong>profile → diagnose → optimize → re-profile</strong> — beats guessing every time.</li>
+<li>The four GEMM versions map to a clean performance ladder: naive (2%) → tiled (20%) → register-blocked (60%) → double-buffered (70%) of cuBLAS.</li>
+<li><strong>Roofline analysis</strong> instantly tells you whether to optimize memory access or compute.</li>
+<li>GPU optimization is a hierarchy: <strong>algorithm &gt; memory access pattern &gt; compute optimization &gt; micro-architecture tricks</strong>.</li>
+<li>cuBLAS's remaining edge comes from assembly-level tuning, Tensor Cores, and multi-level tiling — the same techniques ML compilers automate.</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://github.com/NVIDIA/cutlass">CUTLASS GitHub Repository</a> — Study <code>gemm/</code> directory for production GEMM implementations</li>
+<li><a href="https://siboehm.com/articles/22/CUDA-MMM">How to Optimize a CUDA Matmul Kernel</a> — Simon Boehm's walkthrough</li>
+<li>Jia, Maggioni &amp; Staiger, "Dissecting the NVIDIA Volta GPU Architecture via Microbenchmarking" (2018)</li>
+<li><a href="https://www.elsevier.com/books/programming-massively-parallel-processors/hwu/978-0-323-91231-0">Programming Massively Parallel Processors (Hwu, Kirk &amp; El Hajj)</a> — Chapters 4-6</li>
+</ul>
+<hr />
+<blockquote>
+<p><strong>Next week</strong>: <a href="../week-02/day-08-pytorch-under-the-hood.html">Day 8 — PyTorch Under the Hood</a>. You'll trace what happens when you call <code>torch.matmul()</code> — from Python through the dispatcher, to ATen, to cuBLAS, and finally to the GPU kernels you now understand.</p>
+</blockquote>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-06-matrix-multiply-naive-to-tiled.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 6: Matrix Multiply — Naive to Tiled</a>
+            <a href="../week-02/day-08-pytorch-under-the-hood.html" class="text-emerald-600 hover:text-emerald-800">Day 8: PyTorch Under the Hood &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 27: Writing a Custom Triton Backend - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 4: Triton & Kernel Engineering</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-27-writing-a-custom-triton-backend">Day 27: Writing a Custom Triton Backend</h1>
+<blockquote>
+<p><strong>Phase II · Week 4 · Day 27 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The backend API is torch.compile's escape hatch. When Inductor's fusion heuristics aren't right for your workload, you don't fight the compiler — you replace it."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-26-torchInductor-codegen.html">Day 26: TorchInductor Codegen</a></td>
+<td style="text-align: left;"><a href="day-28-stop-and-reflect-2.html">Day 28: Stop &amp; Reflect #2</a></td>
+<td style="text-align: left;"><a href="README.html">Week 4: Triton &amp; Kernel Engineering</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase II: Compiler Fundamentals</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p><code>torch.compile</code> defaults to Inductor, but the backend is pluggable. The backend API lets you intercept the FX graph <em>after</em> Dynamo + AOTAutograd and generate your own code — Triton, CUDA, C++, or even target a different accelerator entirely. This is how companies like OpenAI (Triton), NVIDIA (TensorRT), Intel (IPEX), and Hugging Face (Optimum) integrate their specialized compilers into the PyTorch ecosystem. Today you'll build a custom backend from scratch and understand when it's worth the effort.</p>
+<hr />
+<h2 id="1-the-backend-api-contract">1. The Backend API Contract</h2>
+<p>A <code>torch.compile</code> backend is a callable that takes an FX graph and example inputs, and returns a compiled function:</p>
+<pre><code>torch.compile(model, backend=my_backend)
+
+Contract:
+                                ┌─────────────────────────┐
+  FX Graph (GraphModule)  ────▶ │   Your Backend          │
+  Example Inputs (list)   ────▶ │   ──────────────        │ ────▶  Callable
+                                │   Analyze graph          │
+                                │   Generate code          │
+                                │   Compile &amp; return       │
+                                └─────────────────────────┘
+
+Signature:
+  def my_backend(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor])
+      -&gt; Callable
+</code></pre>
+<h3 id="what-you-receive">What You Receive</h3>
+<p>The <code>gm</code> (GraphModule) contains:
+- <strong><code>gm.graph</code></strong> — the FX graph with ATen-level ops (after decomposition)
+- <strong><code>gm.code</code></strong> — Python source that executes the graph
+- <strong><code>gm.forward()</code></strong> — callable that runs the graph eagerly</p>
+<p>The <code>example_inputs</code> are concrete tensors with the shapes/dtypes that triggered compilation.</p>
+<pre><code class="language-python">def my_backend(gm, example_inputs):
+    # gm.graph.print_tabular() shows:
+    #   opcode    name    target                  args
+    #   ─────────────────────────────────────────────────
+    #   placeholder  arg0   arg0                   ()
+    #   call_function  sin   aten.sin.default       (arg0,)
+    #   call_function  cos   aten.cos.default       (arg0,)
+    #   call_function  add   aten.add.Tensor        (sin, cos)
+    #   output   output  output                    ((add,),)
+
+    print(gm.graph)
+    return gm.forward   # fallback: just run eagerly
+</code></pre>
+<hr />
+<h2 id="2-minimal-backend-graph-printer">2. Minimal Backend: Graph Printer</h2>
+<p>The simplest useful backend — prints every graph that Dynamo captures:</p>
+<pre><code class="language-python">import torch
+from torch._dynamo import register_backend
+
+@register_backend
+def debug_backend(gm, example_inputs):
+    &quot;&quot;&quot;Print the graph and fall back to eager execution.&quot;&quot;&quot;
+    print(&quot;=&quot; * 60)
+    print(&quot;CAPTURED GRAPH:&quot;)
+    print(&quot;=&quot; * 60)
+    gm.graph.print_tabular()
+    print(f&quot;\nInput shapes: {[x.shape for x in example_inputs]}&quot;)
+    print(f&quot;Input dtypes: {[x.dtype for x in example_inputs]}&quot;)
+    print(&quot;=&quot; * 60)
+
+    # Return the GraphModule's forward — runs the ATen ops eagerly
+    return gm.forward
+
+# Use it
+@torch.compile(backend=&quot;debug_backend&quot;)
+def f(x):
+    return x.sin() + x.cos()
+
+x = torch.randn(8, 8, device=&quot;cuda&quot;)
+result = f(x)
+</code></pre>
+<p>This is invaluable for understanding <em>what</em> Dynamo captures. Every graph break produces a separate call to your backend.</p>
+<hr />
+<h2 id="3-pattern-matching-backend">3. Pattern-Matching Backend</h2>
+<p>A more practical backend that detects specific patterns and replaces them with optimized kernels:</p>
+<pre><code class="language-python">import torch
+import triton
+import triton.language as tl
+from torch._dynamo import register_backend
+
+# Step 1: Write an optimized Triton kernel for SiLU
+@triton.jit
+def silu_kernel(
+    x_ptr, out_ptr, n_elements,
+    BLOCK_SIZE: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets &lt; n_elements
+
+    x = tl.load(x_ptr + offsets, mask=mask)
+    # SiLU(x) = x * sigmoid(x) = x / (1 + exp(-x))
+    result = x * tl.sigmoid(x)
+    tl.store(out_ptr + offsets, result, mask=mask)
+
+
+def run_silu_kernel(x):
+    &quot;&quot;&quot;Wrapper that launches the Triton kernel.&quot;&quot;&quot;
+    output = torch.empty_like(x)
+    n = x.numel()
+    grid = lambda meta: (triton.cdiv(n, meta[&quot;BLOCK_SIZE&quot;]),)
+    silu_kernel[grid](x, output, n, BLOCK_SIZE=1024)
+    return output
+
+
+# Step 2: Pattern detection
+def find_silu_pattern(graph):
+    &quot;&quot;&quot;Find sigmoid(x) * x patterns in the FX graph.&quot;&quot;&quot;
+    matches = []
+    for node in graph.nodes:
+        if node.op != &quot;call_function&quot;:
+            continue
+        # Pattern: mul(sigmoid(x), x) or mul(x, sigmoid(x))
+        if node.target == torch.ops.aten.mul.Tensor:
+            a, b = node.args
+            if (hasattr(a, 'target') and 
+                a.target == torch.ops.aten.sigmoid.default and
+                a.args[0] is b):
+                matches.append((node, b))  # (mul_node, input_x)
+            elif (hasattr(b, 'target') and 
+                  b.target == torch.ops.aten.sigmoid.default and
+                  b.args[0] is a):
+                matches.append((node, a))
+    return matches
+
+
+# Step 3: The backend
+@register_backend
+def silu_opt_backend(gm, example_inputs):
+    &quot;&quot;&quot;Replace SiLU patterns with a custom Triton kernel.&quot;&quot;&quot;
+    matches = find_silu_pattern(gm.graph)
+
+    if not matches:
+        # No pattern found — fall back to Inductor
+        from torch._inductor.compile_fx import compile_fx
+        return compile_fx(gm, example_inputs)
+
+    print(f&quot;[silu_opt] Found {len(matches)} SiLU pattern(s), replacing...&quot;)
+
+    # For simplicity, handle single-pattern case
+    # Production code would rewrite the graph properly
+    def optimized_forward(*args):
+        # Run the Triton kernel directly
+        return run_silu_kernel(args[0])
+
+    return optimized_forward
+
+
+# Step 4: Test it
+@torch.compile(backend=&quot;silu_opt_backend&quot;)
+def model(x):
+    return torch.sigmoid(x) * x  # this IS SiLU
+
+x = torch.randn(4096, device=&quot;cuda&quot;)
+result = model(x)
+expected = torch.nn.functional.silu(x)
+print(f&quot;Correct: {torch.allclose(result, expected, atol=1e-5)}&quot;)
+</code></pre>
+<hr />
+<h2 id="4-proper-graph-rewriting">4. Proper Graph Rewriting</h2>
+<p>Real backends rewrite the FX graph instead of replacing <code>forward()</code>:</p>
+<pre><code class="language-python">import torch
+from torch.fx import GraphModule, Graph, Node
+
+def rewrite_silu(gm: GraphModule) -&gt; GraphModule:
+    &quot;&quot;&quot;Rewrite SiLU pattern in-place in the FX graph.&quot;&quot;&quot;
+    graph = gm.graph
+
+    for node in list(graph.nodes):  # copy list since we modify
+        if node.op != &quot;call_function&quot;:
+            continue
+
+        if node.target != torch.ops.aten.mul.Tensor:
+            continue
+
+        a, b = node.args
+
+        # Check: mul(sigmoid(x), x)
+        sigmoid_node, input_node = None, None
+        if (isinstance(a, Node) and a.target == torch.ops.aten.sigmoid.default
+            and a.args[0] is b):
+            sigmoid_node, input_node = a, b
+        elif (isinstance(b, Node) and b.target == torch.ops.aten.sigmoid.default
+              and b.args[0] is a):
+            sigmoid_node, input_node = b, a
+
+        if sigmoid_node is None:
+            continue
+
+        # Replace the pattern with silu
+        with graph.inserting_before(node):
+            new_node = graph.call_function(
+                torch.ops.aten.silu.default,
+                args=(input_node,),
+            )
+
+        node.replace_all_uses_with(new_node)
+        graph.erase_node(node)
+
+        # Remove dead sigmoid node if unused
+        if len(sigmoid_node.users) == 0:
+            graph.erase_node(sigmoid_node)
+
+    graph.lint()  # validate graph integrity
+    gm.recompile()
+    return gm
+</code></pre>
+<h3 id="graph-rewriting-safety-rules">Graph Rewriting Safety Rules</h3>
+<pre><code>DO:                                      DON'T:
+─────────────────────────                ──────────────────────────
+✓ Copy node list before iteration        ✗ Modify graph while iterating
+✓ Call graph.lint() after changes         ✗ Leave dangling nodes
+✓ Use replace_all_uses_with()             ✗ Manually reconnect edges
+✓ Check node.users before erasing         ✗ Erase nodes with live users
+✓ Call gm.recompile() when done           ✗ Forget to recompile
+</code></pre>
+<hr />
+<h2 id="5-when-to-customize-vs-use-inductor">5. When to Customize vs. Use Inductor</h2>
+<pre><code>                    Use Inductor                Write Custom Backend
+                    ───────────                 ────────────────────
+Pointwise fusion    ██████████  excellent        unnecessary
+Reductions          ████████░░  good             rarely needed
+GEMM epilogues      ██████░░░░  template-based   custom template wins
+Custom hardware     ░░░░░░░░░░  GPU/CPU only     FPGA, TPU, custom ASIC
+Custom dtypes       ██░░░░░░░░  limited          full control
+Exotic patterns     ████░░░░░░  may not fuse     pattern-specific kernel
+Cross-layer fusion  ██░░░░░░░░  limited          can fuse across layers
+Quantization        ████░░░░░░  basic support    specialized backends win
+</code></pre>
+<h3 id="decision-flowchart">Decision Flowchart</h3>
+<pre><code>Is Inductor producing optimal code for your pattern?
+ │
+ ├── YES → Use Inductor. Don't over-engineer.
+ │
+ └── NO → Can you fix it with a custom lowering? (Day 26)
+      │
+      ├── YES → Register lowering. Stays within Inductor.
+      │
+      └── NO → Does the issue require different scheduling/fusion?
+           │
+           ├── YES → Write a custom backend.
+           │
+           └── NO → File a PyTorch issue. Inductor improves fast.
+</code></pre>
+<hr />
+<h2 id="6-backend-composition-chaining-with-inductor">6. Backend Composition: Chaining with Inductor</h2>
+<p>You don't have to replace Inductor entirely. A common pattern is pre-processing the graph and then handing off to Inductor:</p>
+<pre><code class="language-python">from torch._inductor.compile_fx import compile_fx
+
+@register_backend
+def preprocess_then_inductor(gm, example_inputs):
+    &quot;&quot;&quot;Apply custom graph transforms, then use Inductor for codegen.&quot;&quot;&quot;
+
+    # Step 1: Custom transforms
+    gm = rewrite_silu(gm)           # our pattern rewrite
+    gm = fold_constants(gm)          # constant folding
+    gm = remove_dead_code(gm)        # DCE
+
+    # Step 2: Hand off to Inductor for the heavy lifting
+    return compile_fx(gm, example_inputs)
+</code></pre>
+<p>This is the recommended approach for most use cases:
+- You handle <strong>domain-specific patterns</strong> that Inductor misses
+- Inductor handles <strong>fusion, scheduling, and code generation</strong></p>
+<hr />
+<h2 id="7-testing-debugging-custom-backends">7. Testing &amp; Debugging Custom Backends</h2>
+<h3 id="correctness-testing">Correctness Testing</h3>
+<pre><code class="language-python">import torch
+from torch.testing import assert_close
+
+def test_backend_correctness():
+    &quot;&quot;&quot;Golden-model testing: compare custom backend vs eager.&quot;&quot;&quot;
+
+    def model(x):
+        return torch.sigmoid(x) * x + x.cos()
+
+    x = torch.randn(256, 256, device=&quot;cuda&quot;, requires_grad=True)
+    x_copy = x.clone().detach().requires_grad_(True)
+
+    # Eager reference
+    eager_out = model(x)
+    eager_out.sum().backward()
+
+    # Compiled with custom backend
+    compiled = torch.compile(model, backend=&quot;silu_opt_backend&quot;)
+    compiled_out = compiled(x_copy)
+    compiled_out.sum().backward()
+
+    # Compare forward
+    assert_close(compiled_out, eager_out, atol=1e-5, rtol=1e-5)
+
+    # Compare gradients
+    assert_close(x_copy.grad, x.grad, atol=1e-5, rtol=1e-5)
+
+    print(&quot;✓ Forward and backward match!&quot;)
+
+test_backend_correctness()
+</code></pre>
+<h3 id="debugging-tips">Debugging Tips</h3>
+<pre><code class="language-python"># 1. Use TORCH_LOGS to see what Dynamo captures
+# TORCH_LOGS=&quot;dynamo,aot&quot; python script.py
+
+# 2. Print the graph in your backend
+def debug_backend(gm, example_inputs):
+    print(&quot;Graph nodes:&quot;)
+    for node in gm.graph.nodes:
+        print(f&quot;  {node.op:15s} {node.name:20s} target={node.target}&quot;)
+    return gm.forward
+
+# 3. Verify graph validity
+gm.graph.lint()  # raises if graph is broken
+
+# 4. Test with fullgraph to ensure no graph breaks
+@torch.compile(backend=&quot;my_backend&quot;, fullgraph=True)
+def f(x): ...
+
+# 5. Check for dynamic shapes
+print(f&quot;Shapes: {[x.shape for x in example_inputs]}&quot;)
+# If shapes are symbolic (torch.SymInt), handle gracefully
+</code></pre>
+<h3 id="common-backend-bugs">Common Backend Bugs</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Bug</th>
+<th style="text-align: left;">Symptom</th>
+<th style="text-align: left;">Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Missing output</td>
+<td style="text-align: left;"><code>RuntimeError: output mismatch</code></td>
+<td style="text-align: left;">Ensure return matches graph output</td>
+</tr>
+<tr>
+<td style="text-align: left;">Wrong dtype</td>
+<td style="text-align: left;">Silent numerical errors</td>
+<td style="text-align: left;">Check <code>example_inputs</code> dtypes</td>
+</tr>
+<tr>
+<td style="text-align: left;">Dangling nodes</td>
+<td style="text-align: left;"><code>graph.lint()</code> fails</td>
+<td style="text-align: left;">Use <code>replace_all_uses_with</code> + erase</td>
+</tr>
+<tr>
+<td style="text-align: left;">Gradient mismatch</td>
+<td style="text-align: left;">Wrong backward values</td>
+<td style="text-align: left;">Test with <code>requires_grad=True</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Shape assumptions</td>
+<td style="text-align: left;">Fails on recompilation</td>
+<td style="text-align: left;">Use symbolic shapes or <code>dynamic=True</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-build-a-logging-backend-20-min">Exercise 1: Build a Logging Backend (20 min)</h3>
+<pre><code class="language-python">import torch
+
+# TODO: Create a backend that:
+# 1. Logs every graph it receives (ops, shapes, dtypes)
+# 2. Counts total ops and fusion opportunities
+# 3. Falls back to Inductor for actual execution
+# 4. Prints a summary: &quot;Graph: N ops, M fusable groups&quot;
+
+# Test with:
+@torch.compile(backend=&quot;your_backend&quot;)
+def model(x, y):
+    a = x + y
+    b = a * 2
+    c = torch.relu(b)
+    d = c.sum()
+    return d
+
+x = torch.randn(128, 128, device=&quot;cuda&quot;)
+y = torch.randn(128, 128, device=&quot;cuda&quot;)
+result = model(x, y)
+</code></pre>
+<h3 id="exercise-2-constant-folding-pass-25-min">Exercise 2: Constant Folding Pass (25 min)</h3>
+<pre><code class="language-python">import torch
+
+# TODO: Write a backend that constant-folds scalar operations
+# before handing to Inductor.
+#
+# Example: if the graph contains `mul(x, 2.0)` followed by 
+# `mul(result, 3.0)`, rewrite to `mul(x, 6.0)`.
+#
+# Hints:
+# - Walk the graph looking for chains of scalar multiplies
+# - Create new constant nodes with graph.call_function()
+# - Use replace_all_uses_with() to rewire
+
+@torch.compile(backend=&quot;const_fold_backend&quot;)
+def f(x):
+    y = x * 2.0
+    y = y * 3.0    # should fold to x * 6.0
+    y = y + 0.0    # should eliminate (identity)
+    return y
+</code></pre>
+<h3 id="exercise-3-pattern-matching-gelu-backend-30-min">Exercise 3: Pattern-Matching GELU Backend (30 min)</h3>
+<pre><code class="language-python"># TODO: Build a backend that detects the GELU approximation pattern:
+#   0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+# and replaces it with torch.ops.aten.gelu.default
+#
+# Steps:
+# 1. Write find_gelu_pattern() to detect the subgraph
+# 2. Rewrite the graph to use a single GELU node
+# 3. Hand off to Inductor
+# 4. Verify numerical correctness
+
+# This is hard! Start by printing the decomposed graph of:
+@torch.compile(backend=&quot;debug_backend&quot;)
+def approx_gelu(x):
+    return 0.5 * x * (1 + torch.tanh(
+        (2.0 / 3.14159265) ** 0.5 * (x + 0.044715 * x ** 3)
+    ))
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Backends are callables</strong> — <code>(GraphModule, List[Tensor]) → Callable</code>. That's the entire API contract.</li>
+<li><strong>Start with Inductor fallback</strong> — Use <code>compile_fx(gm, example_inputs)</code> as your baseline and only override specific patterns.</li>
+<li><strong>Graph rewriting is the core skill</strong> — <code>replace_all_uses_with()</code>, <code>graph.erase_node()</code>, <code>graph.lint()</code>, and <code>gm.recompile()</code> are your primary tools.</li>
+<li><strong>Pattern detection + replacement</strong> — Most custom backends follow the same structure: find a pattern in the FX graph, replace it with an optimized implementation.</li>
+<li><strong>Test forward AND backward</strong> — Always verify gradients match, not just forward outputs.</li>
+<li><strong>Composition over replacement</strong> — Chain your transforms with Inductor rather than reimplementing all of code generation.</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><strong>Backend API docs:</strong> <a href="https://pytorch.org/docs/main/torch.compiler_custom_backends.html">pytorch.org/docs/main/torch.compiler_custom_backends.html</a></li>
+<li><strong>Custom backends tutorial:</strong> <a href="https://pytorch.org/tutorials/intermediate/custom_backend.html">pytorch.org/tutorials/intermediate/custom_backend.html</a></li>
+<li><strong>TensorRT backend example:</strong> <code>torch_tensorrt</code> — real-world production backend</li>
+<li><strong>FX Graph manipulation:</strong> <a href="https://pytorch.org/docs/main/fx.html">pytorch.org/docs/main/fx.html</a></li>
+<li><strong>Edward Yang's blog:</strong> "Backends for torch.compile" (2023)</li>
+</ul>
+<hr />
+<h2 id="tomorrow">Tomorrow</h2>
+<p><strong>Day 28</strong> is our second <strong>Stop &amp; Reflect</strong> session. We'll build a concept map connecting everything from Phase II: FX graphs → IR → compiler passes → scheduling → Triton → torch.compile → custom backends. A 10-question self-check quiz and "Ready for TVM" checklist will ensure you've internalized the foundations before we move to Phase III.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-26-torchInductor-codegen.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 26: TorchInductor Code Generation</a>
+            <a href="day-28-stop-and-reflect-2.html" class="text-emerald-600 hover:text-emerald-800">Day 28: Stop & Reflect #2 &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

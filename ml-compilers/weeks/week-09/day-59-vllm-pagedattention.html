@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 59: vLLM & PagedAttention - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 9: LLM Serving Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-59-vllm-pagedattention">Day 59: vLLM &amp; PagedAttention</h1>
+<blockquote>
+<p><strong>Phase IV · Week 9 · Day 59 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"We borrowed the best idea from operating systems — virtual memory — and applied it to attention. The result was a 24× throughput improvement."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-58-kv-cache-optimization.html">Day 58: KV Cache Optimization</a></td>
+<td style="text-align: left;"><a href="day-60-speculative-decoding.html">Day 60: Speculative Decoding</a></td>
+<td style="text-align: left;"><a href="README.html">Week 9: LLM Serving Systems</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase IV: Inference &amp; Deployment</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Before vLLM, LLM serving systems wasted 60-80% of GPU memory on internal fragmentation — pre-allocated KV cache blocks that were reserved but unused. A 70B model on 4× A100s might only serve 8 concurrent requests despite having enough raw memory for 40+. PagedAttention solved this by treating KV cache memory like an OS treats RAM: paged, dynamically allocated, and shared when possible. vLLM became the de facto standard for LLM serving, and PagedAttention's ideas have been adopted by TensorRT-LLM, DeepSpeed, and SGLang. Understanding its internals is essential for anyone deploying LLMs at scale.</p>
+<hr />
+<h2 id="1-the-memory-fragmentation-problem">1. The Memory Fragmentation Problem</h2>
+<p>Traditional KV cache allocation pre-reserves a contiguous memory block for each request's maximum possible sequence length:</p>
+<pre><code>Pre-Allocated KV Cache (Traditional)
+═══════════════════════════════════════════════════════════════
+
+  GPU Memory Pool (contiguous allocation):
+  ┌──────────────────────────────────────────────────────┐
+  │ Request A (max 2048)    │ Request B (max 2048)       │
+  │ [████████░░░░░░░░░░░░░] │ [█████████████░░░░░░░░░░] │
+  │  actual=512   wasted=1536   actual=832   wasted=1216 │
+  ├──────────────────────────────────────────────────────┤
+  │ Request C (max 2048)    │ ░░░░░ UNUSABLE ░░░░░░░░░░ │
+  │ [██░░░░░░░░░░░░░░░░░░] │ (too fragmented for new   │
+  │  actual=128  wasted=1920│  request requiring 2048)   │
+  └──────────────────────────────────────────────────────┘
+
+  Total allocated: 6144 slots
+  Actually used:   1472 slots (24%)
+  Wasted:          4672 slots (76%)    ← catastrophic waste!
+
+  Sources of waste:
+  ─────────────────
+  1. Internal fragmentation:  reserved slots beyond actual length
+  2. External fragmentation:  gaps between allocations
+  3. Pre-allocation:          must reserve for max_seq_len upfront
+</code></pre>
+<hr />
+<h2 id="2-pagedattention-virtual-memory-for-kv-cache">2. PagedAttention — Virtual Memory for KV Cache</h2>
+<p>PagedAttention maps the KV cache into fixed-size <strong>blocks</strong> (pages), indexed via per-request <strong>block tables</strong>:</p>
+<pre><code>PagedAttention Architecture
+═══════════════════════════════════════════════════════════════
+
+  Physical KV blocks (fixed-size, e.g., 16 tokens each):
+  ┌─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐
+  │ P0  │ P1  │ P2  │ P3  │ P4  │ P5  │ P6  │ P7  │
+  │ Req │ Req │ Req │ FREE│ Req │ Req │ FREE│ Req │
+  │  A  │  B  │  A  │     │  C  │  B  │     │  A  │
+  └─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┘
+
+  Block Tables (logical → physical mapping):
+  ┌──────────────────────────────┐
+  │  Request A: [P0, P2, P7]    │  3 blocks = 48 tokens allocated
+  │  Request B: [P1, P5]        │  2 blocks = 32 tokens allocated
+  │  Request C: [P4]            │  1 block  = 16 tokens allocated
+  │  Free list: [P3, P6]        │  2 blocks available
+  └──────────────────────────────┘
+
+  Key properties:
+  ───────────────
+  ✓ No contiguous allocation needed (blocks are non-contiguous)
+  ✓ No pre-allocation to max length (grow block by block)
+  ✓ Internal fragmentation &lt; 1 block per request
+  ✓ No external fragmentation (any free block fits any request)
+  ✓ Memory utilization: &gt;95% (vs ~24% in traditional)
+</code></pre>
+<p>The analogy to OS virtual memory is precise:</p>
+<table>
+<thead>
+<tr>
+<th>OS Concept</th>
+<th>PagedAttention Analog</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Virtual address space</td>
+<td>Sequence positions (0, 1, 2, ...)</td>
+</tr>
+<tr>
+<td>Physical pages (4KB)</td>
+<td>KV blocks (16 tokens × head_dim)</td>
+</tr>
+<tr>
+<td>Page table</td>
+<td>Block table per request</td>
+</tr>
+<tr>
+<td>Page fault → allocate</td>
+<td>New token → allocate next block</td>
+</tr>
+<tr>
+<td>Free page list</td>
+<td>Free block list</td>
+</tr>
+<tr>
+<td>Copy-on-write (fork)</td>
+<td>Shared prefix blocks</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-copy-on-write-prefix-caching">3. Copy-on-Write &amp; Prefix Caching</h2>
+<p>PagedAttention enables <strong>copy-on-write</strong> for requests sharing a common prefix (e.g., system prompt):</p>
+<pre><code>Copy-on-Write for Shared Prefixes
+═══════════════════════════════════════════════════════════════
+
+  System prompt: &quot;You are a helpful assistant. Answer concisely.&quot;
+  (3 blocks)
+
+  Without CoW:
+  ──────────────
+  Req A: [PA₀][PA₁][PA₂][PA₃][PA₄]    15 blocks total
+  Req B: [PB₀][PB₁][PB₂][PB₃]          for 3 requests
+  Req C: [PC₀][PC₁][PC₂][PC₃][PC₄][PC₅]
+          ^^^^ ^^^^ ^^^^
+        identical prefix (duplicated 3×)
+
+  With CoW:
+  ──────────
+  Shared: [PS₀][PS₁][PS₂]              9 blocks total
+                  │                      (saved 6 blocks = 40%)
+       ┌──────────┼──────────┐
+       ▼          ▼          ▼
+  Req A: [PA₃][PA₄]    Req B: [PB₃]    Req C: [PC₃][PC₄][PC₅]
+
+  Block table with ref counts:
+  PS₀ (refcount=3), PS₁ (refcount=3), PS₂ (refcount=3)
+  PA₃ (refcount=1), PA₄ (refcount=1), ...
+
+  If Req A modifies a shared block → copy it first, then modify
+</code></pre>
+<p><strong>Prefix caching</strong> extends this to cache common prefixes across requests, enabling instant prefill for repeated system prompts.</p>
+<hr />
+<h2 id="4-vllm-internal-architecture">4. vLLM Internal Architecture</h2>
+<pre><code>vLLM System Architecture
+═══════════════════════════════════════════════════════════════
+
+  ┌─────────────┐    ┌──────────────────────────────────────┐
+  │   API       │    │           vLLM Engine                 │
+  │   Server    │───▶│                                      │
+  │  (FastAPI)  │    │  ┌──────────┐  ┌──────────────────┐  │
+  └─────────────┘    │  │Scheduler │  │  Block Manager    │  │
+                     │  │          │──│                    │  │
+                     │  │ Waiting  │  │  Allocate/Free    │  │
+                     │  │ Running  │  │  blocks per req   │  │
+                     │  │ Swapped  │  │  CoW ref counting │  │
+                     │  └──────────┘  └──────────────────┘  │
+                     │       │                               │
+                     │       ▼                               │
+                     │  ┌──────────────────┐                │
+                     │  │   Model Runner    │                │
+                     │  │                    │                │
+                     │  │  Prepare inputs    │                │
+                     │  │  Run model forward │                │
+                     │  │  Sample tokens     │                │
+                     │  │  PagedAttention    │                │
+                     │  │  kernel calls      │                │
+                     │  └──────────────────┘                │
+                     └──────────────────────────────────────┘
+
+  Scheduler states per request:
+  ─────────────────────────────
+  WAITING  → queued, no GPU blocks allocated yet
+  RUNNING  → has GPU blocks, actively generating
+  SWAPPED  → GPU blocks moved to CPU (preemption)
+  FINISHED → completed, blocks freed
+</code></pre>
+<h3 id="the-scheduling-loop">The Scheduling Loop</h3>
+<p>Each iteration of the vLLM engine runs one "step":</p>
+<pre><code class="language-python"># Simplified vLLM scheduler loop (pseudocode)
+class Scheduler:
+    def __init__(self, block_manager, max_num_seqs):
+        self.waiting = []    # requests not yet started
+        self.running = []    # actively generating
+        self.swapped = []    # preempted to CPU
+
+    def schedule(self):
+        &quot;&quot;&quot;Decide which requests to run this step.&quot;&quot;&quot;
+        scheduled = []
+
+        # 1. Try to swap in previously preempted requests
+        while self.swapped and self.block_manager.can_swap_in(self.swapped[0]):
+            req = self.swapped.pop(0)
+            self.block_manager.swap_in(req)
+            scheduled.append(req)
+
+        # 2. Continue running existing requests
+        for req in self.running:
+            if self.block_manager.can_append_token(req):
+                scheduled.append(req)
+            else:
+                # No space! Preempt lowest-priority request
+                victim = self._find_preempt_victim(scheduled)
+                self.block_manager.swap_out(victim)
+                self.swapped.append(victim)
+                scheduled.remove(victim)
+                scheduled.append(req)
+
+        # 3. Admit new requests from waiting queue
+        while self.waiting and self.block_manager.can_allocate(self.waiting[0]):
+            req = self.waiting.pop(0)
+            self.block_manager.allocate(req)
+            scheduled.append(req)
+
+        return scheduled  # These all run in one batched forward pass
+</code></pre>
+<hr />
+<h2 id="5-continuous-batching-in-vllm">5. Continuous Batching in vLLM</h2>
+<p>vLLM implements <strong>iteration-level</strong> continuous batching — the batch composition changes every single decode step:</p>
+<pre><code>Continuous Batching Timeline
+═══════════════════════════════════════════════════════════════
+
+  Step 1:  Batch = [A_decode, B_decode, C_prefill]
+           ▲                              ▲
+           ongoing decodes                new request C enters
+
+  Step 2:  Batch = [A_decode, B_decode, C_decode]
+           C now decoding (prefill done)
+
+  Step 3:  Batch = [A_decode, C_decode, D_prefill]
+                    ▲                    ▲
+                    B finished!          D enters immediately
+                    (blocks freed)       (no waiting!)
+
+  Step 4:  Batch = [A_decode, C_decode, D_decode, E_prefill]
+                                                   ▲
+                                                   E enters too
+
+  Result:
+  ─────────
+  ✓ GPU never idles — empty slots filled instantly
+  ✓ No head-of-line blocking — short requests don't wait for long ones
+  ✓ Memory recycled immediately when requests finish
+</code></pre>
+<p>Key scheduling decision: <strong>chunked prefill</strong>. Long prefill requests can monopolize the GPU for hundreds of milliseconds, stalling all decode requests. vLLM splits prefill into chunks interleaved with decode steps:</p>
+<pre><code>Chunked Prefill (vLLM)
+═══════════════════════════════════════════════════════════════
+
+  Without chunking:
+  |←──── C prefill (2048 tok, 200ms) ────→|  Decode A,B stalled!
+
+  With chunking (chunk=256):
+  |C₁|A,B|C₂|A,B|C₃|A,B|C₄|A,B|C₅|A,B|C₆|A,B|C₇|A,B|C₈|A,B|
+   ▲                                                         ▲
+  256 tok prefill chunk                                   done
+
+  Decode latency for A,B: bounded by chunk processing time
+  TTFT for C: slightly higher, but decode requests stay responsive
+</code></pre>
+<hr />
+<h2 id="6-benchmarking-vllm">6. Benchmarking vLLM</h2>
+<pre><code class="language-python"># vLLM benchmark script — compare with HuggingFace and TGI
+# Requires: pip install vllm
+
+from vllm import LLM, SamplingParams
+import time
+
+def benchmark_vllm(model_name=&quot;meta-llama/Llama-2-7b-hf&quot;,
+                   num_prompts=100,
+                   input_len=512,
+                   output_len=128):
+    &quot;&quot;&quot;Benchmark vLLM throughput and latency.&quot;&quot;&quot;
+
+    # Initialize vLLM engine
+    llm = LLM(
+        model=model_name,
+        tensor_parallel_size=1,
+        gpu_memory_utilization=0.9,   # Use 90% of GPU for KV cache
+        max_model_len=4096,
+        block_size=16,                # PagedAttention block size
+        enable_prefix_caching=True,   # Enable prefix sharing
+    )
+
+    sampling_params = SamplingParams(
+        temperature=0.0,    # greedy for deterministic benchmarks
+        max_tokens=output_len,
+    )
+
+    # Generate synthetic prompts
+    prompts = [f&quot;Write a detailed essay about topic number {i}. &quot;
+               f&quot;{'padding ' * (input_len // 2)}&quot; for i in range(num_prompts)]
+
+    # Warm-up
+    llm.generate(prompts[:2], sampling_params)
+
+    # Benchmark
+    start = time.perf_counter()
+    outputs = llm.generate(prompts, sampling_params)
+    elapsed = time.perf_counter() - start
+
+    total_input_tokens = sum(len(o.prompt_token_ids) for o in outputs)
+    total_output_tokens = sum(len(o.outputs[0].token_ids) for o in outputs)
+
+    print(f&quot;Model:            {model_name}&quot;)
+    print(f&quot;Requests:         {num_prompts}&quot;)
+    print(f&quot;Total time:       {elapsed:.2f} sec&quot;)
+    print(f&quot;Throughput:        {num_prompts/elapsed:.1f} req/sec&quot;)
+    print(f&quot;Input tok/sec:    {total_input_tokens/elapsed:.0f}&quot;)
+    print(f&quot;Output tok/sec:   {total_output_tokens/elapsed:.0f}&quot;)
+    print(f&quot;Total tok/sec:    {(total_input_tokens+total_output_tokens)/elapsed:.0f}&quot;)
+
+    # Per-request latency distribution
+    latencies = [o.metrics.finished_time - o.metrics.arrival_time 
+                 for o in outputs if o.metrics]
+    if latencies:
+        import statistics
+        print(f&quot;\nLatency (p50):    {statistics.median(latencies)*1000:.0f} ms&quot;)
+        print(f&quot;Latency (p99):    {sorted(latencies)[int(0.99*len(latencies))]*1000:.0f} ms&quot;)
+
+# Uncomment to run:
+# benchmark_vllm()
+</code></pre>
+<h3 id="performance-comparison-table">Performance Comparison Table</h3>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>Throughput (tok/s)</th>
+<th>Memory Util.</th>
+<th>Continuous Batch</th>
+<th>PagedAttention</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HuggingFace <code>generate()</code></td>
+<td>~500</td>
+<td>~30%</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Text Generation Inference</td>
+<td>~2,000</td>
+<td>~60%</td>
+<td>Yes</td>
+<td>No</td>
+</tr>
+<tr>
+<td>vLLM</td>
+<td>~5,000</td>
+<td>~95%</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>TensorRT-LLM</td>
+<td>~6,000</td>
+<td>~93%</td>
+<td>Yes</td>
+<td>Paged KV</td>
+</tr>
+<tr>
+<td>SGLang</td>
+<td>~5,500</td>
+<td>~95%</td>
+<td>Yes</td>
+<td>RadixAttention</td>
+</tr>
+</tbody>
+</table>
+<p><em>Approximate numbers for LLaMA-2 7B, A100 80GB, batch of 64, 512 input + 128 output tokens.</em></p>
+<hr />
+<h2 id="hands-on-exercise-build-a-mini-block-manager">Hands-On Exercise: Build a Mini Block Manager</h2>
+<pre><code class="language-python">class MiniBlockManager:
+    &quot;&quot;&quot;Simplified block manager to understand PagedAttention allocation.&quot;&quot;&quot;
+
+    def __init__(self, num_blocks: int, block_size: int):
+        self.block_size = block_size
+        self.free_blocks = list(range(num_blocks))
+        self.block_tables = {}  # request_id → list of block indices
+        self.ref_counts = {}    # block_idx → reference count
+
+    def allocate(self, request_id: str, num_tokens: int):
+        &quot;&quot;&quot;Allocate blocks for a new request.&quot;&quot;&quot;
+        num_blocks_needed = (num_tokens + self.block_size - 1) // self.block_size
+        if len(self.free_blocks) &lt; num_blocks_needed:
+            raise MemoryError(f&quot;Need {num_blocks_needed} blocks, &quot;
+                              f&quot;only {len(self.free_blocks)} free&quot;)
+
+        blocks = [self.free_blocks.pop(0) for _ in range(num_blocks_needed)]
+        self.block_tables[request_id] = blocks
+        for b in blocks:
+            self.ref_counts[b] = 1
+        return blocks
+
+    def append_token(self, request_id: str):
+        &quot;&quot;&quot;Append a token — may need a new block.&quot;&quot;&quot;
+        blocks = self.block_tables[request_id]
+        current_tokens = len(blocks) * self.block_size  # simplified
+        # In reality, track partially-filled last block
+        if not self.free_blocks:
+            raise MemoryError(&quot;No free blocks for token append&quot;)
+        new_block = self.free_blocks.pop(0)
+        blocks.append(new_block)
+        self.ref_counts[new_block] = 1
+
+    def free(self, request_id: str):
+        &quot;&quot;&quot;Free all blocks for a completed request.&quot;&quot;&quot;
+        for block in self.block_tables.pop(request_id):
+            self.ref_counts[block] -= 1
+            if self.ref_counts[block] == 0:
+                self.free_blocks.append(block)
+                del self.ref_counts[block]
+
+    def share_prefix(self, src_id: str, dst_id: str, n_prefix_blocks: int):
+        &quot;&quot;&quot;CoW: share prefix blocks between two requests.&quot;&quot;&quot;
+        src_blocks = self.block_tables[src_id][:n_prefix_blocks]
+        self.block_tables[dst_id] = src_blocks.copy()
+        for b in src_blocks:
+            self.ref_counts[b] += 1
+
+    def utilization(self):
+        total = len(self.free_blocks) + sum(1 for _ in self.ref_counts)
+        used = sum(1 for _ in self.ref_counts)
+        return used / total if total &gt; 0 else 0
+
+# Exercise: simulate 50 concurrent requests arriving and leaving
+</code></pre>
+<h3 id="exercise-tasks">Exercise Tasks</h3>
+<ol>
+<li><strong>Run the block manager simulation</strong>: Simulate 50 requests with random input lengths (100-2000 tokens) and output lengths (50-500 tokens). Track utilization over time and compare with a pre-allocated baseline.</li>
+<li><strong>Implement swap-out/swap-in</strong>: Add methods to move blocks to/from CPU when GPU is full. Measure the preemption cost.</li>
+<li><strong>Prefix sharing benchmark</strong>: Simulate 100 requests all sharing a 512-token system prompt. Calculate memory saved vs independent allocation.</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Traditional KV cache wastes 60-80% of memory</strong> on internal and external fragmentation due to contiguous pre-allocation</li>
+<li><strong>PagedAttention maps KV cache to fixed-size blocks</strong> indexed by per-request block tables — exactly like OS virtual memory</li>
+<li><strong>Copy-on-write</strong> enables memory sharing for common prefixes (system prompts), saving 30-50% memory</li>
+<li><strong>Continuous batching at iteration level</strong> means requests join and leave every decode step — no head-of-line blocking</li>
+<li><strong>Chunked prefill</strong> prevents long prefill requests from starving decode requests</li>
+<li><strong>vLLM achieves &gt;95% memory utilization</strong> vs ~24% for naïve allocation, translating to 3-24× higher throughput</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><strong>Kwon et al., "Efficient Memory Management for Large Language Model Serving with PagedAttention"</strong> (SOSP 2023)</li>
+<li><strong>vLLM project</strong>: https://github.com/vllm-project/vllm — source code + architecture docs</li>
+<li><strong>Zheng et al., "SGLang: Efficient Execution of Structured Language Model Programs"</strong> (2024) — RadixAttention</li>
+<li><strong>NVIDIA TensorRT-LLM</strong>: paged KV cache implementation — https://github.com/NVIDIA/TensorRT-LLM</li>
+<li><strong>Yu et al., "ORCA: A Distributed Serving System for Transformer-Based Generative Models"</strong> (OSDI 2022) — continuous batching</li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p>We've optimized <em>how</em> we store the cache and <em>how</em> we schedule requests. But there's still the fundamental bottleneck: autoregressive generation requires N sequential forward passes for N tokens. What if you could generate 5 tokens in the time of 1? <strong>Day 60: Speculative Decoding</strong> introduces draft-and-verify algorithms that break the sequential barrier by predicting multiple tokens in parallel and verifying them in a single forward pass.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-58-kv-cache-optimization.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 58: KV Cache Optimization</a>
+            <a href="day-60-speculative-decoding.html" class="text-emerald-600 hover:text-emerald-800">Day 60: Speculative Decoding &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

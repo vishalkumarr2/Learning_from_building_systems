@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10: Custom C++ Extensions & pybind11 - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 2: PyTorch Internals</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-10-custom-c-extensions-pybind11">Day 10: Custom C++ Extensions &amp; pybind11</h1>
+<blockquote>
+<p><strong>Phase I · Week 2 · Day 10 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"If the operation you need doesn't exist in ATen, you don't file a feature request — you write a kernel."</em></p>
+<table>
+<thead>
+<tr>
+<th>Previous</th>
+<th>Next</th>
+<th>Week</th>
+<th>Phase</th>
+<th>Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="day-09-memory-management-pytorch.html">Day 9: Memory Management</a></td>
+<td><a href="day-11-torch-profiler-trace.html">Day 11: torch.profiler &amp; Trace Analysis</a></td>
+<td><a href="README.html">Week 2: PyTorch Internals</a></td>
+<td>Phase I: Foundations</td>
+<td><a href="../../STUDY-PLAN.html">Curriculum Home</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Fusing operations into a single CUDA kernel eliminates memory round-trips to global
+memory. A naive <code>bias + GELU(x)</code> requires two kernel launches and one intermediate
+tensor write/read. A fused kernel does both in registers — saving ~2× bandwidth and
+1 kernel launch overhead. Custom C++ extensions are how production systems (FlashAttention,
+xFormers, Triton-compiled ops) deliver their speedups. Knowing this pathway is essential
+for any ML compiler engineer.</p>
+<hr />
+<h2 id="1-extension-architecture">1. Extension Architecture</h2>
+<p>PyTorch offers two paths for custom C++/CUDA code:</p>
+<pre><code>┌─────────────────────────────────────────────────┐
+│                 Python User Code                │
+│         my_op = my_extension.fused_bias_gelu    │
+├─────────────┬───────────────────────────────────┤
+│ Ahead-of-   │  JIT Compilation                  │
+│ Time Build  │  torch.utils.cpp_extension.load() │
+│ setup.py /  │  ← compiles on first call,        │
+│ setuptools  │    caches in ~/.cache/torch_ext/   │
+├─────────────┴───────────────────────────────────┤
+│            torch.utils.cpp_extension             │
+│  CppExtension / CUDAExtension                   │
+├─────────────────────────────────────────────────┤
+│  pybind11 bindings (auto-included by PyTorch)    │
+├─────────────────────────────────────────────────┤
+│  Your C++ / CUDA source files                    │
+│  (.cpp for CPU, .cu for CUDA)                    │
+└─────────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="2-jit-compilation-with-load">2. JIT Compilation with <code>load()</code></h2>
+<p>The fastest way to iterate on a custom op:</p>
+<pre><code class="language-python">from torch.utils.cpp_extension import load
+
+# This compiles on first call, caches for subsequent runs
+my_extension = load(
+    name='my_extension',
+    sources=['my_op.cpp', 'my_op_cuda.cu'],
+    extra_cuda_cflags=['-O3', '--use_fast_math'],
+    verbose=True,
+)
+
+# Use it like any Python function
+y = my_extension.fused_bias_gelu(x, bias)
+</code></pre>
+<p>Behind the scenes, <code>load()</code>:
+1. Invokes <code>nvcc</code> for <code>.cu</code> files and <code>g++</code> for <code>.cpp</code> files
+2. Links against <code>libtorch</code> and <code>libc10</code>
+3. Creates a shared object (<code>.so</code>) via pybind11
+4. Caches in <code>~/.cache/torch_extensions/</code></p>
+<hr />
+<h2 id="3-full-example-fused-bias-gelu">3. Full Example: Fused Bias + GELU</h2>
+<h3 id="31-the-math">3.1 The Math</h3>
+<p>GELU (Gaussian Error Linear Unit):</p>
+<p>$$\text{GELU}(x) = x \cdot \Phi(x) \approx 0.5 \, x \left(1 + \tanh\!\left[\sqrt{\frac{2}{\pi}}\left(x + 0.044715\, x^3\right)\right]\right)$$</p>
+<p>We want to compute $\text{GELU}(x + \text{bias})$ in a single kernel.</p>
+<h3 id="32-cuda-kernel-fused_bias_gelu_cudacu">3.2 CUDA Kernel (<code>fused_bias_gelu_cuda.cu</code>)</h3>
+<pre><code class="language-cpp">#include &lt;torch/extension.h&gt;
+#include &lt;cuda.h&gt;
+#include &lt;cuda_runtime.h&gt;
+
+// Device function: GELU approximation (tanh variant)
+__device__ __forceinline__ float gelu_fwd(float x) {
+    const float kSqrt2OverPi = 0.7978845608f;  // sqrt(2/pi)
+    const float kCoeff = 0.044715f;
+    float cube = x * x * x;
+    float inner = kSqrt2OverPi * (x + kCoeff * cube);
+    return 0.5f * x * (1.0f + tanhf(inner));
+}
+
+// Device function: GELU gradient
+__device__ __forceinline__ float gelu_bwd(float x) {
+    const float kSqrt2OverPi = 0.7978845608f;
+    const float kCoeff = 0.044715f;
+    float cube = x * x * x;
+    float inner = kSqrt2OverPi * (x + kCoeff * cube);
+    float tanh_inner = tanhf(inner);
+    float sech2 = 1.0f - tanh_inner * tanh_inner;
+    float inner_deriv = kSqrt2OverPi * (1.0f + 3.0f * kCoeff * x * x);
+    return 0.5f * (1.0f + tanh_inner) + 0.5f * x * sech2 * inner_deriv;
+}
+
+// Forward kernel: y = GELU(x + bias)
+__global__ void fused_bias_gelu_fwd_kernel(
+    const float* __restrict__ input,
+    const float* __restrict__ bias,
+    float* __restrict__ output,
+    int rows, int cols
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx &lt; rows * cols) {
+        int col = idx % cols;
+        float val = input[idx] + bias[col];
+        output[idx] = gelu_fwd(val);
+    }
+}
+
+// Backward kernel
+__global__ void fused_bias_gelu_bwd_kernel(
+    const float* __restrict__ grad_out,
+    const float* __restrict__ input,
+    const float* __restrict__ bias,
+    float* __restrict__ grad_input,
+    int rows, int cols
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx &lt; rows * cols) {
+        int col = idx % cols;
+        float val = input[idx] + bias[col];
+        grad_input[idx] = grad_out[idx] * gelu_bwd(val);
+    }
+}
+
+// C++ wrapper functions (called from Python)
+torch::Tensor fused_bias_gelu_fwd_cuda(
+    torch::Tensor input,
+    torch::Tensor bias
+) {
+    TORCH_CHECK(input.is_cuda(), &quot;input must be on CUDA&quot;);
+    TORCH_CHECK(bias.is_cuda(), &quot;bias must be on CUDA&quot;);
+    TORCH_CHECK(input.size(-1) == bias.size(0), &quot;bias size mismatch&quot;);
+
+    auto output = torch::empty_like(input);
+    int rows = input.numel() / input.size(-1);
+    int cols = input.size(-1);
+    int total = rows * cols;
+
+    const int threads = 256;
+    const int blocks = (total + threads - 1) / threads;
+
+    fused_bias_gelu_fwd_kernel&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(
+        input.data_ptr&lt;float&gt;(),
+        bias.data_ptr&lt;float&gt;(),
+        output.data_ptr&lt;float&gt;(),
+        rows, cols
+    );
+
+    return output;
+}
+
+torch::Tensor fused_bias_gelu_bwd_cuda(
+    torch::Tensor grad_out,
+    torch::Tensor input,
+    torch::Tensor bias
+) {
+    auto grad_input = torch::empty_like(input);
+    int rows = input.numel() / input.size(-1);
+    int cols = input.size(-1);
+    int total = rows * cols;
+
+    const int threads = 256;
+    const int blocks = (total + threads - 1) / threads;
+
+    fused_bias_gelu_bwd_kernel&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(
+        grad_out.data_ptr&lt;float&gt;(),
+        input.data_ptr&lt;float&gt;(),
+        bias.data_ptr&lt;float&gt;(),
+        grad_input.data_ptr&lt;float&gt;(),
+        rows, cols
+    );
+
+    return grad_input;
+}
+</code></pre>
+<h3 id="33-c-bindings-fused_bias_gelucpp">3.3 C++ Bindings (<code>fused_bias_gelu.cpp</code>)</h3>
+<pre><code class="language-cpp">#include &lt;torch/extension.h&gt;
+
+// Forward declarations of CUDA functions
+torch::Tensor fused_bias_gelu_fwd_cuda(torch::Tensor input,
+                                        torch::Tensor bias);
+torch::Tensor fused_bias_gelu_bwd_cuda(torch::Tensor grad_out,
+                                        torch::Tensor input,
+                                        torch::Tensor bias);
+
+// Input validation + dispatch
+torch::Tensor fused_bias_gelu_fwd(torch::Tensor input,
+                                   torch::Tensor bias) {
+    TORCH_CHECK(input.device().is_cuda(),
+                &quot;fused_bias_gelu only supports CUDA tensors&quot;);
+    return fused_bias_gelu_fwd_cuda(input, bias);
+}
+
+torch::Tensor fused_bias_gelu_bwd(torch::Tensor grad_out,
+                                   torch::Tensor input,
+                                   torch::Tensor bias) {
+    return fused_bias_gelu_bwd_cuda(grad_out, input, bias);
+}
+
+// pybind11 module definition
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def(&quot;forward&quot;,  &amp;fused_bias_gelu_fwd,
+          &quot;Fused bias + GELU forward (CUDA)&quot;);
+    m.def(&quot;backward&quot;, &amp;fused_bias_gelu_bwd,
+          &quot;Fused bias + GELU backward (CUDA)&quot;);
+}
+</code></pre>
+<hr />
+<h2 id="4-autograd-integration">4. Autograd Integration</h2>
+<p>To make the custom op work with <code>loss.backward()</code>, wrap it in a
+<code>torch.autograd.Function</code>:</p>
+<pre><code class="language-python">import torch
+from torch.utils.cpp_extension import load
+
+# JIT compile
+fused_op = load(
+    name='fused_bias_gelu',
+    sources=['fused_bias_gelu.cpp', 'fused_bias_gelu_cuda.cu'],
+    extra_cuda_cflags=['-O3'],
+)
+
+class FusedBiasGELU(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, bias):
+        # Save for backward
+        ctx.save_for_backward(input, bias)
+        return fused_op.forward(input, bias)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, bias = ctx.saved_tensors
+        grad_input = fused_op.backward(grad_output.contiguous(),
+                                        input, bias)
+        # grad_bias = sum of grad_input along batch dims
+        grad_bias = grad_input.sum(dim=tuple(range(grad_input.dim()-1)))
+        return grad_input, grad_bias
+
+# Convenience wrapper
+def fused_bias_gelu(input, bias):
+    return FusedBiasGELU.apply(input, bias)
+</code></pre>
+<h3 id="41-gradient-check">4.1 Gradient Check</h3>
+<p>Always validate your backward implementation:</p>
+<pre><code class="language-python">from torch.autograd import gradcheck
+
+input = torch.randn(4, 8, dtype=torch.float64,
+                     device='cuda', requires_grad=True)
+bias = torch.randn(8, dtype=torch.float64,
+                    device='cuda', requires_grad=True)
+
+# gradcheck uses finite differences to verify analytical gradients
+assert gradcheck(FusedBiasGELU.apply, (input, bias), eps=1e-6)
+print(&quot;Gradient check PASSED&quot;)
+</code></pre>
+<hr />
+<h2 id="5-registering-with-the-dispatcher">5. Registering with the Dispatcher</h2>
+<p>For proper integration with <code>torch.compile</code> and other PyTorch subsystems,
+register your op with the dispatcher using <code>torch.library</code>:</p>
+<pre><code class="language-python">import torch
+from torch import Tensor
+
+# Define the operator schema
+torch.library.define(
+    &quot;myops::fused_bias_gelu&quot;,
+    &quot;(Tensor input, Tensor bias) -&gt; Tensor&quot;
+)
+
+# Register CUDA implementation
+@torch.library.impl(&quot;myops::fused_bias_gelu&quot;, &quot;cuda&quot;)
+def fused_bias_gelu_cuda(input: Tensor, bias: Tensor) -&gt; Tensor:
+    return FusedBiasGELU.apply(input, bias)
+
+# Register a &quot;fake&quot; implementation for torch.compile tracing
+@torch.library.impl_abstract(&quot;myops::fused_bias_gelu&quot;)
+def fused_bias_gelu_abstract(input: Tensor, bias: Tensor) -&gt; Tensor:
+    # Return a tensor with the correct shape/dtype but no data
+    return torch.empty_like(input)
+
+# Now usable as:
+y = torch.ops.myops.fused_bias_gelu(x, bias)
+</code></pre>
+<hr />
+<h2 id="6-ahead-of-time-build-with-setuptools">6. Ahead-of-Time Build with setuptools</h2>
+<p>For distribution, use <code>setup.py</code>:</p>
+<pre><code class="language-python"># setup.py
+from setuptools import setup
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+
+setup(
+    name='fused_bias_gelu',
+    ext_modules=[
+        CUDAExtension(
+            name='fused_bias_gelu',
+            sources=[
+                'fused_bias_gelu.cpp',
+                'fused_bias_gelu_cuda.cu',
+            ],
+            extra_compile_args={
+                'cxx': ['-O3'],
+                'nvcc': ['-O3', '--use_fast_math',
+                         '-gencode=arch=compute_80,code=sm_80',  # A100
+                         '-gencode=arch=compute_89,code=sm_89'], # RTX 4090
+            },
+        ),
+    ],
+    cmdclass={'build_ext': BuildExtension},
+)
+</code></pre>
+<p>Build and install:</p>
+<pre><code class="language-bash">pip install -e .
+# OR for development iteration:
+python setup.py build_ext --inplace
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-benchmark-fused-vs-unfused-30-min">Exercise 1: Benchmark Fused vs Unfused (30 min)</h3>
+<pre><code class="language-python">import torch
+import torch.nn.functional as F
+import time
+
+def unfused_bias_gelu(x, bias):
+    return F.gelu(x + bias, approximate='tanh')
+
+# Compare against unfused PyTorch implementation
+x = torch.randn(512, 4096, device='cuda')
+bias = torch.randn(4096, device='cuda')
+
+# Warmup
+for _ in range(10):
+    unfused_bias_gelu(x, bias)
+    # fused_bias_gelu(x, bias)  # your custom op
+
+torch.cuda.synchronize()
+
+# Benchmark unfused
+t0 = time.time()
+for _ in range(1000):
+    y_ref = unfused_bias_gelu(x, bias)
+torch.cuda.synchronize()
+t_unfused = time.time() - t0
+
+print(f&quot;Unfused: {t_unfused*1000:.1f} ms (1000 iters)&quot;)
+# Compare with your fused version — expect 1.3-2x speedup
+
+# TASK: Also measure peak memory for both versions
+</code></pre>
+<h3 id="exercise-2-add-half-precision-support-30-min">Exercise 2: Add Half-Precision Support (30 min)</h3>
+<pre><code class="language-cpp">// Extend the CUDA kernel to support fp16 using __half types.
+// Hints:
+//   - Use AT_DISPATCH_FLOATING_TYPES_AND_HALF macro
+//   - For __half arithmetic, use __hadd(), __hmul()
+//   - Or cast to float for computation, cast back to __half for storage
+
+// Template the kernel:
+template &lt;typename scalar_t&gt;
+__global__ void fused_bias_gelu_fwd_kernel(
+    const scalar_t* __restrict__ input,
+    const scalar_t* __restrict__ bias,
+    scalar_t* __restrict__ output,
+    int rows, int cols
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx &lt; rows * cols) {
+        int col = idx % cols;
+        float val = static_cast&lt;float&gt;(input[idx])
+                  + static_cast&lt;float&gt;(bias[col]);
+        output[idx] = static_cast&lt;scalar_t&gt;(gelu_fwd(val));
+    }
+}
+
+// Dispatch:
+// AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), &quot;fused_gelu&quot;, [&amp;] {
+//     fused_bias_gelu_fwd_kernel&lt;scalar_t&gt;&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(...);
+// });
+</code></pre>
+<h3 id="exercise-3-vectorized-memory-access-20-min">Exercise 3: Vectorized Memory Access (20 min)</h3>
+<pre><code class="language-cpp">// The basic kernel loads one float per thread. Optimize by loading
+// 4 floats at once using float4:
+
+__global__ void fused_bias_gelu_fwd_vec4(
+    const float4* __restrict__ input,
+    const float* __restrict__ bias,
+    float4* __restrict__ output,
+    int rows, int cols_div4
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx &lt; rows * cols_div4) {
+        int col4 = (idx % cols_div4) * 4;
+        float4 in = input[idx];
+        float4 out;
+        out.x = gelu_fwd(in.x + bias[col4 + 0]);
+        out.y = gelu_fwd(in.y + bias[col4 + 1]);
+        out.z = gelu_fwd(in.z + bias[col4 + 2]);
+        out.w = gelu_fwd(in.w + bias[col4 + 3]);
+        output[idx] = out;
+    }
+}
+
+// TASK: Integrate this into the extension and benchmark.
+// Expected speedup: 1.5-2x over scalar version due to memory coalescing.
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong><code>torch.utils.cpp_extension.load()</code></strong> provides zero-setup JIT compilation for
+   rapid C++/CUDA kernel development</li>
+<li><strong>Kernel fusion</strong> eliminates intermediate memory writes — the primary speedup
+   mechanism for bandwidth-bound operations</li>
+<li><strong><code>torch.autograd.Function</code></strong> bridges custom CUDA kernels with PyTorch's autograd
+   engine; always verify with <code>gradcheck</code></li>
+<li><strong><code>torch.library</code></strong> registers ops with the dispatcher for compatibility with
+   <code>torch.compile</code>, <code>vmap</code>, and other transforms</li>
+<li><strong><code>AT_DISPATCH_FLOATING_TYPES_AND_HALF</code></strong> handles dtype dispatch across fp32/fp64/fp16
+   without duplicating kernel code</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://pytorch.org/tutorials/advanced/cpp_extension.html">PyTorch Custom C++ and CUDA Extensions tutorial</a></li>
+<li><a href="https://pytorch.org/docs/stable/library.html">torch.library documentation</a></li>
+<li><a href="https://pybind11.readthedocs.io/">pybind11 documentation</a></li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses">CUDA C++ Programming Guide: Memory Access Patterns</a></li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p><strong>Day 11: torch.profiler &amp; Trace Analysis</strong> — We'll learn to profile PyTorch programs
+with <code>torch.profiler</code>, visualize execution traces in Chrome/Perfetto, identify GPU
+idle time, and measure CPU-GPU overlap to find the real bottleneck.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-09-memory-management-pytorch.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 9: Memory Management in PyTorch</a>
+            <a href="day-11-torch-profiler-trace.html" class="text-emerald-600 hover:text-emerald-800">Day 11: torch.profiler & Trace Analysis &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

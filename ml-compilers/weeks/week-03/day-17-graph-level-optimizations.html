@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17: Graph-Level Optimizations - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 3: IR & Compiler Passes</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-17-graph-level-optimizations">Day 17: Graph-Level Optimizations</h1>
+<blockquote>
+<p><strong>Phase II · Week 3 · Day 17 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The fastest operation is the one you never execute — and the second fastest is the one you fuse into another."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-16-computation-graphs-ir.html">Day 16: Computation Graphs as IR</a></td>
+<td style="text-align: left;"><a href="day-18-polyhedral-model.html">Day 18: The Polyhedral Model</a></td>
+<td style="text-align: left;"><a href="README.html">Week 3: IRs &amp; Passes</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase II: Compiler Fundamentals</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>A raw computation graph from <code>torch.trace</code> or <code>jit.script</code> is <strong>naively correct but naively slow</strong>. Every node becomes a separate kernel launch on GPU (~5–10µs overhead each), every intermediate tensor gets allocated and freed, and redundant computations waste both time and memory. Graph-level optimization passes transform this graph into an equivalent but dramatically faster one — often reducing kernel count by 3–10× and memory by 2–5×. These passes are the "middle-end" of the ML compiler, and they operate purely on the dataflow structure without knowing anything about hardware.</p>
+<hr />
+<h2 id="1-constant-folding">1. Constant Folding</h2>
+<p><strong>Idea</strong>: if all inputs to a node are known at compile time, evaluate the node during compilation and replace it with the result.</p>
+<pre><code>  Before:                          After:
+  ┌───┐                           ┌───┐
+  │ 2 │──┐                        │ 6 │──▶ [mul] ──▶ output
+  ├───┤   ▼                       └───┘      ▲
+  │ 3 │──▶ [mul] ──▶ [add] ──▶ output        │
+  └───┘              ▲                        x
+                     │
+                     x
+
+  2 * 3 = 6 (computed at compile time)
+  Graph shrinks: 2 nodes → 1 node
+</code></pre>
+<p>In FX:</p>
+<pre><code class="language-python">import torch
+from torch.fx import symbolic_trace, Node
+
+class WithConstants(torch.nn.Module):
+    def forward(self, x):
+        scale = torch.tensor(2.0) * torch.tensor(3.0)  # constant!
+        return x * scale
+
+traced = symbolic_trace(WithConstants())
+print(&quot;Before:&quot;, len([n for n in traced.graph.nodes if n.op == 'call_function']))
+
+# Constant folding pass
+from torch.fx.passes.tools_common import legalize_graph
+from torch.fx.experimental.const_fold import split_const_subgraphs
+
+const_split = split_const_subgraphs(traced)
+print(&quot;After split — constant subgraphs extracted for precomputation&quot;)
+</code></pre>
+<h3 id="when-it-applies-in-ml">When It Applies in ML</h3>
+<ul>
+<li><strong>Fixed input shapes</strong> baked into shape computation nodes</li>
+<li><strong>Weight preprocessing</strong>: <code>weight.T</code> computed once at compile time</li>
+<li><strong>Scale factors</strong>: <code>1.0 / sqrt(d_model)</code> in attention</li>
+</ul>
+<hr />
+<h2 id="2-dead-code-elimination-dce">2. Dead Code Elimination (DCE)</h2>
+<p><strong>Idea</strong>: if a node's output is never used by any other node or the graph output, remove it.</p>
+<pre><code>  Before:                          After:
+  x ──▶ [relu] ──▶ [log] ──▶ out  x ──▶ [relu] ──▶ out
+           │
+           └──▶ [exp] (dead!)      [exp] removed — no users
+</code></pre>
+<p>In FX:</p>
+<pre><code class="language-python">import torch
+from torch.fx import symbolic_trace
+
+class HasDeadCode(torch.nn.Module):
+    def forward(self, x):
+        a = torch.relu(x)
+        b = torch.exp(x)      # computed but never used!
+        c = torch.log(a)
+        return c
+
+traced = symbolic_trace(HasDeadCode())
+print(&quot;Before DCE:&quot;)
+traced.graph.print_tabular()
+
+# FX built-in DCE
+traced.graph.eliminate_dead_code()
+traced.recompile()
+
+print(&quot;\nAfter DCE:&quot;)
+traced.graph.print_tabular()
+# `exp` node is gone!
+</code></pre>
+<p>DCE is cheap (single pass, $O(N)$) and always safe. Run it after every other optimization pass to clean up orphaned nodes.</p>
+<hr />
+<h2 id="3-common-subexpression-elimination-cse">3. Common Subexpression Elimination (CSE)</h2>
+<p><strong>Idea</strong>: if two nodes compute the same operation on the same inputs, keep one and redirect all users to it.</p>
+<pre><code>  Before:                              After:
+  x ──▶ [relu] ──▶ [mul] ──▶ a        x ──▶ [relu] ──┬──▶ [mul] ──▶ a
+  x ──▶ [relu] ──▶ [add] ──▶ b                        └──▶ [add] ──▶ b
+  (relu computed twice!)               (relu computed once, shared)
+</code></pre>
+<pre><code class="language-python">import torch
+from torch.fx import symbolic_trace
+
+class HasCSE(torch.nn.Module):
+    def forward(self, x):
+        a = torch.relu(x)
+        b = torch.relu(x)  # redundant!
+        return a * 2 + b * 3
+
+traced = symbolic_trace(HasCSE())
+
+# Manual CSE pass
+def cse_pass(graph):
+    seen = {}  # (op, target, args) → node
+    replacements = 0
+    for node in graph.nodes:
+        if node.op == 'call_function':
+            key = (node.target, tuple(id(a) for a in node.args))
+            if key in seen:
+                node.replace_all_uses_with(seen[key])
+                replacements += 1
+            else:
+                seen[key] = node
+    graph.eliminate_dead_code()
+    return replacements
+
+n = cse_pass(traced.graph)
+traced.recompile()
+print(f&quot;Eliminated {n} redundant nodes&quot;)
+</code></pre>
+<h3 id="cse-in-practice">CSE in Practice</h3>
+<p>CSE catches patterns like:
+- Repeated <code>x.shape[0]</code> lookups
+- Identical normalization denominators: $\frac{1}{\sqrt{d}}$ computed multiple times in multi-head attention
+- Gradient checkpointing re-computations that overlap with forward</p>
+<hr />
+<h2 id="4-operator-fusion">4. Operator Fusion</h2>
+<p><strong>The single most important optimization in ML compilers.</strong></p>
+<p>Without fusion, a chain of elementwise ops generates one kernel launch per op, with intermediate tensors written to and read from global memory:</p>
+<pre><code>  Unfused (3 kernel launches, 2 intermediate tensors):
+  ┌──────────┐    ┌──────────┐    ┌──────────┐
+  │ mul      │──▶ │ add      │──▶ │ relu     │
+  │ DRAM→reg │    │ DRAM→reg │    │ DRAM→reg │
+  │ reg→DRAM │    │ reg→DRAM │    │ reg→DRAM │
+  └──────────┘    └──────────┘    └──────────┘
+     ~10µs           ~10µs           ~10µs      = 30µs + memory
+
+  Fused (1 kernel launch, 0 intermediate tensors):
+  ┌──────────────────────────────────────┐
+  │ mul → add → relu (all in registers) │
+  │ DRAM→reg               reg→DRAM     │
+  └──────────────────────────────────────┘
+     ~12µs                                = 12µs, 2.5x faster
+</code></pre>
+<h3 id="fusion-categories">Fusion Categories</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Pattern</th>
+<th style="text-align: left;">Example</th>
+<th style="text-align: left;">Savings</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Elementwise chain</strong></td>
+<td style="text-align: left;"><code>relu(x * 2 + 1)</code></td>
+<td style="text-align: left;">Eliminate intermediates</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Reduction + elementwise</strong></td>
+<td style="text-align: left;"><code>softmax = exp(x) / sum(exp(x))</code></td>
+<td style="text-align: left;">One pass over data</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>MatMul + bias + activation</strong></td>
+<td style="text-align: left;"><code>relu(Wx + b)</code></td>
+<td style="text-align: left;">Vendor-fused GEMM (cuBLAS)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Attention pattern</strong></td>
+<td style="text-align: left;">Q @ K.T / √d → softmax → @ V</td>
+<td style="text-align: left;">FlashAttention kernel</td>
+</tr>
+</tbody>
+</table>
+<h3 id="implementing-a-fusion-pass-in-fx">Implementing a Fusion Pass in FX</h3>
+<pre><code class="language-python">import torch
+from torch.fx import symbolic_trace, Node
+import operator
+
+class FusableModel(torch.nn.Module):
+    def forward(self, x):
+        a = x * 2.0
+        b = a + 1.0
+        c = torch.relu(b)
+        return c
+
+traced = symbolic_trace(FusableModel())
+
+def find_fusable_chains(graph):
+    &quot;&quot;&quot;Find chains of elementwise ops that can be fused.&quot;&quot;&quot;
+    ELEMENTWISE = {torch.relu, torch.sigmoid, torch.tanh,
+                   operator.mul, operator.add, operator.sub}
+    chains = []
+    visited = set()
+
+    for node in graph.nodes:
+        if node in visited or node.op != 'call_function':
+            continue
+        if node.target not in ELEMENTWISE:
+            continue
+
+        # Walk forward collecting the chain
+        chain = [node]
+        visited.add(node)
+        current = node
+
+        while True:
+            users = list(current.users)
+            if len(users) != 1:
+                break
+            nxt = users[0]
+            if nxt.op != 'call_function' or nxt.target not in ELEMENTWISE:
+                break
+            chain.append(nxt)
+            visited.add(nxt)
+            current = nxt
+
+        if len(chain) &gt; 1:
+            chains.append(chain)
+
+    return chains
+
+chains = find_fusable_chains(traced.graph)
+for i, chain in enumerate(chains):
+    ops = [n.target.__name__ if hasattr(n.target, '__name__') else str(n.target)
+           for n in chain]
+    print(f&quot;Fusable chain {i}: {' → '.join(ops)}&quot;)
+</code></pre>
+<hr />
+<h2 id="5-layout-transformation-nchw-nhwc">5. Layout Transformation (NCHW → NHWC)</h2>
+<p>Memory layout determines cache efficiency. For convolutions:</p>
+<pre><code>  NCHW (PyTorch default):        NHWC (cuDNN preferred):
+  Memory order:                   Memory order:
+  [batch][channel][height][width] [batch][height][width][channel]
+
+  For 3×3 conv accessing a        For 3×3 conv accessing a
+  spatial window:                  spatial window:
+  ┌─C0─┐ ┌─C1─┐ ┌─C2─┐          ┌──H0,W0──┐
+  │ ... │ │ ... │ │ ... │          │ C0 C1 C2│ ← contiguous!
+  └─────┘ └─────┘ └─────┘          ├──H0,W1──┤
+  Channels scattered in memory     │ C0 C1 C2│
+  → poor spatial locality           └─────────┘
+                                   Channels are contiguous
+                                   → vector-friendly
+</code></pre>
+<p>The layout transform pass inserts transpose operations at graph boundaries and propagates the preferred layout through the graph:</p>
+<pre><code class="language-python">def layout_transform_pass(graph, preferred='channels_last'):
+    &quot;&quot;&quot;Insert layout conversions for conv2d operations.&quot;&quot;&quot;
+    for node in graph.nodes:
+        if node.target == torch.nn.functional.conv2d:
+            # Insert: input = input.to(memory_format=channels_last)
+            # Insert: weight = weight.to(memory_format=channels_last)
+            # After conv: output = output.to(memory_format=contiguous)
+            pass  # Actual implementation modifies graph nodes
+</code></pre>
+<p>Performance impact: NHWC can be <strong>1.3–2× faster</strong> for convolutions on NVIDIA Tensor Cores.</p>
+<hr />
+<h2 id="6-algebraic-simplification">6. Algebraic Simplification</h2>
+<p>Replace expensive operations with mathematically equivalent cheaper ones:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Before</th>
+<th style="text-align: left;">After</th>
+<th style="text-align: left;">Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>x * 1.0</code></td>
+<td style="text-align: left;"><code>x</code></td>
+<td style="text-align: left;">Multiplicative identity</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>x + 0.0</code></td>
+<td style="text-align: left;"><code>x</code></td>
+<td style="text-align: left;">Additive identity</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>x * 0.0</code></td>
+<td style="text-align: left;"><code>zeros_like(x)</code></td>
+<td style="text-align: left;">Zero product</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>x ** 2</code></td>
+<td style="text-align: left;"><code>x * x</code></td>
+<td style="text-align: left;">Strength reduction</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>exp(log(x))</code></td>
+<td style="text-align: left;"><code>x</code></td>
+<td style="text-align: left;">Inverse functions</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>x / x</code></td>
+<td style="text-align: left;"><code>ones_like(x)</code></td>
+<td style="text-align: left;">Self-division (if <code>x ≠ 0</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>relu(relu(x))</code></td>
+<td style="text-align: left;"><code>relu(x)</code></td>
+<td style="text-align: left;">Idempotent function</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>x.T.T</code></td>
+<td style="text-align: left;"><code>x</code></td>
+<td style="text-align: left;">Double transpose</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-python">def algebraic_simplify(graph):
+    &quot;&quot;&quot;Apply algebraic simplification rules.&quot;&quot;&quot;
+    simplified = 0
+    for node in list(graph.nodes):
+        if node.op != 'call_function':
+            continue
+
+        # Rule: relu(relu(x)) → relu(x)
+        if node.target == torch.relu:
+            arg = node.args[0]
+            if isinstance(arg, Node) and arg.target == torch.relu:
+                node.replace_all_uses_with(arg)
+                simplified += 1
+
+        # Rule: x * 1.0 → x
+        if node.target == operator.mul:
+            for i, arg in enumerate(node.args):
+                if isinstance(arg, (int, float)) and arg == 1.0:
+                    other = node.args[1 - i]
+                    node.replace_all_uses_with(other)
+                    simplified += 1
+                    break
+
+    graph.eliminate_dead_code()
+    return simplified
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-build-a-complete-optimization-pipeline-30-min">Exercise 1: Build a Complete Optimization Pipeline (30 min)</h3>
+<pre><code class="language-python">import torch
+from torch.fx import symbolic_trace
+import operator
+
+class UnoptimizedModel(torch.nn.Module):
+    def forward(self, x):
+        # Constant folding target
+        scale = 2.0 * 3.0
+
+        # CSE target
+        a = torch.relu(x)
+        b = torch.relu(x)  # redundant
+
+        # Algebraic simplification target
+        c = a * 1.0         # identity
+
+        # Dead code target
+        d = torch.exp(x)    # unused
+
+        # Fusion target
+        e = b * scale
+        f = e + 1.0
+        g = torch.relu(f)
+
+        return c + g
+
+traced = symbolic_trace(UnoptimizedModel())
+print(f&quot;Before: {len(list(traced.graph.nodes))} nodes&quot;)
+
+# TODO: Apply in order:
+# 1. Constant folding
+# 2. CSE
+# 3. Algebraic simplification
+# 4. DCE (cleanup)
+# Count nodes after each pass
+</code></pre>
+<h3 id="exercise-2-measure-fusion-impact-25-min">Exercise 2: Measure Fusion Impact (25 min)</h3>
+<pre><code class="language-python">import torch
+import time
+
+def unfused(x):
+    x = x * 2.0
+    x = x + 1.0
+    x = torch.relu(x)
+    x = x * 0.5
+    x = torch.sigmoid(x)
+    return x
+
+compiled = torch.compile(unfused, mode=&quot;reduce-overhead&quot;)
+
+x = torch.randn(4096, 4096, device='cuda')
+
+# Warm up
+for _ in range(20):
+    unfused(x)
+    compiled(x)
+torch.cuda.synchronize()
+
+# Benchmark
+def bench(fn, x, n=200):
+    torch.cuda.synchronize()
+    t0 = time.perf_counter()
+    for _ in range(n):
+        fn(x)
+    torch.cuda.synchronize()
+    return (time.perf_counter() - t0) / n * 1000
+
+print(f&quot;Eager:    {bench(unfused, x):.3f} ms  (5 kernel launches)&quot;)
+print(f&quot;Compiled: {bench(compiled, x):.3f} ms  (1 fused kernel)&quot;)
+</code></pre>
+<h3 id="exercise-3-write-a-pattern-matching-pass-20-min">Exercise 3: Write a Pattern-Matching Pass (20 min)</h3>
+<pre><code class="language-python">import torch
+from torch.fx import symbolic_trace
+
+class GeluApprox(torch.nn.Module):
+    &quot;&quot;&quot;GELU written as individual ops — ripe for pattern matching.&quot;&quot;&quot;
+    def forward(self, x):
+        return 0.5 * x * (1.0 + torch.tanh(
+            0.7978845608 * (x + 0.044715 * x * x * x)))
+
+traced = symbolic_trace(GeluApprox())
+
+# Task: Write an FX pass that detects this pattern
+# and replaces it with a single torch.nn.functional.gelu call.
+#
+# Hints:
+# 1. Look for the tanh node
+# 2. Check if its input matches 0.7978... * (x + 0.044... * x^3)
+# 3. If so, replace the entire subgraph with F.gelu(x)
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Constant folding</strong> eliminates compile-time-known computations — shapes, scales, dtype conversions</li>
+<li><strong>DCE</strong> is cheap ($O(N)$) and should run after every pass — it cleans up nodes orphaned by other transforms</li>
+<li><strong>CSE</strong> finds and deduplicates identical computations — especially valuable in attention and normalization patterns</li>
+<li><strong>Operator fusion</strong> is the single most impactful optimization — it eliminates kernel launch overhead and intermediate memory traffic</li>
+<li><strong>Layout transforms</strong> (NCHW→NHWC) can unlock 1.3–2× speedups on Tensor Cores with zero algorithm changes</li>
+<li><strong>Algebraic simplification</strong> catches identity ops, inverse functions, and strength-reducible patterns</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Jia, Z. et al. — <em>TASO: Optimizing Deep Learning Computation with Automatic Generation of Graph Substitutions</em> (SOSP 2019)</li>
+<li>Niu, W. et al. — <em>DNNFusion: Accelerating Deep Neural Networks Execution with Advanced Operator Fusion</em> (PLDI 2021)</li>
+<li>PyTorch docs — <a href="https://pytorch.org/docs/stable/fx.html">FX Graph Transformations</a></li>
+<li>Zheng, L. et al. — <em>Ansor: Generating High-Performance Tensor Programs for Deep Learning</em> (OSDI 2020)</li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p><strong>Day 18</strong> goes deeper — literally into the <strong>loop nests</strong> inside each operator. The <strong>polyhedral model</strong> gives us a mathematical framework for reasoning about iteration spaces, data dependencies, and legal loop transformations. We'll see how TVM's schedule primitives (<code>split</code>, <code>reorder</code>, <code>tile</code>) map to affine transformations in a polyhedral framework.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-16-computation-graphs-ir.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 16: Computation Graphs as IR</a>
+            <a href="day-18-polyhedral-model.html" class="text-emerald-600 hover:text-emerald-800">Day 18: The Polyhedral Model &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

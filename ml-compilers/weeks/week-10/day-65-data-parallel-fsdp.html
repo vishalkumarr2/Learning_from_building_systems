@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 65: Data Parallel & FSDP - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 10: Distributed Training & Capstone</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-65-data-parallel-fsdp">Day 65: Data Parallel &amp; FSDP</h1>
+<blockquote>
+<p><strong>Phase V · Week 10 · Day 65 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"DDP replicates the model. FSDP shards everything. The difference is 4× memory savings — enough to turn 'impossible on 8 GPUs' into 'fits comfortably'."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-64-distributed-training-basics.html">Day 64: Distributed Training Basics</a></td>
+<td style="text-align: left;"><a href="day-66-tensor-pipeline-parallel.html">Day 66: Tensor &amp; Pipeline Parallelism</a></td>
+<td style="text-align: left;"><a href="README.html">Week 10: Distributed Training &amp; Capstone</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase V: Training at Scale</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Data parallelism is the most widely used distributed training strategy — it's conceptually simple, scales linearly, and introduces no model changes. <strong>DDP</strong> (DistributedDataParallel) is PyTorch's battle-tested implementation, handling gradient synchronization with bucket-based AllReduce overlapped with backward computation. But DDP replicates the entire model on every GPU, limiting you to models that fit in a single GPU's memory. <strong>FSDP</strong> (Fully Sharded Data Parallel) — PyTorch's implementation of Microsoft's ZeRO (Zero Redundancy Optimizer) — eliminates this redundancy by sharding parameters, gradients, and optimizer states across GPUs. Understanding DDP internals and FSDP's ZeRO stages is critical for training any model beyond 10B parameters.</p>
+<hr />
+<h2 id="1-ddp-internals-how-distributeddataparallel-works">1. DDP Internals: How DistributedDataParallel Works</h2>
+<h3 id="the-naive-approach-and-why-its-slow">The Naive Approach (and Why It's Slow)</h3>
+<pre><code>Naive Data Parallelism
+═══════════════════════════════════════════════════════════════
+
+  Step 1: Forward pass (independent per GPU)
+  Step 2: Backward pass (independent per GPU)
+  Step 3: AllReduce ALL gradients ← BLOCKING, NO OVERLAP
+  Step 4: Optimizer step (identical per GPU)
+
+  Problem: Step 3 waits for ALL gradients before starting.
+           No overlap between compute and communication.
+</code></pre>
+<h3 id="ddps-bucket-based-gradient-allreduce">DDP's Bucket-Based Gradient AllReduce</h3>
+<pre><code>DDP: Overlapped Gradient Synchronization
+═══════════════════════════════════════════════════════════════
+
+  Backward pass computes gradients layer by layer (last → first):
+
+  Time ──────────────────────────────────────────────────────►
+
+  Backward:  [grad_L32] [grad_L31] [grad_L30] ... [grad_L1]
+                │           │          │
+  Buckets:    ┌─▼───────────▼──┐  ┌────▼────────────┐
+              │  Bucket 2      │  │  Bucket 1        │  ...
+              │  (25 MB)       │  │  (25 MB)         │
+              └──────┬─────────┘  └──────┬───────────┘
+                     │                   │
+  AllReduce:    [AllReduce B2]      [AllReduce B1]
+                     ▲                   ▲
+                     │                   │
+          Starts as soon as      Starts when B1 full
+          bucket B2 is full      (overlaps with earlier
+                                  backward compute)
+
+  Key: Gradients are AllReduced while backward is STILL RUNNING
+       for earlier layers. Communication is almost fully hidden.
+</code></pre>
+<h3 id="ddp-code">DDP Code</h3>
+<pre><code class="language-python">import torch
+import torch.nn as nn
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import DataLoader, DistributedSampler
+
+def train_ddp(rank, world_size):
+    dist.init_process_group(&quot;nccl&quot;, rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
+
+    # Create model and wrap with DDP
+    model = MyTransformer().cuda(rank)
+    model = DDP(model, device_ids=[rank])
+    # DDP constructor:
+    #   - Broadcasts parameters from rank 0 to all ranks
+    #   - Registers backward hooks on each parameter
+    #   - Creates gradient buckets (default 25 MB each)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+
+    # DistributedSampler ensures non-overlapping data per GPU
+    sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank)
+    loader = DataLoader(dataset, sampler=sampler, batch_size=32)
+
+    for epoch in range(num_epochs):
+        sampler.set_epoch(epoch)  # Shuffle differently each epoch
+        for batch in loader:
+            inputs, labels = batch[0].cuda(rank), batch[1].cuda(rank)
+
+            optimizer.zero_grad()
+            outputs = model(inputs)       # Forward (independent)
+            loss = criterion(outputs, labels)
+            loss.backward()               # Backward + AllReduce (overlapped!)
+            # After backward(): all ranks have identical averaged gradients
+
+            optimizer.step()              # Identical update on all ranks
+
+    dist.destroy_process_group()
+</code></pre>
+<h3 id="ddp-tuning-parameters">DDP Tuning Parameters</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bucket_cap_mb</code></td>
+<td>25</td>
+<td>Larger → better bandwidth utilization, worse overlap</td>
+</tr>
+<tr>
+<td><code>gradient_as_bucket_view</code></td>
+<td>False</td>
+<td>Avoid gradient copy to bucket (saves memory)</td>
+</tr>
+<tr>
+<td><code>find_unused_parameters</code></td>
+<td>False</td>
+<td>Handle models with conditional branches (slower)</td>
+</tr>
+<tr>
+<td><code>static_graph</code></td>
+<td>False</td>
+<td>Enable optimizations for models with fixed structure</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-the-memory-problem-why-ddp-isnt-enough">2. The Memory Problem: Why DDP Isn't Enough</h2>
+<p>DDP replicates everything. For a model with $N$ parameters and $P$ GPUs:</p>
+<pre><code>DDP Memory Usage (per GPU) — REDUNDANT
+═══════════════════════════════════════════════════════════════
+
+  Per GPU              Total across P GPUs      Waste
+  ──────────────────────────────────────────────────────────
+  2N  (FP16 weights)   2NP                      (P-1)/P redundant
+  2N  (FP16 grads)     2NP                      (P-1)/P redundant
+  4N  (FP32 master)    4NP                      (P-1)/P redundant
+  4N  (Adam m)         4NP                      (P-1)/P redundant
+  4N  (Adam v)         4NP                      (P-1)/P redundant
+  ──────────────────────────────────────────────────────────
+  16N per GPU          16NP total
+
+  With 8 GPUs, 7/8 = 87.5% of memory is WASTED on duplicates!
+</code></pre>
+<hr />
+<h2 id="3-zero-zero-redundancy-optimizer">3. ZeRO: Zero Redundancy Optimizer</h2>
+<p>Microsoft's ZeRO (Rajbhandari et al., 2019) eliminates redundancy in three progressive stages:</p>
+<pre><code>ZeRO Stages — Progressive Sharding
+═══════════════════════════════════════════════════════════════
+
+  DDP (no ZeRO):  Each GPU holds ALL of: Params + Grads + Optimizer
+  Memory per GPU: 2N + 2N + 12N = 16N bytes
+
+  ZeRO Stage 1: Shard OPTIMIZER states only
+  ────────────────────────────────────────────
+  GPU 0: [Full Params] [Full Grads] [Optim shard 0]
+  GPU 1: [Full Params] [Full Grads] [Optim shard 1]
+  GPU 2: [Full Params] [Full Grads] [Optim shard 2]
+  GPU 3: [Full Params] [Full Grads] [Optim shard 3]
+
+  Memory per GPU: 2N + 2N + 12N/P = 4N + 12N/P
+  8 GPUs: 4N + 1.5N = 5.5N   (2.9× reduction)
+
+  ZeRO Stage 2: Shard OPTIMIZER + GRADIENTS
+  ──────────────────────────────────────────
+  GPU 0: [Full Params] [Grad shard 0] [Optim shard 0]
+  GPU 1: [Full Params] [Grad shard 1] [Optim shard 1]
+
+  Memory per GPU: 2N + 2N/P + 12N/P = 2N + 14N/P
+  8 GPUs: 2N + 1.75N = 3.75N   (4.3× reduction)
+
+  ZeRO Stage 3: Shard EVERYTHING (Params + Grads + Optimizer)
+  ────────────────────────────────────────────────────────────
+  GPU 0: [Param shard 0] [Grad shard 0] [Optim shard 0]
+  GPU 1: [Param shard 1] [Grad shard 1] [Optim shard 1]
+
+  Memory per GPU: 2N/P + 2N/P + 12N/P = 16N/P
+  8 GPUs: 2N   (8× reduction!)
+
+  ┌──────────────────────────────────────────────────┐
+  │  7B model: DDP = 112 GB/GPU → ZeRO-3 = 14 GB/GPU │
+  │  Fits on a single consumer GPU!                   │
+  └──────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="the-cost-extra-communication">The Cost: Extra Communication</h3>
+<p>ZeRO Stage 3 trades memory for communication — parameters must be gathered before each forward/backward:</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Memory per GPU</th>
+<th>Communication Volume</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DDP</td>
+<td>$16N$</td>
+<td>$2N$ (AllReduce grads)</td>
+</tr>
+<tr>
+<td>ZeRO-1</td>
+<td>$4N + \frac{12N}{P}$</td>
+<td>$2N$ (AllReduce grads)</td>
+</tr>
+<tr>
+<td>ZeRO-2</td>
+<td>$2N + \frac{14N}{P}$</td>
+<td>$2N$ (ReduceScatter grads)</td>
+</tr>
+<tr>
+<td>ZeRO-3</td>
+<td>$\frac{16N}{P}$</td>
+<td>$3N$ (AllGather params fwd + AllGather bwd + ReduceScatter grads)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-fsdp-in-pytorch-zero-stage-3">4. FSDP in PyTorch: ZeRO Stage 3</h2>
+<p>FSDP is PyTorch's native implementation of ZeRO-3 with additional optimizations.</p>
+<h3 id="fsdp-execution-flow">FSDP Execution Flow</h3>
+<pre><code>FSDP Forward + Backward with Parameter Gathering
+═══════════════════════════════════════════════════════════════
+
+  State: Each GPU holds 1/P of each FSDP unit's parameters
+
+  FORWARD PASS:
+  ─────────────
+  For each FSDP unit (e.g., transformer layer):
+    1. AllGather: Collect full parameters from all GPUs    ← communication
+    2. Run forward computation with full parameters        ← compute
+    3. Discard non-local parameter shards (free memory!)   ← memory saved
+    4. Keep only local shard for backward
+
+  BACKWARD PASS:
+  ──────────────
+  For each FSDP unit (reverse order):
+    1. AllGather: Collect full parameters again             ← communication
+    2. Compute gradients with full parameters               ← compute
+    3. ReduceScatter: Each GPU gets its gradient shard      ← communication
+    4. Discard full parameters and full gradients            ← memory saved
+
+  Net effect: Only 1/P of params + 1/P of grads + 1/P of optim in memory!
+</code></pre>
+<h3 id="fsdp2-code-pytorch-2x">FSDP2 Code (PyTorch 2.x)</h3>
+<pre><code class="language-python">import torch
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    MixedPrecision,
+    ShardingStrategy,
+)
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from functools import partial
+
+def train_fsdp(rank, world_size):
+    dist.init_process_group(&quot;nccl&quot;, rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
+
+    model = LargeTransformer(num_layers=32, hidden=4096, heads=32)
+
+    # Auto-wrap policy: wrap each TransformerBlock as an FSDP unit
+    wrap_policy = partial(
+        transformer_auto_wrap_policy,
+        transformer_layer_cls={TransformerBlock},
+    )
+
+    # Mixed precision: compute in BF16, reduce in FP32, params stored as BF16
+    mp_policy = MixedPrecision(
+        param_dtype=torch.bfloat16,
+        reduce_dtype=torch.float32,    # Gradient reduction in FP32 for stability
+        buffer_dtype=torch.bfloat16,
+    )
+
+    model = FSDP(
+        model,
+        auto_wrap_policy=wrap_policy,
+        mixed_precision=mp_policy,
+        sharding_strategy=ShardingStrategy.FULL_SHARD,  # ZeRO-3
+        device_id=rank,
+        use_orig_params=True,  # Required for torch.compile compatibility
+    )
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+
+    for batch in dataloader:
+        optimizer.zero_grad()
+        loss = model(batch).loss
+        loss.backward()      # ReduceScatter gradients automatically
+        optimizer.step()     # Each GPU updates only its shard
+</code></pre>
+<h3 id="sharding-strategies">Sharding Strategies</h3>
+<table>
+<thead>
+<tr>
+<th>Strategy</th>
+<th>PyTorch Enum</th>
+<th>Equivalent</th>
+<th>Memory</th>
+<th>Communication</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Full Shard</td>
+<td><code>FULL_SHARD</code></td>
+<td>ZeRO-3</td>
+<td>Best ($16N/P$)</td>
+<td>Highest ($3N$)</td>
+</tr>
+<tr>
+<td>Shard Grad Op</td>
+<td><code>SHARD_GRAD_OP</code></td>
+<td>ZeRO-2</td>
+<td>Good ($2N + 14N/P$)</td>
+<td>Medium ($2N$)</td>
+</tr>
+<tr>
+<td>No Shard</td>
+<td><code>NO_SHARD</code></td>
+<td>DDP</td>
+<td>Worst ($16N$)</td>
+<td>Lowest ($2N$)</td>
+</tr>
+<tr>
+<td>Hybrid Shard</td>
+<td><code>HYBRID_SHARD</code></td>
+<td>ZeRO-3 intra-node, DDP inter-node</td>
+<td>Balanced</td>
+<td>Balanced</td>
+</tr>
+</tbody>
+</table>
+<h3 id="hybrid-sharding-best-of-both-worlds">Hybrid Sharding: Best of Both Worlds</h3>
+<pre><code>Hybrid Sharding (HYBRID_SHARD)
+═══════════════════════════════════════════════════════════════
+
+  Node 0 (8 GPUs, NVLink)         Node 1 (8 GPUs, NVLink)
+  ┌─────────────────────────┐     ┌─────────────────────────┐
+  │ FSDP shard across       │     │ FSDP shard across       │
+  │ 8 GPUs (fast NVLink)    │     │ 8 GPUs (fast NVLink)    │
+  │                         │     │                         │
+  │ GPU0-GPU7 each hold     │     │ GPU0-GPU7 each hold     │
+  │ 1/8 of params           │     │ 1/8 of params           │
+  └────────┬────────────────┘     └────────┬────────────────┘
+           │                                │
+           └──── DDP AllReduce (slow IB) ───┘
+                 Only gradients, not params!
+
+  Benefit: AllGather uses fast NVLink (900 GB/s)
+           Only gradient AllReduce goes over slow InfiniBand (50 GB/s)
+</code></pre>
+<hr />
+<h2 id="5-mixed-precision-with-fsdp">5. Mixed Precision with FSDP</h2>
+<p>FSDP supports per-component precision control:</p>
+<pre><code>Mixed Precision Data Flow in FSDP
+═══════════════════════════════════════════════════════════════
+
+  Storage (sharded): BF16 weights  ← saves memory
+        │
+        ▼
+  AllGather: gather full BF16 params
+        │
+        ▼
+  Forward: compute in BF16          ← fast on Tensor Cores
+        │
+        ▼
+  Backward: compute grads in BF16   ← fast
+        │
+        ▼
+  ReduceScatter: accumulate in FP32 ← numerical stability!
+        │
+        ▼
+  Optimizer: update in FP32         ← master weights
+        │
+        ▼
+  Cast back to BF16 for storage     ← memory savings
+</code></pre>
+<hr />
+<h2 id="6-fsdp-vs-deepspeed-zero">6. FSDP vs DeepSpeed ZeRO</h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>PyTorch FSDP</th>
+<th>DeepSpeed ZeRO</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Framework</td>
+<td>Native PyTorch</td>
+<td>Separate library</td>
+</tr>
+<tr>
+<td>ZeRO Stages</td>
+<td>2, 3 (+ hybrid)</td>
+<td>1, 2, 3, 3+ (offload)</td>
+</tr>
+<tr>
+<td>CPU Offload</td>
+<td>Yes (basic)</td>
+<td>Yes (advanced, NVMe)</td>
+</tr>
+<tr>
+<td>torch.compile</td>
+<td>Yes (with <code>use_orig_params</code>)</td>
+<td>Limited</td>
+</tr>
+<tr>
+<td>Activation Checkpointing</td>
+<td>Via <code>checkpoint_wrapper</code></td>
+<td>Built-in</td>
+</tr>
+<tr>
+<td>Config</td>
+<td>Python API</td>
+<td>JSON config + Python</td>
+</tr>
+<tr>
+<td>Community</td>
+<td>Growing</td>
+<td>Mature, feature-rich</td>
+</tr>
+</tbody>
+</table>
+<h3 id="when-to-choose-what">When to Choose What</h3>
+<ul>
+<li><strong>FSDP</strong>: Pure PyTorch, <code>torch.compile</code> integration needed, simpler setups</li>
+<li><strong>DeepSpeed</strong>: CPU/NVMe offloading, very large models (100B+), MoE support, advanced pipeline parallelism</li>
+</ul>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-ddp-vs-fsdp-memory-comparison-45-min">Exercise 1: DDP vs FSDP Memory Comparison (45 min)</h3>
+<p>Train a 1B-parameter model (GPT-2 XL) on 4 GPUs with both DDP and FSDP. Measure peak GPU memory for each. Verify that FSDP uses approximately $16N/P$ memory vs DDP's $16N$.</p>
+<pre><code class="language-python"># Memory measurement snippet
+torch.cuda.reset_peak_memory_stats()
+# ... training step ...
+peak_mb = torch.cuda.max_memory_allocated() / 1024**2
+print(f&quot;[Rank {rank}] Peak memory: {peak_mb:.0f} MB&quot;)
+</code></pre>
+<h3 id="exercise-2-sharding-strategy-sweep-30-min">Exercise 2: Sharding Strategy Sweep (30 min)</h3>
+<p>Compare <code>FULL_SHARD</code>, <code>SHARD_GRAD_OP</code>, and <code>NO_SHARD</code> on the same model. Measure memory, throughput (samples/sec), and verify gradient equivalence across strategies.</p>
+<h3 id="exercise-3-fsdp-amp-training-loop-45-min">Exercise 3: FSDP + AMP Training Loop (45 min)</h3>
+<p>Write a complete FSDP training loop for a 7B model with mixed precision, gradient clipping, learning rate warmup, and checkpointing. Use <code>HYBRID_SHARD</code> if multi-node, <code>FULL_SHARD</code> if single-node.</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>DDP overlaps communication</strong> — gradient AllReduce runs concurrently with backward pass via bucketing</li>
+<li><strong>DDP wastes memory</strong> — 87.5% redundancy across 8 GPUs (each stores full params + grads + optimizer)</li>
+<li><strong>ZeRO-3 / FSDP shards everything</strong> — memory per GPU drops from $16N$ to $16N/P$, making 70B models trainable on 8×80GB GPUs</li>
+<li><strong>Extra communication cost</strong> — FSDP adds AllGather for forward and backward ($+2N$), but overlaps with compute</li>
+<li><strong>Hybrid sharding</strong> — FSDP within a node (fast NVLink), DDP across nodes (slow IB) balances memory and bandwidth</li>
+<li><strong>FSDP2 + torch.compile</strong> — <code>use_orig_params=True</code> enables compilation, closing the performance gap with custom solutions</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Rajbhandari et al., "ZeRO: Memory Optimizations Toward Training Trillion Parameter Models" (2019)</li>
+<li><a href="https://pytorch.org/tutorials/intermediate/FSDP_tutorial.html">PyTorch FSDP Tutorial</a></li>
+<li><a href="https://pytorch.org/docs/stable/fsdp.html">PyTorch FSDP2 Design</a></li>
+<li>Zhao et al., "PyTorch FSDP: Experiences on Scaling Fully Sharded Data Parallel" (2023)</li>
+<li>DeepSpeed ZeRO documentation and benchmarks</li>
+</ul>
+<hr />
+<h2 id="tomorrows-teaser">Tomorrow's Teaser</h2>
+<p>FSDP handles models that are too large for one GPU's memory, but what about models with layers so large that a <em>single layer</em> exceeds GPU memory? Tomorrow we explore <strong>tensor parallelism</strong> (splitting individual matrix operations across GPUs) and <strong>pipeline parallelism</strong> (splitting the model depth-wise with micro-batch scheduling), completing the 3D parallelism picture used to train GPT-4 and LLaMA-3.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-64-distributed-training-basics.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 64: Distributed Training Basics</a>
+            <a href="day-66-tensor-pipeline-parallel.html" class="text-emerald-600 hover:text-emerald-800">Day 66: Tensor & Pipeline Parallelism &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

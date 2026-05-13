@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 15: Compiler 101 for ML Engineers - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 3: IR & Compiler Passes</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-15-compiler-101-for-ml-engineers">Day 15: Compiler 101 for ML Engineers</h1>
+<blockquote>
+<p><strong>Phase II · Week 3 · Day 15 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"A compiler is a program that translates one language into another — and in ML, the source language is a computation graph and the target is a specific piece of silicon."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="../week-02/day-14-stop-and-reflect-1.html">Day 14: Stop &amp; Reflect 1</a></td>
+<td style="text-align: left;"><a href="day-16-computation-graphs-ir.html">Day 16: Computation Graphs as IR</a></td>
+<td style="text-align: left;"><a href="README.html">Week 3: IRs &amp; Passes</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase II: Compiler Fundamentals</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Every time you call <code>model(x)</code> in PyTorch, a hidden pipeline transforms your Python-level math into GPU machine code. Understanding this pipeline — <strong>frontend → IR → optimization → code generation</strong> — is the difference between blindly hoping for speed and systematically engineering it. ML compilers are the reason a 70B-parameter model can run on a phone, and why the same model code can target NVIDIA, AMD, Apple, and custom TPU silicon without rewrites.</p>
+<hr />
+<h2 id="1-what-is-a-compiler">1. What Is a Compiler?</h2>
+<p>A compiler is a <strong>structured translator</strong> that converts a program from a source representation to a target representation, applying correctness-preserving transformations along the way.</p>
+<pre><code>Source Program → [Frontend] → IR → [Optimizer] → IR' → [Backend] → Target Code
+</code></pre>
+<p>The key insight: by splitting into phases with a <strong>common intermediate representation (IR)</strong>, you decouple the $M$ source languages from the $N$ target architectures, reducing the problem from $O(M \times N)$ to $O(M + N)$.</p>
+<pre><code>                    Traditional Compiler Architecture
+  ┌──────────┐
+  │    C      │──┐
+  ├──────────┤   │     ┌──────────┐     ┌──────────┐     ┌──────────┐
+  │  C++     │───┼────▶│          │────▶│          │────▶│  x86     │
+  ├──────────┤   │     │    IR    │     │ Optimizer │     ├──────────┤
+  │  Rust    │───┤     │ (LLVM)  │     │  Passes   │     │  ARM     │
+  ├──────────┤   │     │          │     │          │     ├──────────┤
+  │ Fortran  │───┘     └──────────┘     └──────────┘     │  RISC-V  │
+  └──────────┘                                           └──────────┘
+   M frontends              1 IR                         N backends
+</code></pre>
+<h3 id="the-three-phases">The Three Phases</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Phase</th>
+<th style="text-align: left;">Input</th>
+<th style="text-align: left;">Output</th>
+<th style="text-align: left;">Key Tasks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Frontend</strong></td>
+<td style="text-align: left;">Source code</td>
+<td style="text-align: left;">IR</td>
+<td style="text-align: left;">Lexing, parsing, type checking, semantic analysis</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Middle-end</strong></td>
+<td style="text-align: left;">IR</td>
+<td style="text-align: left;">Optimized IR</td>
+<td style="text-align: left;">Dead code elimination, constant folding, loop optimization</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Backend</strong></td>
+<td style="text-align: left;">Optimized IR</td>
+<td style="text-align: left;">Machine code</td>
+<td style="text-align: left;">Register allocation, instruction selection, scheduling</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-why-ml-needs-compilers">2. Why ML Needs Compilers</h2>
+<h3 id="the-hardware-explosion">The Hardware Explosion</h3>
+<p>In 2020, you targeted one GPU family. Today:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Hardware</th>
+<th style="text-align: left;">Vendor</th>
+<th style="text-align: left;">Compute Units</th>
+<th style="text-align: left;">Memory Model</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">CUDA Cores / Tensor Cores</td>
+<td style="text-align: left;">NVIDIA</td>
+<td style="text-align: left;">SMs with warp scheduling</td>
+<td style="text-align: left;">Unified HBM + shared mem</td>
+</tr>
+<tr>
+<td style="text-align: left;">CDNA / RDNA</td>
+<td style="text-align: left;">AMD</td>
+<td style="text-align: left;">CUs with wavefronts</td>
+<td style="text-align: left;">HBM + LDS</td>
+</tr>
+<tr>
+<td style="text-align: left;">TPU v5e</td>
+<td style="text-align: left;">Google</td>
+<td style="text-align: left;">MXU systolic arrays</td>
+<td style="text-align: left;">HBM with interleaved banks</td>
+</tr>
+<tr>
+<td style="text-align: left;">Apple ANE</td>
+<td style="text-align: left;">Apple</td>
+<td style="text-align: left;">Neural engine tiles</td>
+<td style="text-align: left;">Unified memory</td>
+</tr>
+<tr>
+<td style="text-align: left;">Gaudi 3</td>
+<td style="text-align: left;">Intel</td>
+<td style="text-align: left;">TPC + MME</td>
+<td style="text-align: left;">HBM2E</td>
+</tr>
+</tbody>
+</table>
+<p>Writing optimized kernels by hand for each is <strong>unsustainable</strong>. A compiler that ingests one model and targets all of these is the only scalable answer.</p>
+<h3 id="the-optimization-opportunity">The Optimization Opportunity</h3>
+<p>A naive matrix multiply has arithmetic intensity far below what hardware can deliver:</p>
+<p>$$\text{Operational Intensity} = \frac{\text{FLOPs}}{\text{Bytes Moved}} = \frac{2N^3}{3 \times 4N^2} = \frac{N}{6}$$</p>
+<p>For $N = 4096$, this is ~683 FLOPs/byte — well into the compute-bound regime. But only if we <strong>tile loops</strong>, <strong>fuse operators</strong>, and <strong>manage memory hierarchy</strong>. These are classic compiler transformations.</p>
+<hr />
+<h2 id="3-traditional-compilers-vs-ml-compilers">3. Traditional Compilers vs ML Compilers</h2>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Aspect</th>
+<th style="text-align: left;">Traditional (GCC/LLVM)</th>
+<th style="text-align: left;">ML Compiler (TVM/XLA)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Input</strong></td>
+<td style="text-align: left;">Text source code</td>
+<td style="text-align: left;">Computation graph (DAG)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>IR granularity</strong></td>
+<td style="text-align: left;">Instructions (SSA)</td>
+<td style="text-align: left;">Tensor operations</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Key optimizations</strong></td>
+<td style="text-align: left;">Loop unrolling, inlining, register alloc</td>
+<td style="text-align: left;">Operator fusion, layout transform, tiling</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Target</strong></td>
+<td style="text-align: left;">General CPU code</td>
+<td style="text-align: left;">Specialized accelerator kernels</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Correctness</strong></td>
+<td style="text-align: left;">Type safety, memory safety</td>
+<td style="text-align: left;">Numerical equivalence (within $\epsilon$)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Search</strong></td>
+<td style="text-align: left;">Heuristic-driven</td>
+<td style="text-align: left;">Often autotuning (cost-model + search)</td>
+</tr>
+</tbody>
+</table>
+<p>The fundamental difference: traditional compilers optimize <strong>scalar control flow</strong>; ML compilers optimize <strong>tensor data flow</strong>.</p>
+<pre><code>   Traditional Compiler                    ML Compiler
+   ──────────────────                    ──────────────
+   int sum = 0;                          y = Conv2d(x, w)
+   for(i=0; i&lt;N; i++)                    z = BatchNorm(y)
+     sum += a[i]*b[i];                   out = ReLU(z)
+          │                                    │
+          ▼                                    ▼
+   Loop vectorization               Fuse Conv+BN+ReLU into
+   SIMD instruction                 one tiled GPU kernel
+   selection                        with shared memory staging
+</code></pre>
+<hr />
+<h2 id="4-llvm-as-reference-architecture">4. LLVM as Reference Architecture</h2>
+<p>LLVM is the gold standard for compiler infrastructure. Understanding it illuminates every ML compiler.</p>
+<h3 id="llvm-ir-basics">LLVM IR Basics</h3>
+<p>LLVM IR is in <strong>Static Single Assignment (SSA)</strong> form — every variable is assigned exactly once:</p>
+<pre><code class="language-llvm">define float @dot(float* %a, float* %b, i32 %n) {
+entry:
+  br label %loop
+
+loop:
+  %i = phi i32 [ 0, %entry ], [ %i.next, %loop ]
+  %sum = phi float [ 0.0, %entry ], [ %sum.next, %loop ]
+  %pa = getelementptr float, float* %a, i32 %i
+  %pb = getelementptr float, float* %b, i32 %i
+  %va = load float, float* %pa
+  %vb = load float, float* %pb
+  %prod = fmul float %va, %vb
+  %sum.next = fadd float %sum, %prod
+  %i.next = add i32 %i, 1
+  %cond = icmp slt i32 %i.next, %n
+  br i1 %cond, label %loop, label %exit
+
+exit:
+  ret float %sum.next
+}
+</code></pre>
+<p>Key properties:
+- <strong>SSA form</strong>: <code>%sum</code> and <code>%sum.next</code> are distinct values
+- <strong>phi nodes</strong>: merge values from different control flow paths
+- <strong>Typed</strong>: every value has an explicit type
+- <strong>Target-independent</strong>: same IR for x86, ARM, RISC-V</p>
+<h3 id="llvm-pass-pipeline">LLVM Pass Pipeline</h3>
+<pre><code>Input IR → [Canonicalize] → [SimplifyCFG] → [InstCombine] → [GVN] →
+           [LoopRotate] → [LICM] → [LoopVectorize] → [SLP Vectorize] →
+           [InstSelect] → [RegAlloc] → [AsmPrinter] → Machine Code
+</code></pre>
+<p>ML compilers borrow this <strong>pass pipeline</strong> architecture directly.</p>
+<hr />
+<h2 id="5-the-ml-compiler-landscape">5. The ML Compiler Landscape</h2>
+<h3 id="where-each-framework-fits">Where Each Framework Fits</h3>
+<pre><code>                          ML Compiler Stack
+  ┌──────────────────────────────────────────────────┐
+  │              User-Facing Frameworks               │
+  │         PyTorch    JAX    TensorFlow              │
+  └─────────┬──────────┬──────────┬──────────────────┘
+            │          │          │
+  ┌─────────▼──┐  ┌────▼────┐  ┌─▼───────────┐
+  │ torch.compile│  │  jit   │  │ tf.function │  Graph Capture
+  │ (Dynamo)    │  │        │  │ (tf2xla)    │
+  └─────────┬──┘  └────┬────┘  └─┬───────────┘
+            │          │          │
+  ┌─────────▼──┐  ┌────▼────┐  ┌─▼───────────┐
+  │  FX Graph  │  │ StableHLO│ │  XLA HLO    │  High-Level IR
+  │  / Inductor│  │ / MHLO  │  │             │
+  └─────────┬──┘  └────┬────┘  └─┬───────────┘
+            │          │          │
+            ▼          ▼          ▼
+  ┌──────────────────────────────────────────┐
+  │        Low-Level IR / Codegen            │
+  │   Triton IR   │   LLVM IR   │  SPIR-V   │
+  └──────────┬────────────┬─────────┬────────┘
+             ▼            ▼         ▼
+  ┌──────────────────────────────────────────┐
+  │              Hardware                     │
+  │   NVIDIA GPU  │  CPU  │  AMD  │  TPU     │
+  └──────────────────────────────────────────┘
+</code></pre>
+<h3 id="framework-comparison">Framework Comparison</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Compiler</th>
+<th style="text-align: left;">Owner</th>
+<th style="text-align: left;">Source IR</th>
+<th style="text-align: left;">Target</th>
+<th style="text-align: left;">Key Innovation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>XLA</strong></td>
+<td style="text-align: left;">Google</td>
+<td style="text-align: left;">HLO</td>
+<td style="text-align: left;">TPU, GPU, CPU</td>
+<td style="text-align: left;">Algebraic simplification + fusion</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>TVM</strong></td>
+<td style="text-align: left;">Apache</td>
+<td style="text-align: left;">Relay/TIR</td>
+<td style="text-align: left;">Any via BYOC</td>
+<td style="text-align: left;">Autotuning search over schedules</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Triton</strong></td>
+<td style="text-align: left;">OpenAI</td>
+<td style="text-align: left;">Triton-IR</td>
+<td style="text-align: left;">NVIDIA GPU</td>
+<td style="text-align: left;">Block-level programming model</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>torch.compile</strong></td>
+<td style="text-align: left;">Meta</td>
+<td style="text-align: left;">FX Graph</td>
+<td style="text-align: left;">GPU via Inductor</td>
+<td style="text-align: left;">Python-native, dynamic shapes</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>IREE</strong></td>
+<td style="text-align: left;">Google</td>
+<td style="text-align: left;">MLIR</td>
+<td style="text-align: left;">CPU/GPU/mobile</td>
+<td style="text-align: left;">Whole-program compilation</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-a-concrete-example-how-torchcompile-works">6. A Concrete Example: How <code>torch.compile</code> Works</h2>
+<pre><code class="language-python">import torch
+
+@torch.compile
+def fused_gelu(x):
+    return 0.5 * x * (1.0 + torch.tanh(
+        0.7978845608 * (x + 0.044715 * x ** 3)
+    ))
+
+x = torch.randn(1024, 1024, device='cuda')
+y = fused_gelu(x)
+</code></pre>
+<p>What happens behind the scenes:</p>
+<pre><code>Step 1: Dynamo traces Python bytecode → FX Graph
+Step 2: AOTAutograd captures forward + backward graph
+Step 3: FX passes: constant folding, pattern matching
+Step 4: Inductor lowers to Triton IR
+Step 5: Triton compiles to PTX (NVIDIA assembly)
+Step 6: PTX assembled to CUBIN (GPU binary)
+
+Result: One fused kernel instead of 8 separate CUDA launches
+</code></pre>
+<h3 id="inspecting-the-generated-code">Inspecting the Generated Code</h3>
+<pre><code class="language-python">import torch._inductor.config as config
+config.debug = True
+
+# After running, check /tmp/torchinductor_*/
+# You'll find Triton kernel source like:
+&quot;&quot;&quot;
+@triton.jit
+def triton_fused_gelu(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)
+    x0 = tl.load(in_ptr0 + xindex)
+    tmp1 = 0.044715 * x0 * x0 * x0
+    tmp2 = x0 + tmp1
+    tmp3 = 0.7978845608 * tmp2
+    tmp4 = tl.math.tanh(tmp3)
+    tmp5 = 1.0 + tmp4
+    tmp6 = 0.5 * x0 * tmp5
+    tl.store(out_ptr0 + xindex, tmp6)
+&quot;&quot;&quot;
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-trace-the-compilation-pipeline-20-min">Exercise 1: Trace the Compilation Pipeline (20 min)</h3>
+<pre><code class="language-python">import torch
+from torch.fx import symbolic_trace
+
+class SimpleNet(torch.nn.Module):
+    def forward(self, x):
+        a = x * 2
+        b = a + 1
+        c = b * 3
+        d = c - a  # `a` is reused — CSE opportunity
+        return d
+
+net = SimpleNet()
+traced = symbolic_trace(net)
+
+# 1. Print the FX graph
+print(traced.graph)
+
+# 2. Count operations
+print(f&quot;Number of nodes: {len(list(traced.graph.nodes))}&quot;)
+
+# 3. Identify which optimizations could apply:
+#    - Constant folding?
+#    - Dead code elimination?
+#    - Common subexpression elimination?
+</code></pre>
+<h3 id="exercise-2-compare-eager-vs-compiled-20-min">Exercise 2: Compare Eager vs Compiled (20 min)</h3>
+<pre><code class="language-python">import torch
+import time
+
+def benchmark(fn, x, warmup=10, iters=100):
+    for _ in range(warmup):
+        fn(x)
+    torch.cuda.synchronize()
+    start = time.perf_counter()
+    for _ in range(iters):
+        fn(x)
+    torch.cuda.synchronize()
+    return (time.perf_counter() - start) / iters * 1000  # ms
+
+def chain_ops(x):
+    x = torch.relu(x)
+    x = x * 2.0
+    x = x + 1.0
+    x = torch.sigmoid(x)
+    return x
+
+x = torch.randn(4096, 4096, device='cuda')
+
+eager_ms = benchmark(chain_ops, x)
+compiled = torch.compile(chain_ops)
+compiled_ms = benchmark(compiled, x)
+
+print(f&quot;Eager:    {eager_ms:.3f} ms&quot;)
+print(f&quot;Compiled: {compiled_ms:.3f} ms&quot;)
+print(f&quot;Speedup:  {eager_ms / compiled_ms:.2f}x&quot;)
+</code></pre>
+<h3 id="exercise-3-map-the-llvm-analogy-15-min">Exercise 3: Map the LLVM Analogy (15 min)</h3>
+<p>Fill in this table — for each LLVM concept, identify the ML compiler equivalent:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">LLVM Concept</th>
+<th style="text-align: left;">ML Compiler Equivalent</th>
+<th style="text-align: left;">Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">C source code</td>
+<td style="text-align: left;">?</td>
+<td style="text-align: left;"><code>model.forward()</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Clang frontend</td>
+<td style="text-align: left;">?</td>
+<td style="text-align: left;">Dynamo / <code>jit.trace</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">LLVM IR</td>
+<td style="text-align: left;">?</td>
+<td style="text-align: left;">FX Graph / HLO</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>-O2</code> passes</td>
+<td style="text-align: left;">?</td>
+<td style="text-align: left;">Fusion, layout transform</td>
+</tr>
+<tr>
+<td style="text-align: left;">x86 backend</td>
+<td style="text-align: left;">?</td>
+<td style="text-align: left;">Inductor / Triton codegen</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Compilers are structured translators</strong> — the frontend/IR/backend split turns an $O(M \times N)$ problem into $O(M + N)$</li>
+<li><strong>ML compilers operate on tensor dataflow graphs</strong>, not scalar control flow — different IR, different optimizations</li>
+<li><strong>The hardware explosion</strong> makes hand-written kernels unsustainable — compilers are the scalability answer</li>
+<li><strong><code>torch.compile</code></strong> is a full compiler pipeline hiding behind a decorator: Dynamo → FX → Inductor → Triton → PTX</li>
+<li><strong>LLVM's architecture</strong> (SSA IR, pass pipeline, target-independent optimization) is the template every ML compiler follows</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Lattner, C. &amp; Adve, V. — <em>LLVM: A Compilation Framework for Lifelong Program Analysis and Transformation</em> (2004)</li>
+<li>Chen, T. et al. — <em>TVM: An Automated End-to-End Optimizing Compiler for Deep Learning</em> (OSDI 2018)</li>
+<li>Ansel, J. et al. — <em>OpenAI Triton: An Intermediate Language and Compiler for Tiled Neural Network Computations</em> (MAPL 2019)</li>
+<li>PyTorch docs — <a href="https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html">torch.compile tutorial</a></li>
+<li>LLVM docs — <a href="https://llvm.org/docs/LangRef.html">LLVM Language Reference Manual</a></li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p><strong>Day 16</strong> dives into the <strong>computation graph as IR</strong> — how neural networks become directed acyclic graphs, what different IR formats (ONNX, FX, Relay, StableHLO) look like in practice, and how to construct, inspect, and transform them. We'll dump real IR from PyTorch models and compare representations side by side.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="../week-02/day-14-stop-and-reflect-1.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 14: Stop & Reflect #1</a>
+            <a href="day-16-computation-graphs-ir.html" class="text-emerald-600 hover:text-emerald-800">Day 16: Computation Graphs as IR &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

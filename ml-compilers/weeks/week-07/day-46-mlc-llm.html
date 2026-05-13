@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 46: MLC-LLM - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 7: TVM Advanced & MLC</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-46-mlc-llm">Day 46: MLC-LLM</h1>
+<blockquote>
+<p><strong>Phase III · Week 7 · Day 46 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The real test of a compiler isn't how fast it makes things on one device — it's whether it can make them fast on every device."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-45-onnx-runtime-deep-dive.html">Day 45: ONNX Runtime Deep Dive</a></td>
+<td style="text-align: left;"><a href="day-47-contributing-to-tvm.html">Day 47: Contributing to TVM</a></td>
+<td style="text-align: left;"><a href="README.html">Week 7: TVM Advanced &amp; MLC</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Large language models are transforming software, but deploying them is a nightmare. A 7B-parameter model in FP16 needs 14 GB of memory — that won't fit on most phones, laptops, or edge devices. Even when it fits, naive inference is slow. <strong>MLC-LLM</strong> (Machine Learning Compilation for Large Language Models) solves this by applying TVM's compilation stack to LLMs: it takes a model like Llama, quantizes it, compiles it with Relax IR, auto-tunes kernels for the target device, and produces a self-contained deployment package. The result: Llama running on iPhones, Android phones, web browsers (via WebGPU), and every major GPU — all from a single compilation pipeline. MLC-LLM is the culmination of everything you've learned about TVM, demonstrating how IR design, scheduling, and auto-tuning combine for real-world impact.</p>
+<hr />
+<h2 id="1-the-llm-deployment-problem">1. The LLM Deployment Problem</h2>
+<h3 id="why-llms-are-hard-to-deploy">Why LLMs Are Hard to Deploy</h3>
+<pre><code>LLM Deployment Challenges
+══════════════════════════
+
+  Model Size vs Device Memory:
+  ┌────────────────────────────────────────────────┐
+  │ Model        │ Params │ FP16    │ INT4 (Q4)    │
+  ├────────────────────────────────────────────────┤
+  │ Llama-3-8B   │  8.0B  │ 16 GB  │  ~4.5 GB     │
+  │ Llama-3-70B  │ 70.0B  │ 140 GB │  ~38 GB      │
+  │ Mixtral-8x7B │ 46.7B  │  93 GB │  ~26 GB      │
+  │ Phi-3-mini   │  3.8B  │  7.6 GB│  ~2.2 GB     │
+  └────────────────────────────────────────────────┘
+
+  Target Devices:
+  ┌────────────────────────────────────────────────┐
+  │ Device          │ Memory  │ Compute           │
+  ├────────────────────────────────────────────────┤
+  │ NVIDIA A100     │  80 GB  │ CUDA, Tensor Cores│
+  │ Apple M2 Max    │  32 GB  │ Metal, ANE        │
+  │ iPhone 15 Pro   │   6 GB  │ Metal, ANE        │
+  │ Pixel 8         │   8 GB  │ OpenCL/Vulkan     │
+  │ Web Browser     │  ~4 GB  │ WebGPU            │
+  │ AMD RX 7900     │  24 GB  │ Vulkan/ROCm       │
+  └────────────────────────────────────────────────┘
+
+  Key bottleneck: LLM inference is MEMORY-BANDWIDTH bound
+  (decoding reads the entire model for each token generated)
+
+  Arithmetic Intensity ≈ 1 FLOP / 2 bytes (for autoregressive decoding)
+  → Must minimize memory footprint AND optimize memory access
+</code></pre>
+<h3 id="the-mlc-llm-solution">The MLC-LLM Solution</h3>
+<p>MLC-LLM combines three techniques:</p>
+<p>$$\text{MLC-LLM} = \underbrace{\text{Quantization}}_{\text{shrink model}} + \underbrace{\text{Compilation}}_{\text{optimize kernels}} + \underbrace{\text{Universal Runtime}}_{\text{run anywhere}}$$</p>
+<hr />
+<h2 id="2-mlc-llm-architecture">2. MLC-LLM Architecture</h2>
+<h3 id="end-to-end-pipeline">End-to-End Pipeline</h3>
+<pre><code>MLC-LLM Compilation Pipeline
+═════════════════════════════
+
+  Hugging Face Model (e.g., meta-llama/Llama-3-8B)
+         │
+    ┌────▼──────────────────┐
+    │  1. Model Import       │  Weight loading + architecture
+    │     (HF → Relax IR)   │  detection (Llama, GPT, Mistral...)
+    └────┬──────────────────┘
+         │
+    ┌────▼──────────────────┐
+    │  2. Quantization       │  Group quantization (q4f16_1, etc.)
+    │     (weights → INT4)  │  Dequantize fused into matmul
+    └────┬──────────────────┘
+         │
+    ┌────▼──────────────────┐
+    │  3. Relax Optimization │  Graph-level transforms:
+    │     • Attention fusion │  • KV cache management
+    │     • Flash attention  │  • Rotary embedding
+    │     • Operator fusion  │  • Prefill / decode split
+    └────┬──────────────────┘
+         │
+    ┌────▼──────────────────┐
+    │  4. TIR Scheduling     │  Low-level kernel optimization:
+    │     • Tiling            │  • Memory coalescing
+    │     • Vectorization     │  • Shared memory usage
+    │     • Auto-tuning       │  • Target-specific intrinsics
+    └────┬──────────────────┘
+         │
+    ┌────▼──────────────────┐
+    │  5. Code Generation    │  Target-specific output:
+    │     ├─ CUDA (.cu)      │
+    │     ├─ Metal (.metal)  │
+    │     ├─ Vulkan (.spv)   │
+    │     ├─ OpenCL (.cl)    │
+    │     └─ WebGPU (.wgsl)  │
+    └────┬──────────────────┘
+         │
+    ┌────▼──────────────────┐
+    │  6. Packaging           │  Self-contained deployment:
+    │     • Compiled library  │  • Model weights (quantized)
+    │     • Tokenizer         │  • Chat config
+    │     • Runtime           │
+    └────────────────────────┘
+</code></pre>
+<h3 id="key-architectural-decisions">Key Architectural Decisions</h3>
+<pre><code>Why Relax (not Relay) for LLMs
+══════════════════════════════
+
+  LLM Requirement          Relay           Relax
+  ─────────────────        ──────          ──────
+  Dynamic seq length       ✗ (Any hack)    ✓ (symbolic shapes)
+  KV cache mutation        ✗ (pure FP)     ✓ (effects outside dataflow)
+  Variable batch size      ✗ (recompile)   ✓ (symbolic &quot;batch&quot; dim)
+  PagedAttention           ✗ (can't)       ✓ (explicit memory mgmt)
+  Speculative decoding     ✗ (can't)       ✓ (control flow + effects)
+
+  Example: KV cache in Relax
+
+  @R.function
+  def prefill(input_ids: R.Tensor((&quot;batch&quot;, &quot;seq_len&quot;), &quot;int32&quot;),
+              kv_cache: R.Object):
+      # input_ids shape is symbolic — no recompilation needed
+      # kv_cache is an opaque object that can be mutated
+      ...
+</code></pre>
+<hr />
+<h2 id="3-quantization-for-deployment">3. Quantization for Deployment</h2>
+<h3 id="group-quantization">Group Quantization</h3>
+<p>MLC-LLM uses <strong>group quantization</strong> to compress model weights while maintaining accuracy:</p>
+<pre><code>Group Quantization (q4f16_1 — 4-bit weights, FP16 compute)
+══════════════════════════════════════════════════════════
+
+  Original FP16 weight row (1024 elements):
+  [0.23, -0.15, 0.87, -0.42, 0.11, ... ]  ← 2048 bytes
+
+  Group into blocks of 32 (group_size=32):
+  ┌──── Group 0 ────┐ ┌──── Group 1 ────┐
+  │ 32 FP16 values   │ │ 32 FP16 values   │ ...
+  └──────────────────┘ └──────────────────┘
+
+  Per group: compute scale and zero_point
+    scale = (max - min) / 15          (4-bit range: 0-15)
+    zero_point = round(-min / scale)
+
+  Quantize each value:
+    q_val = round(val / scale) + zero_point   ← 4-bit integer
+    q_val = clamp(q_val, 0, 15)
+
+  Storage: 32 × 4 bits = 16 bytes + 2 bytes (scale) + 2 bytes (zp)
+         = 20 bytes vs original 64 bytes ≈ 3.2× compression
+
+  Dequantize (fused into matmul at compute time):
+    val ≈ scale × (q_val - zero_point)
+</code></pre>
+<h3 id="quantization-modes-in-mlc-llm">Quantization Modes in MLC-LLM</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Mode</th>
+<th style="text-align: left;">Weight Bits</th>
+<th style="text-align: left;">Activation</th>
+<th style="text-align: left;">Group Size</th>
+<th style="text-align: left;">Compression</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>q0f16</code></td>
+<td style="text-align: left;">16 (no quant)</td>
+<td style="text-align: left;">FP16</td>
+<td style="text-align: left;">—</td>
+<td style="text-align: left;">1×</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>q0f32</code></td>
+<td style="text-align: left;">32 (no quant)</td>
+<td style="text-align: left;">FP32</td>
+<td style="text-align: left;">—</td>
+<td style="text-align: left;">0.5×</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>q4f16_1</code></td>
+<td style="text-align: left;">4</td>
+<td style="text-align: left;">FP16</td>
+<td style="text-align: left;">32</td>
+<td style="text-align: left;">~3.5×</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>q4f32_1</code></td>
+<td style="text-align: left;">4</td>
+<td style="text-align: left;">FP32</td>
+<td style="text-align: left;">32</td>
+<td style="text-align: left;">~3.5×</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>q4f16_0</code></td>
+<td style="text-align: left;">4</td>
+<td style="text-align: left;">FP16</td>
+<td style="text-align: left;">128</td>
+<td style="text-align: left;">~3.8×</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>q3f16_1</code></td>
+<td style="text-align: left;">3</td>
+<td style="text-align: left;">FP16</td>
+<td style="text-align: left;">32</td>
+<td style="text-align: left;">~4.5×</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>q8f16_1</code></td>
+<td style="text-align: left;">8</td>
+<td style="text-align: left;">FP16</td>
+<td style="text-align: left;">32</td>
+<td style="text-align: left;">~1.9×</td>
+</tr>
+</tbody>
+</table>
+<h3 id="fused-dequantize-matmul">Fused Dequantize-MatMul</h3>
+<p>The key optimization: <strong>dequantization is fused into the matrix multiplication kernel</strong>, avoiding materialization of full-precision weights:</p>
+<pre><code class="language-python"># Pseudocode: fused dequant-matmul TIR kernel
+
+@T.prim_func
+def fused_dequant_matmul(
+    x: T.Buffer((M, K), &quot;float16&quot;),         # activations
+    w_q: T.Buffer((N, K // 8), &quot;uint32&quot;),    # packed 4-bit weights
+    scales: T.Buffer((N, K // 32), &quot;float16&quot;), # per-group scales
+    output: T.Buffer((M, N), &quot;float16&quot;),     # result
+):
+    for i, j in T.grid(M, N):
+        acc = T.float16(0)
+        for k in range(K):
+            # Extract 4-bit weight from packed uint32
+            group_idx = k // 32
+            w_fp16 = dequantize(w_q[j, k // 8], k % 8, 
+                                scales[j, group_idx])
+            acc += x[i, k] * w_fp16
+        output[i, j] = acc
+
+# The compiler tiles, vectorizes, and uses shared memory
+# to make this efficient on each target
+</code></pre>
+<hr />
+<h2 id="4-universal-deployment">4. Universal Deployment</h2>
+<h3 id="webllm-llms-in-the-browser">WebLLM: LLMs in the Browser</h3>
+<p><strong>WebLLM</strong> runs compiled LLMs directly in the browser via WebGPU:</p>
+<pre><code>WebLLM Architecture
+═══════════════════
+
+  Browser (Chrome/Edge/Firefox with WebGPU)
+  ┌────────────────────────────────────────┐
+  │  JavaScript Application                │
+  │  ┌──────────────────────────────────┐  │
+  │  │  WebLLM Engine                    │  │
+  │  │  • Tokenizer (in JS/WASM)        │  │
+  │  │  • Chat template handler         │  │
+  │  │  • Streaming response manager    │  │
+  │  └──────────┬───────────────────────┘  │
+  │             │                          │
+  │  ┌──────────▼───────────────────────┐  │
+  │  │  TVM Web Runtime                  │  │
+  │  │  • WASM for control logic         │  │
+  │  │  • WebGPU for compute kernels     │  │
+  │  │  • Cached model weights (IndexDB) │  │
+  │  └──────────────────────────────────┘  │
+  └────────────────────────────────────────┘
+
+  First load: downloads ~2-4 GB (quantized weights)
+  Subsequent: loads from IndexedDB cache
+  Inference: GPU-accelerated via WebGPU shaders
+</code></pre>
+<pre><code class="language-javascript">// WebLLM usage in JavaScript
+import * as webllm from &quot;@mlc-ai/web-llm&quot;;
+
+const engine = new webllm.MLCEngine();
+await engine.reload(&quot;Llama-3-8B-Instruct-q4f16_1-MLC&quot;);
+
+const reply = await engine.chat.completions.create({
+    messages: [
+        { role: &quot;system&quot;, content: &quot;You are a helpful assistant.&quot; },
+        { role: &quot;user&quot;, content: &quot;What is machine learning compilation?&quot; },
+    ],
+    temperature: 0.7,
+    max_tokens: 256,
+    stream: true,  // Streaming token generation
+});
+
+for await (const chunk of reply) {
+    process.stdout.write(chunk.choices[0]?.delta?.content || &quot;&quot;);
+}
+</code></pre>
+<h3 id="mobile-deployment-ios-android">Mobile Deployment (iOS / Android)</h3>
+<pre><code>MLC-LLM on Mobile
+══════════════════
+
+  iOS (Swift)                    Android (Kotlin)
+  ┌────────────────┐             ┌────────────────┐
+  │ MLCSwift       │             │ MLCAndroid      │
+  │ Framework      │             │ Library         │
+  │                │             │                 │
+  │ Metal kernels  │             │ Vulkan/OpenCL   │
+  │ (compiled .lib)│             │ kernels (.so)   │
+  │                │             │                 │
+  │ Quantized      │             │ Quantized       │
+  │ weights (4-bit)│             │ weights (4-bit) │
+  │ ~2-4 GB        │             │ ~2-4 GB         │
+  └────────────────┘             └────────────────┘
+
+  Performance (Llama-3-8B-q4f16_1):
+  ┌────────────────────────────────────────┐
+  │ Device           │ Prefill │ Decode   │
+  ├────────────────────────────────────────┤
+  │ iPhone 15 Pro    │ ~35 t/s │ ~15 t/s  │
+  │ Pixel 8 Pro      │ ~25 t/s │ ~10 t/s  │
+  │ M2 MacBook Air   │ ~80 t/s │ ~35 t/s  │
+  │ RTX 4090         │ ~250 t/s│ ~90 t/s  │
+  │ Chrome (WebGPU)  │ ~20 t/s │ ~8 t/s   │
+  └────────────────────────────────────────┘
+  (Approximate; varies by prompt length and device load)
+</code></pre>
+<hr />
+<h2 id="5-compilation-deep-dive">5. Compilation Deep Dive</h2>
+<h3 id="attention-kernel-optimization">Attention Kernel Optimization</h3>
+<p>MLC-LLM compiles optimized attention kernels for each backend. The TIR representation enables target-specific tuning:</p>
+<pre><code>FlashAttention via TVM Compilation
+══════════════════════════════════
+
+  Standard Attention:
+    S = Q · Kᵀ / √d_k           ← O(n²d) memory for S
+    P = softmax(S)               ← O(n²) memory for P
+    O = P · V                    ← O(n²d) total
+
+  Flash Attention (tiled, online softmax):
+    for each Q tile (block_q):
+      for each K,V tile (block_kv):
+        S_tile = Q_tile · K_tileᵀ / √d_k
+        m_new = max(m_old, rowmax(S_tile))
+        P_tile = exp(S_tile - m_new)
+        l_new = exp(m_old - m_new) * l_old + rowsum(P_tile)
+        O = diag(exp(m_old - m_new)) * O_old + P_tile · V_tile
+      O = diag(1/l_new) * O
+
+  Memory: O(n) instead of O(n²)
+
+  TVM advantage: the SAME algorithm compiles to:
+  ┌─────────────────────────────────────────┐
+  │ Target   │ Implementation              │
+  ├─────────────────────────────────────────┤
+  │ CUDA     │ Shared mem tiles, warp ops   │
+  │ Metal    │ Threadgroup mem, SIMD groups │
+  │ Vulkan   │ Workgroup shared memory      │
+  │ WebGPU   │ Workgroup variables          │
+  └─────────────────────────────────────────┘
+</code></pre>
+<h3 id="prefill-vs-decode-kernels">Prefill vs Decode Kernels</h3>
+<p>MLC-LLM generates different kernels for the two phases:</p>
+<pre><code>Prefill (process prompt):           Decode (generate tokens):
+  • Batch matmul: [1, S, D] × [D, D]   • Single-token: [1, 1, D] × [D, D]
+  • Compute-bound (high arithmetic     • Memory-bound (low arithmetic
+    intensity, S can be large)            intensity, reads entire KV cache)
+  • Use large tiles, maximize FLOPs     • Optimize for memory bandwidth
+  • Parallelize across sequence         • Parallelize across batch
+
+  ┌──────────────────────┐     ┌──────────────────────┐
+  │  Prefill Kernel       │     │  Decode Kernel        │
+  │  ┌─────────────────┐ │     │  ┌─────────────────┐ │
+  │  │ Large tiles      │ │     │  │ Small tiles      │ │
+  │  │ (128×128)        │ │     │  │ (1×128)          │ │
+  │  │ Compute-heavy    │ │     │  │ Memory-access    │ │
+  │  │ loop body        │ │     │  │ optimized        │ │
+  │  └─────────────────┘ │     │  └─────────────────┘ │
+  └──────────────────────┘     └──────────────────────┘
+</code></pre>
+<hr />
+<h2 id="6-hands-on-exercises">6. Hands-On Exercises</h2>
+<h3 id="exercise-1-compile-a-model-with-mlc-llm-40-min">Exercise 1: Compile a Model with MLC-LLM (40 min)</h3>
+<pre><code class="language-bash"># Install MLC-LLM
+pip install mlc-llm mlc-ai-nightly
+
+# Option 1: Use pre-compiled model (quick start)
+mlc_llm chat HF://mlc-ai/Llama-3-8B-Instruct-q4f16_1-MLC
+
+# Option 2: Compile from Hugging Face (full pipeline)
+# Step 1: Convert model weights
+mlc_llm convert_weight \
+    --model-type llama \
+    --quantization q4f16_1 \
+    --source &quot;meta-llama/Llama-3-8B-Instruct&quot; \
+    --output ./dist/Llama-3-8B-q4f16_1/
+
+# Step 2: Generate model config
+mlc_llm gen_config \
+    --model-type llama \
+    --quantization q4f16_1 \
+    --source &quot;meta-llama/Llama-3-8B-Instruct&quot; \
+    --output ./dist/Llama-3-8B-q4f16_1/
+
+# Step 3: Compile model library for target
+mlc_llm compile \
+    --model ./dist/Llama-3-8B-q4f16_1/ \
+    --quantization q4f16_1 \
+    --target cuda \           # or: metal, vulkan, webgpu
+    --output ./dist/libs/Llama-3-8B-q4f16_1-cuda.so
+</code></pre>
+<h3 id="exercise-2-mlc-llm-python-api-20-min">Exercise 2: MLC-LLM Python API (20 min)</h3>
+<pre><code class="language-python">from mlc_llm import MLCEngine
+
+# Create engine with compiled model
+engine = MLCEngine(
+    model=&quot;./dist/Llama-3-8B-q4f16_1/&quot;,
+    model_lib=&quot;./dist/libs/Llama-3-8B-q4f16_1-cuda.so&quot;,
+)
+
+# OpenAI-compatible API
+response = engine.chat.completions.create(
+    messages=[
+        {&quot;role&quot;: &quot;system&quot;, &quot;content&quot;: &quot;You are a compiler expert.&quot;},
+        {&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Explain operator fusion in 3 sentences.&quot;},
+    ],
+    temperature=0.7,
+    max_tokens=128,
+)
+print(response.choices[0].message.content)
+
+# Streaming
+for chunk in engine.chat.completions.create(
+    messages=[{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;What is TVM?&quot;}],
+    stream=True,
+):
+    content = chunk.choices[0].delta.content
+    if content:
+        print(content, end=&quot;&quot;, flush=True)
+
+# Benchmark
+import time
+prompt = &quot;Explain the transformer architecture step by step.&quot;
+t0 = time.perf_counter()
+resp = engine.chat.completions.create(
+    messages=[{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: prompt}],
+    max_tokens=256,
+)
+elapsed = time.perf_counter() - t0
+n_tokens = resp.usage.completion_tokens
+print(f&quot;\n\nTokens: {n_tokens}, Time: {elapsed:.2f}s&quot;)
+print(f&quot;Throughput: {n_tokens/elapsed:.1f} tokens/sec&quot;)
+</code></pre>
+<h3 id="exercise-3-inspect-the-compiled-ir-20-min">Exercise 3: Inspect the Compiled IR (20 min)</h3>
+<pre><code class="language-python"># Examine what MLC-LLM produces at the Relax level
+import tvm
+from tvm import relax
+
+# Load the compiled library
+lib = tvm.runtime.load_module(&quot;./dist/libs/Llama-3-8B-q4f16_1-cuda.so&quot;)
+
+# If you have the pre-compilation Relax IR:
+# (saved during mlc_llm compile with --debug-dump)
+# mod = tvm.ir.load_json(open(&quot;model_relax.json&quot;).read())
+
+# Key things to look for:
+# 1. Fused functions: prefill_fused_* and decode_fused_*
+# 2. Quantized matmul: fused_dequantize_matmul
+# 3. Attention: fused_attention_kv_cache_*
+# 4. Symbolic shapes: R.Tensor((&quot;batch&quot;, &quot;seq_len&quot;, 4096), &quot;float16&quot;)
+
+# Compare model sizes
+import os
+original_size_gb = 8e9 * 2 / 1e9  # 8B params × 2 bytes (FP16)
+quant_size_gb = os.path.getsize(
+    &quot;./dist/Llama-3-8B-q4f16_1/params_shard_0.bin&quot;
+) / 1e9
+print(f&quot;Original (FP16): ~{original_size_gb:.1f} GB&quot;)
+print(f&quot;Quantized (Q4):  ~{quant_size_gb:.1f} GB&quot;)
+print(f&quot;Compression:     ~{original_size_gb/quant_size_gb:.1f}×&quot;)
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>MLC-LLM</strong> applies TVM's full compilation stack (Relax IR, TIR scheduling, auto-tuning) to make LLMs run on any hardware — from NVIDIA GPUs to web browsers</li>
+<li><strong>Group quantization</strong> (e.g., q4f16_1) compresses 16-bit weights to 4 bits with per-group scale factors, achieving ~3.5× compression with minimal accuracy loss</li>
+<li><strong>Fused dequantize-matmul</strong> is the critical kernel — dequantization happens inside the matmul loop, never materializing full-precision weights in memory</li>
+<li><strong>Relax IR</strong> (not Relay) is essential for LLMs because it supports symbolic shapes, mutable KV caches, and the prefill/decode split natively</li>
+<li><strong>WebLLM</strong> demonstrates universal deployment — the same compilation pipeline targets CUDA, Metal, Vulkan, and WebGPU, enabling LLMs to run entirely in-browser</li>
+<li><strong>Prefill vs decode</strong> require different kernel strategies: prefill is compute-bound (large matrix ops), decode is memory-bound (single-token with full KV cache reads)</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://llm.mlc.ai/docs/">MLC-LLM Documentation</a> — official guide</li>
+<li><a href="https://webllm.mlc.ai/">WebLLM Project</a> — browser-based LLM demo</li>
+<li><a href="https://mlc.ai/">Machine Learning Compilation (MLC) Course</a> — full course by Tianqi Chen</li>
+<li><a href="https://github.com/mlc-ai/mlc-llm">MLC-LLM GitHub</a> — source code</li>
+<li><a href="https://blog.mlc.ai/2023/05/01/bringing-hardware-accelerated-language-models-to-consumer-devices">Universal LLM Deployment (blog)</a> — design rationale</li>
+<li><a href="https://www.w3.org/TR/webgpu/">WebGPU Standard</a> — the API enabling browser deployment</li>
+</ul>
+<hr />
+<h2 id="tomorrow-contributing-to-tvm">Tomorrow: Contributing to TVM</h2>
+<p>Day 47 shifts from using TVM to <strong>contributing to it</strong>. You'll learn TVM's development workflow, how to navigate the codebase, write a simple pass, and submit a pull request. Open-source contribution is how you solidify your understanding and join the community.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-45-onnx-runtime-deep-dive.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 45: ONNX Runtime Deep Dive</a>
+            <a href="day-47-contributing-to-tvm.html" class="text-emerald-600 hover:text-emerald-800">Day 47: Contributing to Apache TVM &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

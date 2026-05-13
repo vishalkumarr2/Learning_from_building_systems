@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 31: Relay Optimization Passes - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 5: TVM Foundations</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-31-relay-optimization-passes">Day 31: Relay Optimization Passes</h1>
+<blockquote>
+<p><strong>Phase III · Week 5 · Day 31 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"A compiler pass is a function from IR to IR. Stack enough good passes in the right order, and your naive specification becomes production-quality code."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-30-relay-ir.html">Day 30: Relay IR</a></td>
+<td style="text-align: left;"><a href="day-32-tensor-expression-te.html">Day 32: Tensor Expression (TE)</a></td>
+<td style="text-align: left;"><a href="README.html">Week 5: TVM Foundations</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>A model imported into Relay is correct but unoptimized — every conv, batch norm, relu, and add is a separate operation with its own memory allocation and kernel launch. <strong>Relay optimization passes</strong> transform this naive IR into efficient code by fusing operations, folding constants, simplifying batch normalization, and rearranging data layouts. These passes are what make TVM competitive with hand-optimized libraries like cuDNN. Today you'll learn TVM's pass infrastructure, study the most important built-in passes, and write your own custom passes.</p>
+<hr />
+<h2 id="1-the-pass-infrastructure">1. The Pass Infrastructure</h2>
+<h3 id="pass-types">Pass Types</h3>
+<p>TVM organizes passes into three categories by scope:</p>
+<pre><code>┌─────────────────────────────────────────────────────────┐
+│  ModulePass                                             │
+│  • Operates on the entire IRModule                      │
+│  • Can add/remove/modify global functions               │
+│  • Example: InlinePrimitives, LambdaLift                │
+│                                                         │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  FunctionPass                                     │  │
+│  │  • Operates on each function independently        │  │
+│  │  • Most common type                               │  │
+│  │  • Example: FuseOps, FoldConstant, InferType      │  │
+│  │                                                   │  │
+│  │  ┌─────────────────────────────────────────────┐  │  │
+│  │  │  Sequential Pass                            │  │  │
+│  │  │  • Chains multiple passes in order          │  │  │
+│  │  │  • Groups related transformations           │  │  │
+│  │  └─────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="passcontext">PassContext</h3>
+<p>Every pass runs inside a <code>PassContext</code> that controls optimization levels and configuration:</p>
+<pre><code class="language-python">import tvm
+from tvm import relay
+
+# opt_level controls which passes run
+# 0: minimal (type inference only)
+# 1: basic optimizations (fold constant, eliminate dead code)
+# 2: more aggressive (fusion, layout transform)
+# 3: all optimizations (everything)
+# 4: experimental (may not be stable)
+
+with tvm.transform.PassContext(opt_level=3):
+    lib = relay.build(mod, target=&quot;llvm&quot;)
+
+# Fine-grained control
+with tvm.transform.PassContext(
+    opt_level=3,
+    config={
+        &quot;relay.FuseOps.max_depth&quot;: 5,           # fusion depth limit
+        &quot;relay.backend.use_auto_scheduler&quot;: True, # use Ansor
+    },
+    disabled_pass=[&quot;AlterOpLayout&quot;],             # skip specific passes
+):
+    lib = relay.build(mod, target=&quot;llvm&quot;)
+</code></pre>
+<h3 id="running-passes-manually">Running Passes Manually</h3>
+<pre><code class="language-python"># Apply a single pass
+mod = relay.transform.InferType()(mod)
+mod = relay.transform.FoldConstant()(mod)
+mod = relay.transform.FuseOps(fuse_opt_level=2)(mod)
+
+# Chain passes with Sequential
+seq = tvm.transform.Sequential([
+    relay.transform.InferType(),
+    relay.transform.SimplifyInference(),
+    relay.transform.FoldConstant(),
+    relay.transform.FuseOps(fuse_opt_level=2),
+])
+
+with tvm.transform.PassContext(opt_level=3):
+    mod_optimized = seq(mod)
+</code></pre>
+<hr />
+<h2 id="2-fuseops-operator-fusion">2. FuseOps — Operator Fusion</h2>
+<p><strong>FuseOps</strong> is the most impactful Relay pass. It merges sequences of operators into single fused functions, eliminating intermediate memory allocations and kernel launches.</p>
+<h3 id="fusion-rules">Fusion Rules</h3>
+<p>TVM classifies operators into categories for fusion:</p>
+<pre><code>Category 0: kElemWise     — element-wise (relu, sigmoid, add, multiply)
+Category 1: kBroadcast    — broadcasting (add with broadcast, expand)
+Category 2: kInjective    — shape-preserving (reshape, transpose, cast)
+Category 3: kCommReduce   — reduction (sum, mean, max along axes)
+Category 4: kOutEWiseFusable — complex but fusable output (conv2d, matmul)
+Category 7: kOpaque       — cannot be fused (custom ops, side effects)
+</code></pre>
+<h3 id="fusion-strategy">Fusion Strategy</h3>
+<pre><code>Rule 1: ElemWise + ElemWise → FUSE
+  relu(sigmoid(x))  →  fused_relu_sigmoid(x)
+
+Rule 2: OutEWiseFusable + ElemWise → FUSE  
+  relu(conv2d(x, w))  →  fused_conv2d_relu(x, w)
+
+Rule 3: Injective + Injective → FUSE
+  transpose(reshape(x))  →  fused_reshape_transpose(x)
+
+Rule 4: Reduction + ElemWise → FUSE
+  relu(reduce_sum(x))  →  fused_reduce_relu(x)
+
+Rule 5: OutEWiseFusable + OutEWiseFusable → NO FUSE
+  matmul(conv2d(x, w), v)  →  kept separate (each too complex)
+</code></pre>
+<h3 id="fusion-in-action">Fusion in Action</h3>
+<pre><code class="language-python">import tvm
+from tvm import relay
+import numpy as np
+
+# Build: Conv → BatchNorm → ReLU → Add (residual)
+x = relay.var(&quot;x&quot;, shape=(1, 64, 56, 56), dtype=&quot;float32&quot;)
+w = relay.var(&quot;w&quot;, shape=(64, 64, 3, 3), dtype=&quot;float32&quot;)
+
+conv = relay.nn.conv2d(x, w, padding=(1, 1))
+bn = relay.nn.batch_norm(conv,
+    relay.var(&quot;gamma&quot;, shape=(64,)),
+    relay.var(&quot;beta&quot;, shape=(64,)),
+    relay.var(&quot;mean&quot;, shape=(64,)),
+    relay.var(&quot;var&quot;, shape=(64,)),
+)
+relu = relay.nn.relu(bn[0])  # batch_norm returns tuple
+out = relay.add(relu, x)      # residual connection
+
+func = relay.Function(relay.analysis.free_vars(out), out)
+mod = tvm.IRModule.from_expr(func)
+mod = relay.transform.InferType()(mod)
+
+print(&quot;=== Before Fusion ===&quot;)
+print(mod[&quot;main&quot;])
+
+# Apply SimplifyInference (fold BN) then FuseOps
+mod = relay.transform.SimplifyInference()(mod)
+mod = relay.transform.InferType()(mod)
+mod = relay.transform.FuseOps(fuse_opt_level=2)(mod)
+
+print(&quot;\n=== After Fusion ===&quot;)
+print(mod[&quot;main&quot;])
+</code></pre>
+<p>Before fusion:</p>
+<pre><code>%0 = nn.conv2d(%x, %w, padding=[1, 1, 1, 1])
+%1 = nn.batch_norm(%0, %gamma, %beta, %mean, %var)
+%2 = %1.0
+%3 = nn.relu(%2)
+%4 = add(%3, %x)
+</code></pre>
+<p>After SimplifyInference + FuseOps:</p>
+<pre><code>%0 = fn(%p0, %p1, ...) {        ← fused function
+  %1 = nn.conv2d(%p0, %p1, ...)
+  %2 = multiply(%1, %scale)      ← BN folded into multiply+add
+  %3 = add(%2, %bias)
+  nn.relu(%3)
+}
+%4 = %0(%x, %w, %scale, %bias)
+%5 = add(%4, %x)                 ← residual add stays separate
+</code></pre>
+<h3 id="memory-impact">Memory Impact</h3>
+<pre><code>Before fusion (5 ops, 4 intermediate tensors):
+  Reads:  5 × 64×56×56×4 bytes = 40.1 MB total memory traffic
+  Writes: 4 × 64×56×56×4 bytes = 32.1 MB
+  Kernel launches: 5
+
+After fusion (2 ops, 1 intermediate tensor):
+  Reads:  2 × 64×56×56×4 bytes = 16.0 MB
+  Writes: 1 × 64×56×56×4 bytes =  8.0 MB
+  Kernel launches: 2
+
+  Memory traffic reduction: ~3.6×
+</code></pre>
+<hr />
+<h2 id="3-foldconstant-constant-folding">3. FoldConstant — Constant Folding</h2>
+<p><strong>FoldConstant</strong> evaluates expressions whose inputs are all constants at compile time.</p>
+<pre><code class="language-python"># Before FoldConstant:
+%0 = add(relay.const(1.0), relay.const(2.0))   # constant expression
+%1 = multiply(%input, %0)
+
+# After FoldConstant:
+%0 = multiply(%input, relay.const(3.0))         # pre-computed!
+</code></pre>
+<h3 id="where-constant-folding-helps">Where Constant Folding Helps</h3>
+<pre><code class="language-python"># Shape computations
+shape = relay.shape_of(relay.const(np.zeros((1, 3, 224, 224))))
+# → relay.const([1, 3, 224, 224])
+
+# BatchNorm parameter computation (after SimplifyInference)
+# scale = gamma / sqrt(var + eps)  ← all constants
+# → pre-computed as a single const tensor
+
+# Quantization scale factors
+# scale = (max_val - min_val) / 255.0  ← all constants
+</code></pre>
+<pre><code class="language-python">mod = relay.transform.FoldConstant()(mod)
+</code></pre>
+<hr />
+<h2 id="4-simplifyinference-batch-normalization-folding">4. SimplifyInference — Batch Normalization Folding</h2>
+<p><strong>SimplifyInference</strong> eliminates inference-only operations. The biggest win: <strong>folding BatchNorm into the preceding Conv2d</strong>.</p>
+<h3 id="the-math">The Math</h3>
+<p>During training, BatchNorm computes:</p>
+<p>$$y = \gamma \cdot \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta$$</p>
+<p>At inference, $\mu$ and $\sigma^2$ are fixed. We can precompute:</p>
+<p>$$\text{scale} = \frac{\gamma}{\sqrt{\sigma^2 + \epsilon}}, \quad \text{bias} = \beta - \mu \cdot \text{scale}$$</p>
+<p>And fold into the convolution:</p>
+<p>$$W_{\text{new}} = W \cdot \text{scale}, \quad b_{\text{new}} = b \cdot \text{scale} + \text{bias}$$</p>
+<h3 id="before-vs-after">Before vs After</h3>
+<pre><code>Before SimplifyInference:
+  %0 = nn.conv2d(%x, %w)               ← conv kernel
+  %1 = nn.batch_norm(%0, γ, β, μ, σ²)  ← BN with 5 params
+  %2 = nn.relu(%1.0)
+
+After SimplifyInference:
+  %0 = nn.conv2d(%x, %w)               ← same conv
+  %1 = multiply(%0, %scale)            ← scale = γ/√(σ²+ε)
+  %2 = add(%1, %bias)                  ← bias = β - μ·scale
+  %3 = nn.relu(%2)
+
+  Then FoldConstant folds scale/bias into the conv weights!
+</code></pre>
+<p>Result: <strong>BatchNorm is completely eliminated</strong> — zero runtime cost.</p>
+<hr />
+<h2 id="5-alteroplayout-data-layout-optimization">5. AlterOpLayout — Data Layout Optimization</h2>
+<p><strong>AlterOpLayout</strong> changes the memory layout of tensors to match hardware preferences.</p>
+<h3 id="layout-notation">Layout Notation</h3>
+<pre><code>NCHW:    standard PyTorch layout    (batch, channels, height, width)
+NHWC:    standard TF layout         (batch, height, width, channels)
+NCHW8c:  packed layout for AVX2     (batch, channels/8, height, width, 8)
+NCHW16c: packed layout for AVX-512  (batch, channels/16, height, width, 16)
+</code></pre>
+<h3 id="why-layout-matters">Why Layout Matters</h3>
+<pre><code>NCHW memory layout (Channel-first):
+┌─────────────────────────────┐
+│ C0: [h0w0 h0w1 h0w2 ...]   │  ← all pixels of channel 0
+│ C1: [h0w0 h0w1 h0w2 ...]   │  ← all pixels of channel 1
+│ ...                         │
+└─────────────────────────────┘
+
+NCHW8c packed layout:
+┌─────────────────────────────────────────┐
+│ C0-7:  [c0h0w0 c1h0w0 ... c7h0w0       │  ← 8 channels at same spatial pos
+│         c0h0w1 c1h0w1 ... c7h0w1 ...]   │  ← next spatial position
+└─────────────────────────────────────────┘
+
+The packed layout enables SIMD: AVX2 processes 8 float32 values at once,
+and with NCHW8c, those 8 values are 8 channels at the same (h,w) position
+— exactly what a conv2d inner loop needs.
+</code></pre>
+<pre><code class="language-python"># AlterOpLayout automatically picks the best layout for the target
+target = tvm.target.Target(&quot;llvm -mcpu=skylake&quot;)  # has AVX2
+with tvm.transform.PassContext(opt_level=3):
+    # AlterOpLayout will convert NCHW → NCHW8c for conv2d ops
+    mod_optimized = relay.transform.AlterOpLayout()(mod)
+</code></pre>
+<hr />
+<h2 id="6-writing-custom-relay-passes">6. Writing Custom Relay Passes</h2>
+<h3 id="using-the-decorator-api">Using the Decorator API</h3>
+<pre><code class="language-python">@relay.transform.function_pass(opt_level=1)
+class ReluReplacer:
+    &quot;&quot;&quot;Replace nn.relu with clip(0, inf) — a custom pass example.&quot;&quot;&quot;
+
+    def transform_function(self, func, mod, ctx):
+        class Replacer(relay.ExprMutator):
+            def visit_call(self, call):
+                call = super().visit_call(call)
+                if isinstance(call.op, tvm.ir.Op) and call.op.name == &quot;nn.relu&quot;:
+                    # relu(x) = clip(x, a_min=0, a_max=inf)
+                    return relay.clip(call.args[0], a_min=0.0, a_max=float(&quot;inf&quot;))
+                return call
+
+        return Replacer().visit(func)
+
+# Use it
+mod_transformed = ReluReplacer()(mod)
+</code></pre>
+<h3 id="a-more-practical-pass-dead-code-elimination">A More Practical Pass: Dead Code Elimination</h3>
+<pre><code class="language-python">@relay.transform.function_pass(opt_level=1)
+class CountAndReport:
+    &quot;&quot;&quot;Report statistics about each function (analysis pass).&quot;&quot;&quot;
+
+    def transform_function(self, func, mod, ctx):
+        op_counts = {}
+
+        def count(node):
+            if isinstance(node, relay.Call) and isinstance(node.op, tvm.ir.Op):
+                name = node.op.name
+                op_counts[name] = op_counts.get(name, 0) + 1
+
+        relay.analysis.post_order_visit(func, count)
+
+        total = sum(op_counts.values())
+        print(f&quot;  Function has {total} ops: {dict(op_counts)}&quot;)
+
+        return func  # analysis only — return unchanged
+
+# Chain with other passes
+pipeline = tvm.transform.Sequential([
+    relay.transform.InferType(),
+    CountAndReport(),                    # ← our custom pass
+    relay.transform.SimplifyInference(),
+    CountAndReport(),                    # ← see the difference
+    relay.transform.FuseOps(),
+    CountAndReport(),                    # ← after fusion
+])
+</code></pre>
+<h3 id="registering-as-a-named-pass">Registering as a Named Pass</h3>
+<pre><code class="language-python">@tvm.ir.transform.module_pass(opt_level=2, name=&quot;MyCustomPass&quot;)
+class MyCustomPass:
+    def transform_module(self, mod, ctx):
+        for gvar, func in mod.functions.items():
+            if isinstance(func, relay.Function):
+                # Transform each function
+                new_func = self._optimize(func)
+                mod.update_func(gvar, new_func)
+        return mod
+
+    def _optimize(self, func):
+        # Your transformation logic
+        return func
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-observe-pass-by-pass-transformation">Exercise 1: Observe Pass-by-Pass Transformation</h3>
+<pre><code class="language-python">import tvm
+from tvm import relay
+import onnx
+
+onnx_model = onnx.load(&quot;resnet18.onnx&quot;)
+mod, params = relay.frontend.from_onnx(onnx_model, {&quot;input&quot;: (1, 3, 224, 224)})
+
+passes = [
+    (&quot;InferType&quot;,           relay.transform.InferType()),
+    (&quot;SimplifyInference&quot;,   relay.transform.SimplifyInference()),
+    (&quot;FoldConstant&quot;,        relay.transform.FoldConstant()),
+    (&quot;EliminateCommonSubexpr&quot;, relay.transform.EliminateCommonSubexpr()),
+    (&quot;FuseOps&quot;,             relay.transform.FuseOps(fuse_opt_level=2)),
+]
+
+def count_ops(mod):
+    ops = {}
+    def visit(node):
+        if isinstance(node, relay.Call) and isinstance(node.op, tvm.ir.Op):
+            ops[node.op.name] = ops.get(node.op.name, 0) + 1
+    relay.analysis.post_order_visit(mod[&quot;main&quot;], visit)
+    return sum(ops.values()), ops
+
+for name, p in passes:
+    before_count, _ = count_ops(mod)
+    mod = p(mod)
+    after_count, after_ops = count_ops(mod)
+    delta = after_count - before_count
+    sign = &quot;+&quot; if delta &gt;= 0 else &quot;&quot;
+    print(f&quot;  {name:30s} {before_count:3d} → {after_count:3d} ops ({sign}{delta})&quot;)
+</code></pre>
+<h3 id="exercise-2-write-a-fusion-analysis-pass">Exercise 2: Write a Fusion Analysis Pass</h3>
+<pre><code class="language-python">@relay.transform.function_pass(opt_level=0)
+class FusionAnalyzer:
+    &quot;&quot;&quot;Identify fusable chains before FuseOps runs.&quot;&quot;&quot;
+
+    def transform_function(self, func, mod, ctx):
+        chains = []
+        current_chain = []
+
+        def categorize(op_name):
+            elemwise = {&quot;nn.relu&quot;, &quot;sigmoid&quot;, &quot;tanh&quot;, &quot;add&quot;, &quot;multiply&quot;, &quot;subtract&quot;}
+            injective = {&quot;reshape&quot;, &quot;transpose&quot;, &quot;expand_dims&quot;, &quot;squeeze&quot;}
+            compute = {&quot;nn.conv2d&quot;, &quot;nn.dense&quot;, &quot;nn.batch_matmul&quot;}
+            if op_name in elemwise: return &quot;elemwise&quot;
+            if op_name in injective: return &quot;injective&quot;
+            if op_name in compute: return &quot;compute&quot;
+            return &quot;opaque&quot;
+
+        def visit(node):
+            if isinstance(node, relay.Call) and isinstance(node.op, tvm.ir.Op):
+                cat = categorize(node.op.name)
+                current_chain.append((node.op.name, cat))
+
+        relay.analysis.post_order_visit(func, visit)
+
+        # Print fusable sequences
+        print(&quot;  Potential fusion chains:&quot;)
+        for i, (name, cat) in enumerate(current_chain):
+            print(f&quot;    [{i:2d}] {name:30s} ({cat})&quot;)
+
+        return func  # analysis only
+
+# Run before FuseOps to predict what will be fused
+FusionAnalyzer()(mod)
+</code></pre>
+<h3 id="exercise-3-benchmark-simplifyinference-impact">Exercise 3: Benchmark SimplifyInference Impact</h3>
+<pre><code class="language-python">import timeit
+
+target = tvm.target.Target(&quot;llvm -mcpu=native&quot;)
+
+# Compile WITHOUT SimplifyInference
+mod_raw, params = relay.frontend.from_onnx(onnx_model, {&quot;input&quot;: (1, 3, 224, 224)})
+with tvm.transform.PassContext(opt_level=3, disabled_pass=[&quot;SimplifyInference&quot;]):
+    lib_no_bn_fold = relay.build(mod_raw, target=target, params=params)
+
+# Compile WITH SimplifyInference (default at opt_level=3)
+mod_raw2, params2 = relay.frontend.from_onnx(onnx_model, {&quot;input&quot;: (1, 3, 224, 224)})
+with tvm.transform.PassContext(opt_level=3):
+    lib_bn_fold = relay.build(mod_raw2, target=target, params=params2)
+
+# Benchmark both
+input_data = np.random.randn(1, 3, 224, 224).astype(&quot;float32&quot;)
+
+for name, lib in [(&quot;No BN fold&quot;, lib_no_bn_fold), (&quot;With BN fold&quot;, lib_bn_fold)]:
+    from tvm.contrib import graph_executor
+    dev = tvm.cpu(0)
+    ex = graph_executor.GraphModule(lib[&quot;default&quot;](dev))
+    ex.set_input(&quot;input&quot;, tvm.nd.array(input_data))
+
+    def run():
+        ex.run()
+
+    for _ in range(20): run()  # warmup
+    t = timeit.timeit(run, number=100) / 100
+    print(f&quot;  {name:15s}: {t*1000:.2f} ms&quot;)
+
+# Expected: BN folding gives ~5-15% speedup on CPU
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Pass infrastructure</strong> organizes transforms into ModulePass, FunctionPass, and Sequential — with <code>PassContext</code> controlling what runs at each <code>opt_level</code></li>
+<li><strong>FuseOps</strong> is the highest-impact pass — merging element-wise and injective ops into compute ops reduces memory traffic by 2–4× and kernel launches proportionally</li>
+<li><strong>SimplifyInference</strong> eliminates BatchNorm at zero runtime cost by folding $\gamma/\sqrt{\sigma^2+\epsilon}$ into convolution weights</li>
+<li><strong>FoldConstant</strong> pre-computes compile-time-known expressions, critical after BN folding creates constant scale/bias tensors</li>
+<li><strong>AlterOpLayout</strong> changes data layout (e.g., NCHW → NCHW8c) to exploit SIMD hardware — invisible to the user but significant for CPU performance</li>
+<li><strong>Custom passes</strong> are straightforward: subclass <code>ExprMutator</code>, use the <code>@function_pass</code> decorator, and chain into the pipeline with <code>Sequential</code></li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://tvm.apache.org/docs/arch/pass_infra.html">TVM Pass Infrastructure</a> — architectural guide to the pass system</li>
+<li><a href="https://tvm.apache.org/docs/how_to/extend_tvm/use_pass_infra.html">Writing a Customized Pass</a> — official tutorial</li>
+<li><a href="https://github.com/apache/tvm/blob/main/src/relay/transforms/fuse_ops.cc">Relay Operator Fusion Design</a> — implementation source</li>
+<li><a href="https://arxiv.org/abs/2202.10963">Operator Fusion in Deep Learning</a> — survey of fusion strategies across compilers</li>
+</ul>
+<hr />
+<h2 id="tomorrow">Tomorrow</h2>
+<p><strong>Day 32: Tensor Expression (TE) Language</strong> — We'll drop below Relay to TVM's compute layer. You'll learn how to define tensor computations with <code>te.compute()</code> and <code>te.reduce_axis()</code>, then optimize them using schedule primitives like split, reorder, tile, and vectorize — the foundation of TVM's learning-based optimization.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-30-relay-ir.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 30: Relay IR</a>
+            <a href="day-32-tensor-expression-te.html" class="text-emerald-600 hover:text-emerald-800">Day 32: Tensor Expression (TE) &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

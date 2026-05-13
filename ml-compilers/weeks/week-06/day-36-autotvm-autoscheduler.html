@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 36: AutoTVM & AutoScheduler (Ansor) - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 6: TVM Tuning & Backends</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-36-autotvm-autoscheduler-ansor">Day 36: AutoTVM &amp; AutoScheduler (Ansor)</h1>
+<blockquote>
+<p><strong>Phase III · Week 6 · Day 36 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"When the search space has 10¹⁰ configurations, you don't hand-tune — you let the machine learn to compile itself."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="../week-05/day-35-mini-project-tvm-compile.html">Day 35: Mini-Project — End-to-End TVM Compilation</a></td>
+<td style="text-align: left;"><a href="day-37-metaschedule.html">Day 37: MetaSchedule</a></td>
+<td style="text-align: left;"><a href="README.html">Week 6: TVM Tuning &amp; Backends</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Last week you compiled a model end-to-end with TVM, but every schedule was TVM's default — generic loop nests with no hardware-specific tuning. On a real GPU, those defaults often leave 2–5× performance on the table. AutoTVM and AutoScheduler (Ansor) solve this by <strong>searching</strong> for optimal schedules automatically. AutoTVM uses hand-written templates with configurable knobs; Ansor generates schedules from scratch without templates. Together they're the reason TVM matches or beats vendor libraries on many workloads — and understanding how they work is essential for anyone deploying TVM in production.</p>
+<hr />
+<h2 id="1-the-auto-tuning-problem">1. The Auto-Tuning Problem</h2>
+<h3 id="why-manual-scheduling-doesnt-scale">Why Manual Scheduling Doesn't Scale</h3>
+<p>A single matrix multiplication on a modern GPU has a staggering number of schedule choices:</p>
+<pre><code>Tile sizes:       [1, 2, 4, 8, 16, 32, 64, 128] × 3 axes  →  ~500 combos
+Unroll factors:   [1, 2, 4, 8, 16]                          →  ~5 choices
+Vectorization:    [1, 2, 4, 8]                               →  ~4 choices
+Thread binding:   blockIdx/threadIdx assignments             →  ~10 variants
+Shared memory:    cache or not, tile sizes                   →  ~20 variants
+───────────────────────────────────────────────────────────────
+Total:            ~2,000,000 candidate schedules
+</code></pre>
+<p>For a model with 50+ operators, the combined space is effectively infinite. Auto-tuning uses <strong>machine learning</strong> to navigate this space efficiently.</p>
+<h3 id="the-two-generations">The Two Generations</h3>
+<pre><code>┌───────────────────────────────────────────────────────────────┐
+│                  TVM Auto-Tuning Evolution                    │
+│                                                               │
+│  Gen 1: AutoTVM (2018)           Gen 2: Ansor (2020)          │
+│  ┌─────────────────────┐         ┌─────────────────────────┐  │
+│  │ Human writes template│         │ No template needed      │  │
+│  │ with ConfigSpace     │         │ Auto-generates sketches  │  │
+│  │ knobs                │         │ from compute definition  │  │
+│  │                      │         │                          │  │
+│  │ Search over knob     │         │ Evolutionary search +    │  │
+│  │ values only          │         │ cost model over full     │  │
+│  │                      │         │ schedule space           │  │
+│  └─────────────────────┘         └─────────────────────────┘  │
+│  Pros: predictable,              Pros: no expert knowledge,   │
+│        fast convergence                 better peak perf       │
+│  Cons: needs expert,              Cons: slower search,         │
+│        limited space                    larger search space     │
+└───────────────────────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="2-autotvm-template-based-tuning">2. AutoTVM: Template-Based Tuning</h2>
+<p>AutoTVM requires a human expert to write a <strong>schedule template</strong> — a parameterized schedule with tunable knobs. The tuner then searches over knob values.</p>
+<h3 id="configspace-and-knobs">ConfigSpace and Knobs</h3>
+<pre><code class="language-python">import tvm
+from tvm import te, autotvm
+import numpy as np
+
+# Define a tunable matrix multiplication
+@autotvm.template(&quot;matmul&quot;)
+def matmul_template(N, L, M, dtype=&quot;float32&quot;):
+    A = te.placeholder((N, L), name=&quot;A&quot;, dtype=dtype)
+    B = te.placeholder((L, M), name=&quot;B&quot;, dtype=dtype)
+    k = te.reduce_axis((0, L), name=&quot;k&quot;)
+    C = te.compute((N, M), lambda i, j: te.sum(A[i, k] * B[k, j], axis=k), name=&quot;C&quot;)
+
+    s = te.create_schedule(C.op)
+
+    # ---- ConfigSpace: define tunable knobs ----
+    cfg = autotvm.get_config()
+
+    # Tile sizes for the output axes
+    cfg.define_split(&quot;tile_y&quot;, N, num_outputs=2)    # splits i
+    cfg.define_split(&quot;tile_x&quot;, M, num_outputs=2)    # splits j
+    cfg.define_split(&quot;tile_k&quot;, L, num_outputs=2)    # splits k
+
+    # Apply the splits
+    yo, yi = cfg[&quot;tile_y&quot;].apply(s, C, C.op.axis[0])
+    xo, xi = cfg[&quot;tile_x&quot;].apply(s, C, C.op.axis[1])
+    ko, ki = cfg[&quot;tile_k&quot;].apply(s, C, k)
+
+    # Reorder: outer loops → reduction → inner compute
+    s[C].reorder(yo, xo, ko, yi, ki, xi)
+
+    # Optional: unroll inner loops
+    cfg.define_knob(&quot;auto_unroll_max_step&quot;, [0, 64, 512, 1024])
+    s[C].pragma(yo, &quot;auto_unroll_max_step&quot;, cfg[&quot;auto_unroll_max_step&quot;].val)
+
+    return s, [A, B, C]
+</code></pre>
+<h3 id="key-knob-types">Key Knob Types</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Knob</th>
+<th style="text-align: left;">Purpose</th>
+<th style="text-align: left;">Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>define_split</code></td>
+<td style="text-align: left;">Tile a loop axis into factors</td>
+<td style="text-align: left;"><code>tile_y: 1024 → (32, 32)</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>define_knob</code></td>
+<td style="text-align: left;">Choose from discrete values</td>
+<td style="text-align: left;"><code>unroll: [0, 64, 512]</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>define_reorder</code></td>
+<td style="text-align: left;">Permute loop axes</td>
+<td style="text-align: left;"><code>[i, j, k] → [j, i, k]</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>define_annotate</code></td>
+<td style="text-align: left;">Loop annotations</td>
+<td style="text-align: left;"><code>vectorize</code>, <code>unroll</code>, <code>parallel</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="running-autotvm-tuning">Running AutoTVM Tuning</h3>
+<pre><code class="language-python"># Define the task
+N, L, M = 1024, 1024, 1024
+task = autotvm.task.create(&quot;matmul&quot;, args=(N, L, M, &quot;float32&quot;),
+                           target=&quot;llvm -mcpu=core-avx2&quot;)
+
+print(f&quot;ConfigSpace size: {len(task.config_space)}&quot;)
+# → ConfigSpace size: 1728
+
+# Configure the tuner
+measure_option = autotvm.measure_option(
+    builder=&quot;local&quot;,
+    runner=autotvm.LocalRunner(number=5, repeat=3, timeout=10),
+)
+
+# XGBoost cost model + simulated annealing search
+tuner = autotvm.tuner.XGBTuner(task, feature_type=&quot;curve&quot;)
+
+# Run 200 trials
+tuner.tune(
+    n_trial=200,
+    measure_option=measure_option,
+    callbacks=[
+        autotvm.callback.progress_bar(200),
+        autotvm.callback.log_to_file(&quot;matmul_autotvm.json&quot;),
+    ],
+)
+</code></pre>
+<h3 id="cost-model-architecture">Cost Model Architecture</h3>
+<p>AutoTVM's XGBoost cost model predicts execution time from schedule features:</p>
+<p>$$\hat{t} = f_{\text{XGB}}(\mathbf{x})$$</p>
+<p>where $\mathbf{x}$ encodes loop structure (tile sizes, nesting order, annotations). The model is retrained after every batch of hardware measurements to improve predictions.</p>
+<hr />
+<h2 id="3-autoscheduler-ansor-template-free-tuning">3. AutoScheduler (Ansor): Template-Free Tuning</h2>
+<p>Ansor eliminates templates entirely. Given only a TE compute definition, it:</p>
+<ol>
+<li><strong>Generates sketches</strong> — high-level schedule structures (e.g., "tile + fuse + parallelize")</li>
+<li><strong>Annotates sketches</strong> — fills in concrete tile sizes, unroll factors</li>
+<li><strong>Evaluates</strong> via cost model + selective hardware measurement</li>
+<li><strong>Evolves</strong> — mutates and recombines top-performing schedules</li>
+</ol>
+<h3 id="using-ansor">Using Ansor</h3>
+<pre><code class="language-python">from tvm import auto_scheduler
+
+# Step 1: Define the computation (no template!)
+@auto_scheduler.register_workload
+def matmul_ansor(N, L, M, dtype=&quot;float32&quot;):
+    A = te.placeholder((N, L), name=&quot;A&quot;, dtype=dtype)
+    B = te.placeholder((L, M), name=&quot;B&quot;, dtype=dtype)
+    k = te.reduce_axis((0, L), name=&quot;k&quot;)
+    C = te.compute((N, M), lambda i, j: te.sum(A[i, k] * B[k, j], axis=k), name=&quot;C&quot;)
+    return [A, B, C]
+
+# Step 2: Create task
+target = tvm.target.Target(&quot;llvm -mcpu=core-avx2&quot;)
+task = auto_scheduler.SearchTask(
+    func=matmul_ansor, args=(1024, 1024, 1024, &quot;float32&quot;), target=target
+)
+
+print(f&quot;Compute DAG:\n{task.compute_dag}&quot;)
+
+# Step 3: Configure tuning
+tune_option = auto_scheduler.TuningOptions(
+    num_measure_trials=1000,
+    measure_callbacks=[auto_scheduler.RecordToFile(&quot;matmul_ansor.json&quot;)],
+    verbose=2,
+)
+
+# Step 4: Run search
+task.tune(tune_option)
+
+# Step 5: Apply best schedule
+sch, args = task.apply_best(&quot;matmul_ansor.json&quot;)
+print(tvm.lower(sch, args, simple_mode=True))
+</code></pre>
+<h3 id="sketch-generation">Sketch Generation</h3>
+<p>Ansor generates sketches by analyzing the compute DAG:</p>
+<pre><code>Compute: C[i,j] = sum(A[i,k] * B[k,j], axis=k)
+           │
+           ▼
+┌──────────────────────────────────────────────┐
+│ Sketch 1: Multi-level tiling                 │
+│   tile(i, [t1, t2, t3]) → io, im, ii        │
+│   tile(j, [t4, t5, t6]) → jo, jm, ji        │
+│   tile(k, [t7, t8])     → ko, ki             │
+│   reorder(io, jo, ko, im, jm, ki, ii, ji)    │
+│   cache_write(C, &quot;local&quot;)                     │
+├──────────────────────────────────────────────┤
+│ Sketch 2: Vectorized + parallel              │
+│   tile(i, [t1, t2]) → io, ii                 │
+│   tile(j, [t3, t4]) → jo, ji                 │
+│   parallel(io)                                │
+│   vectorize(ji)                               │
+├──────────────────────────────────────────────┤
+│ Sketch 3: Cache + reorder                    │
+│   cache_read(A, &quot;local&quot;)                      │
+│   tile + fuse + bind to threads               │
+└──────────────────────────────────────────────┘
+</code></pre>
+<p>Each sketch is then "annotated" — concrete values are assigned by evolutionary search.</p>
+<hr />
+<h2 id="4-tuning-a-full-model-with-ansor">4. Tuning a Full Model with Ansor</h2>
+<p>For real deployment, you tune all operators in a model together:</p>
+<pre><code class="language-python">import tvm.relay as relay
+from tvm.contrib import graph_executor
+
+# Import a model (e.g., ResNet-18 from ONNX)
+import onnx
+onnx_model = onnx.load(&quot;resnet18.onnx&quot;)
+mod, params = relay.frontend.from_onnx(onnx_model, shape={&quot;input&quot;: (1, 3, 224, 224)})
+
+target = tvm.target.Target(&quot;cuda -arch=sm_80&quot;)
+
+# Extract tuning tasks — one per unique operator
+tasks, task_weights = auto_scheduler.extract_tasks(mod[&quot;main&quot;], params, target)
+
+print(f&quot;Extracted {len(tasks)} tuning tasks:&quot;)
+for i, task in enumerate(tasks):
+    print(f&quot;  Task {i}: {task.desc}  (weight={task_weights[i]})&quot;)
+
+# Tune all tasks with a shared cost model
+tuner = auto_scheduler.TaskScheduler(tasks, task_weights)
+tune_option = auto_scheduler.TuningOptions(
+    num_measure_trials=2000,           # total budget across all tasks
+    runner=auto_scheduler.LocalRunner(timeout=30, repeat=3),
+    measure_callbacks=[auto_scheduler.RecordToFile(&quot;resnet18_ansor.json&quot;)],
+)
+tuner.tune(tune_option)
+
+# Compile with the best schedules
+with auto_scheduler.ApplyHistoryBest(&quot;resnet18_ansor.json&quot;):
+    with tvm.transform.PassContext(opt_level=3):
+        lib = relay.build(mod, target=target, params=params)
+</code></pre>
+<h3 id="task-scheduling-strategy">Task Scheduling Strategy</h3>
+<p>The <code>TaskScheduler</code> allocates measurement trials across operators using weights (proportional to their estimated runtime impact):</p>
+<p>$$\text{trials}_i = \left\lfloor \frac{w_i}{\sum_j w_j} \cdot N_{\text{total}} \right\rfloor$$</p>
+<p>This ensures the tuner spends the most time on the <strong>hottest</strong> operators (e.g., large convolutions) rather than wasting trials on cheap ops.</p>
+<hr />
+<h2 id="5-analyzing-tuning-logs">5. Analyzing Tuning Logs</h2>
+<h3 id="speedup-progression">Speedup Progression</h3>
+<pre><code class="language-python">import json
+
+# Load tuning records
+records = []
+with open(&quot;resnet18_ansor.json&quot;, &quot;r&quot;) as f:
+    for line in f:
+        records.append(json.loads(line))
+
+# Plot performance over trials
+import matplotlib.pyplot as plt
+
+costs = [r[&quot;result&quot;][0][0] if r[&quot;result&quot;][0][0] &lt; 1e8 else None for r in records]
+valid = [(i, c) for i, c in enumerate(costs) if c is not None]
+xs, ys = zip(*valid)
+
+# Running best
+best_so_far = []
+current_best = float(&quot;inf&quot;)
+for _, c in valid:
+    current_best = min(current_best, c)
+    best_so_far.append(current_best)
+
+plt.figure(figsize=(10, 4))
+plt.plot(xs, ys, &quot;.&quot;, alpha=0.3, label=&quot;Individual trials&quot;)
+plt.plot(xs, best_so_far, &quot;r-&quot;, linewidth=2, label=&quot;Best so far&quot;)
+plt.xlabel(&quot;Trial number&quot;)
+plt.ylabel(&quot;Latency (s)&quot;)
+plt.title(&quot;Ansor Tuning Progression&quot;)
+plt.legend()
+plt.yscale(&quot;log&quot;)
+plt.savefig(&quot;tuning_progression.png&quot;)
+</code></pre>
+<h3 id="typical-speedup-curve">Typical Speedup Curve</h3>
+<pre><code>Latency
+  │
+  │  ·  ·                                   Individual trials
+  │ ···· ·  ·
+  │  ·····  · ·   ·
+  │   ·····  ··· · ·
+  │────────────────────── Best so far
+  │     ·   ·  ···  ·  ·  ·
+  │         ────────────────────
+  │              ···  ·    · ···
+  │                ─────────────── Plateau (~optimal)
+  │
+  └──────────────────────────────────── Trial number
+     0      200     500     1000    2000
+</code></pre>
+<p>The curve typically shows rapid improvement in the first 20% of trials, then diminishing returns.</p>
+<hr />
+<h2 id="6-autotvm-vs-ansor-when-to-use-which">6. AutoTVM vs Ansor: When to Use Which</h2>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Criterion</th>
+<th style="text-align: left;">AutoTVM</th>
+<th style="text-align: left;">Ansor (AutoScheduler)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Template required</strong></td>
+<td style="text-align: left;">Yes — expert writes it</td>
+<td style="text-align: left;">No — automatic</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Search space</strong></td>
+<td style="text-align: left;">Limited to template knobs</td>
+<td style="text-align: left;">Full schedule space</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Peak performance</strong></td>
+<td style="text-align: left;">Good (bounded by template)</td>
+<td style="text-align: left;">Often better</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Convergence speed</strong></td>
+<td style="text-align: left;">Faster (smaller space)</td>
+<td style="text-align: left;">Slower (larger space)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Custom hardware</strong></td>
+<td style="text-align: left;">Easy to add template</td>
+<td style="text-align: left;">May need new rules</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Maintenance</strong></td>
+<td style="text-align: left;">Templates per operator</td>
+<td style="text-align: left;">One framework</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Recommended for</strong></td>
+<td style="text-align: left;">Known operators, quick wins</td>
+<td style="text-align: left;">New models, best perf</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>In practice</strong>: Ansor is the recommended approach for TVM ≥ 0.8. AutoTVM templates remain useful for custom operators or when Ansor's sketch generation doesn't cover a pattern.</p>
+</blockquote>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-tune-a-conv2d-with-autotvm-25-min">Exercise 1: Tune a Conv2D with AutoTVM (25 min)</h3>
+<p>Write an AutoTVM template for a 2D convolution (<code>N=1, C=64, H=W=56, kernel=3×3, out_channels=128</code>). Add knobs for:
+- Tiling the output height/width
+- Unroll factor for the reduction axis
+- Whether to vectorize the innermost loop</p>
+<p>Run 100 trials and compare the best result against TVM's default schedule.</p>
+<h3 id="exercise-2-ansor-on-mobilenetv2-30-min">Exercise 2: Ansor on MobileNetV2 (30 min)</h3>
+<p>Use <code>auto_scheduler.extract_tasks()</code> to pull tuning tasks from MobileNetV2 (from last week's mini-project). Tune with 500 trials total. Questions:
+1. How many unique tasks are extracted?
+2. Which task gets the most trials? Why?
+3. What's the end-to-end speedup vs the untuned compilation?</p>
+<h3 id="exercise-3-compare-cost-models-20-min">Exercise 3: Compare Cost Models (20 min)</h3>
+<p>AutoTVM supports multiple tuners. Run the same task with:
+- <code>XGBTuner</code> (XGBoost cost model)
+- <code>GATuner</code> (genetic algorithm, no cost model)
+- <code>RandomTuner</code> (baseline)</p>
+<p>Plot the convergence curves. How many trials does each need to reach 90% of XGBTuner's best?</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Auto-tuning is essential</strong> — default TVM schedules leave 2–5× on the table compared to tuned ones</li>
+<li><strong>AutoTVM</strong> uses expert-written templates with configurable knobs; search is fast but bounded by template quality</li>
+<li><strong>Ansor</strong> generates schedules from scratch via sketch generation + evolutionary search — no templates needed</li>
+<li><strong>Cost models</strong> (XGBoost) dramatically reduce the number of hardware measurements needed</li>
+<li><strong>Task schedulers</strong> allocate tuning budget proportionally to operator runtime impact</li>
+<li><strong>Tuning logs</strong> are reusable — save them and apply with <code>ApplyHistoryBest</code> for reproducible compilation</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://arxiv.org/abs/1805.08166">AutoTVM: Learning-based Compiler Optimization</a> — the original AutoTVM paper (Chen et al., 2018)</li>
+<li><a href="https://arxiv.org/abs/2006.06762">Ansor: Generating High-Performance Tensor Programs</a> — the AutoScheduler paper (Zheng et al., 2020)</li>
+<li><a href="https://tvm.apache.org/docs/how_to/tune_with_autotvm/index.html">TVM Auto-Tuning Tutorial</a> — official AutoTVM guide</li>
+<li><a href="https://tvm.apache.org/docs/how_to/tune_with_autoscheduler/index.html">Auto-Scheduling Tutorial</a> — official Ansor guide</li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p>AutoTVM and Ansor were groundbreaking, but they have limitations: AutoTVM needs templates, Ansor's search space can be too large, and neither integrates cleanly with TIR's <code>tvm.script</code>. <strong>Day 37</strong> introduces <strong>MetaSchedule</strong> — TVM's unified tuning framework that replaces both, built around trace-based scheduling and composable mutators.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="../week-05/day-35-mini-project-tvm-compile.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 35: Mini-Project — TVM Compilation</a>
+            <a href="day-37-metaschedule.html" class="text-emerald-600 hover:text-emerald-800">Day 37: MetaSchedule &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

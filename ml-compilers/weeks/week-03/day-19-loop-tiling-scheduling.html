@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 19: Loop Tiling & Scheduling - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 3: IR & Compiler Passes</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-19-loop-tiling-scheduling">Day 19: Loop Tiling &amp; Scheduling</h1>
+<blockquote>
+<p><strong>Phase II · Week 3 · Day 19 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"Tiling is the single most impactful transformation a compiler can apply — it converts an O(N³) memory traffic problem into an O(N³/T) one, where T is the tile size you choose."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-18-polyhedral-model.html">Day 18: The Polyhedral Model</a></td>
+<td style="text-align: left;"><a href="day-20-auto-tuning-search.html">Day 20: Auto-Tuning &amp; Search Spaces</a></td>
+<td style="text-align: left;"><a href="README.html">Week 3: IRs &amp; Passes</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase II: Compiler Fundamentals</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Yesterday we learned the polyhedral model gives us a <strong>mathematical certificate</strong> for loop transformations. Today we put that to work. Loop tiling (also called blocking) is the dominant technique for exploiting the memory hierarchy in dense linear algebra — the backbone of every neural network. A naive matmul on a 4096×4096 matrix touches ~1 TB of DRAM traffic; a well-tiled version cuts that by 100×. TVM, XLA, Triton, and every serious ML compiler expose tiling as a first-class scheduling concept.</p>
+<hr />
+<h2 id="1-why-tiling-works-the-memory-wall">1. Why Tiling Works: The Memory Wall</h2>
+<p>Modern processors have a multi-level memory hierarchy:</p>
+<pre><code>┌───────────────────────────────────────────────┐
+│              Registers                        │  ~ 1 cycle, ~KB
+├───────────────────────────────────────────────┤
+│              L1 Cache                         │  ~ 4 cycles, 32-64 KB
+├───────────────────────────────────────────────┤
+│              L2 Cache                         │  ~ 12 cycles, 256 KB-1 MB
+├───────────────────────────────────────────────┤
+│              L3 Cache (shared)                │  ~ 40 cycles, 8-64 MB
+├───────────────────────────────────────────────┤
+│              DRAM                             │  ~ 200 cycles, 16-256 GB
+├───────────────────────────────────────────────┤
+│              GPU HBM / Device Memory          │  ~ 400 cycles from core
+└───────────────────────────────────────────────┘
+</code></pre>
+<p><strong>The key metric:</strong> <em>arithmetic intensity</em> — FLOPs per byte transferred.</p>
+<p>$$\text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes moved from DRAM}}$$</p>
+<p>For naive matmul $C_{M \times N} = A_{M \times K} \cdot B_{K \times N}$:
+- FLOPs: $2MNK$
+- DRAM traffic: $O(MNK)$ (each element of $B$ is re-read $M$ times)
+- Arithmetic intensity: $O(1)$ — <strong>memory-bound</strong></p>
+<p>For tiled matmul with tile size $T$:
+- DRAM traffic: $O(MNK / T)$
+- Arithmetic intensity: $O(T)$ — <strong>compute-bound</strong> when $T$ is large enough</p>
+<hr />
+<h2 id="2-single-level-tiling">2. Single-Level Tiling</h2>
+<h3 id="the-transformation">The Transformation</h3>
+<p>Split each loop into an <strong>outer tile loop</strong> and an <strong>inner point loop</strong>:</p>
+<pre><code>Original:           Tiled (tile size T):
+for i in [0, M):    for io in [0, M/T):       ← tile loop
+  for j in [0, N):    for jo in [0, N/T):
+    for k in [0, K):    for ii in [0, T):      ← point loop
+      C[i][j] +=           for ji in [0, T):
+        A[i][k]*B[k][j]     for ki in [0, T):
+                               C[io*T+ii][jo*T+ji] +=
+                                 A[io*T+ii][ko*T+ki] * B[ko*T+ki][jo*T+ji]
+</code></pre>
+<p>Wait — we also need to tile <code>k</code>. The full 3-level tiling:</p>
+<pre><code class="language-c">// Tiled matmul: tile sizes Ti, Tj, Tk
+for (int io = 0; io &lt; M; io += Ti)
+  for (int jo = 0; jo &lt; N; jo += Tj)
+    for (int ko = 0; ko &lt; K; ko += Tk)        // ← tile loops
+      for (int ii = io; ii &lt; min(io+Ti, M); ii++)
+        for (int ji = jo; ji &lt; min(jo+Tj, N); ji++)
+          for (int ki = ko; ki &lt; min(ko+Tk, K); ki++)  // ← point loops
+            C[ii][ji] += A[ii][ki] * B[ki][ji];
+</code></pre>
+<h3 id="why-this-is-legal">Why This Is Legal</h3>
+<p>From the polyhedral model (Day 18): the matmul has <strong>no loop-carried dependencies</strong> on <code>i</code> and <code>j</code> (each <code>C[i][j]</code> is independent), and the <code>k</code> reduction only requires summing in any order. Tiling preserves these dependence relations because it only <strong>reorders</strong> iterations, never removes them.</p>
+<h3 id="data-reuse-analysis">Data Reuse Analysis</h3>
+<p>For one tile of size $T_i \times T_j \times T_k$:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Array</th>
+<th style="text-align: left;">Footprint</th>
+<th style="text-align: left;">Accesses</th>
+<th style="text-align: left;">Reuse ratio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">$A$</td>
+<td style="text-align: left;">$T_i \times T_k$</td>
+<td style="text-align: left;">$T_i \times T_j \times T_k$</td>
+<td style="text-align: left;">$T_j$</td>
+</tr>
+<tr>
+<td style="text-align: left;">$B$</td>
+<td style="text-align: left;">$T_k \times T_j$</td>
+<td style="text-align: left;">$T_i \times T_j \times T_k$</td>
+<td style="text-align: left;">$T_i$</td>
+</tr>
+<tr>
+<td style="text-align: left;">$C$</td>
+<td style="text-align: left;">$T_i \times T_j$</td>
+<td style="text-align: left;">$T_i \times T_j \times T_k$</td>
+<td style="text-align: left;">$T_k$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Total working set:</strong> $T_i T_k + T_k T_j + T_i T_j$ elements must fit in cache.</p>
+<hr />
+<h2 id="3-tile-size-selection">3. Tile Size Selection</h2>
+<p>Choosing tile sizes is a constrained optimization problem:</p>
+<h3 id="cache-capacity-constraint">Cache Capacity Constraint</h3>
+<p>$$T_i \cdot T_k + T_k \cdot T_j + T_i \cdot T_j \leq \frac{C_{\text{L1}}}{\text{sizeof(float)}}$$</p>
+<p>For L1 = 32 KB with float32: capacity = 8192 elements.</p>
+<h3 id="practical-guidelines">Practical Guidelines</h3>
+<pre><code>┌──────────────────────────────────────────────────┐
+│            Tile Size Decision Tree                │
+├──────────────────────────────────────────────────┤
+│                                                  │
+│  1. Start with cache capacity constraint         │
+│     └─ L1: 32KB → ~8K floats                    │
+│     └─ 3 arrays → ~2.7K per array               │
+│     └─ T ≈ √2700 ≈ 52 → round to 32 or 64      │
+│                                                  │
+│  2. Align to vector width                        │
+│     └─ AVX-512: 16 floats → T multiple of 16    │
+│     └─ NEON: 4 floats → T multiple of 4         │
+│                                                  │
+│  3. Match GPU warp/wavefront                     │
+│     └─ NVIDIA: warp=32, tile often 128×128      │
+│     └─ AMD: wavefront=64                        │
+│                                                  │
+│  4. L2 tiling: repeat for L2 capacity            │
+│     └─ Outer tiles target L2 (256KB-1MB)        │
+│     └─ Inner tiles target L1 (32KB)             │
+│                                                  │
+└──────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="example-optimal-tile-size-calculation">Example: Optimal Tile Size Calculation</h3>
+<pre><code class="language-python">import math
+
+def optimal_tile_size(M, N, K, cache_bytes, elem_size=4):
+    &quot;&quot;&quot;Compute tile size for square tiles fitting in cache.
+
+    Working set: 3 * T^2 elements (A-tile + B-tile + C-tile)
+    Constraint: 3 * T^2 * elem_size &lt;= cache_bytes
+    &quot;&quot;&quot;
+    capacity = cache_bytes // elem_size
+    T_max = int(math.sqrt(capacity / 3))
+
+    # Round down to power of 2 for alignment
+    T = 1
+    while T * 2 &lt;= T_max:
+        T *= 2
+
+    # Verify
+    working_set = 3 * T * T * elem_size
+    print(f&quot;Tile size: {T}×{T}&quot;)
+    print(f&quot;Working set: {working_set} bytes ({working_set/1024:.1f} KB)&quot;)
+    print(f&quot;Cache: {cache_bytes} bytes ({cache_bytes/1024:.1f} KB)&quot;)
+    print(f&quot;Utilization: {working_set/cache_bytes*100:.1f}%&quot;)
+    return T
+
+# L1 = 32KB
+T_l1 = optimal_tile_size(4096, 4096, 4096, 32 * 1024)
+# → Tile size: 32×32, Working set: 12288 bytes (12.0 KB), 37.5% utilization
+
+# L2 = 256KB  
+T_l2 = optimal_tile_size(4096, 4096, 4096, 256 * 1024)
+# → Tile size: 128×128, Working set: 196608 bytes (192.0 KB), 75.0% utilization
+</code></pre>
+<hr />
+<h2 id="4-multi-level-tiling">4. Multi-Level Tiling</h2>
+<p>Real compilers apply tiling <strong>recursively</strong> to target each cache level:</p>
+<pre><code>┌─────────────────────────────────────────────────┐
+│  Level 3: Thread-block tile (128×128)           │  ← Targets L2 / shared mem
+│  ┌─────────────────────────────────────────┐    │
+│  │  Level 2: Warp tile (32×64)             │    │  ← Targets register file
+│  │  ┌─────────────────────────────────┐    │    │
+│  │  │  Level 1: Thread tile (8×8)     │    │    │  ← Targets registers
+│  │  │  ┌────────────────────────┐     │    │    │
+│  │  │  │  Vectorized (1×4 FMA)  │     │    │    │  ← SIMD unit
+│  │  │  └────────────────────────┘     │    │    │
+│  │  └─────────────────────────────────┘    │    │
+│  └─────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────┘
+</code></pre>
+<p>In TVM, this maps to:</p>
+<pre><code class="language-python">import tvm
+from tvm import te
+
+M, N, K = 1024, 1024, 1024
+
+# Define computation
+A = te.placeholder((M, K), name=&quot;A&quot;)
+B = te.placeholder((K, N), name=&quot;B&quot;)
+k = te.reduce_axis((0, K), name=&quot;k&quot;)
+C = te.compute((M, N), lambda i, j: te.sum(A[i, k] * B[k, j], axis=k), name=&quot;C&quot;)
+
+s = te.create_schedule(C.op)
+
+# Level 1: Thread-block tiles (target L2)
+block_x = 128
+block_y = 128
+
+# Level 2: Warp tiles
+warp_x = 32
+warp_y = 64
+
+# Level 3: Thread tiles
+thread_x = 8
+thread_y = 8
+
+# Get loop axes
+i, j = s[C].op.axis
+k_axis = s[C].op.reduce_axis[0]
+
+# Split i: block → warp → thread
+i_block, i_inner = s[C].split(i, factor=block_x)
+i_warp, i_thread = s[C].split(i_inner, factor=warp_x)
+i_t_outer, i_t_inner = s[C].split(i_thread, factor=thread_x)
+
+# Split j: block → warp → thread
+j_block, j_inner = s[C].split(j, factor=block_y)
+j_warp, j_thread = s[C].split(j_inner, factor=warp_y)
+j_t_outer, j_t_inner = s[C].split(j_thread, factor=thread_y)
+
+# Split k for software pipelining
+k_outer, k_inner = s[C].split(k_axis, factor=8)
+
+# Reorder: blocks outermost, then warps, then threads, then k
+s[C].reorder(i_block, j_block, i_warp, j_warp,
+             k_outer, i_t_outer, j_t_outer,
+             k_inner, i_t_inner, j_t_inner)
+</code></pre>
+<hr />
+<h2 id="5-loop-reordering-and-parallelism-extraction">5. Loop Reordering and Parallelism Extraction</h2>
+<p>Tiling creates new loop levels. <strong>Reordering</strong> them controls parallelism and locality:</p>
+<pre><code>After tiling matmul (6 loops):
+  io, jo, ko, ii, ji, ki
+
+Option A: io, jo, ko, ii, ji, ki  — ko innermost among tiles
+  → Each tile computes partial C, accumulates across ko
+  → Good for C locality (stays in registers)
+
+Option B: ko, io, jo, ii, ji, ki  — ko outermost
+  → Process one K-slice globally, then next
+  → Bad: C evicted between K-tiles
+
+Option C: io, jo, ii, ji, ko, ki  — reduction fully inside
+  → Each (io,jo) block completes C-tile independently
+  → Best for parallelism: no cross-block synchronization
+</code></pre>
+<h3 id="vectorization">Vectorization</h3>
+<p>The innermost loop should match SIMD width:</p>
+<pre><code class="language-python"># TVM: vectorize the innermost dimension
+s[C].vectorize(j_t_inner)  # Emit SIMD instructions for j-inner
+
+# This transforms:
+#   for j_inner in range(8):
+#     C[i][j_base + j_inner] += A[i][k] * B[k][j_base + j_inner]
+# Into:
+#   C[i][j_base:j_base+8] += A[i][k] * B[k][j_base:j_base+8]  # Single SIMD op
+</code></pre>
+<h3 id="thread-binding-gpu">Thread Binding (GPU)</h3>
+<pre><code class="language-python"># Bind tile loops to GPU grid/block dimensions
+s[C].bind(i_block, te.thread_axis(&quot;blockIdx.y&quot;))
+s[C].bind(j_block, te.thread_axis(&quot;blockIdx.x&quot;))
+s[C].bind(i_warp,  te.thread_axis(&quot;threadIdx.y&quot;))
+s[C].bind(j_warp,  te.thread_axis(&quot;threadIdx.x&quot;))
+</code></pre>
+<hr />
+<h2 id="6-scheduling-as-an-optimization-space">6. Scheduling as an Optimization Space</h2>
+<p>A <strong>schedule</strong> is a mapping from computation to hardware execution order. The same algorithm can have millions of legal schedules:</p>
+<pre><code>                    Algorithm
+                   (what to compute)
+                        │
+           ┌────────────┼────────────┐
+           ▼            ▼            ▼
+      Schedule A    Schedule B    Schedule C
+      (tiled 32)   (tiled 64)   (tiled 128)
+      (vectorize j)(vectorize k)(parallel i)
+           │            │            │
+           ▼            ▼            ▼
+        12 ms         8 ms         15 ms
+</code></pre>
+<p>This is the <strong>Halide insight</strong>: separate the algorithm from the schedule.</p>
+<h3 id="tvm-schedule-primitives-summary">TVM Schedule Primitives Summary</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Primitive</th>
+<th style="text-align: left;">Effect</th>
+<th style="text-align: left;">Typical Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>split(axis, factor)</code></td>
+<td style="text-align: left;">Divide loop into outer/inner</td>
+<td style="text-align: left;">Tiling</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>fuse(a, b)</code></td>
+<td style="text-align: left;">Merge two loops into one</td>
+<td style="text-align: left;">Reducing loop overhead</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>reorder(a, b, c, ...)</code></td>
+<td style="text-align: left;">Change loop nesting order</td>
+<td style="text-align: left;">Locality optimization</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>bind(axis, thread)</code></td>
+<td style="text-align: left;">Map loop to GPU thread</td>
+<td style="text-align: left;">Parallelism</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>vectorize(axis)</code></td>
+<td style="text-align: left;">Emit SIMD instructions</td>
+<td style="text-align: left;">Inner loop vectorization</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>unroll(axis)</code></td>
+<td style="text-align: left;">Fully unroll loop</td>
+<td style="text-align: left;">Small inner loops</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>compute_at(tensor, axis)</code></td>
+<td style="text-align: left;">Inline producer at consumer loop</td>
+<td style="text-align: left;">Fusion / locality</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>compute_inline()</code></td>
+<td style="text-align: left;">Fully inline computation</td>
+<td style="text-align: left;">Element-wise ops</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>parallel(axis)</code></td>
+<td style="text-align: left;">OpenMP parallelize</td>
+<td style="text-align: left;">CPU multi-core</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>cache_read/write</code></td>
+<td style="text-align: left;">Stage data in local buffer</td>
+<td style="text-align: left;">Shared memory / registers</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-tiled-matmul-in-numpy-20-min">Exercise 1: Tiled Matmul in NumPy (20 min)</h3>
+<p>Implement and benchmark tiled vs. naive matmul to observe the cache effect:</p>
+<pre><code class="language-python">import numpy as np
+import time
+
+def naive_matmul(A, B):
+    M, K = A.shape
+    _, N = B.shape
+    C = np.zeros((M, N))
+    for i in range(M):
+        for j in range(N):
+            for k in range(K):
+                C[i][j] += A[i][k] * B[k][j]
+    return C
+
+def tiled_matmul(A, B, T=32):
+    M, K = A.shape
+    _, N = B.shape
+    C = np.zeros((M, N))
+    for io in range(0, M, T):
+        for jo in range(0, N, T):
+            for ko in range(0, K, T):
+                # Tile boundaries
+                i_end = min(io + T, M)
+                j_end = min(jo + T, N)
+                k_end = min(ko + T, K)
+                # Compute tile (using NumPy for inner block)
+                C[io:i_end, jo:j_end] += (
+                    A[io:i_end, ko:k_end] @ B[ko:k_end, jo:j_end]
+                )
+    return C
+
+# Benchmark (use small N for pure-Python naive)
+N = 256
+A = np.random.randn(N, N).astype(np.float32)
+B = np.random.randn(N, N).astype(np.float32)
+
+# Test correctness
+C_ref = A @ B
+C_tiled = tiled_matmul(A, B, T=32)
+print(f&quot;Max error: {np.max(np.abs(C_ref - C_tiled)):.2e}&quot;)
+
+# Benchmark tiled with different tile sizes
+for T in [8, 16, 32, 64, 128]:
+    start = time.perf_counter()
+    for _ in range(10):
+        tiled_matmul(A, B, T)
+    elapsed = (time.perf_counter() - start) / 10
+    print(f&quot;T={T:4d}: {elapsed*1000:.1f} ms&quot;)
+</code></pre>
+<h3 id="exercise-2-tvm-schedule-exploration-25-min">Exercise 2: TVM Schedule Exploration (25 min)</h3>
+<p>Write a TVM schedule for 2D convolution with tiling:</p>
+<pre><code class="language-python">import tvm
+from tvm import te
+
+# 2D Convolution: O[n,c,h,w] = sum over rc,rh,rw of I[n,rc,h+rh,w+rw] * W[c,rc,rh,rw]
+N, CI, H, W = 1, 64, 56, 56
+CO, KH, KW = 128, 3, 3
+
+data = te.placeholder((N, CI, H, W), name=&quot;data&quot;)
+weight = te.placeholder((CO, CI, KH, KW), name=&quot;weight&quot;)
+
+rc = te.reduce_axis((0, CI), name=&quot;rc&quot;)
+rh = te.reduce_axis((0, KH), name=&quot;rh&quot;)
+rw = te.reduce_axis((0, KW), name=&quot;rw&quot;)
+
+OH, OW = H - KH + 1, W - KW + 1
+conv = te.compute(
+    (N, CO, OH, OW),
+    lambda n, c, h, w: te.sum(
+        data[n, rc, h + rh, w + rw] * weight[c, rc, rh, rw],
+        axis=[rc, rh, rw]
+    ),
+    name=&quot;conv&quot;
+)
+
+s = te.create_schedule(conv.op)
+
+# TODO: Apply these schedule transforms
+# 1. Split the 'c' (output channel) axis by factor 32
+# 2. Split the 'h' axis by factor 4  
+# 3. Split 'rc' (reduction) by factor 16
+# 4. Reorder: n, c_outer, h_outer, c_inner, h_inner, rc_outer, rh, rw, rc_inner, w
+# 5. Vectorize 'w'
+# 6. Parallel 'c_outer'
+
+# Verify: print(tvm.lower(s, [data, weight, conv], simple_mode=True))
+</code></pre>
+<h3 id="exercise-3-tile-size-vs-performance-curve-15-min">Exercise 3: Tile Size vs. Performance Curve (15 min)</h3>
+<p>Use <code>perf stat</code> (Linux) to measure L1 cache misses for different tile sizes:</p>
+<pre><code class="language-bash"># Compile the tiled matmul C program (provided)
+gcc -O2 -o tiled_matmul tiled_matmul.c -lm
+
+# Sweep tile sizes and measure cache misses
+for T in 4 8 16 32 64 128 256 512; do
+    echo &quot;=== Tile size: $T ===&quot;
+    perf stat -e L1-dcache-load-misses,LLC-load-misses \
+        ./tiled_matmul $T 2&gt;&amp;1 | grep -E &quot;(misses|seconds)&quot;
+done
+
+# Expected: L1 misses drop dramatically from T=4 to T=32,
+# then increase again past T=128 (tiles exceed L1 capacity)
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Tiling transforms memory-bound computation into compute-bound</strong> by increasing arithmetic intensity from $O(1)$ to $O(T)$</li>
+<li><strong>Tile size selection</strong> is constrained by cache capacity — the working set of all arrays must fit in the target cache level</li>
+<li><strong>Multi-level tiling</strong> targets each level of the memory hierarchy (registers → L1 → L2 → shared memory)</li>
+<li><strong>Loop reordering</strong> after tiling controls whether parallelism, vectorization, or locality is prioritized</li>
+<li><strong>TVM schedule primitives</strong> (<code>split</code>, <code>reorder</code>, <code>bind</code>, <code>vectorize</code>, <code>compute_at</code>) are direct encodings of polyhedral transformations</li>
+<li><strong>The schedule space is combinatorial</strong> — even a single matmul has millions of valid schedules, motivating auto-tuning (tomorrow)</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Lam, M., Rothberg, E., Wolf, M. — <em>The Cache Performance and Optimizations of Blocked Algorithms</em> (ASPLOS 1991) — the original tiling paper</li>
+<li>Ragan-Kelley, J. et al. — <em>Halide: A Language and Compiler for Optimizing Parallelism, Locality, and Recomputation</em> (PLDI 2013)</li>
+<li>Chen, T. et al. — <em>TVM: An Automated End-to-End Optimizing Compiler for Deep Learning</em> (OSDI 2018)</li>
+<li>Goto, K. &amp; van de Geijn, R. — <em>Anatomy of High-Performance Matrix Multiplication</em> (ACM TOMS 2008)</li>
+<li>Intel Optimization Manual, Chapter 3 — <em>Cache Blocking Techniques</em></li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p><strong>Day 20</strong> tackles the question tiling leaves unanswered: <strong>how do you choose the best tile sizes, unroll factors, and loop orders automatically?</strong> We'll explore auto-tuning — from brute-force grid search through genetic algorithms to TVM's learned cost models — and see why ML compilers increasingly use ML to optimize ML.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-18-polyhedral-model.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 18: The Polyhedral Model</a>
+            <a href="day-20-auto-tuning-search.html" class="text-emerald-600 hover:text-emerald-800">Day 20: Auto-Tuning & Search Spaces &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 1: Why ML Needs Compilers - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 1: GPU Architecture & CUDA</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-1-why-ml-needs-compilers">Day 1: Why ML Needs Compilers</h1>
+<blockquote>
+<p><strong>Phase I · Week 1 · Day 1 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"Between your Python model definition and the GPU transistors switching, there's a compiler-shaped gap. Today we learn why that gap exists."</em></p>
+<hr />
+<h2 id="navigation">Navigation</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Previous</strong></td>
+<td>— Start of curriculum</td>
+</tr>
+<tr>
+<td><strong>Next</strong></td>
+<td><a href="day-02-gpu-architecture.html">Day 2: GPU Architecture Deep Dive →</a></td>
+</tr>
+<tr>
+<td><strong>Week</strong></td>
+<td>Week 1: GPU Architecture &amp; CUDA</td>
+</tr>
+<tr>
+<td><strong>Phase</strong></td>
+<td>Phase I: Hardware &amp; Compute Foundations</td>
+</tr>
+<tr>
+<td><strong>Curriculum</strong></td>
+<td><a href="../../CURRICULUM.html">Full Curriculum</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>You write <code>model(x)</code> in Python and expect it to run fast on a GPU. But between that Python call and actual hardware execution, there's an enormous translation problem. The hardware landscape is fragmenting (NVIDIA, AMD, Apple Silicon, TPUs, custom ASICs), while model architectures are exploding in complexity. ML compilers exist to bridge this gap automatically.</p>
+<p>By the end of this curriculum, you'll understand every layer of that translation — and know how to optimize each one.</p>
+<hr />
+<h2 id="1-the-software-hardware-gap">1. The Software-Hardware Gap</h2>
+<h3 id="11-what-happens-when-you-call-modelx">1.1 What Happens When You Call <code>model(x)</code></h3>
+<pre><code class="language-python">import torch
+
+model = torch.nn.Linear(768, 768)
+x = torch.randn(32, 768, device='cuda')
+y = model(x)   # ← What actually happens here?
+</code></pre>
+<p>The journey from Python to silicon:</p>
+<pre><code>Python call: model(x)
+    │
+    ▼
+PyTorch dispatcher → selects ATen operator
+    │
+    ▼
+ATen C++ kernel → addmm(bias, input, weight.T)
+    │
+    ▼
+cuBLAS / cuDNN → vendor library call
+    │
+    ▼
+CUDA PTX assembly → virtual GPU instructions
+    │
+    ▼
+SASS → actual hardware instructions (SM-specific)
+    │
+    ▼
+GPU Streaming Multiprocessors → transistors switch
+</code></pre>
+<p>Each arrow represents a <strong>compilation or dispatch decision</strong> that affects performance.</p>
+<h3 id="12-why-not-just-use-vendor-libraries">1.2 Why Not Just Use Vendor Libraries?</h3>
+<p>Vendor libraries like cuBLAS and cuDNN are heavily optimized for <strong>standard operations</strong>:
+- Matrix multiplication → cuBLAS SGEMM
+- Convolution → cuDNN's implicit GEMM or Winograd
+- Batch normalization → cuDNN fused kernels</p>
+<p><strong>The problem</strong>: Real models don't run one operation at a time. They run sequences:</p>
+<pre><code class="language-python"># Common transformer pattern
+x = layer_norm(x)           # cuDNN kernel, reads from global memory
+x = linear(x)               # cuBLAS GEMM, reads from global memory
+x = gelu(x)                 # custom kernel, reads from global memory
+x = dropout(x)              # custom kernel, reads from global memory
+</code></pre>
+<p>Each kernel launch:
+1. <strong>Reads</strong> input from global GPU memory (slow: ~900 GB/s on A100)
+2. <strong>Computes</strong> the result (fast: 312 TFLOPS on A100)
+3. <strong>Writes</strong> output back to global GPU memory (slow again)</p>
+<p><strong>Memory bandwidth is the bottleneck</strong>, not compute. For elementwise ops like GELU and dropout, you're spending 95%+ of time on memory transfers.</p>
+<h3 id="13-the-fusion-opportunity">1.3 The Fusion Opportunity</h3>
+<p>A compiler can <strong>fuse</strong> these into a single kernel:</p>
+<pre><code>Without fusion:                        With fusion:
+┌────────────┐                        ┌────────────────────────┐
+│ LayerNorm  │ ← read x, write tmp1   │                        │
+└────────────┘                        │  LayerNorm + Linear    │
+┌────────────┐                        │  + GELU + Dropout      │
+│   Linear   │ ← read tmp1, write tmp2│                        │
+└────────────┘                        │  ← read x once         │
+┌────────────┐                        │  → write output once   │
+│    GELU    │ ← read tmp2, write tmp3│                        │
+└────────────┘                        └────────────────────────┘
+┌────────────┐
+│  Dropout   │ ← read tmp3, write y
+└────────────┘
+4 kernel launches                     1 kernel launch
+8 global memory round-trips           2 global memory round-trips
+</code></pre>
+<p><strong>Result</strong>: 2-4× speedup for memory-bound sequences. This is what ML compilers do automatically.</p>
+<hr />
+<h2 id="2-the-hardware-fragmentation-problem">2. The Hardware Fragmentation Problem</h2>
+<h3 id="21-target-diversity">2.1 Target Diversity</h3>
+<p>A modern ML system might need to deploy to:</p>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>ISA</th>
+<th>Memory Model</th>
+<th>Peak FLOPS (FP16)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NVIDIA A100</td>
+<td>CUDA/PTX</td>
+<td>Unified (HBM2e)</td>
+<td>312 TFLOPS</td>
+</tr>
+<tr>
+<td>NVIDIA H100</td>
+<td>CUDA/PTX</td>
+<td>Unified (HBM3)</td>
+<td>990 TFLOPS</td>
+</tr>
+<tr>
+<td>AMD MI300X</td>
+<td>ROCm/GCN</td>
+<td>Unified (HBM3)</td>
+<td>1307 TFLOPS</td>
+</tr>
+<tr>
+<td>Apple M4 Max</td>
+<td>Metal</td>
+<td>Unified (LPDDR5)</td>
+<td>~28 TFLOPS</td>
+</tr>
+<tr>
+<td>Google TPU v5</td>
+<td>XLA/HLO</td>
+<td>HBM2e</td>
+<td>~459 TFLOPS</td>
+</tr>
+<tr>
+<td>Intel Gaudi 3</td>
+<td>Synapse</td>
+<td>HBM2e</td>
+<td>~1835 TFLOPS</td>
+</tr>
+<tr>
+<td>ARM Cortex-A78</td>
+<td>NEON</td>
+<td>Separate (LPDDR5)</td>
+<td>~0.05 TFLOPS</td>
+</tr>
+</tbody>
+</table>
+<p>Writing optimized kernels by hand for each target is impractical. A compiler provides <strong>hardware abstraction</strong> — write the model once, compile to any target.</p>
+<h3 id="22-the-optimization-space">2.2 The Optimization Space</h3>
+<p>For a single matmul on GPU, the optimization choices include:
+- <strong>Tile sizes</strong>: How to partition the problem across thread blocks
+- <strong>Loop order</strong>: Which dimension to iterate first
+- <strong>Vectorization</strong>: How many elements per thread load
+- <strong>Shared memory usage</strong>: What to cache in fast on-chip SRAM
+- <strong>Pipeline depth</strong>: How to overlap compute and memory
+- <strong>Thread block dimensions</strong>: Grid/block shape configuration</p>
+<p>The number of valid configurations can be $10^{10}$ or more. <strong>Auto-tuning</strong> (searching this space) is a core ML compiler technique.</p>
+<hr />
+<h2 id="3-compilation-vs-interpretation">3. Compilation vs Interpretation</h2>
+<h3 id="31-eager-mode-interpretation">3.1 Eager Mode (Interpretation)</h3>
+<p>PyTorch default — execute operations one at a time:</p>
+<pre><code class="language-python"># Eager mode: each line dispatches immediately
+x = torch.relu(x)           # dispatch → kernel → sync
+x = torch.matmul(W, x)      # dispatch → kernel → sync
+x = x + bias                # dispatch → kernel → sync
+</code></pre>
+<p><strong>Pros</strong>: Easy debugging, dynamic shapes, Python control flow<br />
+<strong>Cons</strong>: No cross-operator optimization, kernel launch overhead, no fusion</p>
+<h3 id="32-graph-mode-compilation">3.2 Graph Mode (Compilation)</h3>
+<p>Capture the entire computation graph, then optimize it as a whole:</p>
+<pre><code class="language-python"># Graph capture
+@torch.compile
+def forward(x, W, bias):
+    x = torch.relu(x)
+    x = torch.matmul(W, x)
+    x = x + bias
+    return x
+
+# First call: trace → optimize → codegen → cache
+# Subsequent calls: run optimized kernel directly
+</code></pre>
+<p><strong>Pros</strong>: Global optimization, fusion, hardware-specific codegen<br />
+<strong>Cons</strong>: Tracing limitations, recompilation on shape change, harder debugging</p>
+<h3 id="33-the-middle-ground">3.3 The Middle Ground</h3>
+<p>Modern ML compilers use <strong>selective compilation</strong>:
+- Compile hot paths (attention, FFN blocks)
+- Keep control flow in eager mode
+- Recompile only when shapes change</p>
+<p><code>torch.compile</code> (PyTorch 2.x) does exactly this via TorchDynamo.</p>
+<hr />
+<h2 id="4-the-ml-compiler-landscape">4. The ML Compiler Landscape</h2>
+<h3 id="41-major-projects">4.1 Major Projects</h3>
+<pre><code>                    ┌─────────────────────┐
+                    │   ML Frameworks     │
+                    │ PyTorch, TF, JAX    │
+                    └────────┬────────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+     ┌──────────────┐ ┌───────────┐ ┌───────────┐
+     │ torch.compile│ │    XLA    │ │  Apache   │
+     │ (Dynamo +    │ │ (Google)  │ │   TVM     │
+     │  Inductor)   │ │           │ │           │
+     └──────┬───────┘ └─────┬─────┘ └─────┬─────┘
+            │               │             │
+            ▼               ▼             ▼
+     ┌──────────────┐ ┌───────────┐ ┌───────────┐
+     │   Triton     │ │  LLVM /   │ │  TIR +    │
+     │  (OpenAI)    │ │  MLIR     │ │  Codegen  │
+     └──────┬───────┘ └─────┬─────┘ └─────┬─────┘
+            │               │             │
+            └───────────────┼─────────────┘
+                            ▼
+                    ┌──────────────┐
+                    │  Hardware    │
+                    │  GPU/CPU/TPU │
+                    └──────────────┘
+</code></pre>
+<h3 id="42-where-each-fits">4.2 Where Each Fits</h3>
+<table>
+<thead>
+<tr>
+<th>Compiler</th>
+<th>Frontend</th>
+<th>Backend</th>
+<th>Strength</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>torch.compile</td>
+<td>PyTorch models</td>
+<td>Triton (GPU), C++ (CPU)</td>
+<td>Seamless PyTorch integration</td>
+</tr>
+<tr>
+<td>XLA</td>
+<td>JAX, TensorFlow</td>
+<td>LLVM</td>
+<td>TPU support, whole-program opt</td>
+</tr>
+<tr>
+<td>Apache TVM</td>
+<td>ONNX, PyTorch, TF</td>
+<td>LLVM, CUDA, Metal, Vulkan</td>
+<td>Universal deployment, auto-tuning</td>
+</tr>
+<tr>
+<td>Triton</td>
+<td>Python DSL</td>
+<td>LLVM → PTX</td>
+<td>Easy custom GPU kernels</td>
+</tr>
+<tr>
+<td>MLIR</td>
+<td>Multi-framework</td>
+<td>Multi-target</td>
+<td>Reusable compiler infrastructure</td>
+</tr>
+<tr>
+<td>TensorRT</td>
+<td>ONNX, TF</td>
+<td>CUDA (NVIDIA only)</td>
+<td>Fastest NVIDIA inference</td>
+</tr>
+</tbody>
+</table>
+<h3 id="43-apache-tvms-position">4.3 Apache TVM's Position</h3>
+<p>TVM is unique because it:
+1. <strong>Accepts multiple frontends</strong>: ONNX, PyTorch, TensorFlow, MXNet
+2. <strong>Targets multiple backends</strong>: NVIDIA, AMD, ARM, RISC-V, WebGPU, bare metal
+3. <strong>Auto-tunes</strong>: Searches the optimization space per-target
+4. <strong>Open source</strong> under Apache 2.0 with 1000+ contributors</p>
+<p>This makes it the most <strong>universal</strong> ML compiler — we'll spend 3 full weeks inside it (Days 29–49).</p>
+<hr />
+<h2 id="5-hands-on-measuring-the-gap">5. Hands-On: Measuring the Gap</h2>
+<h3 id="exercise-1-unfused-vs-fused-operations">Exercise 1: Unfused vs Fused Operations</h3>
+<pre><code class="language-python">import torch
+import time
+
+device = 'cuda'
+x = torch.randn(4096, 4096, device=device)
+
+# Unfused: 3 separate kernels
+def unfused(x):
+    x = torch.relu(x)
+    x = x * 0.5
+    x = x + 1.0
+    return x
+
+# torch.compile fuses them
+fused = torch.compile(unfused)
+
+# Warmup
+for _ in range(10):
+    unfused(x)
+    fused(x)
+torch.cuda.synchronize()
+
+# Benchmark
+N = 100
+start = time.perf_counter()
+for _ in range(N):
+    unfused(x)
+torch.cuda.synchronize()
+unfused_time = (time.perf_counter() - start) / N
+
+start = time.perf_counter()
+for _ in range(N):
+    fused(x)
+torch.cuda.synchronize()
+fused_time = (time.perf_counter() - start) / N
+
+print(f&quot;Unfused: {unfused_time*1000:.2f} ms&quot;)
+print(f&quot;Fused:   {fused_time*1000:.2f} ms&quot;)
+print(f&quot;Speedup: {unfused_time/fused_time:.2f}x&quot;)
+</code></pre>
+<h3 id="exercise-2-profile-the-difference">Exercise 2: Profile the Difference</h3>
+<pre><code class="language-python">from torch.profiler import profile, ProfilerActivity
+
+with profile(activities=[ProfilerActivity.CUDA]) as prof:
+    for _ in range(5):
+        unfused(x)
+        torch.cuda.synchronize()
+
+print(&quot;=== Unfused ===&quot;)
+print(prof.key_averages().table(sort_by=&quot;cuda_time_total&quot;, row_limit=10))
+
+with profile(activities=[ProfilerActivity.CUDA]) as prof:
+    for _ in range(5):
+        fused(x)
+        torch.cuda.synchronize()
+
+print(&quot;=== Fused ===&quot;)
+print(prof.key_averages().table(sort_by=&quot;cuda_time_total&quot;, row_limit=10))
+</code></pre>
+<p><strong>What to observe</strong>:
+- Unfused: 3 kernel launches, 3 memory round-trips
+- Fused: 1 kernel launch (Triton-generated), 1 memory round-trip
+- The fused version should be 2-3× faster for this memory-bound pattern</p>
+<hr />
+<h2 id="6-key-takeaways">6. Key Takeaways</h2>
+<ol>
+<li><strong>The gap</strong>: Between Python <code>model(x)</code> and GPU hardware, there are 6+ translation layers</li>
+<li><strong>Memory bandwidth</strong> is the bottleneck for most ML workloads, not compute</li>
+<li><strong>Operator fusion</strong> eliminates redundant memory transfers — this is the #1 compiler optimization</li>
+<li><strong>Hardware fragmentation</strong> makes hand-tuned kernels impractical — compilers provide portability</li>
+<li><strong>The landscape</strong>: torch.compile, XLA, TVM, Triton, TensorRT each solve different parts of the problem</li>
+<li><strong>TVM</strong> is the most universal — we'll go deep on it in Phase III</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://arxiv.org/abs/2002.03794">The Deep Learning Compiler: A Comprehensive Survey</a> — Foundational survey paper</li>
+<li><a href="https://docs.google.com/document/d/1y811KlMlUbNEGxMerO9wpAKJ4BjqtVRGFsy0CLXB0tQ/">torch.compile: the missing manual</a> — PyTorch team's guide</li>
+<li><a href="https://arxiv.org/abs/1802.04799">TVM: An Automated End-to-End Optimizing Compiler for Deep Learning</a> — Original TVM paper (OSDI 2018)</li>
+<li><a href="https://www.eecs.harvard.edu/~htk/publication/2019-mapl-tillet-kung-cox.pdf">Triton: An Intermediate Language and Compiler for Tiled Neural Network Computations</a> — Triton's design paper</li>
+</ul>
+<hr />
+<h2 id="tomorrow">Tomorrow</h2>
+<p>Day 2 dives into <strong>GPU architecture</strong> — streaming multiprocessors, warp scheduling, and the memory hierarchy that makes fusion so important.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="../../index.html" class="text-emerald-600 hover:text-emerald-800">&larr; Curriculum Home</a>
+            <a href="day-02-gpu-architecture.html" class="text-emerald-600 hover:text-emerald-800">Day 2: GPU Architecture &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

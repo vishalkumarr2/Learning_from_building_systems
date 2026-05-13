@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 42: Stop & Reflect #3 - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 6: TVM Tuning & Backends</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-42-stop-reflect-3">Day 42: Stop &amp; Reflect #3</h1>
+<blockquote>
+<p><strong>Phase III · Week 6 · Day 42 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"To know that you know what you know, and to know that you do not know what you do not know — that is true knowledge."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-41-tvm-unity-relax.html">Day 41: TVM Unity &amp; Relax</a></td>
+<td style="text-align: left;"><a href="../week-07/day-43-mlir-for-ml.html">Day 43: MLIR for ML</a></td>
+<td style="text-align: left;"><a href="README.html">Week 6: TVM Tuning &amp; Backends</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>You've spent two dense weeks (Days 29–41) inside Apache TVM — from architecture overview through Relay, TE, TIR, tuning, BYOC, quantization, edge deployment, and Relax. That's <strong>13 days of interconnected material</strong>. Before moving to MLIR and the broader compiler ecosystem (Phase IV), you need to consolidate. This reflection session tests retention, builds connections between concepts, and equips you with a practical decision framework for choosing the right tool in real deployment scenarios.</p>
+<hr />
+<h2 id="1-concept-map-the-tvm-universe">1. Concept Map: The TVM Universe</h2>
+<p>Map every major concept from Weeks 5–6 and draw the connections:</p>
+<pre><code>                        TVM Compilation Stack — Full Picture
+═══════════════════════════════════════════════════════════════════════════
+
+  PyTorch / ONNX / TFLite
+        │
+        ▼ Frontend Import (Day 30)
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                      Relay IR (Day 30-31)                       │
+  │  • Functional graph: %x = nn.conv2d(%data, %weight)             │
+  │  • Type/shape inference, pattern matching                       │
+  │  • Optimization passes: FoldConstant, FuseOps, SimplifyInference│
+  │  • QNN dialect for quantized models (Day 39)                    │
+  └───────┬───────────────┬──────────────────────────┬──────────────┘
+          │               │                          │
+          ▼               ▼                          ▼
+  ┌──────────────┐ ┌──────────────┐         ┌──────────────────┐
+  │ TE (Day 32)  │ │ BYOC (Day 38)│         │ Relax (Day 41)   │
+  │ Compute decl │ │ Partition to │         │ Next-gen IR      │
+  │ A[i,j] =     │ │ external lib │         │ • Symbolic shapes│
+  │  B[i,k]*C[k,j│ │ (cuDNN, DNNL,│         │ • Dataflow blocks│
+  └──────┬───────┘ │  TensorRT)   │         │ • call_tir       │
+         │         └──────────────┘         └─────────┬────────┘
+         ▼                                            │
+  ┌──────────────┐                                    │
+  │ TIR (Day 33) │◀───────────────────────────────────┘
+  │ Low-level IR │       (Relax calls TIR directly)
+  │ • Loops      │
+  │ • Buffers    │
+  │ • Schedules  │
+  └──────┬───────┘
+         │
+         ▼ Schedule Transformations
+  ┌───────────────────────────────────────────────────────────┐
+  │                 Tuning Layer (Days 36-37)                  │
+  │                                                            │
+  │  AutoTVM        AutoScheduler      MetaSchedule            │
+  │  (template)     (Ansor, auto)      (unified, TIR-native)   │
+  │  Day 36         Day 36             Day 37                  │
+  │                                                            │
+  │  Cost Model: XGBoost → predicts runtime from TIR features  │
+  │  Search: random/GA/evolutionary over schedule knobs        │
+  └──────────────────────────┬────────────────────────────────┘
+                             │
+                             ▼ Code Generation
+  ┌───────────────────────────────────────────────────────────┐
+  │                  Target Backends                           │
+  │                                                            │
+  │  LLVM → x86, ARM, RISC-V    CUDA/ROCm → GPU               │
+  │  C codegen → microcontrollers  Hexagon → Qualcomm DSP      │
+  │  Vulkan/Metal/OpenCL → mobile GPU                          │
+  └──────────────────────────┬────────────────────────────────┘
+                             │
+                             ▼ Deployment (Days 34, 40)
+  ┌───────────────────────────────────────────────────────────┐
+  │                    Runtime Layer                            │
+  │                                                            │
+  │  Graph Executor     AOT Executor      µTVM (CRT)           │
+  │  (~300 KB, JSON)    (~10 KB, C)       (bare-metal)         │
+  │  Linux/Android      Linux/RTOS        Arduino/Zephyr       │
+  │  Raspberry Pi       Jetson            Cortex-M4            │
+  │                                                            │
+  │  RPC: remote tune + benchmark on real hardware (Day 40)    │
+  │  Quantization: INT8 via QNN calibration (Day 39)           │
+  └───────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="connection-exercise">Connection Exercise</h3>
+<p>For each arrow in the concept map, write a one-sentence explanation of the transformation:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">From → To</th>
+<th style="text-align: left;">What Happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">PyTorch → Relay</td>
+<td style="text-align: left;"><code>relay.frontend.from_pytorch</code> traces the model and converts ops to Relay operators</td>
+</tr>
+<tr>
+<td style="text-align: left;">Relay → TE</td>
+<td style="text-align: left;"><code>FuseOps</code> pass groups operators; each fused group gets a TE compute declaration</td>
+</tr>
+<tr>
+<td style="text-align: left;">TE → TIR</td>
+<td style="text-align: left;">TE's <code>te.create_prim_func()</code> converts compute + schedule into loop-level TIR</td>
+</tr>
+<tr>
+<td style="text-align: left;">TIR → LLVM/CUDA</td>
+<td style="text-align: left;">TIR codegen emits LLVM IR (for CPUs) or CUDA kernels (for GPUs)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Relay → BYOC</td>
+<td style="text-align: left;">Pattern matching annotates subgraphs; partitioning extracts them for external libs</td>
+</tr>
+<tr>
+<td style="text-align: left;">Relax → TIR</td>
+<td style="text-align: left;"><code>call_tir</code> directly references TIR functions (no lowering pass needed)</td>
+</tr>
+<tr>
+<td style="text-align: left;">TIR → Tuning</td>
+<td style="text-align: left;">MetaSchedule explores schedule knobs; cost model predicts; runner measures</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-self-check-quiz">2. Self-Check Quiz</h2>
+<p>Answer each question, then check against the reference answers below. Score yourself honestly.</p>
+<h3 id="questions">Questions</h3>
+<p><strong>Q1.</strong> What are the three main IRs in the classic TVM stack, ordered from highest to lowest abstraction?</p>
+<p><strong>Q2.</strong> In TE, what is the difference between a <strong>compute</strong> declaration and a <strong>schedule</strong>? Give a one-line example of each.</p>
+<p><strong>Q3.</strong> Name three Relay optimization passes and describe what each does in one sentence.</p>
+<p><strong>Q4.</strong> What problem does operator <strong>fusion</strong> solve, and what is the primary performance benefit?</p>
+<p><strong>Q5.</strong> In MetaSchedule, what role does the <strong>cost model</strong> play, and why is it necessary?</p>
+<p><strong>Q6.</strong> Explain the BYOC workflow in three steps.</p>
+<p><strong>Q7.</strong> What is the formula for converting a floating-point value $x$ to a quantized integer $q$ using scale $s$ and zero point $z$?</p>
+<p><strong>Q8.</strong> What is the key difference between the <strong>Graph Executor</strong> and the <strong>AOT Executor</strong>? When would you choose each?</p>
+<p><strong>Q9.</strong> In Relax, what does <code>R.call_tir(func, args, out_sinfo)</code> do that Relay's lowering cannot?</p>
+<p><strong>Q10.</strong> Why are <strong>first-class dynamic shapes</strong> important for LLM serving, and how does Relax handle them differently from Relay?</p>
+<h3 id="reference-answers">Reference Answers</h3>
+<details>
+<summary>Click to reveal answers</summary>
+
+**A1.** Relay (graph-level, functional) → TE (tensor expression, compute + schedule) → TIR (low-level, loops and buffers).
+
+**A2.** Compute declares *what* to calculate: `C[i,j] = te.sum(A[i,k] * B[k,j], axis=k)`. Schedule declares *how*: `s[C].tile(i, j, 32, 32)` — tiling the loop nest into 32×32 blocks.
+
+**A3.** (1) `FuseOps` — merges elementwise/broadcast operators into fused kernels to eliminate intermediate memory. (2) `FoldConstant` — pre-computes constant expressions at compile time. (3) `SimplifyInference` — replaces batch norm with scale+bias during inference.
+
+**A4.** Fusion eliminates **memory round-trips**. Without fusion, each operator writes its output to DRAM and the next reads it back. Fused operators pass data through registers/L1 cache, reducing memory bandwidth by orders of magnitude.
+
+**A5.** The cost model (XGBoost-based) **predicts kernel latency from TIR features** without running the kernel. This is necessary because measuring every candidate schedule on real hardware would take days — the cost model prunes the search space by 100–1000×, and only the top candidates are actually measured.
+
+**A6.** (1) **Pattern match** — identify subgraphs the external backend can handle (e.g., conv2d+bias+relu for cuDNN). (2) **Partition** — extract matched subgraphs into tagged composite functions. (3) **Unified runtime** — GraphExecutor dispatches between TVM-compiled and external-backend regions.
+
+**A7.** $q = \text{round}\left(\frac{x}{s}\right) + z$, where $s$ is the scale (float), $z$ is the zero point (integer).
+
+**A8.** Graph Executor uses a JSON graph description + interpreter loop at runtime (~300 KB overhead, needs `malloc`). AOT Executor bakes the execution order into a single C function (~10 KB overhead, no dynamic allocation needed). Choose Graph for Linux devices (easier debugging); choose AOT for microcontrollers (bare-metal, minimal RAM).
+
+**A9.** `call_tir` creates a **direct reference** from a Relax function to a TIR function within the same IRModule. This means Relax and TIR can be co-optimized and transformed together. Relay's lowering is a one-way door — once lowered to TIR, graph-level context is lost.
+
+**A10.** LLMs have variable batch sizes, sequence lengths, and KV cache sizes at every inference step. Relay uses `Any` as a placeholder with limited compiler reasoning. Relax uses **symbolic shape variables** (e.g., `("batch", "seq_len")`) that support arithmetic ($\text{new\_len} = \text{past\_len} + \text{seq\_len}$), enabling the compiler to pre-allocate buffers, specialize kernels, and optimize memory layout even with dynamic shapes.
+
+</details>
+
+<h3 id="scoring">Scoring</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Score</th>
+<th style="text-align: left;">Assessment</th>
+<th style="text-align: left;">Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">9–10</td>
+<td style="text-align: left;">Excellent — solid grasp of the full TVM stack</td>
+<td style="text-align: left;">Proceed to Phase IV</td>
+</tr>
+<tr>
+<td style="text-align: left;">7–8</td>
+<td style="text-align: left;">Good — minor gaps</td>
+<td style="text-align: left;">Re-read the missed topics, then proceed</td>
+</tr>
+<tr>
+<td style="text-align: left;">5–6</td>
+<td style="text-align: left;">Fair — several gaps</td>
+<td style="text-align: left;">Re-do the hands-on exercises for missed areas</td>
+</tr>
+<tr>
+<td style="text-align: left;">≤4</td>
+<td style="text-align: left;">Needs review</td>
+<td style="text-align: left;">Revisit Days 29–41 before continuing</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-decision-framework-choosing-your-tool">3. Decision Framework: Choosing Your Tool</h2>
+<p>When deploying ML models, TVM is one of several options. Use this framework:</p>
+<pre><code>                  ML Deployment Decision Tree
+═══════════════════════════════════════════════════════
+
+  &quot;I have a trained model. How should I deploy it?&quot;
+                    │
+            ┌───────┴────────┐
+            │ Target device? │
+            └───────┬────────┘
+                    │
+       ┌────────────┼────────────────┐
+       │            │                │
+   NVIDIA GPU   CPU / ARM      Microcontroller
+       │            │                │
+       ▼            ▼                ▼
+  ┌─────────┐ ┌──────────┐    ┌──────────┐
+  │ Torch   │ │ ORT /    │    │ µTVM     │
+  │ compile │ │ TVM /    │    │ (AOT)    │
+  │ or      │ │ torch    │    │          │
+  │ TensorRT│ │ compile  │    │ Only     │
+  │ or TVM  │ │          │    │ option!  │
+  └────┬────┘ └────┬─────┘    └──────────┘
+       │           │
+       ▼           ▼
+  Performance vs Effort tradeoff (see table below)
+</code></pre>
+<h3 id="detailed-comparison-matrix">Detailed Comparison Matrix</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Criterion</th>
+<th style="text-align: left;">TVM</th>
+<th style="text-align: left;">torch.compile</th>
+<th style="text-align: left;">Triton</th>
+<th style="text-align: left;">ONNX Runtime</th>
+<th style="text-align: left;">TensorRT</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Primary strength</strong></td>
+<td style="text-align: left;">Multi-target, auto-tuning</td>
+<td style="text-align: left;">PyTorch-native, zero friction</td>
+<td style="text-align: left;">Custom GPU kernels</td>
+<td style="text-align: left;">Cross-platform inference</td>
+<td style="text-align: left;">Max NVIDIA perf</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Target devices</strong></td>
+<td style="text-align: left;">CPU, GPU, ARM, MCU, DSP</td>
+<td style="text-align: left;">CPU, GPU (CUDA, ROCm)</td>
+<td style="text-align: left;">NVIDIA GPU only</td>
+<td style="text-align: left;">CPU, GPU, NPU</td>
+<td style="text-align: left;">NVIDIA GPU only</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Dynamic shapes</strong></td>
+<td style="text-align: left;">Relax: ✅ Relay: limited</td>
+<td style="text-align: left;">✅ (torch.export)</td>
+<td style="text-align: left;">Manual</td>
+<td style="text-align: left;">✅</td>
+<td style="text-align: left;">✅ (with profiles)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Setup effort</strong></td>
+<td style="text-align: left;">High (compile TVM, tune)</td>
+<td style="text-align: left;">Low (pip install)</td>
+<td style="text-align: left;">Medium (write kernels)</td>
+<td style="text-align: left;">Low (pip install)</td>
+<td style="text-align: left;">Medium (TRT builder)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>INT8 quantization</strong></td>
+<td style="text-align: left;">✅ (QNN + calibration)</td>
+<td style="text-align: left;">Via Torch AO</td>
+<td style="text-align: left;">Manual</td>
+<td style="text-align: left;">✅ (QDQ nodes)</td>
+<td style="text-align: left;">✅ (PTQ + QAT)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Microcontrollers</strong></td>
+<td style="text-align: left;">✅ (µTVM)</td>
+<td style="text-align: left;">✗</td>
+<td style="text-align: left;">✗</td>
+<td style="text-align: left;">✗ (too heavy)</td>
+<td style="text-align: left;">✗</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Custom operators</strong></td>
+<td style="text-align: left;">TE / TIR / BYOC</td>
+<td style="text-align: left;">torch.library</td>
+<td style="text-align: left;">Native (write them!)</td>
+<td style="text-align: left;">Custom op API</td>
+<td style="text-align: left;">Plugin API</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Tuning</strong></td>
+<td style="text-align: left;">AutoTVM, MetaSchedule</td>
+<td style="text-align: left;">Inductor + Triton</td>
+<td style="text-align: left;">Manual</td>
+<td style="text-align: left;">Graph optimizations</td>
+<td style="text-align: left;">TRT builder</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Latency</strong> (after tuning)</td>
+<td style="text-align: left;">★★★★☆</td>
+<td style="text-align: left;">★★★☆☆</td>
+<td style="text-align: left;">★★★★★</td>
+<td style="text-align: left;">★★★☆☆</td>
+<td style="text-align: left;">★★★★★</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Developer experience</strong></td>
+<td style="text-align: left;">★★☆☆☆</td>
+<td style="text-align: left;">★★★★★</td>
+<td style="text-align: left;">★★★☆☆</td>
+<td style="text-align: left;">★★★★☆</td>
+<td style="text-align: left;">★★★☆☆</td>
+</tr>
+</tbody>
+</table>
+<h3 id="decision-heuristics">Decision Heuristics</h3>
+<pre><code class="language-python">def choose_tool(target, model_type, team_expertise, constraints):
+    &quot;&quot;&quot;
+    Practical decision guide.
+    &quot;&quot;&quot;
+    # Rule 1: Microcontrollers → TVM (no alternative)
+    if target in (&quot;cortex-m&quot;, &quot;arduino&quot;, &quot;zephyr&quot;):
+        return &quot;TVM (µTVM + AOT)&quot;
+
+    # Rule 2: NVIDIA GPU, maximum throughput, known model → TensorRT
+    if target == &quot;nvidia_gpu&quot; and model_type == &quot;standard&quot; and &quot;latency&quot; in constraints:
+        return &quot;TensorRT (or torch.compile with TRT backend)&quot;
+
+    # Rule 3: Custom GPU kernel needed → Triton
+    if &quot;custom_kernel&quot; in constraints and target == &quot;nvidia_gpu&quot;:
+        return &quot;Triton (write the kernel, wrap as torch op)&quot;
+
+    # Rule 4: Multi-target deployment → TVM or ONNX Runtime
+    if len(target) &gt; 1 or target in (&quot;arm_cpu&quot;, &quot;risc_v&quot;, &quot;hexagon&quot;):
+        return &quot;TVM (cross-compile, auto-tune per target)&quot;
+
+    # Rule 5: PyTorch team, fast iteration, good enough perf → torch.compile
+    if team_expertise == &quot;pytorch&quot; and &quot;maximum_perf&quot; not in constraints:
+        return &quot;torch.compile (Inductor backend)&quot;
+
+    # Rule 6: Cross-framework (ONNX model), easy deployment → ORT
+    if model_type == &quot;onnx&quot;:
+        return &quot;ONNX Runtime (+ EP for GPU acceleration)&quot;
+
+    # Default: start with torch.compile, profile, escalate if needed
+    return &quot;torch.compile → profile → escalate to TVM/TRT if bottlenecked&quot;
+</code></pre>
+<hr />
+<h2 id="4-reflection-prompts">4. Reflection Prompts</h2>
+<p>Take 15 minutes to write short answers to these questions. There are no wrong answers — they're for building your mental model.</p>
+<h3 id="architecture-design">Architecture &amp; Design</h3>
+<ol>
+<li>
+<p><strong>Why did TVM introduce three separate IRs (Relay, TE, TIR) instead of one?</strong> What are the trade-offs of this layered design, and how does Relax attempt to address them?</p>
+</li>
+<li>
+<p><strong>If you were designing a new ML compiler from scratch today</strong>, which TVM design decisions would you keep and which would you change? Consider what you know about MLIR (coming in Phase IV).</p>
+</li>
+</ol>
+<h3 id="practical-engineering">Practical Engineering</h3>
+<ol start="3">
+<li>
+<p><strong>You need to deploy a ResNet-50 model on four different targets</strong>: NVIDIA A100, Intel Xeon, Raspberry Pi 4, and an STM32 Cortex-M7. Describe your compilation strategy for each.</p>
+</li>
+<li>
+<p><strong>Your auto-tuned TVM model is 10% slower than cuDNN on conv2d.</strong> Walk through your debugging process. What would you check first? When would you fall back to BYOC?</p>
+</li>
+</ol>
+<h3 id="connections-gaps">Connections &amp; Gaps</h3>
+<ol start="5">
+<li>
+<p><strong>What concept from Weeks 5-6 was hardest for you to understand?</strong> Write a one-paragraph explanation of it as if teaching a colleague — teaching reveals gaps.</p>
+</li>
+<li>
+<p><strong>Predict three ways the TVM ecosystem will evolve over the next two years.</strong> Consider Relax adoption, LLM compilation, and the relationship with PyTorch.</p>
+</li>
+</ol>
+<hr />
+<h2 id="5-knowledge-consolidation-exercise">5. Knowledge Consolidation Exercise</h2>
+<h3 id="build-a-cheat-sheet">Build a Cheat Sheet</h3>
+<p>Create a one-page (front and back) TVM cheat sheet covering:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Section</th>
+<th style="text-align: left;">Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>IR Summary</strong></td>
+<td style="text-align: left;">Relay, TE, TIR, Relax — one sentence each</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Key APIs</strong></td>
+<td style="text-align: left;"><code>relay.build</code>, <code>relay.frontend.from_*</code>, <code>meta_schedule.tune_tvm</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Target Strings</strong></td>
+<td style="text-align: left;">LLVM (x86, ARM), CUDA, C (MCU) — with <code>-mattr</code> flags</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Tuning</strong></td>
+<td style="text-align: left;">AutoTVM vs AutoScheduler vs MetaSchedule — when to use each</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Deployment</strong></td>
+<td style="text-align: left;">Graph executor vs AOT vs µTVM — decision criteria</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Quick Recipes</strong></td>
+<td style="text-align: left;">PyTorch → TVM → benchmark (5-line version)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="compile-a-gotchas-list">Compile a "Gotchas" List</h3>
+<p>From your experience in the exercises, document:</p>
+<pre><code>TVM Gotchas (personal notes)
+═════════════════════════════
+1. Target string must match actual hardware — wrong -mattr = SIGILL on device
+2. AutoTVM templates ≠ MetaSchedule — can't mix tuning logs between them  
+3. relay.build() returns a Module — must call export_library() for deployment
+4. QNN calibration needs representative data — random input ≠ real distribution
+5. Cross-compilation requires matching toolchain (aarch64-linux-gnu-gcc)
+6. RPC server and tracker must use matching TVM versions
+7. USMP (memory planning) only works with AOT executor
+8. ...add your own from the exercises...
+</code></pre>
+<hr />
+<h2 id="6-progress-check-phase-iii-complete">6. Progress Check: Phase III Complete</h2>
+<p>You've finished Phase III — the Apache TVM deep dive. Here's what you covered:</p>
+<pre><code>Phase III: Apache TVM Deep Dive — Summary
+══════════════════════════════════════════
+
+Week 5: TVM Foundations (Days 29-35)
+  ✓ Day 29: Architecture overview (compiler vs runtime)
+  ✓ Day 30: Relay IR (graph-level, type system, ops)
+  ✓ Day 31: Relay optimization passes (FuseOps, FoldConstant, layout)
+  ✓ Day 32: Tensor Expressions (compute declarations)
+  ✓ Day 33: TIR &amp; schedules (loop transformations)
+  ✓ Day 34: Runtime &amp; deployment (Module, RPC)
+  ✓ Day 35: Mini-project (end-to-end MobileNetV2)
+
+Week 6: TVM Tuning &amp; Backends (Days 36-42)
+  ✓ Day 36: AutoTVM &amp; AutoScheduler (template vs template-free)
+  ✓ Day 37: MetaSchedule (unified tuning framework)
+  ✓ Day 38: BYOC — Bring Your Own Codegen (hybrid compilation)
+  ✓ Day 39: Quantization (QNN dialect, calibration, INT8)
+  ✓ Day 40: Edge devices (cross-compilation, µTVM, AOT, memory planning)
+  ✓ Day 41: TVM Unity &amp; Relax (next-gen IR, dynamic shapes)
+  ✓ Day 42: Stop &amp; Reflect #3 (this session)
+
+Skills acquired:
+  • Compile any PyTorch/ONNX model through TVM
+  • Write custom TE compute + schedules
+  • Auto-tune for specific hardware targets
+  • Deploy to devices from GPUs to microcontrollers
+  • Understand quantization pipeline end-to-end
+  • Read and write Relax programs
+</code></pre>
+<h3 id="readiness-for-phase-iv">Readiness for Phase IV</h3>
+<p>Phase IV (Weeks 7–8) covers <strong>MLIR and the broader compiler ecosystem</strong>: MLIR dialects, Torch-MLIR, StableHLO, IREE, and how they relate to TVM. You'll see how many TVM concepts (IRs, passes, lowering, backends) map directly to MLIR's more general framework.</p>
+<p>Before proceeding, verify:
+- [ ] Can explain the TVM compilation pipeline from PyTorch import to target code
+- [ ] Can write a TE compute declaration and apply basic schedules
+- [ ] Understand the purpose of auto-tuning and how MetaSchedule works
+- [ ] Know when to use Graph Executor vs AOT Executor vs µTVM
+- [ ] Can describe what Relax improves over Relay
+- [ ] Scored ≥ 7/10 on the self-check quiz above</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Concept maps reveal connections</strong> — the TVM stack is not a linear pipeline but a graph with multiple paths (Relay→TIR, Relay→BYOC, Relax→TIR)</li>
+<li><strong>Self-assessment prevents false confidence</strong> — scoring below 7/10 means gaps that will compound in Phase IV</li>
+<li><strong>No single tool wins everywhere</strong> — TVM excels at multi-target and edge; torch.compile wins on developer experience; Triton/TensorRT win on raw NVIDIA GPU performance</li>
+<li><strong>The decision framework is situational</strong> — target device, model type, team expertise, and deployment constraints all factor in</li>
+<li><strong>Phase III knowledge maps directly to Phase IV</strong> — MLIR's dialects ≈ TVM's IRs, MLIR's passes ≈ TVM's passes, MLIR's lowering ≈ TVM's codegen</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://mlc.ai/">MLC Course — Full TVM Tutorial</a> — the best comprehensive TVM resource</li>
+<li><a href="https://tvm.apache.org/docs/arch/">TVM Design Documents</a> — architecture rationale</li>
+<li><a href="https://arxiv.org/abs/2002.03794">The Deep Learning Compiler: A Comprehensive Survey (2020)</a> — academic perspective on TVM and competitors</li>
+<li><a href="https://www.modular.com/blog">Comparing ML Compilers (Modular Blog)</a> — industry perspective on the compiler landscape</li>
+<li><a href="https://tvm.apache.org/docs/how_to/work_with_relay/index.html">Relay to Relax Migration Guide</a> — practical migration docs</li>
+</ul>
+<hr />
+<h2 id="tomorrow-mlir-for-ml">Tomorrow: MLIR for ML</h2>
+<p>Day 43 begins <strong>Phase IV</strong> with a deep dive into MLIR — the Multi-Level Intermediate Representation framework from Google/LLVM. You'll see how MLIR's dialect system generalizes TVM's IR stack, and why MLIR is becoming the foundation for the next generation of ML compilers (Torch-MLIR, StableHLO, IREE, and more).</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-41-tvm-unity-relax.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 41: TVM Unity & Relax</a>
+            <a href="../week-07/day-43-mlir-for-ml.html" class="text-emerald-600 hover:text-emerald-800">Day 43: MLIR for ML &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

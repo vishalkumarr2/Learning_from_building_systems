@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 50: Model Formats & ONNX - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 8: Model Formats & Runtimes</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-50-model-formats-onnx">Day 50: Model Formats &amp; ONNX</h1>
+<blockquote>
+<p><strong>Phase IV · Week 8 · Day 50 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"A model trapped in one framework is a model half-deployed. Portable formats are the lingua franca of production ML."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="../week-07/day-49-stop-and-reflect-4.html">Day 49: Stop &amp; Reflect #4</a></td>
+<td style="text-align: left;"><a href="day-51-weight-compression.html">Day 51: Weight Compression &amp; Pruning</a></td>
+<td style="text-align: left;"><a href="README.html">Week 8: Model Formats &amp; Runtimes</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase IV: Inference &amp; Deployment</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Every model you train eventually needs to <strong>leave its training framework</strong>. PyTorch is great for research, but production inference runs on TensorRT, CoreML, ONNX Runtime, or custom hardware. Model interchange formats bridge that gap — they serialize the computation graph, weights, and metadata into a framework-agnostic representation. ONNX (Open Neural Network Exchange) dominates this space, backed by Microsoft, Meta, and NVIDIA. Understanding ONNX internals — its protobuf schema, operator sets, shape inference, and graph surgery tools — is essential for anyone deploying models at scale. Today you learn to export, inspect, optimize, and transform ONNX models fluently.</p>
+<hr />
+<h2 id="1-the-model-serialization-landscape">1. The Model Serialization Landscape</h2>
+<p>Different formats serve different stages and ecosystems:</p>
+<pre><code>Model Serialization Formats — The Full Landscape
+══════════════════════════════════════════════════════════════════════
+
+  Training Framework          Interchange           Deployment Runtime
+  ┌─────────────────┐        ┌──────────────┐       ┌──────────────────┐
+  │  PyTorch         │──┬───▶│    ONNX       │──┬──▶│ ONNX Runtime     │
+  │  (.pt/.pth)      │  │    │  (.onnx)      │  │   │ TensorRT         │
+  ├─────────────────┤  │    ├──────────────┤  │   │ OpenVINO         │
+  │  TensorFlow      │──┤    │  SavedModel   │──┤   │ CoreML           │
+  │  (.pb/.h5)       │  │    │  (.pb dir)    │  │   │ TFLite           │
+  ├─────────────────┤  │    ├──────────────┤  │   ├──────────────────┤
+  │  JAX             │──┤    │  StableHLO    │  │   │ XLA (TPU/GPU)    │
+  │  (pytree)        │  │    │  (.mlir)      │  │   │ IREE             │
+  ├─────────────────┤  │    ├──────────────┤  │   ├──────────────────┤
+  │  State dicts     │──┘    │  SafeTensors  │──┘   │ llama.cpp        │
+  │  (.safetensors)  │       │  (.safetensors)│      │ vLLM / TGI       │
+  └─────────────────┘       ├──────────────┤       └──────────────────┘
+                             │  GGUF         │
+                             │  (.gguf)       │
+                             └──────────────┘
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Ecosystem</th>
+<th>Key Feature</th>
+<th>Typical Size</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>ONNX</strong></td>
+<td>Cross-framework</td>
+<td>Standardized opset, wide tooling</td>
+<td>Graph + weights in one file</td>
+</tr>
+<tr>
+<td><strong>SavedModel</strong></td>
+<td>TensorFlow</td>
+<td>Full TF graph with signatures</td>
+<td>Directory structure</td>
+</tr>
+<tr>
+<td><strong>TorchScript</strong></td>
+<td>PyTorch</td>
+<td>Traced/scripted Python → IR</td>
+<td><code>.pt</code> archive</td>
+</tr>
+<tr>
+<td><strong>SafeTensors</strong></td>
+<td>HuggingFace</td>
+<td>Memory-mapped, no pickle exploits</td>
+<td>Weights only</td>
+</tr>
+<tr>
+<td><strong>GGUF</strong></td>
+<td>llama.cpp</td>
+<td>Quantized LLMs, single-file</td>
+<td>Weights + metadata</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-onnx-specification-deep-dive">2. ONNX Specification Deep Dive</h2>
+<p>ONNX is defined as a Protocol Buffer schema. Understanding its structure is key to manipulating models programmatically.</p>
+<h3 id="21-protobuf-schema-hierarchy">2.1 Protobuf Schema Hierarchy</h3>
+<pre><code>ONNX Protobuf Structure
+════════════════════════════════════════════
+
+  ModelProto
+  ├── ir_version: int           (e.g., 9)
+  ├── opset_import[]            (e.g., opset 18)
+  ├── producer_name: str        (e.g., &quot;pytorch&quot;)
+  ├── graph: GraphProto
+  │   ├── name: str
+  │   ├── input[]: ValueInfoProto
+  │   │   ├── name: str
+  │   │   └── type: TypeProto
+  │   │       └── tensor_type
+  │   │           ├── elem_type: int  (1=float32)
+  │   │           └── shape: TensorShapeProto
+  │   ├── output[]: ValueInfoProto
+  │   ├── node[]: NodeProto
+  │   │   ├── op_type: str      (&quot;Conv&quot;, &quot;Relu&quot;, ...)
+  │   │   ├── input[]: str      (tensor names)
+  │   │   ├── output[]: str
+  │   │   └── attribute[]: AttributeProto
+  │   ├── initializer[]: TensorProto    ← weights!
+  │   └── value_info[]: ValueInfoProto  ← intermediate shapes
+  └── metadata_props[]
+</code></pre>
+<h3 id="22-operator-sets-opsets">2.2 Operator Sets (Opsets)</h3>
+<p>ONNX defines <strong>versioned operator sets</strong> — each opset version adds, modifies, or deprecates operators:</p>
+<table>
+<thead>
+<tr>
+<th>Opset</th>
+<th>Key Additions</th>
+<th>ONNX Version</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>13</td>
+<td>Squeeze/Unsqueeze axis changes</td>
+<td>1.8</td>
+</tr>
+<tr>
+<td>14</td>
+<td>Reshape allows 0-dim, Add/Mul broadcasting</td>
+<td>1.9</td>
+</tr>
+<tr>
+<td>15</td>
+<td>Shape op with start/end</td>
+<td>1.10</td>
+</tr>
+<tr>
+<td>16</td>
+<td>GridSample, ScatterND updates</td>
+<td>1.11</td>
+</tr>
+<tr>
+<td>17</td>
+<td>LayerNorm, GroupNorm as single ops</td>
+<td>1.12</td>
+</tr>
+<tr>
+<td>18</td>
+<td>Pad edge-case fixes, BitwiseAnd/Or</td>
+<td>1.13</td>
+</tr>
+<tr>
+<td>19</td>
+<td>DeformConv, AveragePool ceil mode</td>
+<td>1.14</td>
+</tr>
+<tr>
+<td>20</td>
+<td>GridSample 5D, DFT inverse</td>
+<td>1.15</td>
+</tr>
+</tbody>
+</table>
+<p>The opset version determines <strong>which runtime versions can execute your model</strong>. Always export at the lowest opset that supports your operators.</p>
+<h3 id="23-shape-inference">2.3 Shape Inference</h3>
+<p>Shape inference propagates known input dimensions through every node:</p>
+<p>$$\text{output\_shape}[i] = f(\text{input\_shapes}, \text{attributes})$$</p>
+<p>For convolution:</p>
+<p>$$H_{out} = \left\lfloor \frac{H_{in} + 2p - d(k-1) - 1}{s} + 1 \right\rfloor$$</p>
+<pre><code class="language-python">import onnx
+from onnx import shape_inference
+
+model = onnx.load(&quot;resnet50.onnx&quot;)
+model = shape_inference.infer_shapes(model)
+
+# Verify all intermediate shapes are populated
+for vi in model.graph.value_info:
+    shape = [d.dim_value for d in vi.type.tensor_type.shape.dim]
+    print(f&quot;{vi.name}: {shape}&quot;)
+</code></pre>
+<hr />
+<h2 id="3-exporting-from-pytorch">3. Exporting from PyTorch</h2>
+<h3 id="31-classic-torchonnxexport-torchscript-based">3.1 Classic torch.onnx.export (TorchScript-based)</h3>
+<pre><code class="language-python">import torch
+import torchvision.models as models
+
+model = models.resnet50(pretrained=True).eval()
+dummy_input = torch.randn(1, 3, 224, 224)
+
+torch.onnx.export(
+    model,
+    dummy_input,
+    &quot;resnet50.onnx&quot;,
+    opset_version=17,
+    input_names=[&quot;image&quot;],
+    output_names=[&quot;logits&quot;],
+    dynamic_axes={
+        &quot;image&quot;: {0: &quot;batch_size&quot;},       # Dynamic batch
+        &quot;logits&quot;: {0: &quot;batch_size&quot;},
+    },
+)
+</code></pre>
+<p><strong>Limitations of TorchScript-based export:</strong>
+- Fails on Python control flow that depends on tensor values
+- Cannot handle data-dependent shapes well
+- Silently drops unsupported operations</p>
+<h3 id="32-modern-dynamo-export-torchonnxdynamo_export">3.2 Modern Dynamo Export (torch.onnx.dynamo_export)</h3>
+<pre><code class="language-python">import torch
+
+model = models.resnet50(pretrained=True).eval()
+dummy_input = torch.randn(1, 3, 224, 224)
+
+# Dynamo-based: captures the FX graph, not TorchScript
+export_output = torch.onnx.dynamo_export(model, dummy_input)
+export_output.save(&quot;resnet50_dynamo.onnx&quot;)
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>TorchScript Export</th>
+<th>Dynamo Export</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Control flow</td>
+<td>Limited</td>
+<td>Full Python support</td>
+</tr>
+<tr>
+<td>Dynamic shapes</td>
+<td>Manual <code>dynamic_axes</code></td>
+<td>Automatic via guards</td>
+</tr>
+<tr>
+<td>Custom ops</td>
+<td>Requires scripting</td>
+<td>Native FX decomposition</td>
+</tr>
+<tr>
+<td>Speed</td>
+<td>Faster</td>
+<td>Slightly slower</td>
+</tr>
+<tr>
+<td>Maturity</td>
+<td>Stable</td>
+<td>Evolving (PyTorch 2.x+)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-onnx-graph-inspection-validation">4. ONNX Graph Inspection &amp; Validation</h2>
+<h3 id="41-programmatic-inspection">4.1 Programmatic Inspection</h3>
+<pre><code class="language-python">import onnx
+
+model = onnx.load(&quot;resnet50.onnx&quot;)
+
+# Basic validation
+onnx.checker.check_model(model)
+
+# Graph statistics
+print(f&quot;IR version:  {model.ir_version}&quot;)
+print(f&quot;Opset:       {model.opset_import[0].version}&quot;)
+print(f&quot;Nodes:       {len(model.graph.node)}&quot;)
+print(f&quot;Inputs:      {[i.name for i in model.graph.input]}&quot;)
+print(f&quot;Outputs:     {[o.name for o in model.graph.output]}&quot;)
+print(f&quot;Initializers (weights): {len(model.graph.initializer)}&quot;)
+
+# Operator histogram
+from collections import Counter
+op_counts = Counter(n.op_type for n in model.graph.node)
+for op, count in op_counts.most_common(10):
+    print(f&quot;  {op:20s}: {count}&quot;)
+</code></pre>
+<h3 id="42-visual-inspection-with-netron">4.2 Visual Inspection with Netron</h3>
+<pre><code class="language-bash">pip install netron
+netron resnet50.onnx
+# Opens browser at http://localhost:8080
+</code></pre>
+<hr />
+<h2 id="5-onnx-graph-surgery-with-onnx-graphsurgeon">5. ONNX Graph Surgery with onnx-graphsurgeon</h2>
+<p>Graph surgery lets you <strong>modify ONNX graphs programmatically</strong> — add nodes, remove subgraphs, replace operators, or fuse patterns.</p>
+<pre><code class="language-python">import onnx_graphsurgeon as gs
+import onnx
+import numpy as np
+
+# Load and wrap
+graph = gs.import_onnx(onnx.load(&quot;model.onnx&quot;))
+
+# Remove all Dropout nodes (short-circuit input → output)
+for node in graph.nodes:
+    if node.op == &quot;Dropout&quot;:
+        node.outputs[0].inputs.clear()
+        node.inputs[0].outputs = node.outputs
+
+# Clean up and export
+graph.cleanup().toposort()
+onnx.save(gs.export_onnx(graph), &quot;model_modified.onnx&quot;)
+</code></pre>
+<hr />
+<h2 id="6-model-optimization-with-onnx-tools">6. Model Optimization with ONNX Tools</h2>
+<h3 id="61-onnx-optimizer-onnxoptimizer">6.1 ONNX Optimizer (onnxoptimizer)</h3>
+<pre><code class="language-python">import onnxoptimizer
+
+model = onnx.load(&quot;model.onnx&quot;)
+
+optimized = onnxoptimizer.optimize(model, passes=[
+    &quot;eliminate_identity&quot;,
+    &quot;eliminate_nop_dropout&quot;,
+    &quot;fuse_bn_into_conv&quot;,
+    &quot;fuse_matmul_add_bias_into_gemm&quot;,
+    &quot;fuse_consecutive_transposes&quot;,
+])
+
+onnx.save(optimized, &quot;model_optimized.onnx&quot;)
+</code></pre>
+<h3 id="62-onnx-runtime-graph-optimizations">6.2 ONNX Runtime Graph Optimizations</h3>
+<pre><code class="language-python">import onnxruntime as ort
+
+# ORT applies its own graph optimizations at session creation
+sess_options = ort.SessionOptions()
+sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+sess_options.optimized_model_filepath = &quot;model_ort_optimized.onnx&quot;
+
+session = ort.InferenceSession(&quot;model.onnx&quot;, sess_options)
+# The optimized model is saved to disk
+</code></pre>
+<p>ORT optimization levels: 0 (none) → 1 (basic) → 2 (extended, default) → 3 (full with custom fusions).</p>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-export-and-inspect-20-min">Exercise 1: Export and Inspect (20 min)</h3>
+<ol>
+<li>Export a HuggingFace BERT model to ONNX using both <code>torch.onnx.export</code> and <code>torch.onnx.dynamo_export</code></li>
+<li>Compare operator counts, opset versions, and file sizes</li>
+<li>Run <code>onnx.checker.check_model()</code> on both — do they both pass?</li>
+<li>Visualize one in Netron and screenshot the attention layer structure</li>
+</ol>
+<h3 id="exercise-2-shape-inference-and-validation-15-min">Exercise 2: Shape Inference and Validation (15 min)</h3>
+<ol>
+<li>Load the exported model, strip all intermediate shape info</li>
+<li>Re-run <code>shape_inference.infer_shapes()</code> and verify all shapes are recovered</li>
+<li>Change the input to a dynamic batch size — which intermediate shapes become symbolic?</li>
+</ol>
+<h3 id="exercise-3-graph-surgery-25-min">Exercise 3: Graph Surgery (25 min)</h3>
+<ol>
+<li>Use <code>onnx-graphsurgeon</code> to remove all Dropout and LayerNorm nodes from a BERT ONNX model</li>
+<li>Verify the modified model still loads and passes <code>check_model()</code></li>
+<li>Count nodes before and after — what's the reduction ratio?</li>
+<li>Try replacing <code>MatMul + Add</code> with fused <code>Gemm</code> using <code>gs</code></li>
+</ol>
+<h3 id="exercise-4-safetensors-vs-pickle-15-min">Exercise 4: SafeTensors vs Pickle (15 min)</h3>
+<pre><code class="language-python">from safetensors.torch import save_file, load_file
+import torch
+
+# Save weights safely
+tensors = {&quot;weight&quot;: torch.randn(768, 768), &quot;bias&quot;: torch.randn(768)}
+save_file(tensors, &quot;model.safetensors&quot;)
+
+# Load — memory-mapped, no arbitrary code execution
+loaded = load_file(&quot;model.safetensors&quot;)
+assert torch.equal(tensors[&quot;weight&quot;], loaded[&quot;weight&quot;])
+</code></pre>
+<p>Why is SafeTensors preferred over pickle for weight distribution?</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>ONNX is the lingua franca</strong> — it bridges PyTorch, TensorFlow, and dozens of inference runtimes via a standardized protobuf schema</li>
+<li><strong>Opset version matters</strong> — it determines which runtimes can execute your model; export at the lowest opset supporting your operators</li>
+<li><strong>Dynamo export is the future</strong> — <code>torch.onnx.dynamo_export</code> handles dynamic control flow and complex Python patterns that TorchScript cannot</li>
+<li><strong>Graph surgery enables deployment</strong> — tools like <code>onnx-graphsurgeon</code> let you rewrite graphs for specific hardware targets</li>
+<li><strong>SafeTensors &gt; pickle</strong> — memory-mapped, zero-copy loading with no arbitrary code execution risks</li>
+<li><strong>Always validate</strong> — run <code>onnx.checker.check_model()</code> and <code>shape_inference</code> after every transformation</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://github.com/onnx/onnx/blob/main/docs/IR.html">ONNX Specification (GitHub)</a></li>
+<li><a href="https://onnx.ai/onnx/operators/">ONNX Operator Schemas</a></li>
+<li><a href="https://pytorch.org/docs/stable/onnx_dynamo.html">PyTorch Dynamo ONNX Exporter</a></li>
+<li><a href="https://github.com/NVIDIA/TensorRT/tree/main/tools/onnx-graphsurgeon">onnx-graphsurgeon Documentation</a></li>
+<li><a href="https://huggingface.co/docs/safetensors/">SafeTensors Format Spec</a></li>
+<li><a href="https://github.com/ggerganov/ggml/blob/master/docs/gguf.html">GGUF Format Specification</a></li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p><strong>Day 51: Weight Compression &amp; Pruning</strong> — We move from model formats to model size reduction. You'll learn unstructured pruning, structured channel pruning, N:M sparsity patterns that map directly to NVIDIA sparse tensor cores, and how to combine pruning with quantization for maximum compression without accuracy loss.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="../week-07/day-49-stop-and-reflect-4.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 49: Stop & Reflect #4</a>
+            <a href="day-51-weight-compression.html" class="text-emerald-600 hover:text-emerald-800">Day 51: Weight Compression & Pruning &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

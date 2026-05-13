@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 34: TVM Runtime & Deployment - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 5: TVM Foundations</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-34-tvm-runtime-deployment">Day 34: TVM Runtime &amp; Deployment</h1>
+<blockquote>
+<p><strong>Phase III · Week 5 · Day 34 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The fastest compiler is useless if you can't ship the result. TVM's runtime is 100 KB of C — it runs anywhere a C compiler runs."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-33-tir-schedules.html">Day 33: TIR &amp; Schedules</a></td>
+<td style="text-align: left;"><a href="day-35-mini-project-tvm-compile.html">Day 35: Mini-Project — End-to-End TVM Compilation</a></td>
+<td style="text-align: left;"><a href="README.html">Week 5: TVM Foundations</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>You've spent four days learning how TVM <em>transforms</em> computations — Relay for graphs, TE for operator declarations, TIR for loop nests. But a compiled kernel is just an artifact on disk until the <strong>runtime</strong> loads it, feeds it data, and orchestrates execution. TVM's runtime is deliberately tiny (~100 KB compiled C), runs without Python, and supports cross-compilation for devices you don't have locally. This lesson covers the complete path from <code>tvm.build()</code> to inference on an edge device — the "last mile" that determines whether your optimized model actually ships.</p>
+<hr />
+<h2 id="1-runtime-architecture-overview">1. Runtime Architecture Overview</h2>
+<pre><code>┌────────────────────────────────────────────────────┐
+│                  Python API Layer                   │
+│  relay.build()  →  Module  →  module.run()         │
+└───────────────────────┬────────────────────────────┘
+                        │ FFI (PackedFunc)
+┌───────────────────────┴────────────────────────────┐
+│               TVM Runtime (C++)                     │
+│                                                     │
+│  ┌──────────┐  ┌───────────┐  ┌─────────────────┐ │
+│  │  Module   │  │ PackedFunc│  │    NDArray       │ │
+│  │ (compiled │  │ (type-    │  │  (DLPack-based   │ │
+│  │  kernels) │  │  erased   │  │   tensor)        │ │
+│  │          │  │  callable) │  │                  │ │
+│  └──────────┘  └───────────┘  └─────────────────┘ │
+│                                                     │
+│  ┌─────────────────────────────────────────────┐   │
+│  │        Device API (LLVM / CUDA / OpenCL)    │   │
+│  └─────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="the-four-core-abstractions">The Four Core Abstractions</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Abstraction</th>
+<th style="text-align: left;">Role</th>
+<th style="text-align: left;">C++ Type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Module</strong></td>
+<td style="text-align: left;">Container for compiled functions</td>
+<td style="text-align: left;"><code>tvm::runtime::Module</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>PackedFunc</strong></td>
+<td style="text-align: left;">Type-erased callable (any signature)</td>
+<td style="text-align: left;"><code>tvm::runtime::PackedFunc</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>NDArray</strong></td>
+<td style="text-align: left;">N-dimensional tensor with device placement</td>
+<td style="text-align: left;"><code>tvm::runtime::NDArray</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>DLPack</strong></td>
+<td style="text-align: left;">Zero-copy tensor interchange format</td>
+<td style="text-align: left;"><code>DLManagedTensor</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-module-the-compilation-unit">2. Module — The Compilation Unit</h2>
+<p>A <code>Module</code> is a collection of compiled functions. After <code>tvm.build()</code> or <code>relay.build()</code>, you get a Module containing all the kernels your model needs.</p>
+<pre><code class="language-python">import tvm
+from tvm import te
+import numpy as np
+
+# Simple vector add
+n = 1024
+A = te.placeholder((n,), name=&quot;A&quot;)
+B = te.placeholder((n,), name=&quot;B&quot;)
+C = te.compute((n,), lambda i: A[i] + B[i], name=&quot;C&quot;)
+
+s = te.create_schedule(C.op)
+s[C].vectorize(C.op.axis[0])
+
+# Build for CPU (LLVM backend)
+mod = tvm.build(s, [A, B, C], target=&quot;llvm&quot;, name=&quot;vecadd&quot;)
+
+# Module API
+print(type(mod))           # &lt;class 'tvm.driver.build_module.OperatorModule'&gt;
+print(mod.get_source())    # Shows LLVM IR or source code
+
+# Call the compiled function
+dev = tvm.cpu(0)
+a = tvm.nd.array(np.random.randn(n).astype(&quot;float32&quot;), dev)
+b = tvm.nd.array(np.random.randn(n).astype(&quot;float32&quot;), dev)
+c = tvm.nd.array(np.zeros(n).astype(&quot;float32&quot;), dev)
+mod(a, b, c)  # execute!
+
+np.testing.assert_allclose(c.numpy(), a.numpy() + b.numpy(), atol=1e-5)
+</code></pre>
+<h3 id="module-hierarchy">Module Hierarchy</h3>
+<p>For complex models, modules form a tree:</p>
+<pre><code>Host Module (LLVM)
+├── device_kernel_0 (CUDA)     ← GPU kernels
+├── device_kernel_1 (CUDA)
+├── __tvm_main__               ← entry point / graph executor
+└── metadata                   ← shapes, dtypes, param names
+</code></pre>
+<hr />
+<h2 id="3-packedfunc-tvms-universal-calling-convention">3. PackedFunc — TVM's Universal Calling Convention</h2>
+<p><code>PackedFunc</code> is TVM's secret weapon for FFI. It's a type-erased function that can be called from Python, C++, Rust, or JavaScript with any combination of argument types.</p>
+<pre><code class="language-python"># Every module function is a PackedFunc
+f = mod.get_function(&quot;vecadd&quot;)
+f(a, b, c)  # same as mod(a, b, c) for single-function modules
+
+# Register your own PackedFunc from Python
+@tvm.register_func(&quot;my_custom_op&quot;)
+def my_custom_op(x, y):
+    return x + y
+
+# Call it from anywhere in TVM
+f = tvm.get_global_func(&quot;my_custom_op&quot;)
+result = f(3, 4)  # returns 7
+</code></pre>
+<p><strong>Why type-erased?</strong> TVM needs to call functions across language boundaries (Python ↔ C++) and across devices. PackedFunc serializes arguments into a uniform <code>TVMArgs</code> array, dispatches to the implementation, and deserializes the return value. No templates, no code generation — just a universal ABI.</p>
+<pre><code>Python call: mod(a, b, c)
+    │
+    ▼
+TVMArgs: [NDArray*, NDArray*, NDArray*]
+    │
+    ▼
+C++ dispatch: PackedFunc::operator()(TVMArgs args, TVMRetValue* rv)
+    │
+    ▼
+Device execution: CUDA kernel launch / LLVM JIT call
+</code></pre>
+<hr />
+<h2 id="4-ndarray-dlpack-zero-copy-tensor-exchange">4. NDArray &amp; DLPack — Zero-Copy Tensor Exchange</h2>
+<h3 id="ndarray">NDArray</h3>
+<p><code>tvm.nd.NDArray</code> is TVM's tensor type. It wraps a contiguous memory buffer with shape, dtype, and device metadata.</p>
+<pre><code class="language-python">import tvm
+import numpy as np
+
+# Create on CPU
+x_cpu = tvm.nd.array(np.random.randn(3, 4).astype(&quot;float32&quot;), tvm.cpu())
+
+# Create on GPU (if available)
+x_gpu = tvm.nd.array(np.random.randn(3, 4).astype(&quot;float32&quot;), tvm.cuda(0))
+
+# Copy between devices
+x_gpu_copy = tvm.nd.empty((3, 4), &quot;float32&quot;, tvm.cuda(0))
+x_gpu_copy.copyfrom(x_cpu)
+
+# Convert to/from NumPy (CPU only, zero-copy when possible)
+np_array = x_cpu.numpy()
+</code></pre>
+<h3 id="dlpack-the-universal-tensor-exchange">DLPack — The Universal Tensor Exchange</h3>
+<p>DLPack is a header-only C standard for sharing tensors between frameworks <strong>without copying data</strong>.</p>
+<pre><code class="language-python"># PyTorch → TVM (zero-copy on same device)
+import torch
+pt_tensor = torch.randn(3, 4, device=&quot;cuda&quot;)
+tvm_array = tvm.nd.from_dlpack(pt_tensor)
+
+# TVM → PyTorch
+pt_back = torch.from_dlpack(tvm_array)
+
+# Works with JAX, CuPy, TensorFlow too
+</code></pre>
+<pre><code>┌──────────────┐    DLPack     ┌──────────────┐
+│   PyTorch    │ ──────────▶  │     TVM      │
+│  Tensor      │  zero-copy    │   NDArray    │
+│  .data_ptr() │ ◀──────────  │  .data_ptr() │
+└──────────────┘               └──────────────┘
+       Same GPU memory — no allocation, no memcpy
+</code></pre>
+<hr />
+<h2 id="5-compilation-targets">5. Compilation Targets</h2>
+<h3 id="target-specification">Target Specification</h3>
+<p>TVM uses target strings to control code generation:</p>
+<pre><code class="language-python"># CPU targets
+target_x86   = tvm.target.Target(&quot;llvm -mcpu=skylake-avx512&quot;)
+target_arm    = tvm.target.Target(&quot;llvm -mtriple=aarch64-linux-gnu -mcpu=cortex-a72&quot;)
+target_riscv  = tvm.target.Target(&quot;llvm -mtriple=riscv64-unknown-linux-gnu -mcpu=generic-rv64 -mattr=+v&quot;)
+
+# GPU targets
+target_cuda   = tvm.target.Target(&quot;cuda -arch=sm_80&quot;)      # A100
+target_opencl  = tvm.target.Target(&quot;opencl&quot;)
+target_metal   = tvm.target.Target(&quot;metal&quot;)                 # Apple GPU
+target_vulkan  = tvm.target.Target(&quot;vulkan -max_threads_per_block=256&quot;)
+
+# Specialized
+target_hexagon = tvm.target.Target(&quot;hexagon&quot;)               # Qualcomm DSP
+target_wasm    = tvm.target.Target(&quot;llvm -mtriple=wasm32&quot;)   # Browser
+</code></pre>
+<h3 id="target-selection-guide">Target Selection Guide</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Deployment Scenario</th>
+<th style="text-align: left;">Target String</th>
+<th style="text-align: left;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Server GPU (NVIDIA)</td>
+<td style="text-align: left;"><code>cuda -arch=sm_80</code></td>
+<td style="text-align: left;">Tensor Cores via <code>tensorize</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Server CPU (x86)</td>
+<td style="text-align: left;"><code>llvm -mcpu=skylake-avx512</code></td>
+<td style="text-align: left;">AVX-512 vectorization</td>
+</tr>
+<tr>
+<td style="text-align: left;">Edge GPU (Jetson)</td>
+<td style="text-align: left;"><code>cuda -arch=sm_72</code></td>
+<td style="text-align: left;">Xavier / Orin</td>
+</tr>
+<tr>
+<td style="text-align: left;">Mobile CPU (Android)</td>
+<td style="text-align: left;"><code>llvm -mtriple=aarch64-linux-android</code></td>
+<td style="text-align: left;">ARM NEON auto-vec</td>
+</tr>
+<tr>
+<td style="text-align: left;">Apple Silicon</td>
+<td style="text-align: left;"><code>llvm -mtriple=arm64-apple-macos</code></td>
+<td style="text-align: left;">or <code>metal</code> for GPU</td>
+</tr>
+<tr>
+<td style="text-align: left;">Microcontroller</td>
+<td style="text-align: left;"><code>c -mcpu=cortex-m4</code></td>
+<td style="text-align: left;">C codegen, no LLVM needed</td>
+</tr>
+<tr>
+<td style="text-align: left;">Browser</td>
+<td style="text-align: left;"><code>llvm -mtriple=wasm32</code></td>
+<td style="text-align: left;">Via Emscripten + WASM</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-cross-compilation-for-edge-devices">6. Cross-Compilation for Edge Devices</h2>
+<p>The key insight: you <strong>compile on your workstation</strong> but <strong>run on the target device</strong>. TVM handles this via cross-compilation + RPC.</p>
+<h3 id="step-1-cross-compile">Step 1: Cross-Compile</h3>
+<pre><code class="language-python"># On your x86 workstation, compile FOR ARM
+target = tvm.target.Target(&quot;llvm -mtriple=aarch64-linux-gnu -mcpu=cortex-a72&quot;)
+
+# Import and compile a model
+from tvm import relay
+import onnx
+
+onnx_model = onnx.load(&quot;mobilenetv2.onnx&quot;)
+mod, params = relay.frontend.from_onnx(onnx_model, shape={&quot;input&quot;: (1,3,224,224)})
+
+with tvm.transform.PassContext(opt_level=3):
+    lib = relay.build(mod, target=target, params=params)
+
+# Save artifacts
+lib.export_library(&quot;mobilenet_arm.tar&quot;)  # contains .so + metadata
+</code></pre>
+<h3 id="step-2-deploy-on-device">Step 2: Deploy on Device</h3>
+<pre><code class="language-python"># On the ARM device (Raspberry Pi, Jetson, phone, etc.)
+import tvm
+from tvm.contrib import graph_executor
+
+lib = tvm.runtime.load_module(&quot;mobilenet_arm.tar&quot;)
+dev = tvm.cpu(0)
+m = graph_executor.GraphModule(lib[&quot;default&quot;](dev))
+
+# Run inference
+m.set_input(&quot;input&quot;, tvm.nd.array(input_data))
+m.run()
+output = m.get_output(0).numpy()
+</code></pre>
+<h3 id="step-3-rpc-for-remote-testing">Step 3: RPC for Remote Testing</h3>
+<pre><code>┌─────────────────┐           ┌──────────────────┐
+│   Workstation    │   RPC     │   Target Device   │
+│  (x86, compile)  │ ────────▶│  (ARM, execute)   │
+│                  │ ◀────────│                    │
+│  tvm.rpc.connect │  results  │  tvm.rpc.server   │
+└─────────────────┘           └──────────────────┘
+</code></pre>
+<pre><code class="language-python"># On target device: start RPC server
+# $ python -m tvm.exec.rpc_server --host 0.0.0.0 --port 9090
+
+# On workstation: connect and test
+from tvm import rpc
+
+remote = rpc.connect(&quot;192.168.1.42&quot;, 9090)
+remote.upload(&quot;mobilenet_arm.tar&quot;)
+rlib = remote.load_module(&quot;mobilenet_arm.tar&quot;)
+
+dev = remote.cpu(0)
+m = graph_executor.GraphModule(rlib[&quot;default&quot;](dev))
+m.set_input(&quot;input&quot;, tvm.nd.array(input_data))
+m.run()
+# Results are transferred back automatically
+</code></pre>
+<hr />
+<h2 id="7-saving-loading-compiled-modules">7. Saving &amp; Loading Compiled Modules</h2>
+<h3 id="export-formats">Export Formats</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Format</th>
+<th style="text-align: left;">Method</th>
+<th style="text-align: left;">Contains</th>
+<th style="text-align: left;">Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>.tar</code></td>
+<td style="text-align: left;"><code>export_library()</code></td>
+<td style="text-align: left;">.so + graph JSON + params</td>
+<td style="text-align: left;">Full model deployment</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>.so</code> / <code>.dylib</code></td>
+<td style="text-align: left;"><code>export_library()</code></td>
+<td style="text-align: left;">Compiled shared library</td>
+<td style="text-align: left;">System integration</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>.o</code></td>
+<td style="text-align: left;"><code>save()</code></td>
+<td style="text-align: left;">Object file</td>
+<td style="text-align: left;">Linking into C++ apps</td>
+</tr>
+<tr>
+<td style="text-align: left;">JSON + params</td>
+<td style="text-align: left;"><code>get_graph_json()</code> + <code>get_params()</code></td>
+<td style="text-align: left;">Graph + weights</td>
+<td style="text-align: left;">Separate packaging</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-python"># Full export (recommended)
+lib.export_library(&quot;model.tar&quot;)
+
+# Separate components
+with open(&quot;graph.json&quot;, &quot;w&quot;) as f:
+    f.write(graph_json)
+with open(&quot;params.bin&quot;, &quot;wb&quot;) as f:
+    f.write(relay.save_param_dict(params))
+lib_path = &quot;model.so&quot;
+lib.export_library(lib_path)
+
+# Load separately
+loaded_lib = tvm.runtime.load_module(&quot;model.so&quot;)
+loaded_graph = open(&quot;graph.json&quot;).read()
+loaded_params = bytearray(open(&quot;params.bin&quot;, &quot;rb&quot;).read())
+</code></pre>
+<h3 id="c-deployment-no-python-required">C++ Deployment (No Python Required)</h3>
+<pre><code class="language-cpp">#include &lt;tvm/runtime/module.h&gt;
+#include &lt;tvm/runtime/packed_func.h&gt;
+#include &lt;tvm/runtime/ndarray.h&gt;
+
+// Load compiled module
+tvm::runtime::Module mod = tvm::runtime::Module::LoadFromFile(&quot;model.so&quot;);
+tvm::runtime::PackedFunc run = mod.GetFunction(&quot;default&quot;);
+
+// Create input tensor
+DLDevice dev{kDLCPU, 0};
+auto input = tvm::runtime::NDArray::Empty({1, 3, 224, 224}, DLDataType{kDLFloat, 32, 1}, dev);
+
+// Execute
+run(input);
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-build-export-load-round-trip-30-min">Exercise 1: Build → Export → Load Round-Trip (30 min)</h3>
+<p>Compile a simple matmul with <code>tvm.build()</code>, export as <code>.tar</code>, load it back in a fresh Python session, verify correctness:</p>
+<pre><code class="language-python"># 1. Build a matmul kernel
+# 2. Export with export_library(&quot;matmul.tar&quot;)
+# 3. In a new script: load_module(&quot;matmul.tar&quot;)
+# 4. Run and verify against NumPy
+</code></pre>
+<h3 id="exercise-2-dlpack-zero-copy-pipeline-20-min">Exercise 2: DLPack Zero-Copy Pipeline (20 min)</h3>
+<p>Create a pipeline: PyTorch generates a tensor → pass to TVM via DLPack → TVM runs a custom kernel → return to PyTorch via DLPack. Verify no data copies occurred by checking <code>.data_ptr()</code> addresses.</p>
+<h3 id="exercise-3-cross-compilation-targets-30-min">Exercise 3: Cross-Compilation Targets (30 min)</h3>
+<p>Compile the same vector-add kernel for three different targets and compare the generated code:</p>
+<pre><code class="language-python">targets = [&quot;llvm&quot;, &quot;llvm -mcpu=skylake-avx512&quot;, &quot;cuda -arch=sm_80&quot;]
+for t in targets:
+    mod = tvm.build(s, [A, B, C], target=t)
+    print(f&quot;=== {t} ===&quot;)
+    print(mod.get_source()[:500])  # inspect generated code
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Module</strong> wraps compiled kernels; <strong>PackedFunc</strong> provides a universal calling convention; <strong>NDArray</strong> handles device-placed tensors</li>
+<li><strong>DLPack</strong> enables zero-copy tensor exchange between TVM, PyTorch, JAX, and CuPy — no serialization needed</li>
+<li>TVM supports <strong>15+ compilation targets</strong> from server GPUs to microcontrollers — same frontend, different backends</li>
+<li><strong>Cross-compilation</strong> lets you compile on x86 for ARM/RISC-V; <strong>RPC</strong> lets you test on remote devices without leaving your workstation</li>
+<li><strong><code>export_library()</code></strong> bundles everything (kernels + graph + params) into a single deployable artifact</li>
+<li>The C++ runtime is <strong>~100 KB</strong> and requires no Python — production deployment is just loading a <code>.so</code> and calling PackedFuncs</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://tvm.apache.org/docs/arch/runtime.html">TVM Runtime System</a> — official runtime architecture docs</li>
+<li><a href="https://dmlc.github.io/dlpack/latest/">DLPack Specification</a> — the tensor interchange standard</li>
+<li><a href="https://tvm.apache.org/docs/how_to/deploy/cpp_deploy.html">Deploy TVM Module using C++ API</a> — C++ deployment tutorial</li>
+<li><a href="https://tvm.apache.org/docs/how_to/deploy/index.html">Cross Compilation and RPC</a> — remote device testing guide</li>
+<li><a href="https://tvm.apache.org/docs/arch/runtime.html#packedfunc">PackedFunc Design</a> — deep dive into type-erased calling</li>
+</ul>
+<hr />
+<h2 id="tomorrow">Tomorrow</h2>
+<p><strong>Day 35: Mini-Project — End-to-End TVM Compilation</strong> — You'll put together everything from this week: import MobileNetV2 from PyTorch, optimize with Relay passes, apply schedules, compile for GPU, and benchmark against PyTorch eager and <code>torch.compile</code>. The capstone for Week 5.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-33-tir-schedules.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 33: TIR & Schedule Primitives</a>
+            <a href="day-35-mini-project-tvm-compile.html" class="text-emerald-600 hover:text-emerald-800">Day 35: Mini-Project — TVM Compilation &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

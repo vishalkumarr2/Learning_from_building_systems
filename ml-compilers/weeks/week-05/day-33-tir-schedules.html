@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 33: TIR & Schedule Primitives - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 5: TVM Foundations</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-33-tir-schedule-primitives">Day 33: TIR &amp; Schedule Primitives</h1>
+<blockquote>
+<p><strong>Phase III · Week 5 · Day 33 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"A schedule is a series of promises to the compiler: 'I guarantee this transformation preserves correctness — now make it fast.'"</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-32-tensor-expression-te.html">Day 32: Tensor Expression (TE)</a></td>
+<td style="text-align: left;"><a href="day-34-tvm-runtime-deployment.html">Day 34: TVM Runtime &amp; Deployment</a></td>
+<td style="text-align: left;"><a href="README.html">Week 5: TVM Foundations</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Yesterday you wrote TE declarations — the <em>what</em>. Today you learn TIR (Tensor IR) — the <em>how</em>. TIR is TVM's low-level, loop-explicit intermediate representation. When you call <code>tvm.lower()</code>, your TE compute + schedule transforms into TIR: explicit loop nests, buffer allocations, and memory scope annotations. Understanding TIR is essential for three reasons: (1) it's what you debug when performance is wrong, (2) advanced schedule primitives like <code>compute_at</code>, <code>cache_read</code>, and <code>tensorize</code> are best understood by reading their TIR output, and (3) TVM's new <code>tvm.script</code> lets you write TIR directly, bypassing TE entirely for maximum control.</p>
+<hr />
+<h2 id="1-tir-as-tvms-low-level-ir">1. TIR as TVM's Low-Level IR</h2>
+<h3 id="where-tir-sits-in-the-stack">Where TIR Sits in the Stack</h3>
+<pre><code>  TE (te.compute, te.placeholder)     ← declarative, what
+         │
+         │  tvm.lower()
+         ▼
+  TIR (PrimFunc)                       ← imperative, how
+         │
+         │  tvm.build()
+         ▼
+  Target Code (LLVM IR / CUDA C / ...)
+</code></pre>
+<p>TIR is an <strong>imperative</strong> IR — it has explicit loops, conditionals, buffer loads/stores, and memory allocation. Compare this with Relay (graph-level, functional) and TE (declarative, mathematical).</p>
+<h3 id="tir-node-types">TIR Node Types</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Node</th>
+<th style="text-align: left;">Purpose</th>
+<th style="text-align: left;">Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>BufferStore</code></td>
+<td style="text-align: left;">Write to a buffer</td>
+<td style="text-align: left;"><code>C[i, j] = value</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>BufferLoad</code></td>
+<td style="text-align: left;">Read from a buffer</td>
+<td style="text-align: left;"><code>A[i, k]</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>For</code></td>
+<td style="text-align: left;">Loop construct</td>
+<td style="text-align: left;"><code>for i in range(0, M)</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>Block</code></td>
+<td style="text-align: left;">Scope with bindings</td>
+<td style="text-align: left;">Wraps computation + assertions</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>Allocate</code></td>
+<td style="text-align: left;">Buffer allocation</td>
+<td style="text-align: left;">Stack/shared/global memory</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>IfThenElse</code></td>
+<td style="text-align: left;">Conditional</td>
+<td style="text-align: left;">Guard for boundary checks</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>SeqStmt</code></td>
+<td style="text-align: left;">Sequence of stmts</td>
+<td style="text-align: left;">Multiple ops in order</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-primfunc-the-tir-unit-of-compilation">2. PrimFunc — The TIR Unit of Compilation</h2>
+<p>A <code>PrimFunc</code> is TIR's fundamental unit — one kernel that can be compiled to a target. It declares buffers, their shapes, dtypes, and memory scopes, then contains the loop body.</p>
+<pre><code class="language-python">import tvm
+from tvm import te, tir
+import numpy as np
+
+M, N, K = 128, 128, 128
+A = te.placeholder((M, K), name=&quot;A&quot;)
+B = te.placeholder((K, N), name=&quot;B&quot;)
+k = te.reduce_axis((0, K), name=&quot;k&quot;)
+C = te.compute((M, N), lambda i, j: te.sum(A[i, k] * B[k, j], axis=k), name=&quot;C&quot;)
+
+# Create schedule and lower to TIR
+s = te.create_schedule(C.op)
+mod = tvm.lower(s, [A, B, C], simple_mode=True)
+print(mod)
+</code></pre>
+<p>Output (simplified):</p>
+<pre><code>@T.prim_func
+def main(A: T.Buffer((128, 128), &quot;float32&quot;),
+         B: T.Buffer((128, 128), &quot;float32&quot;),
+         C: T.Buffer((128, 128), &quot;float32&quot;)):
+    for i in range(128):
+        for j in range(128):
+            C[i, j] = T.float32(0)
+            for k in range(128):
+                C[i, j] = C[i, j] + A[i, k] * B[k, j]
+</code></pre>
+<h3 id="anatomy-of-a-primfunc">Anatomy of a PrimFunc</h3>
+<pre><code>PrimFunc
+├── params: [A, B, C]             # Buffer parameters
+├── buffer_map: {var → Buffer}    # Shape, dtype, strides, scope
+├── body: SeqStmt                 # The computation
+│   └── For(i, 0, 128)
+│       └── For(j, 0, 128)
+│           ├── BufferStore(C, 0.0, [i, j])    # init
+│           └── For(k, 0, 128)
+│               └── BufferStore(C, ..., [i, j]) # accumulate
+└── attrs: {&quot;target&quot;: ..., &quot;global_symbol&quot;: &quot;main&quot;}
+</code></pre>
+<hr />
+<h2 id="3-schedule-primitives-in-detail">3. Schedule Primitives in Detail</h2>
+<h3 id="31-compute_at-fusing-producer-into-consumer">3.1 <code>compute_at</code> — Fusing Producer into Consumer</h3>
+<p><code>compute_at</code> is the most powerful primitive. It moves a producer's computation <em>inside</em> the consumer's loop, improving locality.</p>
+<pre><code class="language-python"># Without compute_at: compute B fully, then compute C
+A = te.placeholder((M, N), name=&quot;A&quot;)
+B = te.compute((M, N), lambda i, j: A[i, j] + 1, name=&quot;B&quot;)
+C = te.compute((M, N), lambda i, j: B[i, j] * 2, name=&quot;C&quot;)
+
+s = te.create_schedule(C.op)
+print(&quot;=== Before compute_at ===&quot;)
+print(tvm.lower(s, [A, C], simple_mode=True))
+# for i: for j: B[i,j] = A[i,j] + 1
+# for i: for j: C[i,j] = B[i,j] * 2     ← two separate passes
+
+s = te.create_schedule(C.op)
+s[B].compute_at(s[C], C.op.axis[1])  # fuse B into C's j-loop
+print(&quot;=== After compute_at(C, j) ===&quot;)
+print(tvm.lower(s, [A, C], simple_mode=True))
+# for i: for j: B[0] = A[i,j] + 1; C[i,j] = B[0] * 2  ← fused!
+</code></pre>
+<p><strong>Memory impact</strong>: Without fusion, <code>B</code> requires $M \times N$ storage. After <code>compute_at</code>, <code>B</code> shrinks to a single scalar — computed and consumed immediately.</p>
+<pre><code>Before compute_at:           After compute_at(C, j):
+┌──────────────────┐         ┌──────────────────┐
+│ for i in M:      │         │ for i in M:      │
+│   for j in N:    │         │   for j in N:    │
+│     B[i,j] = ... │         │     b = A[i,j]+1 │
+│                  │         │     C[i,j] = b*2  │
+│ for i in M:      │         └──────────────────┘
+│   for j in N:    │              1 pass, scalar B
+│     C[i,j] = ... │
+└──────────────────┘
+    2 passes, full B
+</code></pre>
+<h3 id="32-cache_read-cache_write-explicit-staging-buffers">3.2 <code>cache_read</code> / <code>cache_write</code> — Explicit Staging Buffers</h3>
+<p>These insert an explicit copy into a faster memory scope (shared memory on GPU, L1 scratchpad on accelerators).</p>
+<pre><code class="language-python">s = te.create_schedule(C.op)
+# Stage A into shared memory before the matmul inner loop
+AA = s.cache_read(A, &quot;shared&quot;, [C])
+# Stage C writes through local registers
+CC = s.cache_write(C, &quot;local&quot;)
+
+# Typical GPU schedule pattern:
+bx, tx = s[C].split(C.op.axis[0], factor=32)
+by, ty = s[C].split(C.op.axis[1], factor=32)
+s[C].bind(bx, te.thread_axis(&quot;blockIdx.x&quot;))
+s[C].bind(tx, te.thread_axis(&quot;threadIdx.x&quot;))
+s[CC].compute_at(s[C], tx)
+s[AA].compute_at(s[C], bx)
+</code></pre>
+<h3 id="33-storage_align-avoiding-bank-conflicts">3.3 <code>storage_align</code> — Avoiding Bank Conflicts</h3>
+<p>GPU shared memory is banked (typically 32 banks, 4 bytes each). When threads in a warp access the same bank, they serialize. <code>storage_align</code> pads the allocation:</p>
+<pre><code class="language-python"># Pad shared memory by 1 element per row to avoid bank conflicts
+s[AA].storage_align(AA.op.axis[0], factor=32, offset=1)
+</code></pre>
+<p>$$\text{Effective stride} = \lceil N / \text{factor} \rceil \times \text{factor} + \text{offset}$$</p>
+<p>Without padding: threads 0 and 8 hit bank 0. With <code>offset=1</code>: stride becomes 33, all bank indices shift.</p>
+<h3 id="34-tensorize-mapping-to-hardware-intrinsics">3.4 <code>tensorize</code> — Mapping to Hardware Intrinsics</h3>
+<p><code>tensorize</code> replaces a loop nest with a hardware-specific intrinsic (e.g., NVIDIA Tensor Core <code>wmma</code>, ARM dot product, Intel VNNI).</p>
+<pre><code class="language-python"># Define a 16×16×16 matrix multiply intrinsic (Tensor Core)
+def intrin_wmma_gemm():
+    a = te.placeholder((16, 16), name=&quot;a&quot;, dtype=&quot;float16&quot;)
+    b = te.placeholder((16, 16), name=&quot;b&quot;, dtype=&quot;float16&quot;)
+    k = te.reduce_axis((0, 16), name=&quot;k&quot;)
+    c = te.compute((16, 16),
+                   lambda i, j: te.sum(a[i, k].astype(&quot;float32&quot;) *
+                                       b[k, j].astype(&quot;float32&quot;), axis=k))
+    # ... buffer/intrinsic definition omitted for brevity
+    return te.decl_tensor_intrin(c.op, ...)
+
+# Use it in a schedule
+s = te.create_schedule(C.op)
+io, ii = s[C].split(C.op.axis[0], factor=16)
+jo, ji = s[C].split(C.op.axis[1], factor=16)
+ko, ki = s[C].split(k, factor=16)
+s[C].tensorize(ii, intrin_wmma_gemm())  # replace 16×16×16 block with wmma
+</code></pre>
+<hr />
+<h2 id="4-reading-lowered-tir-debugging-with-tvmlower">4. Reading Lowered TIR — Debugging with <code>tvm.lower()</code></h2>
+<p><code>tvm.lower()</code> is your primary debugging tool. It shows the TIR <em>after</em> schedule transformations but <em>before</em> target code generation.</p>
+<pre><code class="language-python">M, N = 256, 256
+A = te.placeholder((M, N), name=&quot;A&quot;)
+B = te.compute((M, N), lambda i, j: A[i, j] * 2.0, name=&quot;B&quot;)
+
+s = te.create_schedule(B.op)
+
+# Step 1: tile
+io, ii = s[B].split(B.op.axis[0], factor=32)
+jo, ji = s[B].split(B.op.axis[1], factor=8)
+s[B].reorder(io, jo, ii, ji)
+
+# Step 2: vectorize innermost, parallelize outermost
+s[B].vectorize(ji)
+s[B].parallel(io)
+
+print(tvm.lower(s, [A, B], simple_mode=True))
+</code></pre>
+<p>Expected TIR output:</p>
+<pre><code>@T.prim_func
+def main(A: T.Buffer((256, 256), &quot;float32&quot;),
+         B: T.Buffer((256, 256), &quot;float32&quot;)):
+    T.func_attr({&quot;tir.noalias&quot;: T.bool(True)})
+    for i_outer in T.parallel(8):         # parallel over 256/32=8
+        for j_outer in range(32):         # 256/8=32
+            for i_inner in range(32):
+                B[i_outer*32 + i_inner,
+                  j_outer*8 : j_outer*8 + 8] = (
+                    A[i_outer*32 + i_inner,
+                      j_outer*8 : j_outer*8 + 8] * T.float32(2)
+                )                          # vectorized (8-wide)
+</code></pre>
+<h3 id="common-tir-debugging-patterns">Common TIR Debugging Patterns</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Symptom</th>
+<th style="text-align: left;">TIR Check</th>
+<th style="text-align: left;">Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Slow kernel</td>
+<td style="text-align: left;">Inner loop not vectorized</td>
+<td style="text-align: left;">Add <code>s[X].vectorize(inner)</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">GPU occupancy low</td>
+<td style="text-align: left;">Missing <code>bind()</code> calls</td>
+<td style="text-align: left;">Bind to <code>blockIdx</code> / <code>threadIdx</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Memory blowup</td>
+<td style="text-align: left;">Large temporary buffers</td>
+<td style="text-align: left;">Use <code>compute_at</code> to shrink lifetimes</td>
+</tr>
+<tr>
+<td style="text-align: left;">Bank conflicts</td>
+<td style="text-align: left;">Shared memory stride = power of 2</td>
+<td style="text-align: left;"><code>storage_align(offset=1)</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Correctness bug</td>
+<td style="text-align: left;">Reduction init missing</td>
+<td style="text-align: left;">Check <code>BufferStore</code> for init + accumulate</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-comparison-with-halide-schedules">5. Comparison with Halide Schedules</h2>
+<p>TVM's schedule system descends from Halide. Understanding the lineage clarifies design choices:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Concept</th>
+<th style="text-align: left;">Halide</th>
+<th style="text-align: left;">TVM TE</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Compute declaration</td>
+<td style="text-align: left;"><code>Func f; f(x,y) = ...</code></td>
+<td style="text-align: left;"><code>te.compute((M,N), lambda i,j: ...)</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Split</td>
+<td style="text-align: left;"><code>f.split(x, xo, xi, 32)</code></td>
+<td style="text-align: left;"><code>xo, xi = s[f].split(x, factor=32)</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Reorder</td>
+<td style="text-align: left;"><code>f.reorder(yo, xo, yi, xi)</code></td>
+<td style="text-align: left;"><code>s[f].reorder(yo, xo, yi, xi)</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Vectorize</td>
+<td style="text-align: left;"><code>f.vectorize(xi)</code></td>
+<td style="text-align: left;"><code>s[f].vectorize(xi)</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Parallelize</td>
+<td style="text-align: left;"><code>f.parallel(xo)</code></td>
+<td style="text-align: left;"><code>s[f].parallel(xo)</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Fuse into consumer</td>
+<td style="text-align: left;"><code>g.compute_at(f, yo)</code></td>
+<td style="text-align: left;"><code>s[g].compute_at(s[f], yo)</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">GPU binding</td>
+<td style="text-align: left;"><code>f.gpu_blocks(xo).gpu_threads(xi)</code></td>
+<td style="text-align: left;"><code>s[f].bind(xo, thread_axis("blockIdx.x"))</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Hardware intrinsics</td>
+<td style="text-align: left;"><em>Not built-in</em></td>
+<td style="text-align: left;"><code>s[f].tensorize(xi, intrin)</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">Auto-tuning</td>
+<td style="text-align: left;">Halide auto-scheduler</td>
+<td style="text-align: left;">AutoTVM / MetaSchedule</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key difference</strong>: Halide is primarily for image processing pipelines (stencils, multi-stage filters). TVM extends the model for neural network operators — reductions, tensor contractions, and hardware-specific intrinsics like Tensor Cores.</p>
+<hr />
+<h2 id="6-writing-tir-directly-with-tvmscript">6. Writing TIR Directly with <code>tvm.script</code></h2>
+<p>For advanced cases, bypass TE and write TIR directly:</p>
+<pre><code class="language-python">from tvm.script import tir as T
+
+@T.prim_func
+def matmul_tiled(a: T.handle, b: T.handle, c: T.handle):
+    A = T.match_buffer(a, (128, 128), &quot;float32&quot;)
+    B = T.match_buffer(b, (128, 128), &quot;float32&quot;)
+    C = T.match_buffer(c, (128, 128), &quot;float32&quot;)
+
+    for io, jo in T.grid(4, 4):           # outer tiles: 128/32 = 4
+        for ii, ji in T.grid(32, 32):     # inner tile: 32×32
+            with T.block(&quot;C&quot;):
+                vi = T.axis.spatial(128, io * 32 + ii)
+                vj = T.axis.spatial(128, jo * 32 + ji)
+                T.reads(A[vi, 0:128], B[0:128, vj])
+                T.writes(C[vi, vj])
+                C[vi, vj] = T.float32(0)
+                for k in range(128):
+                    C[vi, vj] += A[vi, k] * B[k, vj]
+
+# This is valid TIR — can be built directly
+mod = tvm.IRModule({&quot;main&quot;: matmul_tiled})
+print(mod.script())
+</code></pre>
+<p><strong>When to use tvm.script over TE</strong>:
+- Irregular access patterns (sparse, ragged)
+- Custom reduction strategies
+- When you need explicit memory management that TE can't express
+- Contributing new operators to TVM itself</p>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-trace-the-tir-30-min">Exercise 1: Trace the TIR (30 min)</h3>
+<p>Write a 2D convolution in TE, apply three different schedules, and compare the <code>tvm.lower()</code> output:</p>
+<pre><code class="language-python">H, W, KH, KW = 64, 64, 3, 3
+data = te.placeholder((H, W), name=&quot;data&quot;)
+kernel = te.placeholder((KH, KW), name=&quot;kernel&quot;)
+rh = te.reduce_axis((0, KH), name=&quot;rh&quot;)
+rw = te.reduce_axis((0, KW), name=&quot;rw&quot;)
+conv = te.compute((H - KH + 1, W - KW + 1),
+    lambda i, j: te.sum(data[i + rh, j + rw] * kernel[rh, rw],
+                        axis=[rh, rw]),
+    name=&quot;conv&quot;)
+
+# Schedule A: naive (no transforms)
+# Schedule B: tile 8×8, vectorize inner
+# Schedule C: tile 8×8, vectorize inner, unroll reduction
+# Compare TIR output for each — how do the loop nests differ?
+</code></pre>
+<h3 id="exercise-2-compute_at-fusion-chain-30-min">Exercise 2: compute_at Fusion Chain (30 min)</h3>
+<p>Create a three-stage pipeline: <code>ReLU → BatchNorm → Scale</code>. Fuse all stages using <code>compute_at</code> so the entire pipeline runs in a single pass with no intermediate buffers.</p>
+<h3 id="exercise-3-gpu-schedule-with-cache_read-30-min">Exercise 3: GPU Schedule with cache_read (30 min)</h3>
+<p>Write a GPU-targeted matmul schedule that:
+1. Tiles to 32×32 thread blocks
+2. Uses <code>cache_read</code> to stage A tiles into shared memory
+3. Uses <code>cache_write</code> to accumulate in local registers
+4. Applies <code>storage_align</code> to avoid bank conflicts
+5. Lowers with <code>tvm.lower()</code> and inspect the memory scopes in TIR</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>TIR is TVM's imperative, loop-explicit IR</strong> — the output of <code>tvm.lower()</code> and the input to target code generation</li>
+<li><strong>PrimFunc</strong> is the unit of compilation: buffer declarations + loop body + metadata</li>
+<li><strong><code>compute_at</code></strong> fuses producer-consumer stages, eliminating intermediate buffers and improving locality</li>
+<li><strong><code>cache_read</code>/<code>cache_write</code></strong> explicitly manage data movement between memory hierarchies (global → shared → local)</li>
+<li><strong><code>storage_align</code></strong> prevents GPU shared memory bank conflicts by adding padding</li>
+<li><strong><code>tensorize</code></strong> maps loop nests to hardware intrinsics (Tensor Cores, VNNI, NEON dot)</li>
+<li><strong><code>tvm.lower(simple_mode=True)</code></strong> is your primary debugging tool — always inspect TIR before building</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://tvm.apache.org/docs/arch/index.html#tir">TIR Introduction (TVM docs)</a> — architectural overview of TIR</li>
+<li><a href="https://tvm.apache.org/docs/tutorial/tvmscript.html">TVMScript Guide</a> — writing TIR directly with <code>tvm.script</code></li>
+<li><a href="https://tvm.apache.org/docs/how_to/work_with_schedules/schedule_primitives.html">Schedule Primitives Tutorial</a> — official guide with examples</li>
+<li><a href="https://people.csail.mit.edu/jrk/halide-pldi13.pdf">Halide: Decoupling Algorithms from Schedules</a> — the compute/schedule paper that started it all</li>
+<li><a href="https://arxiv.org/abs/2207.04296">TensorIR: An Abstraction for Automatic Tensorized Program Optimization</a> — the TIR paper (Feng et al., 2022)</li>
+</ul>
+<hr />
+<h2 id="tomorrow">Tomorrow</h2>
+<p><strong>Day 34: TVM Runtime &amp; Deployment</strong> — You've lowered TIR into optimized loops. Now you'll learn how those loops become executable code: the TVM runtime architecture (Module, PackedFunc, NDArray, DLPack), compilation targets (LLVM, CUDA, ARM), cross-compilation for edge devices, and saving/loading compiled modules for production deployment.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-32-tensor-expression-te.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 32: Tensor Expression (TE)</a>
+            <a href="day-34-tvm-runtime-deployment.html" class="text-emerald-600 hover:text-emerald-800">Day 34: TVM Runtime & Deployment &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

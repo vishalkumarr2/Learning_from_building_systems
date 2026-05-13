@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 38: BYOC — Bring Your Own Codegen - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 6: TVM Tuning & Backends</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-38-byoc-bring-your-own-codegen">Day 38: BYOC — Bring Your Own Codegen</h1>
+<blockquote>
+<p><strong>Phase III · Week 6 · Day 38 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The best compiler is one that knows when not to compile — and delegates to the expert instead."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-37-metaschedule.html">Day 37: MetaSchedule</a></td>
+<td style="text-align: left;"><a href="day-39-quantization-in-tvm.html">Day 39: Quantization in TVM</a></td>
+<td style="text-align: left;"><a href="README.html">Week 6: TVM Tuning &amp; Backends</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>TVM's auto-tuning can produce excellent kernels, but some operators on some hardware are best handled by vendor libraries — cuDNN's convolutions on NVIDIA GPUs, oneDNN (DNNL) on Intel CPUs, or TensorRT's fused subgraphs. Rather than forcing an all-or-nothing choice, TVM's <strong>BYOC (Bring Your Own Codegen)</strong> framework lets you partition a model's graph: offload matched subgraphs to external backends while TVM compiles the rest. This hybrid approach gives you the best of both worlds — vendor-optimized hotspots plus TVM's flexibility for everything else.</p>
+<hr />
+<h2 id="1-the-byoc-architecture">1. The BYOC Architecture</h2>
+<h3 id="high-level-flow">High-Level Flow</h3>
+<pre><code>Input Relay IR
+    │
+    ▼
+┌──────────────────────────────────────────────────┐
+│ Step 1: Pattern Matching &amp; Annotation             │
+│   Identify subgraphs that an external backend     │
+│   can handle (e.g., conv2d+bias+relu for cuDNN)   │
+└──────────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────────┐
+│ Step 2: Partitioning                              │
+│   Extract matched subgraphs into separate         │
+│   &quot;composite functions&quot; with a compiler tag       │
+│   (e.g., &quot;dnnl&quot; or &quot;tensorrt&quot;)                    │
+└──────────────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────┬────────────────────────────┐
+│ TVM-compiled region │ External backend region     │
+│ (standard relay.    │ (codegen/runtime provided   │
+│  build pipeline)    │  by BYOC integration)       │
+└─────────────────────┴────────────────────────────┘
+    │                       │
+    ▼                       ▼
+┌──────────────────────────────────────────────────┐
+│ Step 3: Unified Runtime                           │
+│   Single GraphExecutor dispatches between         │
+│   TVM kernels and external library calls          │
+└──────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="why-not-just-use-the-vendor-library-directly">Why Not Just Use the Vendor Library Directly?</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Approach</th>
+<th style="text-align: left;">Pros</th>
+<th style="text-align: left;">Cons</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Vendor library only</td>
+<td style="text-align: left;">Maximum perf for supported ops</td>
+<td style="text-align: left;">Can't handle unsupported ops, no graph optimization</td>
+</tr>
+<tr>
+<td style="text-align: left;">TVM only</td>
+<td style="text-align: left;">Full control, portable</td>
+<td style="text-align: left;">May trail vendor on specific ops</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BYOC hybrid</strong></td>
+<td style="text-align: left;">Best of both, graceful fallback</td>
+<td style="text-align: left;">Slightly more complex setup</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-pattern-matching-for-offloading">2. Pattern Matching for Offloading</h2>
+<p>BYOC uses Relay's <strong>pattern language</strong> to identify subgraphs suitable for offloading. Patterns describe operator compositions that the external backend supports.</p>
+<h3 id="defining-patterns">Defining Patterns</h3>
+<pre><code class="language-python">from tvm.relay import dataflow_pattern as dfp
+
+def make_conv2d_bias_relu_pattern():
+    &quot;&quot;&quot;Match: conv2d → bias_add → relu (common fused op in cuDNN/DNNL).&quot;&quot;&quot;
+    data = dfp.wildcard()
+    weight = dfp.wildcard()
+    bias = dfp.wildcard()
+
+    # Conv2D
+    conv = dfp.is_op(&quot;nn.conv2d&quot;)(data, weight)
+    # Bias add
+    biased = dfp.is_op(&quot;nn.bias_add&quot;)(conv, bias)
+    # ReLU activation
+    relu = dfp.is_op(&quot;nn.relu&quot;)(biased)
+
+    return relu
+
+def make_dense_pattern():
+    &quot;&quot;&quot;Match: dense (fully connected) layer.&quot;&quot;&quot;
+    data = dfp.wildcard()
+    weight = dfp.wildcard()
+    return dfp.is_op(&quot;nn.dense&quot;)(data, weight)
+
+# Collect patterns with names
+patterns = [
+    (&quot;dnnl.conv2d_bias_relu&quot;, make_conv2d_bias_relu_pattern()),
+    (&quot;dnnl.dense&quot;, make_dense_pattern()),
+]
+</code></pre>
+<h3 id="pattern-matching-in-action">Pattern Matching in Action</h3>
+<pre><code>Before partitioning:
+┌───────────────────────────────────────────────────┐
+│                 Original Relay IR                  │
+│                                                    │
+│  input ──▶ conv2d ──▶ bias_add ──▶ relu ──▶ ...   │
+│               ↑           ↑                        │
+│            weight       bias                       │
+│                                                    │
+│         ... ──▶ add ──▶ dense ──▶ softmax          │
+│                           ↑                        │
+│                        weight                      │
+└───────────────────────────────────────────────────┘
+
+After partitioning (patterns matched):
+┌───────────────────────────────────────────────────┐
+│                                                    │
+│         ┌──────────────────────────┐               │
+│  input ─┤ dnnl.conv2d_bias_relu    ├──▶ ...        │
+│  weight ─┤  (offloaded to DNNL)    │               │
+│  bias  ──┤                          │               │
+│         └──────────────────────────┘               │
+│                                                    │
+│         ... ──▶ add ──▶ ┌──────────┐ ──▶ softmax   │
+│                  ↑      │dnnl.dense│      (TVM)    │
+│                (TVM)    └──────────┘               │
+│                         (offloaded)                │
+└───────────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="3-graph-partitioning">3. Graph Partitioning</h2>
+<p>After pattern matching, the <code>MergeComposite</code> and <code>PartitionGraph</code> passes restructure the IR:</p>
+<pre><code class="language-python">import tvm
+import tvm.relay as relay
+from tvm.relay.op.contrib import dnnl  # DNNL integration
+
+# Load a model
+mod, params = relay.frontend.from_pytorch(traced_model, input_infos)
+
+# Step 1: Merge matched patterns into composite functions
+mod = relay.transform.MergeComposite(patterns)(mod)
+
+# Step 2: Annotate composite functions with the target backend
+mod = relay.transform.AnnotateTarget([&quot;dnnl&quot;])(mod)
+
+# Step 3: Merge adjacent annotated regions
+mod = relay.transform.MergeCompilerRegions()(mod)
+
+# Step 4: Partition into separate functions per backend
+mod = relay.transform.PartitionGraph()(mod)
+
+# Inspect the result
+print(mod.astext())
+</code></pre>
+<h3 id="what-the-partitioned-ir-looks-like">What the Partitioned IR Looks Like</h3>
+<pre><code>// Functions offloaded to DNNL:
+def @dnnl_0(%data, %weight, %bias) -&gt; Tensor
+    // compiler = &quot;dnnl&quot;
+    %0 = nn.conv2d(%data, %weight, ...)
+    %1 = nn.bias_add(%0, %bias)
+    nn.relu(%1)
+
+// Main function — TVM compiles this, calls into DNNL for tagged functions:
+def @main(%input) {
+    %0 = @dnnl_0(%input, meta[relay.Constant][0], meta[relay.Constant][1])
+    %1 = nn.max_pool2d(%0, ...)       // TVM handles this
+    %2 = @dnnl_1(%1, ...)             // another DNNL region
+    nn.softmax(%2)                     // TVM handles this
+}
+</code></pre>
+<hr />
+<h2 id="4-the-byoc-codegen-interface">4. The BYOC Codegen Interface</h2>
+<p>Each BYOC backend implements two components:</p>
+<h3 id="4a-codegen-relay-to-external-representation">4a. Codegen — Relay to External Representation</h3>
+<pre><code class="language-cpp">// Simplified C++ codegen interface
+class DNNLCodegen : public CSourceModuleCodegenBase {
+ public:
+  // Convert a Relay function to external code (C source, binary blob, etc.)
+  runtime::Module CreateCSourceModule(const ObjectRef&amp; ref) override {
+    auto func = Downcast&lt;Function&gt;(ref);
+    // Walk the Relay subgraph, emit DNNL API calls
+    std::string code = EmitDNNLCode(func);
+    return CSourceModuleCreate(code, &quot;c&quot;, {}, {});
+  }
+};
+</code></pre>
+<h3 id="4b-runtime-execute-the-external-code">4b. Runtime — Execute the External Code</h3>
+<pre><code class="language-cpp">// Simplified runtime wrapper
+class DNNLRuntime : public ModuleNode {
+ public:
+  PackedFunc GetFunction(const std::string&amp; name, ...) override {
+    return PackedFunc([this](TVMArgs args, TVMRetValue* rv) {
+      // Extract input tensors from TVM runtime
+      DLTensor* input = args[0];
+      DLTensor* output = args[1];
+
+      // Call DNNL primitive
+      dnnl::memory src_mem(..., input-&gt;data);
+      dnnl::memory dst_mem(..., output-&gt;data);
+      conv_primitive.execute(stream, {{DNNL_ARG_SRC, src_mem},
+                                      {DNNL_ARG_DST, dst_mem}});
+      stream.wait();
+    });
+  }
+};
+</code></pre>
+<h3 id="registration">Registration</h3>
+<pre><code class="language-python"># Python-side registration (using the JSON runtime approach)
+from tvm.relay.op.contrib.register import register_pattern_table
+
+@register_pattern_table(&quot;dnnl&quot;)
+def dnnl_pattern_table():
+    return [
+        (&quot;dnnl.conv2d_bias_relu&quot;, make_conv2d_bias_relu_pattern(), check_conv2d),
+        (&quot;dnnl.dense&quot;, make_dense_pattern(), check_dense),
+    ]
+
+def check_conv2d(extract):
+    &quot;&quot;&quot;Additional checks: data types, layout, padding constraints.&quot;&quot;&quot;
+    call = extract
+    attrs = call.args[0].attrs  # conv2d attributes
+    return attrs.data_layout == &quot;NCHW&quot; and attrs.kernel_layout == &quot;OIHW&quot;
+</code></pre>
+<hr />
+<h2 id="5-existing-byoc-integrations">5. Existing BYOC Integrations</h2>
+<p>TVM ships with several production-ready BYOC backends:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Backend</th>
+<th style="text-align: left;">Target Hardware</th>
+<th style="text-align: left;">Supported Ops</th>
+<th style="text-align: left;">Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>DNNL (oneDNN)</strong></td>
+<td style="text-align: left;">Intel CPU</td>
+<td style="text-align: left;">Conv, Dense, BatchNorm, Pool</td>
+<td style="text-align: left;">Stable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>cuDNN</strong></td>
+<td style="text-align: left;">NVIDIA GPU</td>
+<td style="text-align: left;">Conv, Pool, Softmax, BatchNorm</td>
+<td style="text-align: left;">Stable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>TensorRT</strong></td>
+<td style="text-align: left;">NVIDIA GPU</td>
+<td style="text-align: left;">Full subgraph execution</td>
+<td style="text-align: left;">Stable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>ACL (Arm Compute)</strong></td>
+<td style="text-align: left;">Arm CPU</td>
+<td style="text-align: left;">Conv, Dense, Pool, Activation</td>
+<td style="text-align: left;">Stable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>CUTLASS</strong></td>
+<td style="text-align: left;">NVIDIA GPU</td>
+<td style="text-align: left;">GEMM, Conv2d (via templates)</td>
+<td style="text-align: left;">Experimental</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Ethosn</strong></td>
+<td style="text-align: left;">Arm Ethos-N NPU</td>
+<td style="text-align: left;">Conv, Pool, Concat, Split</td>
+<td style="text-align: left;">Stable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>CMSIS-NN</strong></td>
+<td style="text-align: left;">Arm Cortex-M</td>
+<td style="text-align: left;">Quantized Conv, Dense, Pool</td>
+<td style="text-align: left;">Stable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BNNS</strong></td>
+<td style="text-align: left;">Apple Silicon</td>
+<td style="text-align: left;">Conv, Dense, Activation</td>
+<td style="text-align: left;">Experimental</td>
+</tr>
+</tbody>
+</table>
+<h3 id="using-tensorrt-via-byoc">Using TensorRT via BYOC</h3>
+<pre><code class="language-python">from tvm.relay.op.contrib import tensorrt
+
+# Partition for TensorRT
+mod = tensorrt.partition_for_tensorrt(mod, params, target=&quot;cuda&quot;)
+
+# Build — TVM compiles non-TRT parts, TRT compiles its subgraphs
+with tvm.transform.PassContext(opt_level=3):
+    lib = relay.build(mod, target=&quot;cuda&quot;, params=params)
+
+# At runtime, TVM calls into TRT for offloaded subgraphs
+dev = tvm.cuda(0)
+module = graph_executor.GraphModule(lib[&quot;default&quot;](dev))
+module.set_input(&quot;input&quot;, input_data)
+module.run()
+output = module.get_output(0)
+</code></pre>
+<hr />
+<h2 id="6-when-to-use-byoc-vs-native-tvm">6. When to Use BYOC vs Native TVM</h2>
+<h3 id="decision-framework">Decision Framework</h3>
+<pre><code>Is the operator supported by a vendor library?
+    │
+    ├── No → Use TVM (auto-tune with MetaSchedule)
+    │
+    └── Yes
+         │
+         Is the vendor library significantly faster?
+             │
+             ├── No → Use TVM (more portable)
+             │
+             └── Yes
+                  │
+                  Is the operator a performance hotspot?
+                      │
+                      ├── No → Use TVM (simpler deployment)
+                      │
+                      └── Yes → Use BYOC offloading
+</code></pre>
+<h3 id="practical-guidelines">Practical Guidelines</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Scenario</th>
+<th style="text-align: left;">Recommendation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Large Conv2D on NVIDIA</td>
+<td style="text-align: left;">BYOC to cuDNN or TensorRT</td>
+</tr>
+<tr>
+<td style="text-align: left;">GEMM on Intel CPU</td>
+<td style="text-align: left;">BYOC to DNNL (oneDNN)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Custom/exotic operator</td>
+<td style="text-align: left;">TVM native (no library support)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Quantized inference on Arm</td>
+<td style="text-align: left;">BYOC to ACL or CMSIS-NN</td>
+</tr>
+<tr>
+<td style="text-align: left;">Portable deployment</td>
+<td style="text-align: left;">TVM native (no library dependency)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Maximum throughput, single target</td>
+<td style="text-align: left;">BYOC with TensorRT</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-partition-resnet-18-for-dnnl-30-min">Exercise 1: Partition ResNet-18 for DNNL (30 min)</h3>
+<p>Using the DNNL pattern table, partition a ResNet-18 model:</p>
+<pre><code class="language-python">from tvm.relay.op.contrib import dnnl
+
+# Load ResNet-18
+mod, params = relay.frontend.from_pytorch(traced_resnet, input_infos)
+
+# Partition
+mod = dnnl.partition_for_dnnl(mod, params)
+print(mod.astext()[:3000])
+</code></pre>
+<p>Questions:
+1. How many functions are offloaded to DNNL?
+2. Which operators remain in TVM's domain?
+3. Benchmark DNNL-partitioned vs pure-TVM compilation.</p>
+<h3 id="exercise-2-write-a-custom-pattern-25-min">Exercise 2: Write a Custom Pattern (25 min)</h3>
+<p>Define a pattern for <code>conv2d → batch_norm → relu</code> (the most common ResNet block). Register it as a custom BYOC backend called <code>"mybackend"</code>:</p>
+<pre><code class="language-python">def make_conv_bn_relu_pattern():
+    data = dfp.wildcard()
+    weight = dfp.wildcard()
+    bn_gamma = dfp.wildcard()
+    bn_beta = dfp.wildcard()
+    bn_mean = dfp.wildcard()
+    bn_var = dfp.wildcard()
+
+    conv = dfp.is_op(&quot;nn.conv2d&quot;)(data, weight)
+    bn = dfp.is_op(&quot;nn.batch_norm&quot;)(conv, bn_gamma, bn_beta, bn_mean, bn_var)
+    # batch_norm returns a tuple — take element 0
+    bn_out = dfp.is_tuple_get_item(bn, 0)
+    relu = dfp.is_op(&quot;nn.relu&quot;)(bn_out)
+    return relu
+</code></pre>
+<p>Verify the pattern matches on a ResNet-18 IR and count how many instances are found.</p>
+<h3 id="exercise-3-byoc-profiling-20-min">Exercise 3: BYOC Profiling (20 min)</h3>
+<p>Compile MobileNetV2 three ways and benchmark:
+1. Pure TVM with <code>opt_level=3</code> (no tuning)
+2. TVM with MetaSchedule tuning (500 trials)
+3. BYOC with DNNL (or cuDNN on GPU)</p>
+<p>Which is fastest? Where does BYOC win and where does tuned TVM win?</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>BYOC enables hybrid compilation</strong> — offload hot operators to vendor libraries, compile the rest with TVM</li>
+<li><strong>Pattern matching</strong> identifies subgraphs suitable for offloading (e.g., conv2d+bias+relu → cuDNN)</li>
+<li><strong>Graph partitioning</strong> splits the IR into backend-specific regions with a unified runtime</li>
+<li><strong>The codegen interface</strong> is two parts: compile (Relay → external code) and runtime (execute external code)</li>
+<li><strong>Existing integrations</strong> cover major backends: DNNL, cuDNN, TensorRT, ACL, CMSIS-NN</li>
+<li><strong>Use BYOC when</strong> a vendor library is significantly faster for a hotspot operator; use native TVM for portability</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://tvm.apache.org/docs/dev/how_to/relay_bring_your_own_codegen.html">BYOC Framework (TVM docs)</a> — official implementation guide</li>
+<li><a href="https://arxiv.org/abs/2111.00655">Collage: Automated Integration of Deep Learning Backends</a> — automated BYOC partitioning research</li>
+<li><a href="https://tvm.apache.org/docs/how_to/work_with_relay/using_external_lib.html">DNNL Integration Tutorial</a> — hands-on DNNL offloading</li>
+<li><a href="https://tvm.apache.org/docs/how_to/deploy/tensorrt.html">TensorRT Integration in TVM</a> — TensorRT via BYOC</li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p>Offloading to vendor libraries is powerful, but what about <strong>quantized</strong> inference — running models in INT8 instead of FP32 for 2–4× speedups? <strong>Day 39</strong> covers TVM's quantization pipeline: calibration, the QNN dialect, INT8 compilation, and how to balance accuracy against latency.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-37-metaschedule.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 37: MetaSchedule</a>
+            <a href="day-39-quantization-in-tvm.html" class="text-emerald-600 hover:text-emerald-800">Day 39: Quantization in TVM &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

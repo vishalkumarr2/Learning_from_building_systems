@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 40: TVM for Edge Devices - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 6: TVM Tuning & Backends</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-40-tvm-for-edge-devices">Day 40: TVM for Edge Devices</h1>
+<blockquote>
+<p><strong>Phase III · Week 6 · Day 40 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The real test of a compiler isn't how fast it runs on the machine that built it — it's how fast it runs on the machine in your pocket, your car, or your thermostat."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-39-quantization-in-tvm.html">Day 39: Quantization in TVM</a></td>
+<td style="text-align: left;"><a href="day-41-tvm-unity-relax.html">Day 41: TVM Unity &amp; Relax</a></td>
+<td style="text-align: left;"><a href="README.html">Week 6: TVM Tuning &amp; Backends</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Most ML models are trained on beefy GPU workstations, but they <em>run</em> on edge devices: phones, drones, robots, IoT sensors, Raspberry Pis, NVIDIA Jetsons, and bare-metal microcontrollers. These targets have wildly different ISAs, memory budgets (kilobytes to gigabytes), and OS capabilities (Linux, Zephyr RTOS, or no OS at all). TVM's <strong>cross-compilation</strong> workflow lets you compile on your x86 development machine and produce binaries for ARM Cortex-A, Cortex-M, RISC-V, or Hexagon DSPs. The <strong>µTVM</strong> (MicroTVM) subsystem goes further — deploying to devices with no OS and as little as 256 KB of flash. Mastering edge deployment is the difference between a model that lives in a notebook and one that ships in a product.</p>
+<hr />
+<h2 id="1-cross-compilation-fundamentals">1. Cross-Compilation Fundamentals</h2>
+<h3 id="the-hosttarget-split">The Host/Target Split</h3>
+<p>In cross-compilation, <strong>two machines</strong> are involved:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Role</th>
+<th style="text-align: left;">Description</th>
+<th style="text-align: left;">Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Host</strong></td>
+<td style="text-align: left;">Where compilation happens</td>
+<td style="text-align: left;">x86-64 workstation, Ubuntu 22.04</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Target</strong></td>
+<td style="text-align: left;">Where the compiled model runs</td>
+<td style="text-align: left;">ARM Cortex-A72 (Raspberry Pi 4)</td>
+</tr>
+</tbody>
+</table>
+<p>TVM cleanly separates these through its <code>Target</code> string and the RPC (Remote Procedure Call) system:</p>
+<pre><code>┌─────────────────────────────┐       ┌──────────────────────────┐
+│        HOST (x86-64)        │       │     TARGET (ARM)         │
+│                             │       │                          │
+│  ┌───────────┐              │  RPC  │  ┌──────────────────┐   │
+│  │ TVM       │   compile    │ ────▶ │  │ tvm_rpc_server   │   │
+│  │ Compiler  │──────────▶   │       │  │                  │   │
+│  └───────────┘  .tar module │       │  │  load &amp; execute  │   │
+│                             │       │  └──────────────────┘   │
+│  ┌───────────┐              │       │                          │
+│  │ AutoTune  │   tune via   │ ◀───▶ │  measure real latency   │
+│  │ Engine    │   RPC        │       │                          │
+│  └───────────┘              │       └──────────────────────────┘
+└─────────────────────────────┘
+</code></pre>
+<h3 id="target-specification-strings">Target Specification Strings</h3>
+<p>The TVM target string encodes the ISA, features, and runtime:</p>
+<pre><code class="language-python"># Raspberry Pi 4 (Cortex-A72, ARMv8-A, NEON)
+target_rpi4 = tvm.target.Target(
+    &quot;llvm -device=arm_cpu -mtriple=aarch64-linux-gnu &quot;
+    &quot;-mattr=+neon,+fp-armv8,+crc&quot;
+)
+
+# NVIDIA Jetson Nano (Maxwell GPU + ARM CPU)
+target_jetson_gpu = tvm.target.Target(&quot;cuda -arch=sm_53&quot;)
+target_jetson_cpu = tvm.target.Target(
+    &quot;llvm -device=arm_cpu -mtriple=aarch64-linux-gnu -mattr=+neon&quot;
+)
+
+# Cortex-M4 microcontroller (no OS, Thumb-2 ISA)
+target_m4 = tvm.target.Target(
+    &quot;c -keys=arm_cpu -mcpu=cortex-m4 -march=armv7e-m &quot;
+    &quot;-mfloat-abi=hard -mfpu=fpv4-sp-d16 -runtime=c -system-lib&quot;
+)
+
+# Hexagon DSP (Qualcomm Snapdragon)
+target_hexagon = tvm.target.Target(&quot;hexagon -mcpu=v68&quot;)
+</code></pre>
+<hr />
+<h2 id="2-the-cross-compilation-workflow">2. The Cross-Compilation Workflow</h2>
+<h3 id="step-by-step-x86-raspberry-pi-4">Step-by-Step: x86 → Raspberry Pi 4</h3>
+<pre><code class="language-python">import tvm
+from tvm import relay
+import onnx
+
+# 1. Load model on HOST
+onnx_model = onnx.load(&quot;mobilenet_v2.onnx&quot;)
+mod, params = relay.frontend.from_onnx(onnx_model, shape={&quot;input&quot;: (1, 3, 224, 224)})
+
+# 2. Define TARGET
+target = tvm.target.Target(
+    &quot;llvm -device=arm_cpu -mtriple=aarch64-linux-gnu -mattr=+neon&quot;
+)
+
+# 3. Compile on HOST for TARGET
+with tvm.transform.PassContext(opt_level=3):
+    lib = relay.build(mod, target=target, params=params)
+
+# 4. Export as a deployable artifact
+lib.export_library(
+    &quot;mobilenet_v2_rpi4.tar&quot;,
+    cc=&quot;/usr/bin/aarch64-linux-gnu-gcc&quot;  # Cross-compiler toolchain
+)
+</code></pre>
+<h3 id="deploying-on-the-target">Deploying on the Target</h3>
+<pre><code class="language-python"># On the Raspberry Pi 4
+import tvm
+from tvm.contrib import graph_executor
+import numpy as np
+
+# Load the cross-compiled module
+lib = tvm.runtime.load_module(&quot;mobilenet_v2_rpi4.tar&quot;)
+dev = tvm.cpu(0)
+module = graph_executor.GraphModule(lib[&quot;default&quot;](dev))
+
+# Run inference
+input_data = np.random.uniform(size=(1, 3, 224, 224)).astype(&quot;float32&quot;)
+module.set_input(&quot;input&quot;, input_data)
+module.run()
+output = module.get_output(0).numpy()
+</code></pre>
+<hr />
+<h2 id="3-graph-executor-vs-aot-executor">3. Graph Executor vs AOT Executor</h2>
+<p>TVM provides two execution strategies with fundamentally different tradeoffs:</p>
+<h3 id="graph-executor-interpreter-style">Graph Executor (Interpreter-Style)</h3>
+<pre><code>┌──────────────────────────────────────────────────┐
+│              Graph Executor Runtime               │
+│                                                   │
+│  ┌──────────┐    ┌──────────────────────┐        │
+│  │  JSON    │    │   Shared Library     │        │
+│  │  Graph   │──▶ │   (.so / .tar)       │        │
+│  │  Desc.   │    │   - kernel functions │        │
+│  └──────────┘    │   - fused operators  │        │
+│       │          └──────────────────────┘        │
+│       ▼                     │                    │
+│  Interpreter reads          │                    │
+│  graph node by node ───▶ calls kernels           │
+│                                                   │
+│  Needs: dynamic memory allocator, JSON parser     │
+│  Size:  ~300 KB runtime overhead                  │
+└──────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="aot-executor-ahead-of-time-compiled">AOT Executor (Ahead-of-Time Compiled)</h3>
+<pre><code>┌──────────────────────────────────────────────────┐
+│              AOT Executor                         │
+│                                                   │
+│  ┌──────────────────────────────────────┐        │
+│  │  Single C function: tvmgen_default_run()      │
+│  │                                      │        │
+│  │  // All calls are static, no graph   │        │
+│  │  tvmgen_default_fused_conv2d(args);  │        │
+│  │  tvmgen_default_fused_relu(args);    │        │
+│  │  tvmgen_default_fused_dense(args);   │        │
+│  └──────────────────────────────────────┘        │
+│                                                   │
+│  No interpreter, no JSON, no dynamic alloc        │
+│  Size:  ~10 KB overhead (+ kernel code)           │
+└──────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="comparison-table">Comparison Table</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Feature</th>
+<th style="text-align: left;">Graph Executor</th>
+<th style="text-align: left;">AOT Executor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Runtime overhead</td>
+<td style="text-align: left;">~300 KB</td>
+<td style="text-align: left;">~10 KB</td>
+</tr>
+<tr>
+<td style="text-align: left;">Dynamic allocation</td>
+<td style="text-align: left;">Required</td>
+<td style="text-align: left;">Optional (static planning)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Graph description</td>
+<td style="text-align: left;">JSON at runtime</td>
+<td style="text-align: left;">Baked into C code</td>
+</tr>
+<tr>
+<td style="text-align: left;">Debugging</td>
+<td style="text-align: left;">Inspect graph nodes</td>
+<td style="text-align: left;">Step through C</td>
+</tr>
+<tr>
+<td style="text-align: left;">OS requirement</td>
+<td style="text-align: left;">Linux/RTOS with malloc</td>
+<td style="text-align: left;">Bare-metal compatible</td>
+</tr>
+<tr>
+<td style="text-align: left;">Best for</td>
+<td style="text-align: left;">Raspberry Pi, Jetson</td>
+<td style="text-align: left;">Cortex-M, Arduino, Zephyr</td>
+</tr>
+</tbody>
+</table>
+<h3 id="enabling-aot-compilation">Enabling AOT Compilation</h3>
+<pre><code class="language-python"># AOT compilation with static memory planning
+with tvm.transform.PassContext(opt_level=3):
+    executor = relay.backend.Executor(&quot;aot&quot;, {
+        &quot;unpacked-api&quot;: True,      # Simple C calling convention
+        &quot;interface-api&quot;: &quot;packed&quot;,  # or &quot;c&quot; for minimal runtime
+    })
+    runtime = relay.backend.Runtime(&quot;crt&quot;)  # C Runtime (no libc needed)
+
+    lib = relay.build(
+        mod, target=target_m4, params=params,
+        executor=executor, runtime=runtime
+    )
+</code></pre>
+<hr />
+<h2 id="4-tvm-tvm-for-microcontrollers">4. µTVM — TVM for Microcontrollers</h2>
+<h3 id="the-microcontroller-challenge">The Microcontroller Challenge</h3>
+<p>Microcontrollers (MCUs) operate under extreme constraints:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Resource</th>
+<th style="text-align: left;">Typical MCU</th>
+<th style="text-align: left;">Raspberry Pi 4</th>
+<th style="text-align: left;">Ratio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">RAM</td>
+<td style="text-align: left;">256 KB – 1 MB</td>
+<td style="text-align: left;">4 GB</td>
+<td style="text-align: left;">4,000–16,000×</td>
+</tr>
+<tr>
+<td style="text-align: left;">Flash</td>
+<td style="text-align: left;">512 KB – 2 MB</td>
+<td style="text-align: left;">32 GB (SD)</td>
+<td style="text-align: left;">16,000–65,000×</td>
+</tr>
+<tr>
+<td style="text-align: left;">Clock</td>
+<td style="text-align: left;">80–400 MHz</td>
+<td style="text-align: left;">1.5 GHz (4 cores)</td>
+<td style="text-align: left;">4–19×</td>
+</tr>
+<tr>
+<td style="text-align: left;">OS</td>
+<td style="text-align: left;">None / Zephyr / FreeRTOS</td>
+<td style="text-align: left;">Linux</td>
+<td style="text-align: left;">—</td>
+</tr>
+</tbody>
+</table>
+<p>µTVM addresses these with:
+- <strong>AOT executor</strong> (no interpreter overhead)
+- <strong>Static memory planning</strong> (all buffers pre-allocated at compile time)
+- <strong>C-runtime (CRT)</strong> — a minimal runtime (~10 KB) with no OS dependency
+- <strong>Model Library Format (MLF)</strong> — a self-contained archive for integration</p>
+<h3 id="tvm-architecture">µTVM Architecture</h3>
+<pre><code>┌───────────────────────────── HOST ────────────────────────────┐
+│                                                                │
+│  Python Script ──▶ Relay IR ──▶ TIR ──▶ AOT C Code            │
+│                                           │                    │
+│  ┌──────────────────────────────────────┐ │                    │
+│  │ Project API                          │ │                    │
+│  │  - generate_project()                │◀┘                    │
+│  │  - build()                           │                      │
+│  │  - flash()                           │                      │
+│  │  - open_transport() ←── serial/JTAG  │                      │
+│  └──────────────────────────────────────┘                      │
+│           │              ▲                                     │
+└───────────│──────────────│─────────────────────────────────────┘
+            │ flash        │ serial I/O
+            ▼              │
+┌──────────────────────────────────────────────────┐
+│  MICROCONTROLLER (e.g. STM32F746, nRF5340)       │
+│                                                   │
+│  ┌────────────────────────────────────┐           │
+│  │  Generated AOT code               │           │
+│  │  + CRT runtime (~10 KB)           │           │
+│  │  + Zephyr/Arduino platform glue   │           │
+│  │  + Input/output buffers           │           │
+│  └────────────────────────────────────┘           │
+│                                                   │
+│  Flash: 512 KB    RAM: 256 KB    Clock: 216 MHz   │
+└──────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="tvm-with-arduino">µTVM with Arduino</h3>
+<pre><code class="language-python">import tvm
+from tvm import relay
+from tvm.micro import export_model_library_format
+
+# Load a tiny model (e.g., keyword spotting, 50 KB)
+mod, params = relay.frontend.from_tflite(tflite_model)
+
+target = tvm.target.Target(&quot;c -keys=arm_cpu -mcpu=cortex-m4&quot;)
+
+with tvm.transform.PassContext(opt_level=3):
+    executor = relay.backend.Executor(&quot;aot&quot;, {&quot;unpacked-api&quot;: True})
+    runtime = relay.backend.Runtime(&quot;crt&quot;)
+    lib = relay.build(mod, target=target, params=params,
+                      executor=executor, runtime=runtime)
+
+# Export as Model Library Format
+export_model_library_format(lib, &quot;keyword_spotting.tar&quot;)
+
+# Generate Arduino project
+from tvm.micro.project_api.client import ProjectAPIClient
+project = tvm.micro.generate_project(
+    template_dir=&quot;arduino&quot;,              # or &quot;zephyr&quot;
+    module=lib,
+    generated_project_dir=&quot;./arduino_project&quot;,
+    options={&quot;board&quot;: &quot;nano33ble&quot;, &quot;project_type&quot;: &quot;example_project&quot;}
+)
+project.build()
+project.flash()
+</code></pre>
+<hr />
+<h2 id="5-memory-planning-for-constrained-devices">5. Memory Planning for Constrained Devices</h2>
+<h3 id="the-problem">The Problem</h3>
+<p>A model with 20 intermediate tensors doesn't need 20 buffers simultaneously — some tensors' lifetimes don't overlap:</p>
+<pre><code>Tensor lifetimes (time →):
+
+  T0: ████░░░░░░░░░░░░░░░░
+  T1: ░░████░░░░░░░░░░░░░░
+  T2: ░░░░████░░░░░░░░░░░░
+  T3: ░░░░████████░░░░░░░░
+  T4: ░░░░░░░░░░████░░░░░░
+  T5: ░░░░░░░░░░░░████░░░░
+  T6: ░░░░░░░░░░░░░░████░░
+
+  Without planning: 7 buffers = 7 × 16 KB = 112 KB
+  With planning:    3 buffers = 3 × 16 KB =  48 KB  (57% saving)
+
+  Buffer reuse:
+    Buffer A: T0, T2, T4, T6  (non-overlapping)
+    Buffer B: T1, T5           (non-overlapping)
+    Buffer C: T3               (overlaps with T2, T4)
+</code></pre>
+<h3 id="static-memory-planning-in-tvm">Static Memory Planning in TVM</h3>
+<pre><code class="language-python"># Enable the USMP (Unified Static Memory Planner)
+with tvm.transform.PassContext(opt_level=3, config={
+    &quot;tir.usmp.enable&quot;: True,
+    &quot;tir.usmp.algorithm&quot;: &quot;hill_climb&quot;,  # or &quot;greedy_by_size&quot;
+}):
+    lib = relay.build(mod, target=target, params=params,
+                      executor=relay.backend.Executor(&quot;aot&quot;),
+                      runtime=relay.backend.Runtime(&quot;crt&quot;))
+</code></pre>
+<p>The <strong>USMP</strong> solves a memory coloring problem:</p>
+<p>$$\text{minimize} \quad \sum_{b \in \text{buffers}} \text{size}(b)$$
+$$\text{subject to} \quad \forall (T_i, T_j) \text{ with overlapping lifetimes: } \text{buf}(T_i) \neq \text{buf}(T_j)$$</p>
+<p>Available algorithms:
+- <strong>Greedy by size</strong> — assign largest tensors first, $O(n^2)$
+- <strong>Hill climb</strong> — iterative improvement over greedy, better packing
+- <strong>Linear scan</strong> — similar to register allocation in compilers</p>
+<hr />
+<h2 id="6-rpc-testing-on-real-hardware">6. RPC Testing on Real Hardware</h2>
+<h3 id="setting-up-the-rpc-tracker">Setting Up the RPC Tracker</h3>
+<p>The TVM RPC system lets your host machine communicate with remote devices:</p>
+<pre><code class="language-bash"># On the HOST: start the RPC tracker
+python -m tvm.exec.rpc_tracker --host=0.0.0.0 --port=9190
+
+# On the TARGET (Raspberry Pi / Jetson):
+python -m tvm.exec.rpc_server \
+    --tracker=HOST_IP:9190 \
+    --key=rpi4 \
+    --port=9090
+</code></pre>
+<h3 id="remote-compilation-benchmarking">Remote Compilation + Benchmarking</h3>
+<pre><code class="language-python">import tvm
+from tvm import relay, autotvm
+from tvm.contrib import utils, ndk
+from tvm import rpc
+
+# Connect to RPC tracker
+tracker = rpc.connect_tracker(&quot;HOST_IP&quot;, 9190)
+remote = tracker.request(&quot;rpi4&quot;, priority=0, session_timeout=60)
+
+# Upload and run on remote device
+temp = utils.tempdir()
+path = temp.relpath(&quot;mobilenet.tar&quot;)
+lib.export_library(path, cc=&quot;/usr/bin/aarch64-linux-gnu-gcc&quot;)
+
+remote.upload(path)
+rlib = remote.load_module(&quot;mobilenet.tar&quot;)
+dev = remote.cpu(0)
+
+# Create remote executor
+from tvm.contrib import graph_executor
+module = graph_executor.GraphModule(rlib[&quot;default&quot;](dev))
+
+# Benchmark
+import numpy as np
+input_data = np.random.uniform(size=(1, 3, 224, 224)).astype(&quot;float32&quot;)
+module.set_input(&quot;input&quot;, input_data)
+
+ftimer = module.module.time_evaluator(&quot;run&quot;, dev, repeat=10, number=10)
+prof_res = np.array(ftimer().results) * 1000  # Convert to ms
+print(f&quot;Mean: {np.mean(prof_res):.2f} ms, Std: {np.std(prof_res):.2f} ms&quot;)
+</code></pre>
+<h3 id="remote-autotuning">Remote AutoTuning</h3>
+<pre><code class="language-python"># Tune on real hardware via RPC
+from tvm import meta_schedule as ms
+
+database = ms.tune_tvm(
+    mod=mod,
+    target=target_rpi4,
+    config=ms.TuneConfig(
+        strategy=&quot;evolutionary&quot;,
+        num_trials_per_iter=32,
+        max_trials_per_task=200,
+    ),
+    runner=ms.runner.RPCRunner(
+        rpc_config=ms.runner.RPCConfig(
+            tracker_host=&quot;HOST_IP&quot;,
+            tracker_port=9190,
+            tracker_key=&quot;rpi4&quot;,
+            session_timeout_sec=60,
+        ),
+        max_workers=1,  # One device
+    ),
+    work_dir=&quot;./tune_rpi4&quot;,
+)
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-cross-compile-for-arm-20-min">Exercise 1: Cross-Compile for ARM (20 min)</h3>
+<p>Cross-compile a small model without a physical device using QEMU:</p>
+<pre><code class="language-bash"># Install ARM cross-compiler and QEMU
+sudo apt install gcc-aarch64-linux-gnu qemu-user-static
+
+# Verify
+aarch64-linux-gnu-gcc --version
+qemu-aarch64-static --version
+</code></pre>
+<pre><code class="language-python">import tvm
+from tvm import relay
+import numpy as np
+
+# Build a tiny model
+x = relay.var(&quot;x&quot;, shape=(1, 64), dtype=&quot;float32&quot;)
+w = relay.var(&quot;w&quot;, shape=(10, 64), dtype=&quot;float32&quot;)
+y = relay.nn.dense(x, w)
+y = relay.nn.softmax(y)
+mod = tvm.IRModule.from_expr(y)
+
+target = tvm.target.Target(
+    &quot;llvm -mtriple=aarch64-linux-gnu -mattr=+neon&quot;
+)
+
+with tvm.transform.PassContext(opt_level=3):
+    lib = relay.build(mod, target=target)
+
+lib.export_library(
+    &quot;tiny_model_arm.so&quot;,
+    cc=&quot;/usr/bin/aarch64-linux-gnu-gcc&quot;
+)
+print(&quot;✓ Cross-compiled for ARM64&quot;)
+# Test with: qemu-aarch64-static -L /usr/aarch64-linux-gnu ./run_model
+</code></pre>
+<h3 id="exercise-2-aot-vs-graph-executor-comparison-25-min">Exercise 2: AOT vs Graph Executor Comparison (25 min)</h3>
+<p>Compare the two executors for a keyword-spotting model:</p>
+<pre><code class="language-python">import tvm
+from tvm import relay
+
+# Create a keyword-spotting-sized model
+data = relay.var(&quot;data&quot;, shape=(1, 1, 49, 10), dtype=&quot;float32&quot;)  # MFCC features
+conv = relay.nn.conv2d(data, relay.var(&quot;w1&quot;, shape=(16, 1, 3, 3)),
+                       padding=(1, 1), channels=16, kernel_size=(3, 3))
+pool = relay.nn.global_avg_pool2d(conv)
+flat = relay.nn.batch_flatten(pool)
+dense = relay.nn.dense(flat, relay.var(&quot;w2&quot;, shape=(12, 16)))  # 12 keywords
+out = relay.nn.softmax(dense)
+
+mod = tvm.IRModule.from_expr(out)
+target = tvm.target.Target(&quot;c -keys=arm_cpu -mcpu=cortex-m4&quot;)
+
+# Graph executor build
+with tvm.transform.PassContext(opt_level=3):
+    lib_graph = relay.build(mod, target=target)
+
+# AOT executor build
+with tvm.transform.PassContext(opt_level=3):
+    executor = relay.backend.Executor(&quot;aot&quot;, {&quot;unpacked-api&quot;: True})
+    runtime = relay.backend.Runtime(&quot;crt&quot;)
+    lib_aot = relay.build(mod, target=target,
+                          executor=executor, runtime=runtime)
+
+# Compare: inspect generated code sizes, memory requirements
+</code></pre>
+<h3 id="exercise-3-memory-planning-analysis-15-min">Exercise 3: Memory Planning Analysis (15 min)</h3>
+<p>Analyze memory savings from USMP:</p>
+<pre><code class="language-python"># Enable USMP with verbose logging
+with tvm.transform.PassContext(opt_level=3, config={
+    &quot;tir.usmp.enable&quot;: True,
+    &quot;tir.usmp.algorithm&quot;: &quot;hill_climb&quot;,
+    &quot;tir.disable_vectorize&quot;: True,
+}):
+    lib = relay.build(mod, target=target,
+                      executor=relay.backend.Executor(&quot;aot&quot;),
+                      runtime=relay.backend.Runtime(&quot;crt&quot;))
+
+# Extract memory statistics
+# Look for workspace size in the generated code
+print(&quot;Memory pools allocated:&quot;)
+# Check: tvmgen_default_workspace_pools in generated artifacts
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Cross-compilation</strong> separates host (compile) from target (run) — TVM's <code>Target</code> string specifies ISA, features, and ABI</li>
+<li><strong>AOT executor</strong> eliminates graph interpretation overhead (~10 KB vs ~300 KB), enabling bare-metal deployment</li>
+<li><strong>µTVM</strong> targets microcontrollers via AOT + CRT runtime + Project API for Arduino/Zephyr integration</li>
+<li><strong>Memory planning (USMP)</strong> solves a coloring problem to reuse buffers across non-overlapping tensor lifetimes — critical when RAM is measured in kilobytes</li>
+<li><strong>RPC testing</strong> lets you tune and benchmark on real target hardware from the comfort of your host machine</li>
+<li><strong>Target strings</strong> are your contract with the backend — wrong <code>-mattr</code> flags mean missing NEON optimizations or illegal instructions</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://tvm.apache.org/docs/topic/microtvm/">µTVM: TVM on Microcontrollers</a> — official µTVM documentation</li>
+<li><a href="https://tvm.apache.org/docs/how_to/deploy/rpc.html">TVM RPC System</a> — remote deployment guide</li>
+<li><a href="https://tvm.apache.org/docs/arch/aot_compilation.html">AOT Compilation in TVM</a> — architecture deep dive</li>
+<li><a href="https://tvm.apache.org/docs/arch/model_library_format.html">Model Library Format</a> — packaging for microcontrollers</li>
+<li><a href="https://tvm.apache.org/docs/how_to/deploy/arm_compute_lib.html">Deploying TVM on Raspberry Pi</a> — step-by-step ARM deployment</li>
+<li><a href="https://discuss.tvm.apache.org/t/rfc-unified-static-memory-planner/">USMP: Unified Static Memory Planner (RFC)</a> — memory planning design</li>
+</ul>
+<hr />
+<h2 id="tomorrow-tvm-unity-relax">Tomorrow: TVM Unity &amp; Relax</h2>
+<p>Day 41 looks at the <strong>future of TVM</strong> — the Unity initiative that unifies Relay, TE, and TIR into a single composable framework, and <strong>Relax</strong>, the next-generation IR with first-class dynamic shapes and dataflow blocks. You'll see how the lessons from Days 29–40 feed directly into TVM's next chapter.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-39-quantization-in-tvm.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 39: Quantization in TVM</a>
+            <a href="day-41-tvm-unity-relax.html" class="text-emerald-600 hover:text-emerald-800">Day 41: TVM Unity & Relax &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

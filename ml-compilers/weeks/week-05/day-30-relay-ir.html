@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 30: Relay IR - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 5: TVM Foundations</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-30-relay-ir">Day 30: Relay IR</h1>
+<blockquote>
+<p><strong>Phase III · Week 5 · Day 30 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"Relay is a functional IR — every transformation is a function that takes a graph and returns a new graph. No mutation, no side effects, no debugging nightmares."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-29-tvm-architecture-overview.html">Day 29: TVM Architecture Overview</a></td>
+<td style="text-align: left;"><a href="day-31-relay-optimization-passes.html">Day 31: Relay Optimization Passes</a></td>
+<td style="text-align: left;"><a href="README.html">Week 5: TVM Foundations</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Every model that enters TVM — whether from PyTorch, TensorFlow, or ONNX — is first converted into <strong>Relay IR</strong>. Relay is TVM's graph-level intermediate representation, and it's where high-level optimizations like operator fusion and constant folding happen. Unlike PyTorch's FX Graph (a flat DAG of operations), Relay is a <strong>functional language</strong> with a proper type system, let-bindings, closures, and algebraic data types. Understanding Relay is essential because every optimization pass in TVM's graph layer operates on Relay programs.</p>
+<hr />
+<h2 id="1-what-is-relay">1. What Is Relay?</h2>
+<h3 id="relay-as-a-functional-language">Relay as a Functional Language</h3>
+<p>Relay is not just a "graph format" — it's a full programming language with:</p>
+<pre><code>┌────────────────────────────────────────────────────┐
+│                    Relay IR                        │
+│                                                    │
+│  • First-class functions (closures, higher-order)  │
+│  • Let-bindings (SSA-like, no mutation)             │
+│  • Pattern matching on ADTs                        │
+│  • Rich type system (Tensor, Tuple, Function, Ref) │
+│  • Call-by-value evaluation                        │
+│  • Differentiable (supports AD natively)           │
+└────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="relay-vs-other-high-level-irs">Relay vs Other High-Level IRs</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Feature</th>
+<th style="text-align: left;">FX Graph (PyTorch)</th>
+<th style="text-align: left;">HLO (XLA)</th>
+<th style="text-align: left;">Relay (TVM)</th>
+<th style="text-align: left;">ONNX</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Paradigm</td>
+<td style="text-align: left;">Imperative DAG</td>
+<td style="text-align: left;">Functional ops</td>
+<td style="text-align: left;">Functional language</td>
+<td style="text-align: left;">Serialization format</td>
+</tr>
+<tr>
+<td style="text-align: left;">Type system</td>
+<td style="text-align: left;">Minimal</td>
+<td style="text-align: left;">Shaped arrays</td>
+<td style="text-align: left;">Rich (generics, ADTs)</td>
+<td style="text-align: left;">Tensor types</td>
+</tr>
+<tr>
+<td style="text-align: left;">Control flow</td>
+<td style="text-align: left;">Graph breaks</td>
+<td style="text-align: left;">While/Cond ops</td>
+<td style="text-align: left;">If/Match/Recursion</td>
+<td style="text-align: left;">If/Loop</td>
+</tr>
+<tr>
+<td style="text-align: left;">Functions</td>
+<td style="text-align: left;">None (flat graph)</td>
+<td style="text-align: left;">HloComputation</td>
+<td style="text-align: left;">First-class closures</td>
+<td style="text-align: left;">Subgraphs</td>
+</tr>
+<tr>
+<td style="text-align: left;">Let-bindings</td>
+<td style="text-align: left;">No (node list)</td>
+<td style="text-align: left;">No</td>
+<td style="text-align: left;">Yes (SSA-like)</td>
+<td style="text-align: left;">No</td>
+</tr>
+<tr>
+<td style="text-align: left;">Differentiable</td>
+<td style="text-align: left;">Via AOTAutograd</td>
+<td style="text-align: left;">Via HLO AD</td>
+<td style="text-align: left;">Built-in AD pass</td>
+<td style="text-align: left;">No</td>
+</tr>
+</tbody>
+</table>
+<h3 id="why-functional">Why Functional?</h3>
+<pre><code class="language-python"># Imperative (FX-style): mutations are possible, order matters
+graph.nodes[3].args = (new_input,)  # Mutating in place — dangerous!
+
+# Functional (Relay-style): no mutation, always produce new IR
+new_expr = relay.Call(relay.op.get(&quot;nn.relu&quot;), [old_expr])
+# old_expr is unchanged — safe for parallel passes
+</code></pre>
+<p>The functional approach means:
+- Passes can't corrupt shared state
+- Dead code is automatically collected
+- Transformation correctness is easier to verify</p>
+<hr />
+<h2 id="2-relay-type-system">2. Relay Type System</h2>
+<p>Relay has a static type system that catches shape mismatches at compile time, not at runtime.</p>
+<h3 id="tensor-types">Tensor Types</h3>
+<pre><code class="language-python">import tvm
+from tvm import relay
+
+# TensorType: shape + dtype
+t1 = relay.TensorType((1, 3, 224, 224), &quot;float32&quot;)
+print(t1)  # Tensor[(1, 3, 224, 224), float32]
+
+# Shape can include symbolic dimensions
+n = tvm.tir.Var(&quot;n&quot;, &quot;int32&quot;)
+t_dynamic = relay.TensorType((n, 3, 224, 224), &quot;float32&quot;)
+print(t_dynamic)  # Tensor[(n, 3, 224, 224), float32]
+</code></pre>
+<h3 id="function-types">Function Types</h3>
+<pre><code>FuncType(arg_types, ret_type, type_params, type_constraints)
+
+Example: a conv2d operation
+  fn(Tensor[(N, C_in, H, W), f32],     ← input
+     Tensor[(C_out, C_in, kH, kW), f32] ← weight
+  ) -&gt; Tensor[(N, C_out, H', W'), f32]  ← output
+</code></pre>
+<h3 id="tuple-types">Tuple Types</h3>
+<pre><code class="language-python"># Tuples group multiple values
+tt = relay.TupleType([
+    relay.TensorType((1, 64, 56, 56), &quot;float32&quot;),
+    relay.TensorType((64,), &quot;float32&quot;),
+    relay.TensorType((64,), &quot;float32&quot;),
+])
+# Used by batch_norm which returns (output, running_mean, running_var)
+</code></pre>
+<h3 id="type-inference">Type Inference</h3>
+<p>Relay has a Hindley-Milner-style type inference engine:</p>
+<pre><code class="language-python"># Types are inferred automatically — you don't need to annotate
+x = relay.var(&quot;x&quot;, shape=(1, 3, 224, 224), dtype=&quot;float32&quot;)
+w = relay.var(&quot;w&quot;, shape=(64, 3, 7, 7), dtype=&quot;float32&quot;)
+y = relay.nn.conv2d(x, w, strides=(2, 2), padding=(3, 3))
+
+# After type inference:
+mod = tvm.IRModule.from_expr(y)
+mod = relay.transform.InferType()(mod)
+print(mod[&quot;main&quot;].ret_type)
+# → Tensor[(1, 64, 112, 112), float32]
+</code></pre>
+<p>The type system enforces correctness:</p>
+<p>$$\text{Output height} = \left\lfloor \frac{H + 2p - k}{s} \right\rfloor + 1 = \left\lfloor \frac{224 + 6 - 7}{2} \right\rfloor + 1 = 112$$</p>
+<hr />
+<h2 id="3-constructing-relay-programs">3. Constructing Relay Programs</h2>
+<h3 id="from-primitives-manual-construction">From Primitives (Manual Construction)</h3>
+<pre><code class="language-python">import tvm
+from tvm import relay
+import numpy as np
+
+# Build a simple network: Linear → ReLU → Linear
+# y = relu(x @ W1 + b1) @ W2 + b2
+
+x = relay.var(&quot;x&quot;, shape=(1, 784), dtype=&quot;float32&quot;)
+w1 = relay.var(&quot;w1&quot;, shape=(784, 256), dtype=&quot;float32&quot;)
+b1 = relay.var(&quot;b1&quot;, shape=(256,), dtype=&quot;float32&quot;)
+w2 = relay.var(&quot;w2&quot;, shape=(256, 10), dtype=&quot;float32&quot;)
+b2 = relay.var(&quot;b2&quot;, shape=(10,), dtype=&quot;float32&quot;)
+
+# Build computation graph
+dense1 = relay.nn.dense(x, w1)        # (1, 256)
+biased1 = relay.add(dense1, b1)       # (1, 256) — broadcast
+act = relay.nn.relu(biased1)          # (1, 256)
+dense2 = relay.nn.dense(act, w2)      # (1, 10)
+out = relay.add(dense2, b2)           # (1, 10)
+
+# Create a Relay function
+func = relay.Function([x, w1, b1, w2, b2], out)
+mod = tvm.IRModule.from_expr(func)
+
+# Print the IR
+print(mod)
+</code></pre>
+<p>Output:</p>
+<pre><code>def @main(%x: Tensor[(1, 784), float32],
+          %w1: Tensor[(784, 256), float32],
+          %b1: Tensor[(256), float32],
+          %w2: Tensor[(256, 10), float32],
+          %b2: Tensor[(10), float32]) {
+  %0 = nn.dense(%x, %w1, units=256);
+  %1 = add(%0, %b1);
+  %2 = nn.relu(%1);
+  %3 = nn.dense(%2, %w2, units=10);
+  add(%3, %b2)
+}
+</code></pre>
+<h3 id="using-let-bindings-explicit-naming">Using Let-Bindings (Explicit Naming)</h3>
+<pre><code class="language-python"># Let-bindings give names to intermediate values (SSA form)
+x = relay.var(&quot;x&quot;, shape=(1, 784), dtype=&quot;float32&quot;)
+w = relay.var(&quot;w&quot;, shape=(784, 256), dtype=&quot;float32&quot;)
+
+# Explicit let-binding
+v0 = relay.var(&quot;v0&quot;)
+v1 = relay.var(&quot;v1&quot;)
+body = relay.Let(v0, relay.nn.dense(x, w),
+            relay.Let(v1, relay.nn.relu(v0),
+                v1))
+
+# Equivalent to:
+#   let v0 = nn.dense(x, w) in
+#   let v1 = nn.relu(v0) in
+#   v1
+</code></pre>
+<h3 id="the-difference">The Difference</h3>
+<pre><code>Without let-bindings (expression tree):
+  add(nn.relu(nn.dense(x, w1)), b1)
+  └── if nn.dense appears in two places, it's DUPLICATED
+
+With let-bindings (SSA-like):
+  let %0 = nn.dense(x, w1) in
+  let %1 = nn.relu(%0) in
+  add(%1, b1)
+  └── %0 is computed once, referenced by name
+</code></pre>
+<hr />
+<h2 id="4-frontend-importers">4. Frontend Importers</h2>
+<p>TVM includes importers for all major frameworks. They all produce Relay IR.</p>
+<h3 id="onnx-import">ONNX Import</h3>
+<pre><code class="language-python">import onnx
+from tvm import relay
+
+onnx_model = onnx.load(&quot;model.onnx&quot;)
+mod, params = relay.frontend.from_onnx(onnx_model, shape={&quot;input&quot;: (1, 3, 224, 224)})
+# mod:    tvm.IRModule containing the Relay function
+# params: dict of parameter name → numpy array
+</code></pre>
+<h3 id="pytorch-import">PyTorch Import</h3>
+<pre><code class="language-python">import torch
+from tvm import relay
+
+model = torchvision.models.resnet18(weights=&quot;IMAGENET1K_V1&quot;).eval()
+scripted = torch.jit.trace(model, torch.randn(1, 3, 224, 224))
+
+# Convert TorchScript → Relay
+input_infos = [(&quot;input&quot;, (1, 3, 224, 224))]
+mod, params = relay.frontend.from_pytorch(scripted, input_infos)
+</code></pre>
+<h3 id="tensorflow-import">TensorFlow Import</h3>
+<pre><code class="language-python">from tvm import relay
+
+# From SavedModel
+mod, params = relay.frontend.from_tensorflow(
+    graph_def,           # tf.GraphDef protobuf
+    layout=&quot;NHWC&quot;,       # TF default layout
+    shape={&quot;input&quot;: (1, 224, 224, 3)}
+)
+</code></pre>
+<h3 id="what-the-importers-do">What the Importers Do</h3>
+<pre><code>Framework Model
+     │
+     ▼
+┌─────────────────────────────────────────┐
+│  Frontend Importer                      │
+│                                         │
+│  1. Parse framework-specific format     │
+│  2. Map ops:  torch.nn.Conv2d           │
+│             → relay.nn.conv2d           │
+│  3. Handle layout:  NHWC ↔ NCHW        │
+│  4. Extract weights as numpy arrays     │
+│  5. Build Relay function + params dict  │
+└─────────────────────────────────────────┘
+     │
+     ▼
+  (IRModule, params: Dict[str, np.ndarray])
+</code></pre>
+<h3 id="operator-mapping-examples">Operator Mapping Examples</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">PyTorch</th>
+<th style="text-align: left;">ONNX</th>
+<th style="text-align: left;">Relay</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>torch.nn.Conv2d</code></td>
+<td style="text-align: left;"><code>Conv</code></td>
+<td style="text-align: left;"><code>relay.nn.conv2d</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>torch.nn.BatchNorm2d</code></td>
+<td style="text-align: left;"><code>BatchNormalization</code></td>
+<td style="text-align: left;"><code>relay.nn.batch_norm</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>torch.nn.ReLU</code></td>
+<td style="text-align: left;"><code>Relu</code></td>
+<td style="text-align: left;"><code>relay.nn.relu</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>torch.matmul</code></td>
+<td style="text-align: left;"><code>MatMul</code></td>
+<td style="text-align: left;"><code>relay.nn.dense</code> or <code>relay.nn.batch_matmul</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>torch.nn.Softmax</code></td>
+<td style="text-align: left;"><code>Softmax</code></td>
+<td style="text-align: left;"><code>relay.nn.softmax</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>torch.cat</code></td>
+<td style="text-align: left;"><code>Concat</code></td>
+<td style="text-align: left;"><code>relay.concatenate</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-visualization-and-inspection">5. Visualization and Inspection</h2>
+<h3 id="text-dump">Text Dump</h3>
+<pre><code class="language-python"># Pretty-print the entire module
+print(mod.astext(show_meta_data=False))
+
+# Print just the main function signature
+func = mod[&quot;main&quot;]
+print(f&quot;Inputs:  {[p.name_hint for p in func.params]}&quot;)
+print(f&quot;Return:  {func.ret_type}&quot;)
+</code></pre>
+<h3 id="graphviz-visualization">Graphviz Visualization</h3>
+<pre><code class="language-python">from tvm.contrib import relay_viz
+
+# Generate a graphviz DOT visualization
+viz = relay_viz.RelayVisualizer(mod)
+viz.render(&quot;relay_graph&quot;)  # Creates relay_graph.pdf
+
+# Or as SVG for notebooks
+viz.render(&quot;relay_graph&quot;, format=&quot;svg&quot;)
+</code></pre>
+<h3 id="counting-operations">Counting Operations</h3>
+<pre><code class="language-python">def analyze_relay(mod):
+    &quot;&quot;&quot;Count ops, parameters, and compute cost.&quot;&quot;&quot;
+    op_counts = {}
+    param_count = 0
+
+    def visit(node):
+        nonlocal param_count
+        if isinstance(node, relay.Call) and hasattr(node.op, &quot;name&quot;):
+            name = node.op.name
+            op_counts[name] = op_counts.get(name, 0) + 1
+
+    relay.analysis.post_order_visit(mod[&quot;main&quot;], visit)
+
+    # Count parameters
+    for name, param in params.items():
+        param_count += np.prod(param.shape)
+
+    print(&quot;Operation counts:&quot;)
+    for op, count in sorted(op_counts.items(), key=lambda x: -x[1]):
+        print(f&quot;  {op}: {count}&quot;)
+    print(f&quot;\nTotal parameters: {param_count:,}&quot;)
+
+analyze_relay(mod)
+# nn.conv2d: 20
+# nn.batch_norm: 20
+# nn.relu: 17
+# add: 1
+# nn.dense: 1
+# nn.global_avg_pool2d: 1
+# nn.max_pool2d: 1
+# nn.softmax: 0
+# Total parameters: 11,689,512
+</code></pre>
+<hr />
+<h2 id="6-relay-expression-types-deep-dive">6. Relay Expression Types Deep Dive</h2>
+<h3 id="the-expression-hierarchy">The Expression Hierarchy</h3>
+<pre><code>relay.Expr (base class)
+├── relay.Constant       ← literal tensor value
+├── relay.Var            ← named variable
+├── relay.Call           ← function application (op invocation)
+├── relay.Let            ← let-binding
+├── relay.If             ← conditional
+├── relay.Tuple          ← tuple construction
+├── relay.TupleGetItem   ← tuple element access
+├── relay.Function       ← function definition
+├── relay.GlobalVar      ← reference to a global function
+└── relay.RefCreate      ← mutable reference (rarely used)
+    relay.RefRead
+    relay.RefWrite
+</code></pre>
+<h3 id="traversing-relay-expressions">Traversing Relay Expressions</h3>
+<pre><code class="language-python"># Post-order visitor (most common pattern)
+class OpCounter(relay.ExprVisitor):
+    def __init__(self):
+        super().__init__()
+        self.ops = {}
+
+    def visit_call(self, call):
+        if isinstance(call.op, tvm.ir.Op):
+            name = call.op.name
+            self.ops[name] = self.ops.get(name, 0) + 1
+        # MUST call super to continue traversal
+        super().visit_call(call)
+
+counter = OpCounter()
+counter.visit(mod[&quot;main&quot;])
+print(counter.ops)
+
+# Mutating visitor (creates new IR)
+class ReLUReplacer(relay.ExprMutator):
+    &quot;&quot;&quot;Replace all nn.relu with nn.leaky_relu.&quot;&quot;&quot;
+    def visit_call(self, call):
+        call = super().visit_call(call)  # recurse first
+        if isinstance(call.op, tvm.ir.Op) and call.op.name == &quot;nn.relu&quot;:
+            return relay.nn.leaky_relu(call.args[0], alpha=0.01)
+        return call
+
+replacer = ReLUReplacer()
+new_func = replacer.visit(mod[&quot;main&quot;])
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-build-a-convnet-in-relay">Exercise 1: Build a ConvNet in Relay</h3>
+<pre><code class="language-python">import tvm
+from tvm import relay
+import numpy as np
+
+def build_simple_cnn():
+    &quot;&quot;&quot;Build: Conv2d(3→16) → ReLU → MaxPool → Flatten → Dense(10).&quot;&quot;&quot;
+    x = relay.var(&quot;x&quot;, shape=(1, 3, 32, 32), dtype=&quot;float32&quot;)
+
+    # Conv2d: 3 input channels → 16 output channels, 3×3 kernel
+    w_conv = relay.var(&quot;w_conv&quot;, shape=(16, 3, 3, 3), dtype=&quot;float32&quot;)
+    conv = relay.nn.conv2d(x, w_conv, kernel_size=(3, 3), padding=(1, 1))
+    act = relay.nn.relu(conv)
+    pool = relay.nn.max_pool2d(act, pool_size=(2, 2), strides=(2, 2))
+
+    # Flatten: (1, 16, 16, 16) → (1, 4096)
+    flat = relay.nn.batch_flatten(pool)
+
+    # Dense: 4096 → 10
+    w_dense = relay.var(&quot;w_dense&quot;, shape=(10, 4096), dtype=&quot;float32&quot;)
+    b_dense = relay.var(&quot;b_dense&quot;, shape=(10,), dtype=&quot;float32&quot;)
+    dense = relay.nn.dense(flat, w_dense)
+    out = relay.add(dense, b_dense)
+
+    func = relay.Function([x, w_conv, w_dense, b_dense], out)
+    mod = tvm.IRModule.from_expr(func)
+    mod = relay.transform.InferType()(mod)
+
+    return mod
+
+mod = build_simple_cnn()
+print(mod)
+# Verify: check the inferred output shape is (1, 10)
+</code></pre>
+<h3 id="exercise-2-import-and-compare-two-frameworks">Exercise 2: Import and Compare Two Frameworks</h3>
+<pre><code class="language-python"># Import the same model from ONNX and PyTorch, compare Relay IR
+import torchvision, torch, onnx
+
+model = torchvision.models.mobilenet_v2(weights=&quot;IMAGENET1K_V1&quot;).eval()
+
+# Path A: PyTorch → Relay
+scripted = torch.jit.trace(model, torch.randn(1, 3, 224, 224))
+mod_pt, _ = relay.frontend.from_pytorch(scripted, [(&quot;input&quot;, (1, 3, 224, 224))])
+
+# Path B: PyTorch → ONNX → Relay
+torch.onnx.export(model, torch.randn(1, 3, 224, 224), &quot;/tmp/mbv2.onnx&quot;,
+                  input_names=[&quot;input&quot;])
+mod_onnx, _ = relay.frontend.from_onnx(onnx.load(&quot;/tmp/mbv2.onnx&quot;),
+                                        {&quot;input&quot;: (1, 3, 224, 224)})
+
+# Count ops in each — are they identical?
+# (They may differ slightly due to different op decompositions)
+</code></pre>
+<h3 id="exercise-3-write-a-custom-relay-visitor">Exercise 3: Write a Custom Relay Visitor</h3>
+<pre><code class="language-python">class ShapeAnalyzer(relay.ExprVisitor):
+    &quot;&quot;&quot;Track tensor shapes at every Call node.&quot;&quot;&quot;
+    def __init__(self):
+        super().__init__()
+        self.shapes = []
+
+    def visit_call(self, call):
+        super().visit_call(call)
+        if call.checked_type and isinstance(call.checked_type, relay.TensorType):
+            shape = [int(x) for x in call.checked_type.shape]
+            op_name = call.op.name if isinstance(call.op, tvm.ir.Op) else &quot;fused&quot;
+            self.shapes.append((op_name, shape))
+
+# Run on type-inferred module
+mod_typed = relay.transform.InferType()(mod)
+analyzer = ShapeAnalyzer()
+analyzer.visit(mod_typed[&quot;main&quot;])
+for op, shape in analyzer.shapes:
+    print(f&quot;  {op:30s} → {shape}&quot;)
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Relay is a functional IR</strong> — no mutation, explicit let-bindings, first-class functions — making transformations safe and composable</li>
+<li><strong>Rich type system</strong> with Tensor types, Tuple types, and Function types catches shape errors at compile time via Hindley-Milner inference</li>
+<li><strong>Frontend importers</strong> translate from PyTorch (via TorchScript), TensorFlow, ONNX, and others into a unified Relay representation</li>
+<li><strong><code>ExprVisitor</code> and <code>ExprMutator</code></strong> are the building blocks for writing custom analysis and transformation passes over Relay IR</li>
+<li><strong>Let-bindings</strong> prevent expression duplication and establish SSA-like form for efficient optimization</li>
+<li>Relay sits at the <strong>same level as FX Graph or HLO</strong> but with a richer type system and true functional semantics</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://arxiv.org/abs/1810.00952">Relay: A New IR for Machine Learning Frameworks</a> — original Relay paper (Roesch et al., 2018)</li>
+<li><a href="https://tvm.apache.org/docs/reference/langref/relay_expr.html">TVM Relay Documentation</a> — expression language reference</li>
+<li><a href="https://tvm.apache.org/docs/reference/langref/relay_type.html">Relay Type System</a> — type system specification</li>
+<li><a href="https://tvm.apache.org/docs/how_to/compile_models/index.html">TVM Frontend Tutorials</a> — import from PyTorch, TF, ONNX</li>
+</ul>
+<hr />
+<h2 id="tomorrow">Tomorrow</h2>
+<p><strong>Day 31: Relay Optimization Passes</strong> — Now that you can read and construct Relay programs, we'll learn the pass infrastructure that transforms them. You'll see how FuseOps merges operators for memory efficiency, how FoldConstant pre-computes static expressions, and how to write your own custom Relay passes.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-29-tvm-architecture-overview.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 29: TVM Architecture Overview</a>
+            <a href="day-31-relay-optimization-passes.html" class="text-emerald-600 hover:text-emerald-800">Day 31: Relay Optimization Passes &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 63: Stop & Reflect #5 - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 9: LLM Serving Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-63-stop-reflect-5">Day 63: Stop &amp; Reflect #5</h1>
+<blockquote>
+<p><strong>Phase IV · Week 9 · Day 63 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"You now have ten levers to pull for inference optimization. The art is knowing which to pull, in what order, and when to stop."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-62-serving-frameworks-comparison.html">Day 62: Serving Frameworks Comparison</a></td>
+<td style="text-align: left;"><a href="../week-10/day-64-distributed-training-basics.html">Day 64: Distributed Training Basics</a></td>
+<td style="text-align: left;"><a href="README.html">Week 9: LLM Serving Systems</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase IV: Inference &amp; Deployment</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Phase IV covered 14 days of inference optimization — from model formats and ONNX through knowledge distillation, TensorRT, CPU/edge inference, LLM-specific challenges, KV caching, PagedAttention, speculative decoding, quantization, and serving frameworks. That's a lot of techniques. This reflection synthesizes them into a <strong>decision framework</strong> so you can walk into any deployment scenario and systematically choose the right approach. You'll also test your understanding with a comprehensive quiz and verify readiness for Phase V: Training at Scale.</p>
+<hr />
+<h2 id="1-phase-iv-concept-map">1. Phase IV Concept Map</h2>
+<pre><code>Phase IV: Inference &amp; Deployment — Complete Map
+═══════════════════════════════════════════════════════════════
+
+  Week 8: Model Optimization Fundamentals
+  ────────────────────────────────────────
+  Day 50: Model Formats &amp; ONNX     ─── Interchange, protobuf, opset
+  Day 51: Weight Compression       ─── Pruning, quantization basics
+  Day 52: Knowledge Distillation   ─── Teacher-student, feature matching
+  Day 53: TensorRT Optimization    ─── Graph opt, kernel autotuning
+  Day 54: Inference on CPU         ─── ONNX Runtime, OpenVINO, vectorization
+  Day 55: Inference on Edge        ─── TFLite, Core ML, NPU delegation
+  Day 56: Mini-Project             ─── End-to-end optimization pipeline
+
+  Week 9: LLM Serving Systems
+  ────────────────────────────
+  Day 57: LLM Inference Challenges ─── Prefill/decode, memory-bound
+  Day 58: KV Cache Optimization    ─── MQA, GQA, sliding window
+  Day 59: vLLM &amp; PagedAttention    ─── Virtual memory for KV, batching
+  Day 60: Speculative Decoding     ─── Draft-verify, rejection sampling
+  Day 61: LLM Quantization         ─── GPTQ, AWQ, GGUF, outlier handling
+  Day 62: Serving Frameworks       ─── vLLM, TRT-LLM, SGLang, llama.cpp
+
+  Key connections:
+  ┌─────────────────────────────────────────────────────────┐
+  │  Quantization (Day 51) ──extends──► LLM Quant (Day 61) │
+  │  TensorRT (Day 53) ────underlies──► TRT-LLM (Day 62)   │
+  │  KV Cache (Day 58) ────enables────► PagedAttn (Day 59)  │
+  │  Distillation (Day 52) ─provides─► Draft models (Day 60)│
+  │  CPU/Edge (Day 54-55) ─realized──► llama.cpp (Day 62)   │
+  └─────────────────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="2-the-optimization-decision-tree">2. The Optimization Decision Tree</h2>
+<pre><code>Inference Optimization Decision Tree
+═══════════════════════════════════════════════════════════════
+
+  INPUT: Model type, target hardware, latency/throughput requirements
+
+  Q1: What type of model?
+  │
+  ├─ CNN / Vision model ──────────────────────────────────┐
+  │   Q2: Target hardware?                                │
+  │   ├─ NVIDIA GPU → TensorRT (Day 53)                   │
+  │   ├─ Intel CPU  → OpenVINO (Day 54)                   │
+  │   ├─ Mobile     → TFLite / Core ML (Day 55)           │
+  │   └─ Any CPU    → ONNX Runtime (Day 54)               │
+  │                                                        │
+  │   Then apply (in order):                               │
+  │   1. Graph optimization (op fusion, constant folding)  │
+  │   2. FP16/INT8 quantization (Day 51)                   │
+  │   3. Pruning if accuracy budget allows                 │
+  │   4. Distillation for &gt;2× compression (Day 52)        │
+  │                                                        │
+  └─ LLM / Transformer ──────────────────────────────────┐
+      Q2: Model size vs available GPU memory?              │
+      │                                                    │
+      ├─ Fits on 1 GPU (e.g., 7B on 80GB)                │
+      │   1. Quantize: AWQ/GPTQ 4-bit (Day 61)           │
+      │   2. Enable PagedAttention (Day 59)                │
+      │   3. Continuous batching (Day 59)                   │
+      │   4. Speculative decoding if latency-critical      │
+      │      (Day 60)                                      │
+      │   5. Prefix caching if shared prompts (Day 62)     │
+      │                                                    │
+      ├─ Needs 2-8 GPUs (e.g., 70B)                       │
+      │   1. Tensor parallelism (Day 62)                   │
+      │   2. FP8 or INT4 quantization (Day 61)            │
+      │   3. All of the above optimizations                │
+      │   4. Consider TRT-LLM for max throughput           │
+      │                                                    │
+      ├─ No GPU / edge / laptop                            │
+      │   1. GGUF Q4_K_M quantization (Day 61)            │
+      │   2. llama.cpp (Day 62)                            │
+      │   3. Smaller model + distillation (Day 52)         │
+      │                                                    │
+      └─ Cost-sensitive (minimize $/token)                 │
+          1. Smallest model that meets quality bar          │
+          2. Aggressive quantization (3-4 bit)              │
+          3. Batching optimization (throughput &gt; latency)   │
+          4. Spot instances + autoscaling                   │
+</code></pre>
+<hr />
+<h2 id="3-key-metrics-reference-card">3. Key Metrics Reference Card</h2>
+<pre><code>Inference Optimization Metrics — Quick Reference
+═══════════════════════════════════════════════════════════════
+
+  LATENCY METRICS
+  ───────────────
+  TTFT (Time to First Token)   How fast does output start?
+    Good: &lt; 200ms              Affected by: prefill time,
+    Acceptable: &lt; 500ms        queue depth, model size
+    Poor: &gt; 1s
+
+  TBT (Time Between Tokens)   How smooth is streaming?
+    Good: &lt; 30ms               Affected by: decode speed,
+    Acceptable: &lt; 50ms         batch interference, KV cache
+    Poor: &gt; 100ms
+
+  E2E Latency                  Total request time
+    = TTFT + (n_tokens × TBT)
+
+  THROUGHPUT METRICS
+  ──────────────────
+  Tokens/second               Raw generation speed
+    Single user: 30-80 tok/s   Batch: 1K-10K tok/s
+
+  Requests/second             Concurrent request capacity
+    Depends on: batch size, sequence length, GPU count
+
+  EFFICIENCY METRICS
+  ──────────────────
+  GPU Utilization              Are you using what you're paying for?
+    Target: &gt; 70%              Decode phase often &lt; 30%!
+
+  KV Cache Utilization         Memory efficiency
+    PagedAttention: ~95%       Without: 60-70% (fragmentation)
+
+  $/1M tokens                  Cost efficiency
+    FP16 70B on A100: ~$1.50   INT4 70B on A100: ~$0.40
+    FP16 7B on A100:  ~$0.15   Q4_K_M 7B on CPU: ~$0.05
+
+  QUALITY METRICS
+  ───────────────
+  Perplexity (PPL)             Lower = better language modeling
+    FP16 → INT4: expect +0.1 to +0.3 PPL
+
+  Task accuracy                MMLU, HumanEval, etc.
+    FP16 → INT4: expect -0.5% to -2%
+
+  Exact match to FP16          Speculative decoding: 100%
+                               Quantization: depends on method
+</code></pre>
+<hr />
+<h2 id="4-comprehensive-quiz">4. Comprehensive Quiz</h2>
+<p>Test your understanding of Phase IV. Try to answer before checking the solutions.</p>
+<h3 id="questions">Questions</h3>
+<p><strong>Q1</strong>: A 13B parameter model in FP16 requires how much memory for weights alone?</p>
+<p><strong>Q2</strong>: During LLM decode, GPU utilization is typically low. Why? What is the hardware bottleneck?</p>
+<p><strong>Q3</strong>: Grouped Query Attention (GQA) with 32 query heads and 8 KV heads reduces KV cache by what factor compared to standard MHA?</p>
+<p><strong>Q4</strong>: In PagedAttention, what is a "block" and why does it eliminate memory fragmentation?</p>
+<p><strong>Q5</strong>: Speculative decoding uses rejection sampling. If a draft token has probability $q(x) = 0.6$ in the draft model and $p(x) = 0.3$ in the target model, what is the acceptance probability?</p>
+<p><strong>Q6</strong>: Why can't you apply standard per-tensor INT8 quantization to LLMs without significant accuracy loss?</p>
+<p><strong>Q7</strong>: GPTQ compensates for rounding error by adjusting un-quantized weights using what mathematical object?</p>
+<p><strong>Q8</strong>: AWQ scales up "salient" weight channels before quantizing. How does it determine which channels are salient?</p>
+<p><strong>Q9</strong>: In GGUF K-quants, Q4_K_M uses more bits for certain layer types. Which layers get higher precision and why?</p>
+<p><strong>Q10</strong>: You have a chatbot with a 2000-token system prompt shared across all users, running on 4×A100s. Which serving framework would maximize throughput, and which specific feature makes it best?</p>
+<hr />
+<h3 id="solutions">Solutions</h3>
+<details>
+<summary>Click to reveal answers</summary>
+
+**A1**: $13 \times 10^9 \times 2\text{ bytes} = 26\text{ GB}$. Each FP16 parameter is 2 bytes.
+
+**A2**: Decode is **memory-bandwidth-bound**, not compute-bound. Each decode step reads the entire model weights (~26 GB for 13B) but only computes a single token's worth of matrix-vector products. The arithmetic intensity is ~1 FLOP/byte — far below the GPU's compute/bandwidth ratio (~150 FLOP/byte on A100). The GPU cores sit idle waiting for memory.
+
+**A3**: KV cache is reduced by $32/8 = 4\times$. GQA shares each KV head across $32/8 = 4$ query heads, so you store 8 KV pairs instead of 32.
+
+**A4**: A block is a fixed-size chunk of KV cache slots (e.g., 16 tokens). Sequences are allocated blocks from a global pool (like virtual memory pages) rather than reserving contiguous memory for max_seq_len. Blocks can be non-contiguous in physical memory. This eliminates both internal fragmentation (no wasted padding within a sequence) and external fragmentation (freed blocks return to the pool).
+
+**A5**: $\min(1, p(x)/q(x)) = \min(1, 0.3/0.6) = \min(1, 0.5) = 0.5$. The token is accepted with 50% probability.
+
+**A6**: LLMs exhibit **activation outliers** — approximately 0.1% of channels have magnitudes 100× larger than average. Per-tensor quantization sets the scale factor to cover the outlier range, which compresses 99.9% of normal-magnitude activations to just 2-3 quantization levels, losing most information.
+
+**A7**: The **inverse Hessian** ($H^{-1}$). Specifically, when weight $w_q$ is rounded, the error is distributed to remaining weights proportional to $H^{-1}_{:,q}$, which captures the second-order sensitivity of the loss to each weight.
+
+**A8**: By measuring **activation magnitudes** from calibration data: $s_x = \text{mean}(|X|)$ per channel. Channels with large average activation magnitude are "salient" because quantization error in those weights gets amplified by the large activation, contributing more to output error.
+
+**A9**: **Attention value projections and embeddings** get higher precision (5-6 bits), while **FFN gate/up projections** use the minimum (4 bits). The reasoning: embeddings and output layers are on the model's "edges" where errors aren't averaged out; value projections carry content information through attention; FFN matrices are the largest so compression there saves the most memory.
+
+**A10**: **SGLang** with **RadixAttention**. The 2000-token system prompt creates a massive prefix cache opportunity. RadixAttention stores prefix KV states in a radix tree, so the system prompt is computed once and reused for all requests. This can provide 2-5× throughput improvement compared to frameworks without prefix caching.
+
+</details>
+
+<hr />
+<h2 id="5-optimization-techniques-summary-table">5. Optimization Techniques Summary Table</h2>
+<table>
+<thead>
+<tr>
+<th>Technique</th>
+<th>Type</th>
+<th>Typical Speedup</th>
+<th>Quality Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ONNX export + graph opt</td>
+<td>Format</td>
+<td>1.2-1.5×</td>
+<td>None</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>FP16 → INT8 quantization</td>
+<td>Compression</td>
+<td>1.5-2×</td>
+<td>Minimal</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>FP16 → INT4 quantization</td>
+<td>Compression</td>
+<td>2.5-3.5×</td>
+<td>Low (0.1-0.3 PPL)</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>Structured pruning</td>
+<td>Compression</td>
+<td>1.3-2×</td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>Knowledge distillation</td>
+<td>Architecture</td>
+<td>2-10×</td>
+<td>Low-Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>TensorRT compilation</td>
+<td>Runtime</td>
+<td>1.5-3×</td>
+<td>None</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>Continuous batching</td>
+<td>Serving</td>
+<td>2-5× throughput</td>
+<td>None</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>PagedAttention</td>
+<td>Memory</td>
+<td>2-4× batch size</td>
+<td>None</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>Prefix caching</td>
+<td>Serving</td>
+<td>1.5-5× (workload)</td>
+<td>None</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>Speculative decoding</td>
+<td>Algorithm</td>
+<td>2-3× latency</td>
+<td>None (exact)</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>Tensor parallelism</td>
+<td>Scaling</td>
+<td>Near-linear</td>
+<td>None</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>KV cache compression (GQA)</td>
+<td>Architecture</td>
+<td>4-8× cache</td>
+<td>Minimal</td>
+<td>N/A (model)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-ready-for-training-at-scale-checklist">6. "Ready for Training at Scale" Checklist</h2>
+<p>Before moving to Phase V (Distributed Training), verify you can answer these confidently:</p>
+<pre><code>Phase IV Exit Checklist
+═══════════════════════════════════════════════════════════════
+
+  Model Formats &amp; Optimization
+  ☐ I can export a PyTorch model to ONNX and optimize the graph
+  ☐ I understand operator fusion and constant folding
+  ☐ I know when to use TensorRT vs ONNX Runtime vs OpenVINO
+
+  Compression Techniques
+  ☐ I can explain magnitude pruning, structured pruning, and lottery tickets
+  ☐ I understand PTQ vs QAT and when each is appropriate
+  ☐ I can set up a knowledge distillation training loop
+  ☐ I know why LLM quantization requires special handling (outliers)
+
+  LLM-Specific Optimization
+  ☐ I can explain the prefill vs decode phases and their bottlenecks
+  ☐ I understand MHA → MQA → GQA and KV cache size tradeoffs
+  ☐ I can describe how PagedAttention works and why it matters
+  ☐ I understand continuous batching and why it beats static batching
+  ☐ I can implement basic speculative decoding with draft-verify
+  ☐ I know the difference between GPTQ, AWQ, and GGUF approaches
+
+  Serving &amp; Deployment
+  ☐ I can choose the right serving framework for a given scenario
+  ☐ I understand tensor parallelism vs pipeline parallelism
+  ☐ I know the key metrics: TTFT, TBT, tokens/s, $/1M tokens
+  ☐ I can set up a load test and interpret the results
+
+  If you checked all boxes → You're ready for Phase V!
+  If you missed 3+       → Review the relevant days
+  If you missed 6+       → Re-do the Week 8-9 exercises
+</code></pre>
+<hr />
+<h2 id="7-phase-v-preview-training-at-scale">7. Phase V Preview — Training at Scale</h2>
+<pre><code>What's Ahead: Phase V (Weeks 10-11)
+═══════════════════════════════════════════════════════════════
+
+  Week 10: Distributed Training
+  ─────────────────────────────
+  Day 64: Distributed Training Basics    ─── AllReduce, ring
+  Day 65: Data Parallelism (DDP, FSDP)   ─── Gradient sync
+  Day 66: Model Parallelism              ─── Megatron-LM, pipeline
+  Day 67: Mixed Precision Training       ─── FP16/BF16, loss scaling
+  Day 68: Training Infrastructure        ─── Checkpointing, fault tolerance
+  Day 69: Scaling Laws &amp; Efficiency      ─── Chinchilla, compute-optimal
+  Day 70: Capstone Project               ─── End-to-end ML system
+
+  Key shift: Inference → Training
+  ────────────────────────────────
+  Inference optimizes FORWARD pass only.
+  Training optimizes forward + BACKWARD + COMMUNICATION.
+
+  New challenges you'll face:
+  • Gradient synchronization across 100s of GPUs
+  • Memory: activations + gradients + optimizer state = 16× model size
+  • Communication: all-reduce can dominate training time
+  • Fault tolerance: 1000-GPU jobs fail every few hours
+  • Mixed precision: FP16 training requires loss scaling tricks
+
+  ┌─────────────────────────────────────────────────────────┐
+  │  Inference skills transfer directly:                     │
+  │  • Quantization → Mixed precision training               │
+  │  • Tensor parallelism → Model parallelism                │
+  │  • Memory management → Activation checkpointing          │
+  │  • Batching strategies → Gradient accumulation            │
+  └─────────────────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="hands-on-exercise-build-your-decision-matrix">Hands-On Exercise: Build Your Decision Matrix</h2>
+<h3 id="exercise-deployment-scenario-analysis">Exercise: Deployment Scenario Analysis</h3>
+<p>For each scenario below, specify: (1) framework, (2) quantization method, (3) parallelism strategy, (4) key optimizations, and (5) expected cost/performance.</p>
+<p><strong>Scenario A</strong>: Customer-facing chatbot, LLaMA-3 8B, &lt;200ms TTFT, 500 req/s, 4×A100.</p>
+<p><strong>Scenario B</strong>: Internal document summarizer, LLaMA-3 70B, batch processing 10K docs/day, cost-sensitive, 2×A100.</p>
+<p><strong>Scenario C</strong>: On-device code completion, CodeLlama 7B, MacBook M2 Pro (16GB RAM), &lt;100ms TTFT, single user.</p>
+<p><strong>Scenario D</strong>: Multi-tenant SaaS, 50 different LoRA adapters per customer, LLaMA-3 8B base, 8×A100 cluster.</p>
+<details>
+<summary>Click to reveal suggested solutions</summary>
+
+**Scenario A**: vLLM, AWQ 4-bit (fits 1 GPU easily → replicate 4×), data parallelism, enable prefix caching for system prompt, speculative decoding for TTFT. Expected: ~600 req/s at p99 <200ms TTFT, ~$0.10/1M tokens.
+
+**Scenario B**: vLLM or TGI, GPTQ 4-bit (~37GB, fits on 2×A100 with TP=2), tensor parallelism, maximize batch size (throughput over latency), no speculative decoding needed. Expected: ~15K tokens/s, ~$0.03/1M tokens (batch pricing).
+
+**Scenario C**: llama.cpp, GGUF Q4_K_M (~4.3GB, fits in 16GB with room for KV cache), Metal acceleration, 8 threads, no batching needed. Expected: ~30-40 tokens/s, TTFT <50ms for short prompts.
+
+**Scenario D**: vLLM with multi-LoRA, FP16 base + LoRA adapters hot-swapped, TP=2 per replica × 4 replicas, enable prefix caching. Expected: ~200 req/s aggregate, LoRA swap overhead <5ms.
+
+</details>
+
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Phase IV covered the full inference optimization stack</strong> — from model formats through quantization to production serving frameworks</li>
+<li><strong>The decision tree starts with model type and hardware</strong>, then applies optimizations in priority order (quantization → batching → caching → speculation)</li>
+<li><strong>LLM inference is fundamentally different from CNN inference</strong> — memory-bound decode, KV cache management, and autoregressive constraints require specialized solutions</li>
+<li><strong>Three numbers define deployment quality</strong>: TTFT (user experience), tokens/s (throughput), $/1M tokens (cost)</li>
+<li><strong>Start simple, measure, then optimize</strong> — vLLM + AWQ 4-bit covers 80% of use cases; only add complexity when benchmarks prove it's needed</li>
+<li><strong>Phase V builds on these foundations</strong> — tensor parallelism becomes model parallelism, quantization becomes mixed precision, and batching becomes gradient accumulation</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><strong>All papers cited in Days 50-62</strong> — revisit any that felt unclear</li>
+<li><strong>Databricks "LLM Inference Performance Engineering" blog series</strong> (2024)</li>
+<li><strong>Horace He, "Making Deep Learning Go Brrrr"</strong> — mental models for performance</li>
+<li><strong>Patterson et al., "Carbon Emissions and Large Neural Network Training"</strong> (2021) — why efficiency matters beyond cost</li>
+</ul>
+<hr />
+<h2 id="whats-next">What's Next</h2>
+<p>Phase V: <strong>Training at Scale</strong>. Day 64 introduces distributed training fundamentals — AllReduce, ring topology, gradient synchronization — the communication primitives that make multi-GPU training possible. The shift from inference to training means dealing with backwards passes, optimizer states, and the 16× memory multiplier that makes training far more memory-hungry than serving.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-62-serving-frameworks-comparison.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 62: Serving Frameworks Comparison</a>
+            <a href="../week-10/day-64-distributed-training-basics.html" class="text-emerald-600 hover:text-emerald-800">Day 64: Distributed Training Basics &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

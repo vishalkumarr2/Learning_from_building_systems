@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 58: KV Cache Optimization - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 9: LLM Serving Systems</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-58-kv-cache-optimization">Day 58: KV Cache Optimization</h1>
+<blockquote>
+<p><strong>Phase IV · Week 9 · Day 58 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The fastest byte is the one you never read. The cheapest memory is the one you never allocate."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-57-llm-inference-challenges.html">Day 57: LLM Inference Challenges</a></td>
+<td style="text-align: left;"><a href="day-59-vllm-pagedattention.html">Day 59: vLLM &amp; PagedAttention</a></td>
+<td style="text-align: left;"><a href="README.html">Week 9: LLM Serving Systems</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase IV: Inference &amp; Deployment</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Yesterday we showed that the KV cache is the dominant memory consumer during LLM inference — a single LLaMA-2 70B request at 4K context uses 20 GB just for cached keys and values. This directly limits how many requests you can serve concurrently, which determines your cost per token. Today we attack this bottleneck. Multi-Query Attention can shrink the cache by 32×. Grouped-Query Attention finds the practical sweet spot at 4-8×. Sliding window attention caps memory regardless of sequence length. These are not theoretical — they're deployed in production at every major LLM provider.</p>
+<hr />
+<h2 id="1-anatomy-of-the-kv-cache">1. Anatomy of the KV Cache</h2>
+<p>Let's dissect exactly what's stored in the KV cache and where the memory goes:</p>
+<pre><code>KV Cache Structure — Per Layer
+═══════════════════════════════════════════════════════════════
+
+  Standard Multi-Head Attention (MHA):
+  ────────────────────────────────────
+
+  n_heads = 32, head_dim = 128, seq_len = S
+
+  Key cache:   [batch, n_heads, seq_len, head_dim]
+               [B,     32,      S,       128     ]
+
+  Value cache: [batch, n_heads, seq_len, head_dim]
+               [B,     32,      S,       128     ]
+
+  Memory per layer per token = 2 × n_heads × head_dim × sizeof(dtype)
+                             = 2 × 32 × 128 × 2   (FP16)
+                             = 16,384 bytes = 16 KB
+
+  ┌────────────────────────────────────────────────────┐
+  │  Model          Layers  KV/tok   KV @ 4K   KV @ 128K │
+  │  LLaMA-2 7B     32      512 KB   2 GB      64 GB     │
+  │  LLaMA-2 70B    80      1.25 MB  5 GB      160 GB    │
+  │  Mixtral 8x7B   32      512 KB   2 GB      64 GB     │
+  │  GPT-4 (est.)   120     ~4 MB    ~16 GB    ~512 GB   │
+  └────────────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="2-multi-query-attention-mqa">2. Multi-Query Attention (MQA)</h2>
+<p>The key insight of MQA (Shazeer, 2019): <strong>queries need per-head projections, but keys and values can be shared across all heads</strong>.</p>
+<pre><code>Multi-Head vs Multi-Query Attention
+═══════════════════════════════════════════════════════════════
+
+  Multi-Head Attention (MHA):
+  ──────────────────────────
+  Q: [B, 32, S, 128]    ← 32 separate query heads
+  K: [B, 32, S, 128]    ← 32 separate key heads
+  V: [B, 32, S, 128]    ← 32 separate value heads
+
+  KV parameters: 2 × 32 × d × d_head
+
+
+  Multi-Query Attention (MQA):
+  ────────────────────────────
+  Q: [B, 32, S, 128]    ← 32 separate query heads (unchanged)
+  K: [B,  1, S, 128]    ← 1 shared key head  ← SHARED!
+  V: [B,  1, S, 128]    ← 1 shared value head ← SHARED!
+
+  KV parameters: 2 × 1 × d × d_head
+
+  Memory reduction: 32× for KV cache!
+  Quality impact:   ~0.5-1% degradation on benchmarks
+</code></pre>
+<pre><code class="language-python">import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class MultiQueryAttention(nn.Module):
+    &quot;&quot;&quot;Multi-Query Attention: shared KV heads, independent Q heads.&quot;&quot;&quot;
+
+    def __init__(self, d_model: int = 4096, n_heads: int = 32):
+        super().__init__()
+        self.n_heads = n_heads
+        self.head_dim = d_model // n_heads
+
+        self.q_proj = nn.Linear(d_model, d_model, bias=False)          # Full
+        self.k_proj = nn.Linear(d_model, self.head_dim, bias=False)    # Single head!
+        self.v_proj = nn.Linear(d_model, self.head_dim, bias=False)    # Single head!
+        self.o_proj = nn.Linear(d_model, d_model, bias=False)
+
+    def forward(self, x, kv_cache=None):
+        B, S, D = x.shape
+
+        # Q has n_heads independent projections
+        q = self.q_proj(x).view(B, S, self.n_heads, self.head_dim).transpose(1, 2)
+        # K and V have a single shared projection
+        k = self.k_proj(x).view(B, S, 1, self.head_dim).transpose(1, 2)
+        v = self.v_proj(x).view(B, S, 1, self.head_dim).transpose(1, 2)
+
+        # Append to cache
+        if kv_cache is not None:
+            k = torch.cat([kv_cache[0], k], dim=2)
+            v = torch.cat([kv_cache[1], v], dim=2)
+        new_cache = (k, v)
+
+        # Broadcast K, V across all query heads
+        # k: [B, 1, S_total, head_dim] → broadcast with q: [B, n_heads, S, head_dim]
+        attn = torch.matmul(q, k.transpose(-2, -1)) / (self.head_dim ** 0.5)
+        attn = F.softmax(attn, dim=-1)
+        out = torch.matmul(attn, v)  # v broadcasts from [B, 1, ...] to [B, n_heads, ...]
+
+        out = out.transpose(1, 2).contiguous().view(B, S, D)
+        return self.o_proj(out), new_cache
+</code></pre>
+<hr />
+<h2 id="3-grouped-query-attention-gqa">3. Grouped-Query Attention (GQA)</h2>
+<p>GQA (Ainslie et al., 2023) is the practical compromise between MHA and MQA. Instead of 1 KV head (MQA) or $n$ KV heads (MHA), GQA uses $g$ KV head groups:</p>
+<pre><code>Attention Variants Comparison
+═══════════════════════════════════════════════════════════════
+
+  MHA (n_kv_heads = n_heads = 32):
+  Q: H₁ H₂ H₃ H₄ H₅ H₆ H₇ H₈ ... H₃₂
+  K: H₁ H₂ H₃ H₄ H₅ H₆ H₇ H₈ ... H₃₂    ← 32 KV heads
+  V: H₁ H₂ H₃ H₄ H₅ H₆ H₇ H₈ ... H₃₂
+
+  GQA-8 (n_kv_heads = 8, group_size = 4):
+  Q: H₁ H₂ H₃ H₄ │ H₅ H₆ H₇ H₈ │ ... │ H₂₉ H₃₀ H₃₁ H₃₂
+  K:     G₁        │     G₂        │ ... │      G₈            ← 8 KV heads
+  V:     G₁        │     G₂        │ ... │      G₈
+
+  MQA (n_kv_heads = 1):
+  Q: H₁ H₂ H₃ H₄ H₅ H₆ H₇ H₈ ... H₃₂
+  K:              G₁                         ← 1 KV head
+  V:              G₁
+
+  ┌──────────────────────────────────────────────────────┐
+  │  Variant   KV heads   Cache reduction   Quality      │
+  │  MHA         32       1× (baseline)     Best         │
+  │  GQA-8        8       4×                ~Baseline    │
+  │  GQA-4        4       8×                Minimal loss │
+  │  MQA           1       32×              Slight loss  │
+  └──────────────────────────────────────────────────────┘
+</code></pre>
+<p>LLaMA-2 70B uses GQA with 8 KV heads (vs 64 query heads), giving an 8× cache reduction. LLaMA-3 uses GQA across all model sizes.</p>
+<pre><code class="language-python">class GroupedQueryAttention(nn.Module):
+    &quot;&quot;&quot;GQA: n_kv_heads &lt; n_heads, each KV head serves a group of Q heads.&quot;&quot;&quot;
+
+    def __init__(self, d_model: int = 4096, n_heads: int = 32, n_kv_heads: int = 8):
+        super().__init__()
+        assert n_heads % n_kv_heads == 0, &quot;n_heads must be divisible by n_kv_heads&quot;
+
+        self.n_heads = n_heads
+        self.n_kv_heads = n_kv_heads
+        self.n_groups = n_heads // n_kv_heads  # queries per KV group
+        self.head_dim = d_model // n_heads
+
+        self.q_proj = nn.Linear(d_model, n_heads * self.head_dim, bias=False)
+        self.k_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
+        self.v_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
+        self.o_proj = nn.Linear(d_model, d_model, bias=False)
+
+    def forward(self, x, kv_cache=None):
+        B, S, _ = x.shape
+
+        q = self.q_proj(x).view(B, S, self.n_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(x).view(B, S, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(x).view(B, S, self.n_kv_heads, self.head_dim).transpose(1, 2)
+
+        if kv_cache is not None:
+            k = torch.cat([kv_cache[0], k], dim=2)
+            v = torch.cat([kv_cache[1], v], dim=2)
+        new_cache = (k, v)
+
+        # Expand KV heads to match Q heads by repeating
+        # k: [B, n_kv_heads, S, head_dim] → [B, n_heads, S, head_dim]
+        k = k.repeat_interleave(self.n_groups, dim=1)
+        v = v.repeat_interleave(self.n_groups, dim=1)
+
+        attn = torch.matmul(q, k.transpose(-2, -1)) / (self.head_dim ** 0.5)
+        attn = F.softmax(attn, dim=-1)
+        out = torch.matmul(attn, v)
+
+        out = out.transpose(1, 2).contiguous().view(B, S, -1)
+        return self.o_proj(out), new_cache
+</code></pre>
+<hr />
+<h2 id="4-sliding-window-attention">4. Sliding Window Attention</h2>
+<p>Mistral introduced sliding window attention (SWA) where each token attends only to the last $W$ tokens, not the full context:</p>
+<pre><code>Sliding Window Attention (W = 4)
+═══════════════════════════════════════════════════════════════
+
+  Full Attention mask:           Sliding Window mask (W=4):
+  t₁ t₂ t₃ t₄ t₅ t₆ t₇ t₈     t₁ t₂ t₃ t₄ t₅ t₆ t₇ t₈
+  ✓  .  .  .  .  .  .  .       ✓  .  .  .  .  .  .  .
+  ✓  ✓  .  .  .  .  .  .       ✓  ✓  .  .  .  .  .  .
+  ✓  ✓  ✓  .  .  .  .  .       ✓  ✓  ✓  .  .  .  .  .
+  ✓  ✓  ✓  ✓  .  .  .  .       ✓  ✓  ✓  ✓  .  .  .  .
+  ✓  ✓  ✓  ✓  ✓  .  .  .       .  ✓  ✓  ✓  ✓  .  .  .  ← evict t₁
+  ✓  ✓  ✓  ✓  ✓  ✓  .  .       .  .  ✓  ✓  ✓  ✓  .  .
+  ✓  ✓  ✓  ✓  ✓  ✓  ✓  .       .  .  .  ✓  ✓  ✓  ✓  .
+  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✓       .  .  .  .  ✓  ✓  ✓  ✓
+
+  KV cache: O(n) growing     KV cache: O(W) constant!
+
+  Key insight: information propagates through layers.
+  After L layers with window W, effective receptive field = L × W.
+  Mistral 7B: W=4096, L=32 → effective context = 131,072 tokens
+</code></pre>
+<p>$$\text{KV cache memory (SWA)} = 2 \times L \times n_{\text{kv\_heads}} \times W \times d_h \times \text{sizeof(dtype)}$$</p>
+<p>This is <strong>constant</strong> regardless of actual sequence length — a massive advantage for long-context serving.</p>
+<hr />
+<h2 id="5-kv-cache-compression-techniques">5. KV Cache Compression Techniques</h2>
+<p>Beyond architectural changes, we can compress the cache post-hoc:</p>
+<pre><code>KV Cache Compression Strategies
+═══════════════════════════════════════════════════════════════
+
+  ┌────────────────────┐
+  │ Quantization       │  FP16 → INT8 or INT4 per-token
+  │ 2-4× reduction     │  Minimal quality loss with per-channel scales
+  └────────────────────┘
+  ┌────────────────────┐
+  │ Token Eviction     │  Drop least-important tokens from cache
+  │ ~50% reduction     │  Keep: recent + high-attention + initial tokens
+  └────────────────────┘
+  ┌────────────────────┐
+  │ Token Merging      │  Combine similar adjacent tokens
+  │ ~30% reduction     │  Average similar K/V representations
+  └────────────────────┘
+  ┌────────────────────┐
+  │ Low-Rank Approx.   │  Project KV to lower dimension
+  │ 2-4× reduction     │  SVD-based compression per layer
+  └────────────────────┘
+</code></pre>
+<pre><code class="language-python">def quantize_kv_cache(k_cache: torch.Tensor, v_cache: torch.Tensor, bits: int = 8):
+    &quot;&quot;&quot;Quantize KV cache to INT8 per-channel for memory reduction.
+
+    Args:
+        k_cache: [batch, n_kv_heads, seq_len, head_dim] in FP16
+        v_cache: same shape
+        bits: quantization bits (4 or 8)
+
+    Returns:
+        Quantized cache + scales for dequantization
+    &quot;&quot;&quot;
+    qmax = 2 ** (bits - 1) - 1
+
+    def quantize_tensor(t):
+        # Per-channel quantization (along head_dim)
+        scale = t.abs().amax(dim=-1, keepdim=True) / qmax
+        scale = scale.clamp(min=1e-8)
+        t_q = (t / scale).round().clamp(-qmax, qmax).to(torch.int8)
+        return t_q, scale
+
+    k_q, k_scale = quantize_tensor(k_cache)
+    v_q, v_scale = quantize_tensor(v_cache)
+
+    original_bytes = (k_cache.numel() + v_cache.numel()) * 2  # FP16
+    compressed_bytes = (k_q.numel() + v_q.numel()) * 1 + \
+                       (k_scale.numel() + v_scale.numel()) * 2
+
+    print(f&quot;Original:   {original_bytes / 1e6:.1f} MB&quot;)
+    print(f&quot;Quantized:  {compressed_bytes / 1e6:.1f} MB&quot;)
+    print(f&quot;Ratio:      {original_bytes / compressed_bytes:.2f}×&quot;)
+
+    return (k_q, k_scale), (v_q, v_scale)
+
+
+def evict_tokens(k_cache, v_cache, attention_scores, keep_ratio=0.5, protect_recent=64):
+    &quot;&quot;&quot;H2O-style token eviction: keep heavy hitters + recent tokens.&quot;&quot;&quot;
+    B, H, S, D = k_cache.shape
+    n_keep = int(S * keep_ratio)
+
+    # Always protect the most recent tokens
+    # Score the rest by cumulative attention received
+    cumulative_attn = attention_scores.sum(dim=2)  # [B, H, S_kv]
+
+    # Mask recent tokens with high scores to protect them
+    cumulative_attn[:, :, -protect_recent:] = float('inf')
+
+    # Keep top-k by attention score
+    _, keep_idx = cumulative_attn.topk(n_keep, dim=-1)
+    keep_idx = keep_idx.sort(dim=-1).values  # maintain order
+
+    # Gather kept tokens
+    k_kept = k_cache.gather(2, keep_idx.unsqueeze(-1).expand(-1, -1, -1, D))
+    v_kept = v_cache.gather(2, keep_idx.unsqueeze(-1).expand(-1, -1, -1, D))
+
+    return k_kept, v_kept
+</code></pre>
+<hr />
+<h2 id="6-memory-layout-optimization">6. Memory Layout Optimization</h2>
+<p>How KV cache is laid out in memory affects performance due to GPU cache line behavior:</p>
+<pre><code>Memory Layout: Heads-First vs Tokens-First
+═══════════════════════════════════════════════════════════════
+
+  Heads-first (standard PyTorch): [B, n_heads, seq_len, head_dim]
+  ─────────────────────────────────────────────────────────────
+  Memory: |H0_T0|H0_T1|H0_T2|...|H1_T0|H1_T1|H1_T2|...|
+
+  Appending token T3 → scatter across n_heads locations
+  Good for: attention (contiguous head slices)
+
+  Tokens-first (append-friendly): [B, seq_len, n_heads, head_dim]
+  ─────────────────────────────────────────────────────────────
+  Memory: |T0_H0|T0_H1|T0_H2|...|T1_H0|T1_H1|T1_H2|...|
+
+  Appending token T3 → single contiguous write
+  Good for: token append (contiguous per-token)
+
+  Production systems (vLLM, TensorRT-LLM):
+  ────────────────────────────────────────
+  Use paged block layout — covered tomorrow in PagedAttention.
+  Blocks of [block_size, n_heads, head_dim] indexed via block table.
+</code></pre>
+<hr />
+<h2 id="hands-on-exercise-measure-kv-cache-optimizations">Hands-On Exercise: Measure KV Cache Optimizations</h2>
+<pre><code class="language-python">def kv_cache_comparison():
+    &quot;&quot;&quot;Compare memory usage across MHA, GQA, MQA with/without quantization.&quot;&quot;&quot;
+    configs = {
+        &quot;LLaMA-2 7B (MHA)&quot;:   {&quot;layers&quot;: 32, &quot;kv_heads&quot;: 32, &quot;head_dim&quot;: 128},
+        &quot;LLaMA-2 7B (GQA-8)&quot;: {&quot;layers&quot;: 32, &quot;kv_heads&quot;: 8,  &quot;head_dim&quot;: 128},
+        &quot;LLaMA-2 7B (MQA)&quot;:   {&quot;layers&quot;: 32, &quot;kv_heads&quot;: 1,  &quot;head_dim&quot;: 128},
+        &quot;LLaMA-3 8B (GQA-8)&quot;: {&quot;layers&quot;: 32, &quot;kv_heads&quot;: 8,  &quot;head_dim&quot;: 128},
+        &quot;Mistral 7B (SWA)&quot;:   {&quot;layers&quot;: 32, &quot;kv_heads&quot;: 8,  &quot;head_dim&quot;: 128,
+                                &quot;window&quot;: 4096},
+    }
+
+    seq_len = 32768  # 32K context
+    gpu_mem = 80     # A100 80GB
+
+    print(f&quot;{'Config':&lt;25} {'FP16':&gt;8} {'INT8':&gt;8} {'INT4':&gt;8} {'Max Batch (FP16)':&gt;16}&quot;)
+    print(&quot;─&quot; * 75)
+
+    for name, cfg in configs.items():
+        effective_seq = cfg.get(&quot;window&quot;, seq_len)
+        cache_bytes = (2 * cfg[&quot;layers&quot;] * cfg[&quot;kv_heads&quot;] * effective_seq 
+                       * cfg[&quot;head_dim&quot;] * 2)  # FP16
+        cache_gb = cache_bytes / 1e9
+
+        model_gb = 14  # approximate for 7B
+        max_batch = int((gpu_mem - model_gb) / cache_gb)
+
+        print(f&quot;{name:&lt;25} {cache_gb:&gt;7.1f}G {cache_gb/2:&gt;7.1f}G &quot;
+              f&quot;{cache_gb/4:&gt;7.1f}G {max_batch:&gt;16}&quot;)
+
+kv_cache_comparison()
+</code></pre>
+<h3 id="exercise-tasks">Exercise Tasks</h3>
+<ol>
+<li><strong>Implement GQA from MHA</strong>: Take a trained MHA checkpoint and convert it to GQA by averaging KV head weights within groups. Measure quality change on a small eval set.</li>
+<li><strong>Cache eviction benchmark</strong>: Implement H2O-style eviction with different keep ratios (25%, 50%, 75%). Measure perplexity impact on WikiText.</li>
+<li><strong>Quantized cache decode</strong>: Implement a decode step that reads INT8-quantized KV cache, dequantizes on-the-fly, and produces correct attention output. Compare speed vs FP16.</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>MQA reduces KV cache by $n_{\text{heads}} \times$</strong> by sharing K/V projections — the simplest and most effective optimization</li>
+<li><strong>GQA is the production standard</strong> — LLaMA-2 70B, LLaMA-3, and Mistral all use it, balancing quality and cache size</li>
+<li><strong>Sliding window attention caps memory at $O(W)$</strong> regardless of context length, with effective receptive field $L \times W$</li>
+<li><strong>INT8 KV cache quantization</strong> gives nearly 2× memory savings with negligible quality loss</li>
+<li><strong>Token eviction</strong> (H2O) can drop 50% of cached tokens by removing low-attention tokens</li>
+<li><strong>Memory layout matters</strong> — the order of dimensions affects append latency and attention compute efficiency</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><strong>Shazeer, "Fast Transformer Decoding: One Write-Head is All You Need"</strong> (2019) — original MQA paper</li>
+<li><strong>Ainslie et al., "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints"</strong> (2023)</li>
+<li><strong>Zhang et al., "H2O: Heavy-Hitter Oracle for Efficient Generative Inference"</strong> (2023) — token eviction</li>
+<li><strong>Hooper et al., "KVQuant: Towards 10 Million Context Length LLM Inference with KV Cache Quantization"</strong> (2024)</li>
+<li><strong>Jiang et al., "Mistral 7B"</strong> (2023) — sliding window attention in practice</li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p>You now know how to shrink the KV cache at the model level. But there's still the systems-level problem: how do you allocate and manage cache memory across hundreds of concurrent requests that arrive and leave at different times? <strong>Day 59: vLLM &amp; PagedAttention</strong> solves this with a brilliant idea borrowed from operating systems — virtual memory for the KV cache.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-57-llm-inference-challenges.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 57: LLM Inference Challenges</a>
+            <a href="day-59-vllm-pagedattention.html" class="text-emerald-600 hover:text-emerald-800">Day 59: vLLM & PagedAttention &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

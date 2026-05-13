@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 43: MLIR for ML - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 7: TVM Advanced & MLC</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-43-mlir-for-ml">Day 43: MLIR for ML</h1>
+<blockquote>
+<p><strong>Phase III · Week 7 · Day 43 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The best infrastructure doesn't solve one problem — it gives you the tools to solve every problem in the same way."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="../week-06/day-42-stop-and-reflect-3.html">Day 42: Stop &amp; Reflect #3</a></td>
+<td style="text-align: left;"><a href="day-44-xla-stablehlo.html">Day 44: XLA &amp; StableHLO</a></td>
+<td style="text-align: left;"><a href="README.html">Week 7: TVM Advanced &amp; MLC</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase III: Apache TVM Deep Dive</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Every major ML compiler — XLA, TVM, Torch-MLIR, IREE, Triton — is converging on <strong>MLIR</strong> (Multi-Level Intermediate Representation) as its foundational infrastructure. MLIR was created at Google (originally for TensorFlow) and donated to the LLVM project. Unlike LLVM IR, which is a single fixed abstraction level, MLIR lets you define <strong>multiple IRs (dialects) that coexist in the same program</strong> and progressively lower through well-defined transformations. Understanding MLIR's design philosophy and key dialects is essential because it's becoming the common language for the entire ML compiler ecosystem.</p>
+<hr />
+<h2 id="1-the-problem-mlir-solves">1. The Problem MLIR Solves</h2>
+<h3 id="the-ir-proliferation-problem">The IR Proliferation Problem</h3>
+<p>Before MLIR, every ML framework built its own IR stack from scratch:</p>
+<pre><code>Before MLIR — Every Project Reinvents the Wheel
+════════════════════════════════════════════════
+
+  TensorFlow        PyTorch          TVM           ONNX Runtime
+  ┌─────────┐     ┌─────────┐     ┌─────────┐     ┌─────────┐
+  │ TF Graph │     │ TorchIR │     │  Relay  │     │ ORT Graph│
+  └────┬─────┘     └────┬─────┘     └────┬─────┘     └────┬─────┘
+       │               │               │               │
+  ┌────▼─────┐     ┌────▼─────┐     ┌────▼─────┐     ┌────▼─────┐
+  │  XLA HLO │     │ Triton IR│     │   TIR   │     │  Custom  │
+  └────┬─────┘     └────┬─────┘     └────┬─────┘     └────┬─────┘
+       │               │               │               │
+  ┌────▼─────┐     ┌────▼─────┐     ┌────▼─────┐     ┌────▼─────┘
+  │ LLVM IR  │     │ LLVM IR  │     │ LLVM IR  │     │ Provider │
+  └──────────┘     └──────────┘     └──────────┘     └──────────┘
+
+  Problems:
+  ✗ Each project writes its own passes (CSE, DCE, inlining...)
+  ✗ No shared tooling for testing, debugging, verification
+  ✗ Combining compilers = rewriting everything
+  ✗ Optimization passes don't compose across projects
+</code></pre>
+<h3 id="mlirs-solution-a-compiler-infrastructure-for-irs">MLIR's Solution: A Compiler Infrastructure for IRs</h3>
+<p>MLIR doesn't define one IR — it provides <strong>infrastructure for building IRs</strong>:</p>
+<p>$$\text{MLIR} = \text{Dialect System} + \text{Pass Infrastructure} + \text{Rewrite Patterns} + \text{Verification}$$</p>
+<pre><code>MLIR — One Infrastructure, Many Dialects
+═════════════════════════════════════════
+
+  ┌──────────────────────────────────────────────────┐
+  │                   MLIR Framework                  │
+  │                                                   │
+  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌────────┐ │
+  │  │ linalg  │ │ tensor  │ │  stablehlo │ │ tosa  │ │  ← ML dialects
+  │  └────┬────┘ └────┬────┘ └────┬────┘ └───┬────┘ │
+  │       │           │           │           │       │
+  │  ┌────▼────┐ ┌────▼────┐ ┌────▼────┐            │
+  │  │  affine │ │   scf   │ │  memref │            │  ← Mid-level
+  │  └────┬────┘ └────┬────┘ └────┬────┘            │
+  │       │           │           │                   │
+  │  ┌────▼────┐ ┌────▼────┐ ┌────▼────┐            │
+  │  │  arith  │ │   gpu   │ │  llvm   │            │  ← Low-level
+  │  └─────────┘ └─────────┘ └─────────┘            │
+  │                                                   │
+  │  Shared: Pass Infra, Pattern Rewriter, Verifier   │
+  └──────────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="2-core-mlir-concepts">2. Core MLIR Concepts</h2>
+<h3 id="dialects-self-contained-ir-vocabularies">Dialects: Self-Contained IR Vocabularies</h3>
+<p>A <strong>dialect</strong> is a namespace of operations, types, and attributes. Each dialect captures one abstraction level:</p>
+<pre><code class="language-mlir">// Example: Three different dialects in ONE module
+
+// --- tensor dialect (value semantics, no memory) ---
+%result = tensor.extract_slice %input[0, 0][4, 8][1, 1]
+    : tensor&lt;16x32xf32&gt; to tensor&lt;4x8xf32&gt;
+
+// --- linalg dialect (structured computation) ---
+%matmul = linalg.matmul
+    ins(%A, %B : tensor&lt;4x8xf32&gt;, tensor&lt;8x16xf32&gt;)
+    outs(%C : tensor&lt;4x16xf32&gt;) -&gt; tensor&lt;4x16xf32&gt;
+
+// --- arith dialect (scalar arithmetic) ---
+%sum = arith.addf %x, %y : f32
+</code></pre>
+<h3 id="progressive-lowering">Progressive Lowering</h3>
+<p>The key idea: programs start at a <strong>high level</strong> and are progressively lowered through <strong>well-defined dialect conversions</strong>:</p>
+<pre><code>Progressive Lowering Pipeline for a MatMul
+═══════════════════════════════════════════
+
+  linalg.matmul                          ← Structured op
+      │  ──── linalg-to-loops ────
+      ▼
+  scf.for i = 0..M                      ← Loop nest
+    scf.for j = 0..N
+      scf.for k = 0..K
+        %a = memref.load %A[i,k]
+        %b = memref.load %B[k,j]
+        %c = arith.mulf %a, %b
+        %d = arith.addf %c, %acc
+      │  ──── scf-to-cf ────
+      ▼
+  cf.br ^bb1                             ← Control flow graph
+  ^bb1(%i : index):
+    cf.cond_br %cmp, ^bb2, ^bb3
+      │  ──── cf-to-llvm ────
+      ▼
+  llvm.br ^bb1(%i : i64)                 ← LLVM dialect → LLVM IR
+</code></pre>
+<h3 id="operations-regions-and-blocks">Operations, Regions, and Blocks</h3>
+<p>Every construct in MLIR is an <strong>operation</strong> with a uniform structure:</p>
+<pre><code>%result:2 = &quot;dialect.op_name&quot;(%arg0, %arg1) ({
+   ^bb0(%barg0: f32):    // Block with arguments
+     &quot;dialect.yield&quot;(%barg0) : (f32) -&gt; ()
+}) { attr = &quot;value&quot; } : (f32, f32) -&gt; (f32, i1)
+ ↑          ↑              ↑           ↑        ↑
+ results    op name     region       attrs    types
+</code></pre>
+<hr />
+<h2 id="3-key-dialects-for-ml-compilation">3. Key Dialects for ML Compilation</h2>
+<h3 id="the-ml-compilation-dialect-stack">The ML Compilation Dialect Stack</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Dialect</th>
+<th style="text-align: left;">Abstraction Level</th>
+<th style="text-align: left;">What It Captures</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>stablehlo</code> / <code>mhlo</code></td>
+<td style="text-align: left;">Highest</td>
+<td style="text-align: left;">ML ops: conv, dot, reduce, gather</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>tosa</code></td>
+<td style="text-align: left;">High</td>
+<td style="text-align: left;">Target-independent ML ops (mobile-focused)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>linalg</code></td>
+<td style="text-align: left;">High–Mid</td>
+<td style="text-align: left;">Structured ops with access patterns</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>tensor</code></td>
+<td style="text-align: left;">High</td>
+<td style="text-align: left;">Value-semantic multi-dim arrays</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>memref</code></td>
+<td style="text-align: left;">Mid</td>
+<td style="text-align: left;">Memory-backed arrays with layouts</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>affine</code></td>
+<td style="text-align: left;">Mid</td>
+<td style="text-align: left;">Polyhedral loop nests</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>scf</code></td>
+<td style="text-align: left;">Mid</td>
+<td style="text-align: left;">Structured control flow (for, if, while)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>arith</code></td>
+<td style="text-align: left;">Low</td>
+<td style="text-align: left;">Integer/float arithmetic</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>math</code></td>
+<td style="text-align: left;">Low</td>
+<td style="text-align: left;">Transcendental functions (exp, sin, log)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>gpu</code></td>
+<td style="text-align: left;">Low</td>
+<td style="text-align: left;">GPU kernel launch and thread mapping</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>vector</code></td>
+<td style="text-align: left;">Low</td>
+<td style="text-align: left;">SIMD/vector operations</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>llvm</code></td>
+<td style="text-align: left;">Lowest</td>
+<td style="text-align: left;">1:1 mapping to LLVM IR</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-linalg-dialect-heart-of-ml-compilation">The <code>linalg</code> Dialect — Heart of ML Compilation</h3>
+<p><code>linalg</code> (Linear Algebra) captures computations as <strong>iteration domains + access maps</strong>:</p>
+<pre><code class="language-mlir">// linalg.generic — the universal structured op
+//
+// Semantics:  C[i,j] += A[i,k] * B[k,j]   (matrix multiply)
+
+#map_A = affine_map&lt;(i, j, k) -&gt; (i, k)&gt;    // A indexed by [i,k]
+#map_B = affine_map&lt;(i, j, k) -&gt; (k, j)&gt;    // B indexed by [k,j]
+#map_C = affine_map&lt;(i, j, k) -&gt; (i, j)&gt;    // C indexed by [i,j]
+
+%result = linalg.generic {
+    indexing_maps = [#map_A, #map_B, #map_C],
+    iterator_types = [&quot;parallel&quot;, &quot;parallel&quot;, &quot;reduction&quot;]
+  } ins(%A, %B : tensor&lt;4x8xf32&gt;, tensor&lt;8x16xf32&gt;)
+    outs(%C : tensor&lt;4x16xf32&gt;) {
+  ^bb0(%a: f32, %b: f32, %c: f32):
+    %prod = arith.mulf %a, %b : f32
+    %sum  = arith.addf %c, %prod : f32
+    linalg.yield %sum : f32
+  } -&gt; tensor&lt;4x16xf32&gt;
+</code></pre>
+<p>The power: tiling, fusion, and parallelization are all <strong>mechanical transformations on the indexing maps</strong>, not ad-hoc rewrites.</p>
+<h3 id="tensor-vs-memref-value-vs-memory-semantics"><code>tensor</code> vs <code>memref</code> — Value vs Memory Semantics</h3>
+<pre><code>tensor&lt;4x8xf32&gt;          memref&lt;4x8xf32, strided&lt;[8,1]&gt;&gt;
+     │                          │
+     │  Value semantics          │  Memory semantics
+     │  • Immutable              │  • Mutable (in-place)
+     │  • SSA-friendly           │  • Has layout / strides
+     │  • No aliasing            │  • Aliasing possible
+     │  • Compiler can reason    │  • Maps to real buffers
+     │    freely                 │
+     │                          │
+     └────── bufferization ─────┘
+              (tensor → memref)
+</code></pre>
+<p>Bufferization is a key MLIR pass: it decides where to allocate memory, when to reuse buffers, and converts value-semantic <code>tensor</code> programs into <code>memref</code>-based programs that can run on hardware.</p>
+<hr />
+<h2 id="4-how-ml-compilers-use-mlir">4. How ML Compilers Use MLIR</h2>
+<h3 id="iree-end-to-end-mlir-pipeline">IREE: End-to-End MLIR Pipeline</h3>
+<p>IREE (Intermediate Representation Execution Environment) is the most complete MLIR-based ML compiler:</p>
+<pre><code>IREE Compilation Pipeline (fully MLIR-based)
+═════════════════════════════════════════════
+
+  PyTorch / JAX / TF model
+         │
+    ┌────▼────────────────┐
+    │  Import (StableHLO) │  ← Framework → MLIR
+    └────┬────────────────┘
+         │
+    ┌────▼────────────────┐
+    │  Flow dialect        │  ← Workload partitioning
+    │  • Dispatch regions  │     (what runs on device)
+    │  • Data dependencies │
+    └────┬────────────────┘
+         │
+    ┌────▼────────────────┐
+    │  Stream dialect      │  ← Async execution scheduling
+    │  • Command buffers   │
+    │  • Synchronization   │
+    └────┬────────────────┘
+         │
+    ┌────▼────────────────┐
+    │  HAL dialect         │  ← Hardware abstraction
+    │  • Vulkan / CUDA /   │
+    │    Metal / CPU        │
+    └────┬────────────────┘
+         │
+    ┌────▼────────────────┐
+    │  Executable binary   │  ← Deployable artifact
+    └─────────────────────┘
+</code></pre>
+<h3 id="torch-mlir-pytorch-into-the-mlir-ecosystem">Torch-MLIR: PyTorch into the MLIR Ecosystem</h3>
+<pre><code class="language-python"># Torch-MLIR bridges PyTorch → MLIR dialects
+import torch
+import torch_mlir
+
+class MyModel(torch.nn.Module):
+    def forward(self, x, y):
+        return torch.matmul(x, y) + 1.0
+
+model = MyModel()
+example_inputs = (torch.randn(4, 8), torch.randn(8, 16))
+
+# Export to linalg-on-tensors (MLIR)
+module = torch_mlir.compile(
+    model, example_inputs,
+    output_type=torch_mlir.OutputType.LINALG_ON_TENSORS
+)
+
+print(module.operation.get_asm())
+# Produces MLIR with linalg.matmul, arith.addf, tensor ops
+</code></pre>
+<h3 id="available-output-types">Available Output Types</h3>
+<pre><code class="language-python"># Torch-MLIR can target different MLIR dialect levels:
+torch_mlir.OutputType.TORCH      # torch dialect (highest level)
+torch_mlir.OutputType.LINALG_ON_TENSORS  # linalg + tensor
+torch_mlir.OutputType.STABLEHLO  # for XLA/IREE consumption
+torch_mlir.OutputType.TOSA       # for mobile/edge targets
+</code></pre>
+<hr />
+<h2 id="5-mlir-vs-tvms-ir-stack">5. MLIR vs TVM's IR Stack</h2>
+<h3 id="architectural-comparison">Architectural Comparison</h3>
+<pre><code>TVM IR Stack                    MLIR Ecosystem
+════════════                    ══════════════
+
+ ┌──────────┐                  ┌──────────────┐
+ │  Relax   │  ← Graph-level   │  StableHLO   │  ← ML ops
+ │  (Relay) │                  │  / TOSA       │
+ └────┬─────┘                  └──────┬───────┘
+      │                               │
+ ┌────▼─────┐                  ┌──────▼───────┐
+ │   TIR    │  ← Loop-level    │   linalg     │  ← Structured
+ │          │                  │   + affine    │
+ └────┬─────┘                  └──────┬───────┘
+      │                               │
+ ┌────▼─────┐                  ┌──────▼───────┐
+ │ LLVM IR  │  ← Code gen      │  scf → llvm  │  ← Lowering
+ └──────────┘                  └──────────────┘
+
+Key Differences:
+┌──────────────────┬────────────────────┬────────────────────┐
+│ Aspect           │ TVM                │ MLIR               │
+├──────────────────┼────────────────────┼────────────────────┤
+│ Philosophy       │ ML-specific        │ General compiler   │
+│ Extensibility    │ Add to fixed IRs   │ Create new dialect │
+│ Auto-tuning      │ Built-in           │ Not built-in       │
+│ Community        │ ML-focused         │ Broader (HPC, HW)  │
+│ Deployment       │ TVM runtime        │ Various (IREE,etc) │
+│ Learning curve   │ Moderate           │ Steep              │
+└──────────────────┴────────────────────┴────────────────────┘
+</code></pre>
+<h3 id="what-tvm-could-gain-from-mlir">What TVM Could Gain from MLIR</h3>
+<p>TVM's Relax/TIR are powerful but isolated. MLIR provides:</p>
+<ol>
+<li><strong>Shared pass infrastructure</strong> — CSE, DCE, canonicalization work across all dialects</li>
+<li><strong>Pattern rewriting engine</strong> — Declarative rewrite rules (DRR) for transformations</li>
+<li><strong>Verification</strong> — Every op has a verifier; malformed IR is caught early</li>
+<li><strong>Growing ecosystem</strong> — StableHLO, TOSA, Triton-MLIR, etc. all interoperate</li>
+</ol>
+<p>In fact, TVM Unity's design was partly inspired by MLIR's approach to composable IRs.</p>
+<hr />
+<h2 id="6-hands-on-exploring-mlir">6. Hands-On: Exploring MLIR</h2>
+<h3 id="exercise-1-build-and-run-mlir-opt-30-min">Exercise 1: Build and Run <code>mlir-opt</code> (30 min)</h3>
+<pre><code class="language-bash"># Option A: Use a pre-built MLIR (if available via pip)
+pip install mlir-python-bindings
+
+# Option B: Build from LLVM source (takes ~30 min)
+git clone https://github.com/llvm/llvm-project.git
+cd llvm-project &amp;&amp; mkdir build &amp;&amp; cd build
+cmake -G Ninja ../llvm \
+  -DLLVM_ENABLE_PROJECTS=mlir \
+  -DLLVM_TARGETS_TO_BUILD=&quot;host&quot; \
+  -DCMAKE_BUILD_TYPE=Release
+ninja mlir-opt
+
+# Try progressive lowering of a simple function:
+cat &gt; matmul.mlir &lt;&lt; 'EOF'
+func.func @matmul(%A: tensor&lt;4x8xf32&gt;, %B: tensor&lt;8x16xf32&gt;,
+                   %C: tensor&lt;4x16xf32&gt;) -&gt; tensor&lt;4x16xf32&gt; {
+  %result = linalg.matmul
+    ins(%A, %B : tensor&lt;4x8xf32&gt;, tensor&lt;8x16xf32&gt;)
+    outs(%C : tensor&lt;4x16xf32&gt;) -&gt; tensor&lt;4x16xf32&gt;
+  return %result : tensor&lt;4x16xf32&gt;
+}
+EOF
+
+# Step 1: Tile the matmul
+mlir-opt matmul.mlir \
+  --transform-interpreter \
+  --linalg-tile=&quot;tile-sizes=2,4,8&quot;
+
+# Step 2: Lower linalg to loops
+mlir-opt matmul.mlir --convert-linalg-to-loops
+
+# Step 3: Full pipeline to LLVM
+mlir-opt matmul.mlir \
+  --convert-linalg-to-loops \
+  --convert-scf-to-cf \
+  --convert-cf-to-llvm \
+  --convert-func-to-llvm \
+  --reconcile-unrealized-casts
+</code></pre>
+<h3 id="exercise-2-mlir-python-bindings-20-min">Exercise 2: MLIR Python Bindings (20 min)</h3>
+<pre><code class="language-python"># Using MLIR's Python bindings to build IR programmatically
+from mlir.ir import Context, Module, InsertionPoint, Location
+from mlir.dialects import func, arith, linalg, tensor
+from mlir import ir
+
+with Context() as ctx, Location.unknown():
+    module = Module.create()
+    f32 = ir.F32Type.get()
+    tensor_type = ir.RankedTensorType.get([4, 8], f32)
+
+    with InsertionPoint(module.body):
+        @func.FuncOp.from_py_func(tensor_type, tensor_type)
+        def add_tensors(a, b):
+            return arith.AddFOp(a, b)
+
+    print(module)
+    # Verify the module is well-formed
+    assert module.operation.verify()
+</code></pre>
+<h3 id="exercise-3-compare-lowering-stages-20-min">Exercise 3: Compare Lowering Stages (20 min)</h3>
+<pre><code class="language-bash"># Create a pipeline that dumps IR at each stage
+
+cat &gt; pipeline.sh &lt;&lt; 'EOF'
+#!/bin/bash
+INPUT=$1
+echo &quot;=== Stage 1: Original ===&quot;
+cat $INPUT
+echo &quot;&quot;
+
+echo &quot;=== Stage 2: After Linalg Tiling ===&quot;
+mlir-opt $INPUT --linalg-tile=&quot;tile-sizes=2,4&quot; 2&gt;/dev/null
+echo &quot;&quot;
+
+echo &quot;=== Stage 3: After Lowering to Loops ===&quot;
+mlir-opt $INPUT --convert-linalg-to-loops 2&gt;/dev/null
+echo &quot;&quot;
+
+echo &quot;=== Stage 4: After Buffer Allocation ===&quot;
+mlir-opt $INPUT \
+  --one-shot-bufferize=&quot;bufferize-function-boundaries&quot; \
+  2&gt;/dev/null
+echo &quot;&quot;
+
+echo &quot;=== Stage 5: After Lowering to LLVM ===&quot;
+mlir-opt $INPUT \
+  --convert-linalg-to-loops \
+  --convert-scf-to-cf \
+  --convert-cf-to-llvm \
+  --convert-func-to-llvm 2&gt;/dev/null
+EOF
+
+chmod +x pipeline.sh
+./pipeline.sh matmul.mlir
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>MLIR is compiler infrastructure for building IRs</strong> — not a single IR, but a framework of composable dialects with shared tooling</li>
+<li><strong>Dialects</strong> are self-contained vocabularies (ops, types, attrs) that capture one abstraction level; multiple dialects coexist in one module</li>
+<li><strong>Progressive lowering</strong> transforms programs through dialect conversions: <code>linalg → scf → cf → llvm</code>, each step well-defined and testable</li>
+<li><strong><code>linalg</code> is the key ML dialect</strong> — it encodes computations as iteration domains + affine access maps, enabling mechanical tiling, fusion, and parallelization</li>
+<li><strong><code>tensor</code> vs <code>memref</code></strong> separates value semantics (what to compute) from memory semantics (where to store), connected by bufferization</li>
+<li><strong>The ML compiler ecosystem is converging on MLIR</strong> — XLA (StableHLO), Torch-MLIR, IREE, Triton, and even TVM's design philosophy borrow from MLIR</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://arxiv.org/abs/2002.11054">MLIR: A Compiler Infrastructure for the End of Moore's Law</a> — original paper</li>
+<li><a href="https://mlir.llvm.org/docs/LangRef/">MLIR Language Reference</a> — syntax and semantics</li>
+<li><a href="https://mlir.llvm.org/docs/Dialects/Linalg/">Linalg Dialect Rationale</a> — design decisions</li>
+<li><a href="https://github.com/llvm/torch-mlir">Torch-MLIR Project</a> — PyTorch to MLIR</li>
+<li><a href="https://iree.dev/">IREE Documentation</a> — end-to-end MLIR compiler</li>
+<li><a href="https://mlir.llvm.org/docs/Tutorials/Toy/">MLIR Tutorial (LLVM)</a> — the Toy language tutorial</li>
+</ul>
+<hr />
+<h2 id="tomorrow-xla-stablehlo">Tomorrow: XLA &amp; StableHLO</h2>
+<p>Day 44 explores <strong>XLA</strong> — Google's production ML compiler that powers JAX and TensorFlow — and <strong>StableHLO</strong>, the portable MLIR dialect that lets you move models between XLA, IREE, and other backends. You'll trace a JAX program through XLA's HLO IR, see how fusion passes work, and understand when to choose XLA vs TVM.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="../week-06/day-42-stop-and-reflect-3.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 42: Stop & Reflect #3</a>
+            <a href="day-44-xla-stablehlo.html" class="text-emerald-600 hover:text-emerald-800">Day 44: XLA & StableHLO &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

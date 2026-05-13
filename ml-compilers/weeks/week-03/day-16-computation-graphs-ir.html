@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 16: Computation Graphs as IR - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 3: IR & Compiler Passes</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-16-computation-graphs-as-ir">Day 16: Computation Graphs as IR</h1>
+<blockquote>
+<p><strong>Phase II · Week 3 · Day 16 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"A neural network is just a directed acyclic graph with tensors on the edges and math on the nodes — and every ML compiler begins by building exactly that graph."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-15-compiler-101-for-ml.html">Day 15: Compiler 101 for ML</a></td>
+<td style="text-align: left;"><a href="day-17-graph-level-optimizations.html">Day 17: Graph-Level Optimizations</a></td>
+<td style="text-align: left;"><a href="README.html">Week 3: IRs &amp; Passes</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase II: Compiler Fundamentals</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Before a compiler can optimize anything, it needs a <strong>representation</strong> of the program. In ML compilers, that representation is a <strong>computation graph</strong> — a DAG where nodes are operations and edges carry tensors. The quality of this IR determines what optimizations are possible, how easy they are to implement, and whether the compiler can reason about the program at all. Every major ML framework has its own IR, and understanding the design tradeoffs lets you pick the right tool and debug compilation failures.</p>
+<hr />
+<h2 id="1-from-neural-network-to-dag">1. From Neural Network to DAG</h2>
+<p>A neural network is naturally a directed acyclic graph (DAG):</p>
+<pre><code class="language-python"># PyTorch code
+def forward(x, w1, w2):
+    h = torch.matmul(x, w1)       # Node 1: matmul
+    h = torch.relu(h)             # Node 2: relu
+    h = torch.matmul(h, w2)       # Node 3: matmul
+    h = torch.softmax(h, dim=-1)  # Node 4: softmax
+    return h
+</code></pre>
+<pre><code>               Computation Graph (DAG)
+
+     x ──────────┐
+                  ▼
+     w1 ───▶ [matmul] ──▶ [relu] ──┐
+                                     ▼
+                          w2 ───▶ [matmul] ──▶ [softmax] ──▶ output
+</code></pre>
+<p>Properties of this graph:
+- <strong>Nodes</strong>: tensor operations (matmul, relu, softmax)
+- <strong>Edges</strong>: tensors flowing between operations, with shape and dtype metadata
+- <strong>Acyclic</strong>: no loops (recurrence is unrolled or uses scan primitives)
+- <strong>Dataflow</strong>: execution order is determined by data dependencies, not textual order</p>
+<hr />
+<h2 id="2-node-types-in-ml-irs">2. Node Types in ML IRs</h2>
+<p>ML computation graphs contain more than just arithmetic:</p>
+<pre><code>  ┌─────────────────────────────────────────────────────────┐
+  │                    Node Taxonomy                         │
+  ├──────────────┬──────────────────────────────────────────┤
+  │  Compute     │  matmul, conv2d, relu, softmax, add     │
+  │              │  → actual arithmetic on tensors          │
+  ├──────────────┼──────────────────────────────────────────┤
+  │  Data        │  placeholder (input), get_attr (weight), │
+  │              │  constant, output                        │
+  │              │  → sources/sinks of tensor data          │
+  ├──────────────┼──────────────────────────────────────────┤
+  │  Shape       │  reshape, view, permute, slice, expand   │
+  │              │  → no compute, just reinterpret memory   │
+  ├──────────────┼──────────────────────────────────────────┤
+  │  Control     │  if/else, while_loop, scan               │
+  │              │  → conditional or iterative execution    │
+  ├──────────────┼──────────────────────────────────────────┤
+  │  Memory      │  copy, alloc, dealloc, to_device         │
+  │              │  → explicit memory management            │
+  └──────────────┴──────────────────────────────────────────┘
+</code></pre>
+<p>Different IRs expose different subsets. FX graphs are mostly compute + data + shape. XLA HLO includes explicit memory (and custom-call for vendor libs). MLIR can represent all five in different dialects.</p>
+<hr />
+<h2 id="3-static-single-assignment-ssa-in-ml">3. Static Single Assignment (SSA) in ML</h2>
+<p>SSA form means every variable is defined exactly once. This is natural for computation graphs:</p>
+<pre><code class="language-python"># Python (NOT SSA — `h` is reassigned)
+h = matmul(x, w1)
+h = relu(h)          # h is overwritten
+h = matmul(h, w2)
+
+# SSA form (each value has a unique name)
+h1 = matmul(x, w1)
+h2 = relu(h1)
+h3 = matmul(h2, w2)
+</code></pre>
+<p>Why SSA matters:
+- <strong>Unambiguous def-use chains</strong>: for any value, you know exactly where it was produced and where it's consumed
+- <strong>Optimization is easier</strong>: dead code elimination = remove nodes with no users; constant propagation = replace node with constant
+- <strong>Parallelism is visible</strong>: independent nodes with no data dependency can execute concurrently</p>
+<p>In a graph IR, SSA is <strong>automatic</strong> — each node output is a unique value. This is why graph IRs are so natural for compiler passes.</p>
+<hr />
+<h2 id="4-ir-comparison-five-representations-of-the-same-model">4. IR Comparison: Five Representations of the Same Model</h2>
+<p>Let's trace a simple model through five different IRs:</p>
+<pre><code class="language-python">class TinyModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(4, 3)
+
+    def forward(self, x):
+        return torch.relu(self.linear(x))
+</code></pre>
+<h3 id="4a-pytorch-fx-graph">4a. PyTorch FX Graph</h3>
+<pre><code class="language-python">from torch.fx import symbolic_trace
+
+model = TinyModel()
+traced = symbolic_trace(model)
+traced.graph.print_tabular()
+</code></pre>
+<p>Output:</p>
+<pre><code>opcode       name       target                  args            kwargs
+-----------  ---------  ----------------------  --------------  --------
+placeholder  x          x                       ()              {}
+get_attr     linear_w   linear.weight           ()              {}
+get_attr     linear_b   linear.bias             ()              {}
+call_func    linear_1   torch.nn.functional.linear  (x, linear_w, linear_b)  {}
+call_func    relu       torch.relu              (linear_1,)     {}
+output       output     output                  (relu,)         {}
+</code></pre>
+<h3 id="4b-torchscript-ir">4b. TorchScript IR</h3>
+<pre><code class="language-python">scripted = torch.jit.script(model)
+print(scripted.graph)
+</code></pre>
+<p>Output:</p>
+<pre><code>graph(%self : __torch__.TinyModel,
+      %x : Float(*, 4)):
+  %linear : __torch__.torch.nn.modules.linear.Linear = prim::GetAttr[name=&quot;linear&quot;](%self)
+  %weight : Float(3, 4) = prim::GetAttr[name=&quot;weight&quot;](%linear)
+  %bias : Float(3) = prim::GetAttr[name=&quot;bias&quot;](%linear)
+  %out : Float(*, 3) = aten::linear(%x, %weight, %bias)
+  %relu : Float(*, 3) = aten::relu(%out)
+  return (%relu)
+</code></pre>
+<h3 id="4c-onnx">4c. ONNX</h3>
+<pre><code class="language-python">torch.onnx.export(model, torch.randn(1, 4), &quot;tiny.onnx&quot;)
+# Inspecting with onnx.load:
+</code></pre>
+<pre><code>Nodes:
+  MatMul(x, linear.weight_transposed) → mm_out
+  Add(mm_out, linear.bias) → linear_out
+  Relu(linear_out) → output
+</code></pre>
+<h3 id="4d-xla-hlo-via-jax">4d. XLA HLO (via JAX)</h3>
+<pre><code>HloModule tiny_model
+ENTRY main {
+  p0 = f32[1,4] parameter(0)           // input x
+  p1 = f32[3,4] parameter(1)           // weight
+  p2 = f32[3] parameter(2)             // bias
+  dot = f32[1,3] dot(p0, p1), lhs_contracting_dims={1}, rhs_contracting_dims={1}
+  bcast = f32[1,3] broadcast(p2), dimensions={1}
+  add = f32[1,3] add(dot, bcast)
+  ROOT relu = f32[1,3] maximum(add, f32[1,3] broadcast(f32[] constant(0)))
+}
+</code></pre>
+<h3 id="4e-relay-tvm">4e. Relay (TVM)</h3>
+<pre><code>fn (%x: Tensor[(1, 4), float32],
+    %weight: Tensor[(3, 4), float32],
+    %bias: Tensor[(3), float32]) {
+  %0 = nn.dense(%x, %weight, units=3);
+  %1 = nn.bias_add(%0, %bias);
+  nn.relu(%1)
+}
+</code></pre>
+<h3 id="comparison-summary">Comparison Summary</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">IR</th>
+<th style="text-align: left;">Typed?</th>
+<th style="text-align: left;">SSA?</th>
+<th style="text-align: left;">Control Flow</th>
+<th style="text-align: left;">Abstraction Level</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>FX Graph</strong></td>
+<td style="text-align: left;">Shape-aware</td>
+<td style="text-align: left;">Yes</td>
+<td style="text-align: left;">Limited (via subgraphs)</td>
+<td style="text-align: left;">High (PyTorch ops)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>TorchScript</strong></td>
+<td style="text-align: left;">Typed</td>
+<td style="text-align: left;">Yes</td>
+<td style="text-align: left;">Full (<code>if</code>, <code>for</code>)</td>
+<td style="text-align: left;">Medium (ATen ops)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>ONNX</strong></td>
+<td style="text-align: left;">Typed</td>
+<td style="text-align: left;">Yes</td>
+<td style="text-align: left;">Limited</td>
+<td style="text-align: left;">High (standardized ops)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>XLA HLO</strong></td>
+<td style="text-align: left;">Fully typed</td>
+<td style="text-align: left;">Yes</td>
+<td style="text-align: left;">Structured (<code>while</code>, <code>cond</code>)</td>
+<td style="text-align: left;">Low (primitives)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Relay</strong></td>
+<td style="text-align: left;">Type-inferred</td>
+<td style="text-align: left;">Yes</td>
+<td style="text-align: left;">Functional (<code>let</code>, <code>if</code>)</td>
+<td style="text-align: left;">Medium (nn + math)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-graph-construction-with-fx">5. Graph Construction with FX</h2>
+<p>FX uses <strong>symbolic tracing</strong> — it runs your Python code with proxy objects that record operations instead of executing them:</p>
+<pre><code class="language-python">import torch
+from torch.fx import symbolic_trace, Graph, Node
+
+class FusionCandidate(torch.nn.Module):
+    def forward(self, x):
+        # These three ops could be fused into one kernel
+        a = x * 2.0
+        b = a + 1.0
+        c = torch.relu(b)
+        return c
+
+model = FusionCandidate()
+traced = symbolic_trace(model)
+
+# Introspect the graph
+for node in traced.graph.nodes:
+    print(f&quot;  {node.op:12s} | {node.name:10s} | {node.target} | args={node.args}&quot;)
+</code></pre>
+<p>Output:</p>
+<pre><code>  placeholder  | x          | x       | args=()
+  call_function| mul        | &lt;built-in function mul&gt; | args=(x, 2.0)
+  call_function| add        | &lt;built-in function add&gt; | args=(mul, 1.0)
+  call_function| relu       | &lt;function relu&gt; | args=(add,)
+  output       | output     | output  | args=(relu,)
+</code></pre>
+<h3 id="analyzing-data-dependencies">Analyzing Data Dependencies</h3>
+<pre><code class="language-python">def print_dependency_graph(gm):
+    &quot;&quot;&quot;Print which nodes depend on which.&quot;&quot;&quot;
+    for node in gm.graph.nodes:
+        if node.op in ('call_function', 'call_method'):
+            deps = [a.name for a in node.args if isinstance(a, Node)]
+            print(f&quot;  {node.name} depends on: {deps}&quot;)
+
+print_dependency_graph(traced)
+# mul depends on: ['x']
+# add depends on: ['mul']
+# relu depends on: ['add']
+# → Linear chain: perfect fusion candidate!
+</code></pre>
+<hr />
+<h2 id="6-shape-propagation-and-type-inference">6. Shape Propagation and Type Inference</h2>
+<p>A critical feature of ML IRs is <strong>shape propagation</strong> — deducing output tensor shapes from input shapes and operation semantics:</p>
+<pre><code class="language-python">from torch.fx.passes.shape_prop import ShapeProp
+
+model = TinyModel()
+traced = symbolic_trace(model)
+
+# Run shape propagation with a sample input
+sample = torch.randn(8, 4)
+ShapeProp(traced).propagate(sample)
+
+# Now each node has shape metadata
+for node in traced.graph.nodes:
+    if hasattr(node, 'meta') and 'tensor_meta' in node.meta:
+        meta = node.meta['tensor_meta']
+        print(f&quot;  {node.name}: shape={meta.shape}, dtype={meta.dtype}&quot;)
+</code></pre>
+<p>Expected output:</p>
+<pre><code>  x:        shape=torch.Size([8, 4]), dtype=torch.float32
+  linear_1: shape=torch.Size([8, 3]), dtype=torch.float32
+  relu:     shape=torch.Size([8, 3]), dtype=torch.float32
+</code></pre>
+<p>Shape information enables:
+- <strong>Memory planning</strong>: allocate exact buffer sizes
+- <strong>Tiling decisions</strong>: choose tile sizes that divide tensor dimensions
+- <strong>Layout optimization</strong>: decide NCHW vs NHWC based on actual dimensions</p>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-build-and-inspect-a-graph-25-min">Exercise 1: Build and Inspect a Graph (25 min)</h3>
+<pre><code class="language-python">import torch
+from torch.fx import symbolic_trace
+
+class ResidualBlock(torch.nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.linear1 = torch.nn.Linear(dim, dim)
+        self.linear2 = torch.nn.Linear(dim, dim)
+
+    def forward(self, x):
+        h = torch.relu(self.linear1(x))
+        h = self.linear2(h)
+        return x + h  # residual connection
+
+model = ResidualBlock(64)
+traced = symbolic_trace(model)
+
+# Tasks:
+# 1. Print the tabular graph
+# 2. Count nodes by opcode type
+# 3. Identify the residual (skip) connection in the graph
+# 4. Which nodes could potentially be fused?
+# 5. Draw the DAG on paper — is it a pure chain or does it branch?
+</code></pre>
+<h3 id="exercise-2-compare-ir-representations-25-min">Exercise 2: Compare IR Representations (25 min)</h3>
+<pre><code class="language-python"># Export the same model to ONNX
+model = ResidualBlock(64)
+x = torch.randn(1, 64)
+torch.onnx.export(model, x, &quot;/tmp/residual.onnx&quot;,
+                  input_names=['input'], output_names=['output'])
+
+# Load and inspect ONNX
+import onnx
+onnx_model = onnx.load(&quot;/tmp/residual.onnx&quot;)
+for node in onnx_model.graph.node:
+    inputs = ', '.join(node.input)
+    outputs = ', '.join(node.output)
+    print(f&quot;  {node.op_type}: ({inputs}) -&gt; ({outputs})&quot;)
+
+# Compare:
+# - How many nodes in FX vs ONNX?
+# - Are the operations named the same?
+# - Which representation is more explicit?
+</code></pre>
+<h3 id="exercise-3-graph-surgery-with-fx-20-min">Exercise 3: Graph Surgery with FX (20 min)</h3>
+<pre><code class="language-python">import torch
+from torch.fx import symbolic_trace
+
+class Model(torch.nn.Module):
+    def forward(self, x):
+        a = torch.relu(x)
+        b = torch.sigmoid(a)
+        return b
+
+traced = symbolic_trace(Model())
+
+# Replace relu with leaky_relu by modifying the graph
+for node in traced.graph.nodes:
+    if node.target == torch.relu:
+        node.target = torch.nn.functional.leaky_relu
+
+traced.graph.lint()  # Verify graph integrity
+traced.recompile()   # Regenerate forward() method
+
+# Test it
+x = torch.randn(4)
+print(f&quot;Original relu(-1) = 0, but leaky_relu(-1) = {traced(torch.tensor([-1.0]))}&quot;)
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Neural networks are naturally DAGs</strong> — nodes are ops, edges are tensors, and SSA form is automatic</li>
+<li><strong>Five major IR families</strong> exist (FX, TorchScript, ONNX, HLO, Relay) with different tradeoffs in typing, abstraction level, and control flow support</li>
+<li><strong>SSA + graph IR</strong> make optimizations trivial: dead code = no users, CSE = same op + same inputs</li>
+<li><strong>Shape propagation</strong> through the graph enables memory planning, tiling, and layout decisions</li>
+<li><strong>FX provides Python-native</strong> graph construction, inspection, and transformation — the lowest barrier to entry for IR manipulation</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Reed, J. et al. — <em>torch.fx: Practical Program Capture and Transformation for Deep Learning in Python</em> (MLSys 2022)</li>
+<li>Roesch, J. et al. — <em>Relay: A High-Level Compiler for Deep Learning</em> (2019)</li>
+<li>ONNX Specification — <a href="https://github.com/onnx/onnx/blob/main/docs/IR.html">github.com/onnx/onnx</a></li>
+<li>XLA Architecture — <a href="https://openxla.org/xla/architecture">openxla.org/xla/architecture</a></li>
+<li>StableHLO Specification — <a href="https://github.com/openxla/stablehlo">github.com/openxla/stablehlo</a></li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p><strong>Day 17</strong> takes these graphs and <strong>optimizes them</strong> — constant folding, dead code elimination, common subexpression elimination, and the crown jewel: <strong>operator fusion</strong>. We'll implement real FX transform passes using pattern matching and measure the impact on kernel count and execution time.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-15-compiler-101-for-ml.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 15: Compiler 101 for ML Engineers</a>
+            <a href="day-17-graph-level-optimizations.html" class="text-emerald-600 hover:text-emerald-800">Day 17: Graph-Level Optimizations &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

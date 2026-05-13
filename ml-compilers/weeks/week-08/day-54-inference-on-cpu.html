@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 54: Inference on CPU - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 8: Model Formats & Runtimes</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-54-inference-on-cpu">Day 54: Inference on CPU</h1>
+<blockquote>
+<p><strong>Phase IV · Week 8 · Day 54 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"GPUs get the headlines, but CPUs serve the majority of production inference — and squeezing every cycle out of them is an art form."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-53-tensorrt-optimization.html">Day 53: TensorRT Optimization</a></td>
+<td style="text-align: left;"><a href="day-55-inference-on-edge.html">Day 55: Inference on Edge Devices</a></td>
+<td style="text-align: left;"><a href="README.html">Week 8: Model Formats &amp; Runtimes</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase IV: Inference &amp; Deployment</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Not every deployment has a GPU. In practice, <strong>60–70% of production ML inference</strong> runs on CPUs: web services behind load balancers, laptop applications, on-prem servers without accelerators, and latency-sensitive microservices where GPU scheduling overhead exceeds the compute time. Modern CPUs are not the slow, serial processors of the past — Intel's AMX (Advanced Matrix Extensions) can perform a 16×64 × 64×16 INT8 matrix multiply in a single instruction, Sapphire Rapids achieves &gt;100 INT8 TOPS, and ARM's SVE2 brings scalable vector processing to server and mobile chips alike. The key is choosing the right runtime, precision, and threading strategy for your target CPU.</p>
+<hr />
+<h2 id="1-cpu-inference-landscape">1. CPU Inference Landscape</h2>
+<pre><code>CPU Inference Stack
+══════════════════════════════════════════════════════════════════════
+
+  Application Layer
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Your ML Application (Python / C++ / Java / Rust)           │
+  └──────────────┬──────────────┬──────────────┬────────────────┘
+                 │              │              │
+  Runtime Layer  ▼              ▼              ▼
+  ┌──────────────────┐ ┌──────────────┐ ┌──────────────────────┐
+  │  ONNX Runtime    │ │  OpenVINO    │ │  TFLite (x86/ARM)   │
+  │  (CPU EP)        │ │  (Intel IR)  │ │                      │
+  └────────┬─────────┘ └──────┬───────┘ └──────────┬───────────┘
+           │                  │                     │
+  Kernel   ▼                  ▼                     ▼
+  ┌──────────────────┐ ┌──────────────┐ ┌──────────────────────┐
+  │  oneDNN (DNNL)   │ │  oneDNN      │ │  XNNPACK / ruy      │
+  │  + MLAS          │ │  + TBB       │ │                      │
+  └────────┬─────────┘ └──────┬───────┘ └──────────┬───────────┘
+           │                  │                     │
+  ISA      ▼                  ▼                     ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  CPU ISA Extensions                                          │
+  │  x86: SSE4.2 → AVX2 → AVX-512 → AVX-512_VNNI → AMX        │
+  │  ARM: NEON → SVE → SVE2 → SME                               │
+  └──────────────────────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="2-onnx-runtime-cpu-execution-provider">2. ONNX Runtime CPU Execution Provider</h2>
+<p>ONNX Runtime's CPU EP is the most portable high-performance option — it works across x86 and ARM, uses MLAS (Microsoft Linear Algebra Subroutines) and oneDNN for kernel dispatch.</p>
+<h3 id="21-basic-setup-and-optimization">2.1 Basic Setup and Optimization</h3>
+<pre><code class="language-python">import onnxruntime as ort
+import numpy as np
+
+# ── Session options for maximum CPU throughput ──
+opts = ort.SessionOptions()
+
+# Graph-level optimizations: constant folding, shape inference, fusion
+opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+# Threading strategy
+opts.intra_op_num_threads = 4   # Threads within a single operator (e.g., GEMM)
+opts.inter_op_num_threads = 2   # Threads across independent operators
+
+# Enable operator-level profiling
+opts.enable_profiling = True
+
+# Create session with CPU EP
+session = ort.InferenceSession(
+    &quot;resnet50.onnx&quot;,
+    sess_options=opts,
+    providers=[&quot;CPUExecutionProvider&quot;],
+)
+
+# Warm up + benchmark
+input_name = session.get_inputs()[0].name
+dummy = np.random.randn(1, 3, 224, 224).astype(np.float32)
+
+# Warmup
+for _ in range(10):
+    session.run(None, {input_name: dummy})
+
+# Benchmark
+import time
+start = time.perf_counter()
+N = 100
+for _ in range(N):
+    session.run(None, {input_name: dummy})
+elapsed = time.perf_counter() - start
+print(f&quot;Avg latency: {elapsed / N * 1000:.2f} ms&quot;)
+print(f&quot;Throughput:  {N / elapsed:.1f} img/s&quot;)
+</code></pre>
+<h3 id="22-graph-optimizations-performed-by-ort">2.2 Graph Optimizations Performed by ORT</h3>
+<pre><code>ONNX Runtime Graph Optimization Levels
+══════════════════════════════════════════════════════════
+
+  Level 1 (Basic):
+  ┌─────────────────────────────────────────────────┐
+  │ • Constant folding (precompute static subgraphs)│
+  │ • Redundant node elimination                    │
+  │ • Semantic-preserving rewrites                  │
+  └─────────────────────────────────────────────────┘
+
+  Level 2 (Extended):
+  ┌─────────────────────────────────────────────────┐
+  │ • Conv + BN fusion                              │
+  │ • Conv + Add + ReLU fusion                      │
+  │ • GEMM + activation fusion                      │
+  │ • Attention fusion (BERT-style)                 │
+  │ • SkipLayerNormalization fusion                  │
+  └─────────────────────────────────────────────────┘
+
+  Level 3 (Layout):
+  ┌─────────────────────────────────────────────────┐
+  │ • NCHW → blocked layout (NCHWxc) for oneDNN    │
+  │ • Weight prepacking for MLAS                    │
+  │ • Memory planning (in-place reuse)              │
+  └─────────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2 id="3-intel-openvino">3. Intel OpenVINO</h2>
+<p>OpenVINO (Open Visual Inference and Neural Network Optimization) is Intel's toolkit optimized for Intel CPUs, iGPUs, and VPUs. It excels on Intel hardware with automatic precision calibration and hardware-specific kernel selection.</p>
+<h3 id="31-openvino-pipeline">3.1 OpenVINO Pipeline</h3>
+<pre><code class="language-python">from openvino import Core
+import numpy as np
+
+# Initialize OpenVINO runtime
+core = Core()
+
+# Check available devices and CPU features
+devices = core.available_devices
+cpu_props = core.get_property(&quot;CPU&quot;, &quot;FULL_DEVICE_NAME&quot;)
+print(f&quot;CPU: {cpu_props}&quot;)
+
+# Read ONNX model directly (or use .xml/.bin IR format)
+model = core.read_model(&quot;resnet50.onnx&quot;)
+
+# Apply optimizations: enable dynamic shapes, set precision hints
+compiled = core.compile_model(
+    model,
+    device_name=&quot;CPU&quot;,
+    config={
+        &quot;PERFORMANCE_HINT&quot;: &quot;THROUGHPUT&quot;,       # or &quot;LATENCY&quot;
+        &quot;INFERENCE_NUM_THREADS&quot;: &quot;8&quot;,
+        &quot;INFERENCE_PRECISION_HINT&quot;: &quot;bf16&quot;,     # Use BF16 on supported CPUs
+        &quot;ENABLE_MMAP&quot;: &quot;YES&quot;,                   # Memory-map model weights
+    },
+)
+
+# Create infer request
+infer_request = compiled.create_infer_request()
+
+# Run inference
+input_tensor = np.random.randn(1, 3, 224, 224).astype(np.float32)
+infer_request.infer({0: input_tensor})
+output = infer_request.get_output_tensor(0).data
+</code></pre>
+<h3 id="32-int8-quantization-with-nncf">3.2 INT8 Quantization with NNCF</h3>
+<pre><code class="language-python">import nncf  # Neural Network Compression Framework
+
+# Post-training quantization with calibration dataset
+quantized_model = nncf.quantize(
+    model,
+    calibration_dataset=nncf.Dataset(calib_loader),
+    subset_size=300,             # Number of calibration samples
+    preset=nncf.QuantizationPreset.MIXED,  # INT8 weights + activations
+    target_device=nncf.TargetDevice.CPU,
+)
+
+# Accuracy-aware quantization (rolls back layers that hurt accuracy)
+quantized_model = nncf.quantize_with_accuracy_control(
+    model,
+    calibration_dataset=nncf.Dataset(calib_loader),
+    validation_dataset=nncf.Dataset(val_loader),
+    validation_fn=validate,
+    max_drop=0.01,  # Max 1% accuracy drop
+)
+</code></pre>
+<hr />
+<h2 id="4-vectorization-cpu-isa-extensions">4. Vectorization &amp; CPU ISA Extensions</h2>
+<p>Modern CPUs achieve ML performance through wide vector instructions. Understanding the ISA hierarchy explains the performance gaps.</p>
+<h3 id="41-isa-extension-timeline-x86">4.1 ISA Extension Timeline (x86)</h3>
+<pre><code>x86 Vector ISA Evolution
+══════════════════════════════════════════════════════════
+
+  ISA             Width    INT8 TOPS*    Key ML Feature
+  ─────────────   ─────    ──────────    ─────────────────────────
+  SSE4.2 (2008)   128-bit   ~0.1        PMADDUBSW (8→16 dot)
+  AVX2 (2013)     256-bit   ~0.4        VPMADDUBSW, FMA3
+  AVX-512 (2017)  512-bit   ~1.0        512-bit FMA
+  VNNI (2019)     512-bit   ~4.0        VPDPBUSD (INT8→INT32 dot)
+  AMX (2023)      tiles     ~100        TDPBSSD (tile matmul)
+
+  * Approximate single-core TOPS at 3 GHz
+
+  VNNI Instruction: VPDPBUSD
+  ─────────────────────────
+  Takes 64 INT8 pairs → produces 16 INT32 accumulators
+  in ONE instruction (vs 4 instructions with AVX-512)
+
+  AMX Instruction: TDPBSSD
+  ─────────────────────────
+  Multiplies 16×64 tile × 64×16 tile → 16×16 INT32 result
+  One instruction replaces ~32K scalar multiplies
+</code></pre>
+<h3 id="42-how-vnni-accelerates-int8-inference">4.2 How VNNI Accelerates INT8 Inference</h3>
+<p>The key instruction <code>VPDPBUSD</code> computes a dot product of unsigned/signed byte pairs:</p>
+<p>$$\text{dst}[i] \mathrel{+}= \sum_{j=0}^{3} \text{src1}[4i+j]_{\text{u8}} \times \text{src2}[4i+j]_{\text{s8}}$$</p>
+<p>For a single AVX-512 register (512 bits):
+- 64 INT8 values × 64 INT8 values → 16 INT32 partial sums
+- <strong>Per cycle per core</strong>: 64 multiply-accumulate operations
+- <strong>Per core at 3 GHz</strong>: ~192 GOPS (INT8)</p>
+<h3 id="43-intel-amx-for-matrix-workloads">4.3 Intel AMX for Matrix Workloads</h3>
+<pre><code>AMX Tile Architecture (Sapphire Rapids+)
+══════════════════════════════════════════════════════════
+
+  8 tile registers, each up to 16 rows × 64 bytes:
+
+  ┌──────────────────────────────────────────────────────┐
+  │ Tile T0  (16 × 64 bytes = 1 KiB)                    │
+  │ ┌────────────────────────────────────────────────┐   │
+  │ │ Row 0:  64 × INT8  or  32 × BF16              │   │
+  │ │ Row 1:  ...                                     │   │
+  │ │ ...                                             │   │
+  │ │ Row 15: ...                                     │   │
+  │ └────────────────────────────────────────────────┘   │
+  └──────────────────────────────────────────────────────┘
+
+  TDPBSSD (Tile Dot Product Bytes Signed-Signed Dword):
+  ┌──────────┐   ┌──────────┐     ┌──────────┐
+  │ Tile A   │ × │ Tile B   │  =  │ Tile C   │
+  │ 16 × 64  │   │ 64 × 16  │     │ 16 × 16  │
+  │ (INT8)   │   │ (INT8)   │     │ (INT32)  │
+  └──────────┘   └──────────┘     └──────────┘
+
+  Result: 16 × 16 × 64 = 16,384 INT8 MACs per instruction
+  At ~1 GHz effective: ~16 INT8 TOPS per core
+</code></pre>
+<hr />
+<h2 id="5-threading-intra-op-vs-inter-op-parallelism">5. Threading: Intra-Op vs Inter-Op Parallelism</h2>
+<p>CPU inference performance depends heavily on how threads are assigned across and within operators.</p>
+<h3 id="51-threading-models">5.1 Threading Models</h3>
+<pre><code>Threading Strategies for CPU Inference
+══════════════════════════════════════════════════════════
+
+  Intra-op parallelism (threads within one operator):
+  ┌─────────────────────────────────────────────────┐
+  │  Conv2d (big GEMM)                              │
+  │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐          │
+  │  │ T0   │ │ T1   │ │ T2   │ │ T3   │          │
+  │  │ rows │ │ rows │ │ rows │ │ rows │          │
+  │  │ 0-63 │ │64-127│ │128-  │ │192-  │          │
+  │  └──────┘ └──────┘ └──────┘ └──────┘          │
+  │  → Each thread processes a tile of the output   │
+  └─────────────────────────────────────────────────┘
+
+  Inter-op parallelism (independent operators run in parallel):
+  ┌────────────────────────────────────────────┐
+  │  Branch A              Branch B            │
+  │  ┌──────┐              ┌──────┐           │
+  │  │ Conv │  (parallel)  │ Pool │           │
+  │  │  T0  │              │  T1  │           │
+  │  └──┬───┘              └──┬───┘           │
+  │     └───────┬──────────┘                  │
+  │             ▼                              │
+  │        ┌──────┐                            │
+  │        │ Add  │                            │
+  │        └──────┘                            │
+  └────────────────────────────────────────────┘
+</code></pre>
+<h3 id="52-threading-guidelines">5.2 Threading Guidelines</h3>
+<pre><code class="language-python">import os
+
+# Rule of thumb for threading configuration
+num_physical_cores = os.cpu_count() // 2  # Exclude hyperthreads
+
+# Latency-optimized (single request, minimize time)
+opts_latency = ort.SessionOptions()
+opts_latency.intra_op_num_threads = num_physical_cores
+opts_latency.inter_op_num_threads = 1
+
+# Throughput-optimized (multiple requests, maximize utilization)
+opts_throughput = ort.SessionOptions()
+opts_throughput.intra_op_num_threads = 4
+opts_throughput.inter_op_num_threads = num_physical_cores // 4
+
+# NUMA-aware: bind to one socket
+os.environ[&quot;OMP_NUM_THREADS&quot;] = str(num_physical_cores // 2)  # One socket
+os.environ[&quot;KMP_AFFINITY&quot;] = &quot;granularity=fine,compact,1,0&quot;
+</code></pre>
+<p><strong>Key insight</strong>: Hyperthreads share execution units and caches. For compute-bound ML inference, using only physical cores often gives <strong>better</strong> throughput than using all logical cores.</p>
+<hr />
+<h2 id="6-benchmarking-cpu-inference-pipelines">6. Benchmarking CPU Inference Pipelines</h2>
+<h3 id="61-fair-benchmarking-protocol">6.1 Fair Benchmarking Protocol</h3>
+<pre><code class="language-python">import time
+import numpy as np
+import onnxruntime as ort
+
+def benchmark_cpu_inference(model_path, input_shape, num_warmup=50, num_runs=200):
+    &quot;&quot;&quot;Benchmark ONNX model on CPU with proper methodology.&quot;&quot;&quot;
+
+    opts = ort.SessionOptions()
+    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    opts.intra_op_num_threads = 4
+
+    session = ort.InferenceSession(
+        model_path, sess_options=opts, providers=[&quot;CPUExecutionProvider&quot;]
+    )
+    input_name = session.get_inputs()[0].name
+    dummy = np.random.randn(*input_shape).astype(np.float32)
+
+    # Warmup (JIT compilation, cache warming)
+    for _ in range(num_warmup):
+        session.run(None, {input_name: dummy})
+
+    # Timed runs — collect individual latencies
+    latencies = []
+    for _ in range(num_runs):
+        start = time.perf_counter()
+        session.run(None, {input_name: dummy})
+        latencies.append((time.perf_counter() - start) * 1000)
+
+    latencies = np.array(latencies)
+    print(f&quot;Model: {model_path}&quot;)
+    print(f&quot;  Mean latency:  {latencies.mean():.2f} ms&quot;)
+    print(f&quot;  P50 latency:   {np.percentile(latencies, 50):.2f} ms&quot;)
+    print(f&quot;  P99 latency:   {np.percentile(latencies, 99):.2f} ms&quot;)
+    print(f&quot;  Std dev:       {latencies.std():.2f} ms&quot;)
+    print(f&quot;  Throughput:    {1000 / latencies.mean():.1f} infer/s&quot;)
+    return latencies
+
+
+# Compare FP32 vs INT8
+benchmark_cpu_inference(&quot;resnet50_fp32.onnx&quot;, (1, 3, 224, 224))
+benchmark_cpu_inference(&quot;resnet50_int8.onnx&quot;, (1, 3, 224, 224))
+</code></pre>
+<h3 id="62-system-level-monitoring-during-benchmark">6.2 System-Level Monitoring During Benchmark</h3>
+<pre><code class="language-bash">#!/bin/bash
+# Monitor CPU during inference benchmark
+
+# Pin to physical cores 0-7 (first socket)
+export OMP_NUM_THREADS=8
+export GOMP_CPU_AFFINITY=&quot;0-7&quot;
+
+# Disable frequency scaling for consistent results
+echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+
+# Run benchmark with perf stat
+perf stat -e cycles,instructions,cache-misses,LLC-load-misses \
+    python benchmark.py 2&gt;&amp;1 | tee bench_results.txt
+
+# Check which ISA extensions were used
+perf record -e cpu/event=0xc7,umask=0x01/ python benchmark.py
+# → look for AVX-512 or AMX usage in perf report
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-threading-sweep">Exercise 1: Threading Sweep</h3>
+<p>Benchmark a ResNet-50 ONNX model varying <code>intra_op_num_threads</code> from 1 to <code>os.cpu_count()</code>. Plot latency vs thread count. Find the "knee" where adding threads no longer helps.</p>
+<h3 id="exercise-2-ort-vs-openvino-comparison">Exercise 2: ORT vs OpenVINO Comparison</h3>
+<p>Take the same INT8-quantized model and benchmark it with ONNX Runtime CPU EP and OpenVINO on the same machine. Compare P50, P99 latencies, and throughput.</p>
+<h3 id="exercise-3-vnni-detection">Exercise 3: VNNI Detection</h3>
+<p>Write a script that checks for VNNI support (<code>lscpu | grep vnni</code>), then benchmarks INT8 vs FP32 inference. Report the speedup ratio — on VNNI hardware, INT8 should be 2–4× faster.</p>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>CPUs serve the majority of production inference</strong> — understanding CPU optimization is not optional, even if GPUs get the attention</li>
+<li><strong>ISA extensions are the multiplier</strong> — AVX-512 VNNI gives ~4× INT8 throughput over plain AVX-512; AMX adds another ~10× on top</li>
+<li><strong>Threading strategy matters</strong> — use physical cores only, bind to NUMA nodes, and balance intra-op vs inter-op threads for your workload pattern</li>
+<li><strong>ONNX Runtime vs OpenVINO</strong> — ORT is more portable; OpenVINO extracts more performance on Intel hardware. Benchmark both for your target</li>
+<li><strong>Graph optimizations are free performance</strong> — enable <code>ORT_ENABLE_ALL</code>; fusion + layout transforms can give 20–40% speedup before touching precision</li>
+<li><strong>Benchmark methodology is critical</strong> — pin frequency, warm up caches, collect percentile latencies, and disable turbo boost for reproducible results</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://onnxruntime.ai/docs/performance/tune-performance.html">ONNX Runtime Performance Tuning Guide</a></li>
+<li><a href="https://docs.openvino.ai/">Intel OpenVINO Documentation</a></li>
+<li><a href="https://oneapi-src.github.io/oneDNN/">oneDNN Developer Guide</a></li>
+<li><a href="https://www.intel.com/content/www/us/en/develop/documentation/intrinsics-guide/top/amx.html">Intel AMX Programming Reference</a></li>
+<li><a href="https://github.com/openvinotoolkit/nncf">NNCF (Neural Network Compression Framework)</a></li>
+<li><a href="https://github.com/microsoft/onnxruntime/tree/main/onnxruntime/core/mlas">MLAS Internals (ONNX Runtime)</a></li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p><strong>Day 55: Inference on Edge Devices</strong> — When your target is a phone, Raspberry Pi, or microcontroller, everything changes. You'll explore TFLite, Core ML, NNAPI delegates, and TVM's µTVM, learning to navigate the latency-power-accuracy tradeoff triangle that defines edge deployment.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-53-tensorrt-optimization.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 53: TensorRT Optimization</a>
+            <a href="day-55-inference-on-edge.html" class="text-emerald-600 hover:text-emerald-800">Day 55: Inference on Edge Devices &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

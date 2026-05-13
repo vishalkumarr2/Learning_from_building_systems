@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 6: Matrix Multiply — Naive to Tiled - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 1: GPU Architecture & CUDA</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-6-matrix-multiply-naive-to-tiled">Day 6: Matrix Multiply — Naive to Tiled</h1>
+<blockquote>
+<p><strong>Phase I — GPU Foundations &amp; CUDA</strong> · Week 1 · Day 6 of 70</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Previous</th>
+<th>Next</th>
+<th>Week</th>
+<th>Phase</th>
+<th>Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="day-05-cuda-profiling-roofline.html">Day 5: CUDA Profiling &amp; Roofline</a></td>
+<td><a href="day-07-mini-project-gemm.html">Day 7: Mini-Project — Profile &amp; Optimize a GEMM</a></td>
+<td><a href="../week-01/">Week 1</a></td>
+<td><a href="../../#phase-i">Phase I</a></td>
+<td><a href="../../STUDY-PLAN.html">Curriculum Home</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>General Matrix Multiply (GEMM) is the computational backbone of deep learning. A single transformer forward pass on GPT-3 executes thousands of GEMMs. cuBLAS SGEMM achieves &gt;90% of peak FLOPS — understanding how it gets there teaches you every GPU optimization technique in one kernel. Today you'll write three versions and watch performance climb from ~2% to ~60% of cuBLAS.</p>
+<hr />
+<h2 id="1-the-math">1. The Math</h2>
+<p>Matrix multiply $C = A \times B$ where $A$ is $M \times K$, $B$ is $K \times N$, $C$ is $M \times N$:</p>
+<p>$$C_{i,j} = \sum_{k=0}^{K-1} A_{i,k} \cdot B_{k,j}$$</p>
+<p>Computational complexity:
+- <strong>FLOPs</strong>: $2 \times M \times N \times K$ (one multiply + one add per $k$)
+- <strong>Memory</strong>: $(M \times K + K \times N + M \times N) \times 4$ bytes (FP32, read A, B, write C)</p>
+<p>Arithmetic intensity for square $N \times N$:</p>
+<p>$$\text{AI} = \frac{2N^3}{4 \cdot 3N^2} = \frac{N}{6}$$</p>
+<p>At $N = 4096$: AI ≈ 683 → deeply <strong>compute-bound</strong>. We must maximize FLOP throughput.</p>
+<hr />
+<h2 id="2-version-1-naive-sgemm">2. Version 1: Naive SGEMM</h2>
+<h3 id="21-idea">2.1 Idea</h3>
+<p>Each thread computes one element of $C$ by doing a dot product of a row of $A$ with a column of $B$.</p>
+<pre><code>A (M×K)           B (K×N)           C (M×N)
+┌─────────┐      ┌─────────┐      ┌─────────┐
+│→→→→→→→→→│      │ ↓       │      │         │
+│         │  ×   │ ↓       │  =   │    *    │ ← C[i][j]
+│         │      │ ↓       │      │         │
+└─────────┘      └─────────┘      └─────────┘
+  row i            col j
+</code></pre>
+<h3 id="22-kernel-code">2.2 Kernel Code</h3>
+<pre><code class="language-cuda">__global__ void sgemm_naive(const float *A, const float *B, float *C,
+                            int M, int N, int K) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (row &lt; M &amp;&amp; col &lt; N) {
+        float sum = 0.0f;
+        for (int k = 0; k &lt; K; k++) {
+            sum += A[row * K + k] * B[k * N + col];
+        }
+        C[row * N + col] = sum;
+    }
+}
+
+// Launch
+dim3 block(16, 16);
+dim3 grid((N + 15) / 16, (M + 15) / 16);
+sgemm_naive&lt;&lt;&lt;grid, block&gt;&gt;&gt;(d_A, d_B, d_C, M, N, K);
+</code></pre>
+<h3 id="23-why-its-slow">2.3 Why It's Slow</h3>
+<p>Each thread reads $K$ elements from A and $K$ elements from B. Across the entire grid:</p>
+<ul>
+<li><strong>Total global reads</strong>: $M \times N \times K$ (from A) + $M \times N \times K$ (from B) = $2MNK$</li>
+<li>Each element of A is read $N$ times; each element of B is read $M$ times.</li>
+<li>For $M = N = K = 4096$: that's $2 \times 4096^3 \times 4 = 512$ GB of DRAM traffic!</li>
+</ul>
+<pre><code>                A[row][k] — same row read by N threads in column
+                B[k][col] — same column read by M threads in row
+
+Redundancy factor: O(N) per element
+</code></pre>
+<p><strong>Performance (4096×4096, A100)</strong>: ~350 GFLOPS → <strong>1.8% of peak</strong> (19.5 TFLOPS)</p>
+<hr />
+<h2 id="3-version-2-tiled-gemm-with-shared-memory">3. Version 2: Tiled GEMM with Shared Memory</h2>
+<h3 id="31-the-tiling-idea">3.1 The Tiling Idea</h3>
+<p>Instead of each thread independently reading from global memory, threads in a block <strong>cooperatively load tiles</strong> of A and B into shared memory, then compute from shared memory.</p>
+<pre><code>Outer loop: slide a TILE×TILE window across K dimension
+
+Step t=0:                Step t=1:               Step t=2:
+A tile     B tile        A tile     B tile       A tile     B tile
+┌────┐    ┌────┐        ┌────┐    ┌────┐       ┌────┐    ┌────┐
+│ A0 │    │ B0 │        │ A1 │    │ B1 │       │ A2 │    │ B2 │
+└────┘    └────┘        └────┘    └────┘       └────┘    └────┘
+
+C_tile += A0 × B0      C_tile += A1 × B1      C_tile += A2 × B2
+</code></pre>
+<h3 id="32-memory-traffic-reduction">3.2 Memory Traffic Reduction</h3>
+<p>With tile size $T$:
+- Each tile of A ($T \times T$) is loaded once per block, shared by $T$ threads in the column direction
+- Each tile of B ($T \times T$) is loaded once per block, shared by $T$ threads in the row direction</p>
+<p><strong>Total global reads per block</strong>: $2 \times T^2 \times (K/T) = 2TK$</p>
+<p><strong>Total across all blocks</strong>: $\frac{M}{T} \times \frac{N}{T} \times 2TK = \frac{2MNK}{T}$</p>
+<p>Reduction factor vs naive: <strong>$T\times$</strong> less global memory traffic!</p>
+<p>With $T = 32$: 32× fewer global memory reads.</p>
+<h3 id="33-kernel-code">3.3 Kernel Code</h3>
+<pre><code class="language-cuda">#define TILE 32
+
+__global__ void sgemm_tiled(const float *A, const float *B, float *C,
+                            int M, int N, int K) {
+    __shared__ float As[TILE][TILE];
+    __shared__ float Bs[TILE][TILE];
+
+    int row = blockIdx.y * TILE + threadIdx.y;
+    int col = blockIdx.x * TILE + threadIdx.x;
+    float sum = 0.0f;
+
+    // Loop over tiles along K
+    for (int t = 0; t &lt; (K + TILE - 1) / TILE; t++) {
+        // Collaborative load: each thread loads one element
+        int a_col = t * TILE + threadIdx.x;
+        int b_row = t * TILE + threadIdx.y;
+
+        As[threadIdx.y][threadIdx.x] = (row &lt; M &amp;&amp; a_col &lt; K)
+            ? A[row * K + a_col] : 0.0f;
+        Bs[threadIdx.y][threadIdx.x] = (b_row &lt; K &amp;&amp; col &lt; N)
+            ? B[b_row * N + col] : 0.0f;
+
+        __syncthreads();
+
+        // Compute partial dot product from shared memory
+        for (int k = 0; k &lt; TILE; k++) {
+            sum += As[threadIdx.y][k] * Bs[k][threadIdx.x];
+        }
+
+        __syncthreads();
+    }
+
+    if (row &lt; M &amp;&amp; col &lt; N) {
+        C[row * N + col] = sum;
+    }
+}
+</code></pre>
+<h3 id="34-performance-analysis">3.4 Performance Analysis</h3>
+<p>For the inner loop (<code>for k in 0..TILE</code>):
+- 2 shared memory reads + 1 FMA = 2 reads + 2 FLOPs per iteration
+- Shared memory latency: ~20 cycles vs global ~400 cycles</p>
+<p><strong>Performance (4096×4096, A100)</strong>: ~3800 GFLOPS → <strong>19.5% of peak</strong></p>
+<p>Major improvement over naive, but still far from cuBLAS. Why?</p>
+<hr />
+<h2 id="4-version-3-register-blocking-22-per-thread">4. Version 3: Register Blocking (2×2 Per Thread)</h2>
+<h3 id="41-the-problem-with-version-2">4.1 The Problem with Version 2</h3>
+<p>Each thread computes <strong>1 output element</strong> but loads from shared memory every cycle. The ratio:
+- 2 shared memory loads per 2 FLOPs → compute intensity = 1.0
+- Shared memory bandwidth becomes the bottleneck!</p>
+<h3 id="42-register-blocking-more-work-per-thread">4.2 Register Blocking — More Work Per Thread</h3>
+<p>Each thread computes a <strong>2×2 (or 4×4) sub-tile</strong> of C, reusing A and B values loaded into registers:</p>
+<pre><code>Thread computes C[ry:ry+2][cx:cx+2]:
+
+For each k:
+  a0 = As[ry+0][k]     ← load once
+  a1 = As[ry+1][k]     ← load once
+  b0 = Bs[k][cx+0]     ← load once
+  b1 = Bs[k][cx+1]     ← load once
+
+  c00 += a0 * b0        ← reuse a0, b0
+  c01 += a0 * b1        ← reuse a0
+  c10 += a1 * b0        ← reuse b0
+  c11 += a1 * b1        ← reuse a1, b1
+
+Shared mem loads: 4      FLOPs: 8     Ratio: 2.0 (vs 1.0 before)
+</code></pre>
+<p>For a $R \times R$ register tile:
+$$\text{Loads} = 2R, \quad \text{FLOPs} = 2R^2, \quad \text{Ratio} = R$$</p>
+<h3 id="43-kernel-code-22-register-blocking">4.3 Kernel Code (2×2 Register Blocking)</h3>
+<pre><code class="language-cuda">#define TILE 32
+#define REG  2   // each thread computes REG×REG outputs
+
+__global__ void sgemm_reg_blocked(const float *A, const float *B, float *C,
+                                  int M, int N, int K) {
+    __shared__ float As[TILE][TILE];
+    __shared__ float Bs[TILE][TILE];
+
+    // Thread position — note: fewer threads per block needed
+    int ty = threadIdx.y;  // 0..TILE/REG-1
+    int tx = threadIdx.x;  // 0..TILE/REG-1
+
+    int row_base = blockIdx.y * TILE + ty * REG;
+    int col_base = blockIdx.x * TILE + tx * REG;
+
+    // Register accumulators
+    float c[REG][REG] = {{0.0f}};
+
+    for (int t = 0; t &lt; (K + TILE - 1) / TILE; t++) {
+        // Load tile — each thread loads REG elements of A and B
+        for (int r = 0; r &lt; REG; r++) {
+            int a_row = row_base + r;
+            int a_col = t * TILE + tx * REG;
+            for (int rr = 0; rr &lt; REG; rr++) {
+                As[ty * REG + r][tx * REG + rr] =
+                    (a_row &lt; M &amp;&amp; (a_col + rr) &lt; K)
+                    ? A[a_row * K + a_col + rr] : 0.0f;
+            }
+            int b_row = t * TILE + ty * REG + r;
+            int b_col = col_base;
+            for (int rr = 0; rr &lt; REG; rr++) {
+                Bs[ty * REG + r][tx * REG + rr] =
+                    (b_row &lt; K &amp;&amp; (b_col + rr) &lt; N)
+                    ? B[b_row * N + b_col + rr] : 0.0f;
+            }
+        }
+        __syncthreads();
+
+        // Compute with register reuse
+        for (int k = 0; k &lt; TILE; k++) {
+            float a[REG], b[REG];
+            for (int r = 0; r &lt; REG; r++) {
+                a[r] = As[ty * REG + r][k];
+                b[r] = Bs[k][tx * REG + r];
+            }
+            for (int ri = 0; ri &lt; REG; ri++) {
+                for (int rj = 0; rj &lt; REG; rj++) {
+                    c[ri][rj] += a[ri] * b[rj];
+                }
+            }
+        }
+        __syncthreads();
+    }
+
+    // Write results
+    for (int ri = 0; ri &lt; REG; ri++) {
+        for (int rj = 0; rj &lt; REG; rj++) {
+            int r = row_base + ri;
+            int cc = col_base + rj;
+            if (r &lt; M &amp;&amp; cc &lt; N) {
+                C[r * N + cc] = c[ri][rj];
+            }
+        }
+    }
+}
+
+// Launch: fewer threads since each handles REG×REG outputs
+dim3 block(TILE / REG, TILE / REG);  // 16×16 = 256 threads
+dim3 grid((N + TILE - 1) / TILE, (M + TILE - 1) / TILE);
+</code></pre>
+<p><strong>Performance (4096×4096, A100)</strong>: ~7200 GFLOPS → <strong>37% of peak</strong></p>
+<hr />
+<h2 id="5-performance-comparison">5. Performance Comparison</h2>
+<h3 id="51-benchmark-results-m-n-k-4096-fp32-a100">5.1 Benchmark Results (M = N = K = 4096, FP32, A100)</h3>
+<pre><code>Version                     GFLOPS    % of cuBLAS    Global Reads
+──────────────────────────────────────────────────────────────────
+V1: Naive                     350        1.9%        2 × M×N×K
+V2: Tiled (TILE=32)          3800       20.5%        2 × M×N×K / 32
+V3: Reg-blocked (2×2)        7200       38.9%        same as V2
+V4: Reg-blocked (4×4)       11500       62.2%        same as V2
+cuBLAS                      18500      100.0%        highly optimized
+</code></pre>
+<h3 id="52-what-cublas-does-beyond-v3">5.2 What cuBLAS Does Beyond V3</h3>
+<pre><code>cuBLAS additional optimizations:
+├── 8×8 or 16×16 register blocking
+├── Double buffering (prefetch next tile while computing current)
+├── Vectorized loads (float4 = 128-bit loads)
+├── Warp-level matrix operations (wmma/mma PTX instructions)
+├── Heuristic tile-size selection based on M, N, K
+├── Multi-level tiling (thread-block tile → warp tile → thread tile)
+└── Assembly-level tuning for specific GPU architectures
+</code></pre>
+<h3 id="53-scaling-with-matrix-size">5.3 Scaling With Matrix Size</h3>
+<pre><code>Size          Naive    Tiled    Reg(4×4)  cuBLAS
+─────────────────────────────────────────────────
+ 256×256       180      650      1200      3500
+ 512×512       250     1800      4200      9800
+1024×1024      310     2900      7800     15200
+2048×2048      340     3500     10200     17500
+4096×4096      350     3800     11500     18500
+</code></pre>
+<p>Small matrices are harder — not enough parallelism to saturate the GPU.</p>
+<hr />
+<h2 id="6-loop-unrolling">6. Loop Unrolling</h2>
+<p>The compiler can unroll the inner <code>k</code> loop for higher ILP:</p>
+<pre><code class="language-cuda">// Manual unrolling (or use #pragma unroll)
+#pragma unroll
+for (int k = 0; k &lt; TILE; k++) {
+    // compiler generates TILE separate FMA instructions
+    // no loop overhead, better instruction scheduling
+}
+</code></pre>
+<p>Impact on the register-blocked kernel:</p>
+<pre><code>Without #pragma unroll:  7200 GFLOPS
+With    #pragma unroll: 11500 GFLOPS  (+60%)
+</code></pre>
+<p>The compiler can also unroll with <code>-O3</code>, but <code>#pragma unroll</code> is explicit and reliable.</p>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<ol>
+<li>
+<p><strong>Implement all three versions</strong>: Naive, tiled (TILE=16 and TILE=32), and register-blocked (REG=2, REG=4). Time each with <code>cudaEvent_t</code>.</p>
+</li>
+<li>
+<p><strong>Verify correctness</strong>: Compare each version against cuBLAS output using max absolute error (should be &lt; $10^{-5}$ for FP32).</p>
+</li>
+<li>
+<p><strong>Profile with ncu</strong>: For each version, record:
+   - SM throughput %
+   - Memory throughput %
+   - Achieved FLOPS
+   - Dominant warp stall reason</p>
+</li>
+<li>
+<p><strong>Tile size sweep</strong>: Try TILE = 8, 16, 32, 64. Plot GFLOPS vs tile size. Why does 64 sometimes perform worse than 32?</p>
+</li>
+<li>
+<p><strong>cuBLAS comparison</strong>: Use <code>cublasSgemm</code> and measure the gap. How close can you get?</p>
+</li>
+</ol>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li>Naive GEMM achieves ~2% of peak because each element is read $O(N)$ times from slow global memory.</li>
+<li><strong>Tiling</strong> with shared memory reduces global reads by $T\times$, where $T$ is the tile size.</li>
+<li><strong>Register blocking</strong> increases the compute-to-shared-memory-load ratio from 1 to $R$ (register tile dimension).</li>
+<li><code>#pragma unroll</code> and vectorized loads provide another 1.5–2× on top of algorithmic improvements.</li>
+<li>cuBLAS uses multi-level tiling, assembly tuning, and Tensor Core instructions to reach &gt;90% of peak.</li>
+<li>The progression Naive → Tiled → Register-blocked → cuBLAS mirrors what ML compilers (Triton, TVM) generate automatically.</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Volkov &amp; Demmel, "Benchmarking GPUs to Tune Dense Linear Algebra" (SC'08) — <a href="https://people.eecs.berkeley.edu/~volkov/volkov08-sc.pdf">PDF</a></li>
+<li><a href="https://github.com/NVIDIA/cutlass">CUTLASS: CUDA Templates for Linear Algebra Subroutines</a> — NVIDIA's open-source GEMM library</li>
+<li>Huang et al., "Strassen's Algorithm Reloaded on GPUs" (SC'16)</li>
+<li><a href="https://siboehm.com/articles/22/CUDA-MMM">How to Optimize a CUDA Matmul Kernel</a> — Simon Boehm's excellent walkthrough</li>
+</ul>
+<hr />
+<blockquote>
+<p><strong>Tomorrow</strong>: <a href="day-07-mini-project-gemm.html">Day 7 — Mini-Project: Profile &amp; Optimize a GEMM</a>. You'll implement all four GEMM versions, benchmark them against cuBLAS, build a roofline plot, and write up a performance analysis covering everything from Week 1.</p>
+</blockquote>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-05-cuda-profiling-roofline.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 5: CUDA Profiling & Roofline</a>
+            <a href="day-07-mini-project-gemm.html" class="text-emerald-600 hover:text-emerald-800">Day 7: Mini-Project — GEMM &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

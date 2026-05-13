@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13: Operator Fusion Fundamentals - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 2: PyTorch Internals</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-13-operator-fusion-fundamentals">Day 13: Operator Fusion Fundamentals</h1>
+<blockquote>
+<p><strong>Phase I · Week 2 · Day 13 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The fastest memory access is the one that never happens."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">�phase Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-12-eager-vs-graph-mode.html">Day 12: Eager vs Graph Mode</a></td>
+<td style="text-align: left;"><a href="day-14-stop-and-reflect-1.html">Day 14: Stop &amp; Reflect #1</a></td>
+<td style="text-align: left;"><a href="README.html">Week 2: PyTorch Internals</a></td>
+<td style="text-align: left;">Phase I: Foundations</td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Curriculum Home</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>On modern GPUs, <strong>arithmetic is essentially free</strong> — the bottleneck is moving data between global memory (HBM) and compute cores (SMs). A single A100 can perform 312 TFLOPS of FP16 math but only transfer 2 TB/s of memory. That means for element-wise operations like <code>relu(x * 2 + bias)</code>, we spend more time <em>loading and storing</em> tensors than <em>computing</em> them. <strong>Operator fusion</strong> eliminates redundant memory traffic by combining multiple operations into a single kernel, often delivering 2–5× speedups for memory-bound workloads.</p>
+<hr />
+<h2 id="1-the-memory-wall-why-fusion-matters">1. The Memory Wall: Why Fusion Matters</h2>
+<h3 id="arithmetic-intensity">Arithmetic Intensity</h3>
+<p>The ratio of compute to memory access determines whether an operation is <strong>compute-bound</strong> or <strong>memory-bound</strong>:</p>
+<p>$$\text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes accessed}}$$</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Operation</th>
+<th style="text-align: left;">FLOPs/element</th>
+<th style="text-align: left;">Bytes/element (FP32)</th>
+<th style="text-align: left;">Arith. Intensity</th>
+<th style="text-align: left;">Bound</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">ReLU</td>
+<td style="text-align: left;">1</td>
+<td style="text-align: left;">8 (read + write)</td>
+<td style="text-align: left;">0.125</td>
+<td style="text-align: left;">Memory</td>
+</tr>
+<tr>
+<td style="text-align: left;">Element-wise add</td>
+<td style="text-align: left;">1</td>
+<td style="text-align: left;">12 (2 reads + 1 write)</td>
+<td style="text-align: left;">0.083</td>
+<td style="text-align: left;">Memory</td>
+</tr>
+<tr>
+<td style="text-align: left;">GELU</td>
+<td style="text-align: left;">~10</td>
+<td style="text-align: left;">8</td>
+<td style="text-align: left;">1.25</td>
+<td style="text-align: left;">Memory</td>
+</tr>
+<tr>
+<td style="text-align: left;">MatMul (large)</td>
+<td style="text-align: left;">$2N$ per element</td>
+<td style="text-align: left;">$O(1/N)$ amortized</td>
+<td style="text-align: left;">$O(N)$</td>
+<td style="text-align: left;">Compute</td>
+</tr>
+<tr>
+<td style="text-align: left;">LayerNorm</td>
+<td style="text-align: left;">~5</td>
+<td style="text-align: left;">8 + reduction</td>
+<td style="text-align: left;">~0.5</td>
+<td style="text-align: left;">Memory</td>
+</tr>
+</tbody>
+</table>
+<p>For an A100 (312 TFLOPS FP16, 2 TB/s bandwidth):</p>
+<p>$$\text{Ridge point} = \frac{312 \times 10^{12}}{2 \times 10^{12}} = 156 \text{ FLOPs/byte}$$</p>
+<p>Any operation below 156 FLOPs/byte is <strong>memory-bound</strong>. That includes nearly every activation function, normalization, and element-wise operation.</p>
+<h3 id="unfused-vs-fused-memory-traffic-analysis">Unfused vs Fused: Memory Traffic Analysis</h3>
+<p>Consider <code>y = relu(x * 2 + bias)</code> on a tensor of $N$ FP32 elements:</p>
+<pre><code>UNFUSED (3 separate kernels):
+
+Kernel 1: mul         Kernel 2: add         Kernel 3: relu
+─────────────────     ─────────────────     ─────────────────
+Read  x    (4N B)     Read  t1   (4N B)     Read  t2   (4N B)
+Read  2    (4  B)     Read  bias (4N B)     Write y    (4N B)
+Write t1   (4N B)     Write t2   (4N B)
+
+Total: 4N + 4N        Total: 4N + 4N + 4N   Total: 4N + 4N
+     = 8N bytes            = 12N bytes            = 8N bytes
+
+Grand total: 28N bytes transferred
+             3 kernel launches (~15-45 μs overhead)
+</code></pre>
+<pre><code>FUSED (1 kernel):
+
+Kernel: fused_mul_add_relu
+─────────────────────────
+Read  x    (4N B)
+Read  bias (4N B)
+Write y    (4N B)
+
+Total: 12N bytes transferred
+       1 kernel launch (~5-15 μs overhead)
+</code></pre>
+<p>$$\text{Memory savings} = 1 - \frac{12N}{28N} = 57\%$$</p>
+<p>For $N = 1M$ elements: unfused reads/writes <strong>112 MB</strong>, fused reads/writes <strong>48 MB</strong>.</p>
+<hr />
+<h2 id="2-fusion-categories">2. Fusion Categories</h2>
+<h3 id="21-vertical-fusion-producer-consumer">2.1 Vertical Fusion (Producer-Consumer)</h3>
+<p>Fuses operations that form a <strong>chain</strong> — the output of one feeds directly into the next:</p>
+<pre><code>BEFORE (vertical chain):          AFTER (fused):
+
+┌──────┐                          ┌──────────────────┐
+│ Add  │ → write to HBM           │                  │
+└──┬───┘                          │  Fused kernel:   │
+   │ read from HBM                │  add → mul → relu│
+┌──┴───┐                          │                  │
+│ Mul  │ → write to HBM           │  (intermediates  │
+└──┬───┘                          │   stay in regs)  │
+   │ read from HBM                │                  │
+┌──┴───┐                          └──────────────────┘
+│ ReLU │ → write to HBM
+└──────┘
+
+6 HBM accesses                    2 HBM accesses
+                                  (1 read input, 1 write output)
+</code></pre>
+<p><strong>Rule:</strong> Fusable when the downstream op reads exactly what the upstream op wrote, element-by-element.</p>
+<h3 id="22-horizontal-fusion-independent-operations">2.2 Horizontal Fusion (Independent Operations)</h3>
+<p>Fuses operations that have <strong>no data dependency</strong> but operate on the same input:</p>
+<pre><code>BEFORE:                           AFTER:
+
+     ┌───┐                             ┌───┐
+     │ x │                             │ x │
+     └─┬─┘                             └─┬─┘
+    ┌──┴──┐                              │
+    │     │                        ┌─────┴─────┐
+ ┌──┴──┐ ┌┴───┐                   │  Fused:   │
+ │sin  │ │cos │     ──────►        │ sin + cos │
+ └──┬──┘ └┬───┘                   │(1 read,   │
+    │     │                        │ 2 writes) │
+    ▼     ▼                        └─────┬─────┘
+   y1    y2                           ┌──┴──┐
+                                      ▼     ▼
+ 2 reads of x                       y1    y2
+
+                                   1 read of x
+</code></pre>
+<p><strong>Rule:</strong> Fusable when independent ops share input tensors or have compatible iteration domains.</p>
+<h3 id="23-element-wise-fusion-pointwise">2.3 Element-wise Fusion (Pointwise)</h3>
+<p>The most common and easiest fusion — all operations are element-wise with identical shapes:</p>
+<pre><code class="language-python"># All of these can be fused into a single kernel:
+def pointwise_chain(x, w, b):
+    y = x * w        # element-wise mul
+    y = y + b        # element-wise add
+    y = y.relu()     # element-wise relu
+    y = y * 0.5      # element-wise scale
+    return y
+</code></pre>
+<h3 id="24-reduction-fusion">2.4 Reduction Fusion</h3>
+<p>Fusing element-wise ops with a final reduction (sum, mean, max):</p>
+<pre><code class="language-python"># Fuse: element-wise chain + reduction
+def fused_loss(logits, targets):
+    diff = logits - targets    # element-wise
+    sq = diff * diff           # element-wise
+    return sq.mean()           # reduction
+
+# Without fusion: 3 kernels + 3 HBM round-trips
+# With fusion: element-wise part fused, reduction may be separate
+</code></pre>
+<hr />
+<h2 id="3-fusion-rules-and-constraints">3. Fusion Rules and Constraints</h2>
+<p>Not all operations can be fused. Key constraints:</p>
+<h3 id="what-can-be-fused">What CAN Be Fused</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Pattern</th>
+<th style="text-align: left;">Example</th>
+<th style="text-align: left;">Why It Works</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Pointwise → Pointwise</td>
+<td style="text-align: left;"><code>relu(x + y)</code></td>
+<td style="text-align: left;">Same iteration domain, no deps</td>
+</tr>
+<tr>
+<td style="text-align: left;">Pointwise → Reduction</td>
+<td style="text-align: left;"><code>(x * y).sum()</code></td>
+<td style="text-align: left;">Element-wise feeds reduction</td>
+</tr>
+<tr>
+<td style="text-align: left;">Matmul → Pointwise</td>
+<td style="text-align: left;"><code>relu(A @ B)</code></td>
+<td style="text-align: left;">Epilogue fusion in CUTLASS/cuBLAS</td>
+</tr>
+<tr>
+<td style="text-align: left;">Conv → BN → ReLU</td>
+<td style="text-align: left;">Common in CNNs</td>
+<td style="text-align: left;">Classic inference fusion</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-cannot-be-fused-easily">What CANNOT Be Fused (Easily)</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Pattern</th>
+<th style="text-align: left;">Example</th>
+<th style="text-align: left;">Why It Fails</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Reduction → Pointwise</td>
+<td style="text-align: left;"><code>x / x.sum()</code></td>
+<td style="text-align: left;">Reduction must complete before division</td>
+</tr>
+<tr>
+<td style="text-align: left;">Different shapes</td>
+<td style="text-align: left;"><code>x[::2] + y</code></td>
+<td style="text-align: left;">Mismatched iteration domains</td>
+</tr>
+<tr>
+<td style="text-align: left;">Data-dependent indexing</td>
+<td style="text-align: left;"><code>x[indices] + y</code></td>
+<td style="text-align: left;">Irregular memory access</td>
+</tr>
+<tr>
+<td style="text-align: left;">Cross-device ops</td>
+<td style="text-align: left;">CPU tensor + CUDA tensor</td>
+<td style="text-align: left;">Different memory spaces</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-fusion-barrier-reductions">The Fusion Barrier: Reductions</h3>
+<pre><code>Can fuse INTO a reduction:      Cannot fuse ACROSS a reduction:
+
+x ──► mul ──► add ──► sum       x ──► sum ──► mul ──► add
+      │        │        │             │ BARRIER │        │
+      └── fuse ┘   separate           └───────┘   separate
+                                 (sum must complete before mul)
+</code></pre>
+<hr />
+<h2 id="4-fusion-in-torchcompile-torchinductor">4. Fusion in <code>torch.compile</code> (TorchInductor)</h2>
+<p>Let's see fusion in action with <code>torch.compile</code>:</p>
+<pre><code class="language-python">import torch
+
+def unfused(x, y):
+    a = x + y
+    b = a * 2.0
+    c = b.relu()
+    d = c - 1.0
+    return d.sigmoid()
+
+x = torch.randn(4096, 4096, device='cuda')
+y = torch.randn(4096, 4096, device='cuda')
+
+# Compile with Inductor backend
+compiled = torch.compile(unfused)
+result = compiled(x, y)
+
+# To see the generated Triton code:
+# TORCH_LOGS=&quot;output_code&quot; python script.py
+</code></pre>
+<h3 id="generated-triton-code-simplified">Generated Triton Code (simplified)</h3>
+<p>When you run with <code>TORCH_LOGS="output_code"</code>, TorchInductor produces something like:</p>
+<pre><code class="language-python">@triton.jit
+def fused_kernel(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK: tl.constexpr):
+    &quot;&quot;&quot;All 5 ops fused into a single Triton kernel.&quot;&quot;&quot;
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)
+    xmask = xindex &lt; xnumel
+
+    # Load inputs ONCE from HBM
+    x = tl.load(in_ptr0 + xindex, xmask)
+    y = tl.load(in_ptr1 + xindex, xmask)
+
+    # All computation in registers — no HBM round-trips
+    a = x + y           # add
+    b = a * 2.0          # mul
+    c = tl.maximum(b, 0) # relu
+    d = c - 1.0          # sub
+    e = tl.sigmoid(d)    # sigmoid
+
+    # Store result ONCE to HBM
+    tl.store(out_ptr0 + xindex, e, xmask)
+</code></pre>
+<p><strong>Result:</strong> 5 ops → 1 kernel. Memory traffic reduced from ~10 reads/writes to 2 (one read per input, one write for output).</p>
+<hr />
+<h2 id="5-fusion-across-compiler-stacks">5. Fusion Across Compiler Stacks</h2>
+<p>Different ML compilers approach fusion with different strategies:</p>
+<h3 id="51-torchinductor-pytorch">5.1 TorchInductor (PyTorch)</h3>
+<pre><code>FX Graph → Lowering to ATen → Fusion passes → Triton/C++ codegen
+
+Strategy: &quot;Pointwise fusion + scheduling&quot;
+- Fuses all element-wise ops greedily
+- Separate Triton kernel per fusion group
+- Matmul epilogue fusion via extern kernels
+</code></pre>
+<h3 id="52-xla-jax-tensorflow">5.2 XLA (JAX / TensorFlow)</h3>
+<pre><code>HLO Graph → Fusion passes → LLVM IR → PTX
+
+Strategy: &quot;kFusion / kLoop / kInput fusion&quot;
+- kLoop: fuse ops with compatible loop nesting
+- kInput: fuse ops reading from same input
+- kFusion: general producer-consumer fusion
+- More aggressive than Inductor for reductions
+</code></pre>
+<h3 id="53-tvm-apache-tvm">5.3 TVM (Apache TVM)</h3>
+<pre><code>Relay IR → TE (Tensor Expressions) → Schedule → CUDA/LLVM
+
+Strategy: &quot;Schedule-based fusion with compute_at&quot;
+- Manual or auto-scheduled fusion via compute_at primitive
+- Finer control over tiling and fusion boundaries
+- AutoTVM / Ansor for automated schedule search
+</code></pre>
+<h3 id="comparison-table">Comparison Table</h3>
+<pre><code>┌───────────────┬──────────────┬──────────────┬──────────────┐
+│               │ TorchInductor│     XLA      │     TVM      │
+├───────────────┼──────────────┼──────────────┼──────────────┤
+│ Fusion scope  │ Pointwise +  │ Broad        │ Schedule-    │
+│               │ epilogue     │ HLO fusion   │ driven       │
+│ Codegen       │ Triton/C++   │ LLVM→PTX     │ LLVM/CUDA    │
+│ Reduction     │ Separate     │ Fused with   │ Manual via   │
+│ fusion        │ kernel       │ kInput       │ compute_at   │
+│ Dynamic shape │ ✓ Guards     │ ✗ Recompile  │ ✗ Recompile  │
+│ User control  │ Low          │ Low          │ High         │
+│ Ease of use   │ ★★★★★        │ ★★★★☆        │ ★★☆☆☆        │
+└───────────────┴──────────────┴──────────────┴──────────────┘
+</code></pre>
+<hr />
+<h2 id="6-measuring-fusion-impact">6. Measuring Fusion Impact</h2>
+<h3 id="the-roofline-model">The Roofline Model</h3>
+<p>Fusion shifts an operation's position on the <strong>Roofline plot</strong> by increasing arithmetic intensity:</p>
+<pre><code>                    Roofline Model (A100)
+Performance         ┌────────────────────────────
+(TFLOPS)       312 │             ─────────────── compute ceiling
+                   │            /
+                   │           /
+                   │          /   ← memory bandwidth ceiling
+                   │         /       (2 TB/s)
+                   │        /
+                   │  ★    /    ★★  
+                   │ (un- /   (fused)
+                   │ fused)
+                   │    /
+                   └──/──────────────────────────
+                   0    Arithmetic Intensity (FLOPs/byte)
+                        │         │
+                     0.125      0.625
+                     (relu)    (fused 5-op chain)
+</code></pre>
+<p>Fusing 5 element-wise ops:
+- <strong>Unfused:</strong> Each op reads/writes HBM → AI ≈ 0.125 each
+- <strong>Fused:</strong> One read, one write for 5 ops → AI ≈ 0.625 → closer to roofline</p>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-quantify-fusion-savings-20-min">Exercise 1: Quantify Fusion Savings (20 min)</h3>
+<pre><code class="language-python">import torch
+import torch.utils.benchmark as benchmark
+
+def unfused_chain(x):
+    &quot;&quot;&quot;5 separate kernels.&quot;&quot;&quot;
+    x = x + 1.0
+    x = x * 2.0
+    x = x.relu()
+    x = x - 0.5
+    x = x.sigmoid()
+    return x
+
+compiled_chain = torch.compile(unfused_chain)
+
+sizes = [1024, 4096, 8192, 16384]
+for N in sizes:
+    x = torch.randn(N, N, device='cuda')
+
+    t_eager = benchmark.Timer(
+        stmt='fn(x)', globals={'fn': unfused_chain, 'x': x}
+    ).blocked_autorange()
+
+    t_compiled = benchmark.Timer(
+        stmt='fn(x)', globals={'fn': compiled_chain, 'x': x}
+    ).blocked_autorange()
+
+    print(f&quot;N={N:&gt;5}: eager={t_eager.median*1e3:.2f}ms  &quot;
+          f&quot;compiled={t_compiled.median*1e3:.2f}ms  &quot;
+          f&quot;speedup={t_eager.median/t_compiled.median:.2f}×&quot;)
+</code></pre>
+<h3 id="exercise-2-inspect-generated-code-15-min">Exercise 2: Inspect Generated Code (15 min)</h3>
+<pre><code class="language-bash"># See what Triton code TorchInductor generates
+TORCH_LOGS=&quot;output_code&quot; python -c &quot;
+import torch
+
+@torch.compile
+def fused(x, y):
+    return ((x + y) * 2).relu().sigmoid()
+
+fused(torch.randn(1024, 1024, device='cuda'),
+      torch.randn(1024, 1024, device='cuda'))
+&quot; 2&gt;&amp;1 | grep -A 30 '@triton.jit'
+</code></pre>
+<h3 id="exercise-3-find-the-fusion-barrier-10-min">Exercise 3: Find the Fusion Barrier (10 min)</h3>
+<pre><code class="language-python"># Which of these CAN the compiler fuse into one kernel?
+# Think first, then verify with TORCH_LOGS=&quot;output_code&quot;
+
+def case_a(x): return (x + 1).relu() * 2           # ???
+def case_b(x): return x / x.sum()                   # ???
+def case_c(x): return (x * x).sum().sqrt()           # ???
+def case_d(x, y): return x.relu() + y.sigmoid()      # ???
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Memory bandwidth</strong> — not compute — is the bottleneck for element-wise operations</li>
+<li><strong>Fusion eliminates intermediate memory traffic</strong> — intermediates stay in registers/SRAM instead of round-tripping to HBM</li>
+<li><strong>Vertical fusion</strong> (producer-consumer chains) is the most common and impactful</li>
+<li><strong>Reductions are fusion barriers</strong> — a reduction must complete before downstream ops can proceed</li>
+<li><strong><code>torch.compile</code> fuses aggressively</strong> — generating Triton kernels that combine many PyTorch ops into one</li>
+<li><strong>The Roofline model</strong> quantifies why fusion works: it increases arithmetic intensity, moving ops toward the compute ceiling</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>Ragan-Kelley et al., "Halide: A Language and Compiler for Optimizing Parallelism, Locality, and Recomputation" (PLDI 2013)</li>
+<li><a href="https://www.eecs.harvard.edu/~htk/publication/2019-mapl-tillet-kung-cox.pdf">Triton: An Intermediate Language and Compiler for Tiled Neural Network Computations</a></li>
+<li><a href="https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-target-backends/747">TorchInductor: A PyTorch Native Compiler</a></li>
+<li><a href="https://horace.io/brrr_intro.html">Understanding GPU Memory Hierarchy for Deep Learning</a></li>
+</ul>
+<hr />
+<h2 id="tomorrows-teaser">Tomorrow's Teaser</h2>
+<p><strong>Day 14</strong> is our first <strong>Stop &amp; Reflect</strong> checkpoint. We'll build a concept map connecting everything from GPU architecture through profiling to fusion, test your understanding with a 10-question self-assessment, and verify you have the mental models needed for Phase II: Compiler Fundamentals.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-12-eager-vs-graph-mode.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 12: Eager vs Graph Mode</a>
+            <a href="day-14-stop-and-reflect-1.html" class="text-emerald-600 hover:text-emerald-800">Day 14: Stop & Reflect #1 &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

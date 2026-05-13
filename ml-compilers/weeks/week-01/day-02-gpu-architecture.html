@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 2: GPU Architecture Deep Dive - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 1: GPU Architecture & CUDA</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-2-gpu-architecture-deep-dive">Day 2: GPU Architecture Deep Dive</h1>
+<blockquote>
+<p><strong>Phase I · Week 1 · Day 2 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"You can't optimize what you don't understand. Every ML compiler decision traces back to hardware constraints."</em></p>
+<hr />
+<h2 id="navigation">Navigation</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Previous</strong></td>
+<td><a href="day-01-why-ml-needs-compilers.html">← Day 1: Why ML Needs Compilers</a></td>
+</tr>
+<tr>
+<td><strong>Next</strong></td>
+<td><a href="day-03-cuda-programming-basics.html">Day 3: CUDA Programming Basics →</a></td>
+</tr>
+<tr>
+<td><strong>Week</strong></td>
+<td>Week 1: GPU Architecture &amp; CUDA</td>
+</tr>
+<tr>
+<td><strong>Phase</strong></td>
+<td>Phase I: Hardware &amp; Compute Foundations</td>
+</tr>
+<tr>
+<td><strong>Curriculum</strong></td>
+<td><a href="../../CURRICULUM.html">Full Curriculum</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>Every decision an ML compiler makes — tile sizes, loop orders, memory placement, thread counts — is constrained by GPU hardware. Understanding the architecture lets you predict whether a kernel is memory-bound or compute-bound, why certain tile sizes are magic numbers, and where performance cliffs hide.</p>
+<hr />
+<h2 id="1-gpu-vs-cpu-philosophy">1. GPU vs CPU Philosophy</h2>
+<h3 id="11-fundamental-design-difference">1.1 Fundamental Design Difference</h3>
+<pre><code>CPU (Latency-optimized):                GPU (Throughput-optimized):
+┌────────────────────────┐             ┌────────────────────────┐
+│ Big cache (L1/L2/L3)   │             │ Tiny caches per SM     │
+│ Complex branch predict  │             │ Simple in-order cores  │
+│ Out-of-order execution  │             │ Massive parallelism    │
+│ Few powerful cores      │             │ Thousands of threads   │
+│ (8-128 cores)          │             │ (10K-100K threads)     │
+└────────────────────────┘             └────────────────────────┘
+   Optimize: single-thread speed          Optimize: total throughput
+</code></pre>
+<p><strong>Key insight</strong>: GPUs hide memory latency with <strong>parallelism</strong>, not caches. While one warp waits for data, another warp executes.</p>
+<h3 id="12-why-gpus-dominate-ml">1.2 Why GPUs Dominate ML</h3>
+<p>Matrix multiplication $C = A \times B$ for $n \times n$ matrices:
+- <strong>Operations</strong>: $O(n^3)$ multiplications and additions
+- <strong>Data</strong>: $O(n^2)$ elements to read/write
+- <strong>Arithmetic intensity</strong>: $O(n)$ — increases with problem size</p>
+<p>This high ratio of compute-to-memory makes matmul ideal for GPUs. Neural networks are mostly matmul.</p>
+<hr />
+<h2 id="2-streaming-multiprocessor-sm-architecture">2. Streaming Multiprocessor (SM) Architecture</h2>
+<h3 id="21-nvidia-a100-hierarchy">2.1 NVIDIA A100 Hierarchy</h3>
+<pre><code>GPU (A100)
+├── 108 Streaming Multiprocessors (SMs)
+│   ├── 4 Processing Blocks per SM
+│   │   ├── 16 FP32 CUDA Cores per block (64 per SM)
+│   │   ├── 16 FP64 Cores per block
+│   │   ├── 8 Tensor Cores per block (using FP16/TF32/INT8)
+│   │   ├── 1 Warp Scheduler per block
+│   │   └── Register File (16,384 × 32-bit registers per block)
+│   ├── 192 KB L1 Cache / Shared Memory (configurable split)
+│   └── 65,536 × 32-bit registers total
+├── 40 MB L2 Cache
+└── 80 GB HBM2e Global Memory
+    └── 2039 GB/s bandwidth
+</code></pre>
+<h3 id="22-the-warp-fundamental-execution-unit">2.2 The Warp: Fundamental Execution Unit</h3>
+<p>A <strong>warp</strong> is 32 threads executing the <strong>same instruction</strong> in lockstep (SIMT):</p>
+<pre><code>Warp 0 (32 threads):
+Thread 0:  FMUL R1, R2, R3    ← same instruction
+Thread 1:  FMUL R1, R2, R3    ← different data (registers)
+Thread 2:  FMUL R1, R2, R3
+...
+Thread 31: FMUL R1, R2, R3
+
+All 32 threads execute FMUL simultaneously
+</code></pre>
+<p><strong>Warp divergence</strong>: If threads in a warp take different branches, both paths execute serially:</p>
+<pre><code class="language-python"># This causes divergence — avoid in hot kernels!
+if thread_id % 2 == 0:
+    do_path_A()  # Executes while odd threads idle
+else:
+    do_path_B()  # Executes while even threads idle
+# Total time = time(A) + time(B), not max(A, B)
+</code></pre>
+<h3 id="23-occupancy">2.3 Occupancy</h3>
+<p><strong>Occupancy</strong> = active warps / maximum warps per SM</p>
+<p>An A100 SM supports up to 64 active warps (2048 threads). Resources that limit occupancy:</p>
+<table>
+<thead>
+<tr>
+<th>Resource</th>
+<th>Per SM</th>
+<th>Limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Registers</td>
+<td>65,536</td>
+<td>Kernel uses 64 regs/thread → 65536/64 = 1024 threads = 32 warps max</td>
+</tr>
+<tr>
+<td>Shared memory</td>
+<td>164 KB</td>
+<td>Kernel uses 48 KB → floor(164/48) = 3 blocks max</td>
+</tr>
+<tr>
+<td>Thread blocks</td>
+<td>32 max</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>Higher occupancy = better latency hiding (more warps to switch to while waiting for memory).</p>
+<hr />
+<h2 id="3-memory-hierarchy">3. Memory Hierarchy</h2>
+<h3 id="31-the-speed-size-tradeoff">3.1 The Speed-Size Tradeoff</h3>
+<pre><code>                    Speed            Size        Scope
+                    ─────            ────        ─────
+Registers        ◀══════▶  ~8 TB/s   256 KB/SM   Per thread
+    │
+Shared Memory    ◀══════▶  ~19 TB/s  164 KB/SM   Per thread block
+    │
+L1 Cache         ◀══════▶  ~19 TB/s  (shared)    Per SM
+    │
+L2 Cache         ◀══════▶  ~6 TB/s   40 MB       Shared across GPU
+    │
+Global Memory    ◀══════▶  ~2 TB/s   80 GB       Shared across GPU
+(HBM)
+    │
+CPU Memory       ◀══════▶  ~32 GB/s  System RAM  Via PCIe
+(Host)
+</code></pre>
+<h3 id="32-memory-coalescing">3.2 Memory Coalescing</h3>
+<p>Global memory is accessed in <strong>128-byte transactions</strong>. If 32 threads each request a consecutive 4-byte float, that's one transaction. If they request scattered addresses, it could be 32 transactions:</p>
+<pre><code>Coalesced access (GOOD):
+Thread 0 → addr[0]    ┐
+Thread 1 → addr[1]    │ 1 × 128-byte transaction
+Thread 2 → addr[2]    │
+...                    │
+Thread 31 → addr[31]  ┘
+
+Strided access (BAD):
+Thread 0 → addr[0]      → 1 transaction
+Thread 1 → addr[1024]   → 1 transaction
+Thread 2 → addr[2048]   → 1 transaction
+...
+Thread 31 → addr[31744] → 32 transactions!
+</code></pre>
+<p><strong>Rule</strong>: Access memory in contiguous patterns. This is why row-major vs column-major layout matters enormously.</p>
+<h3 id="33-shared-memory-and-bank-conflicts">3.3 Shared Memory and Bank Conflicts</h3>
+<p>Shared memory has 32 banks, each 4 bytes wide. Threads accessing different banks → parallel. Same bank → serialized:</p>
+<pre><code>No conflict:                    Bank conflict:
+Bank 0: Thread 0               Bank 0: Thread 0, Thread 1  ← serial!
+Bank 1: Thread 1               Bank 1: (empty)
+Bank 2: Thread 2               Bank 2: Thread 2, Thread 3  ← serial!
+...                             ...
+Bank 31: Thread 31             Bank 31: (empty)
+Time: 1 cycle                  Time: 2 cycles
+</code></pre>
+<hr />
+<h2 id="4-tensor-cores">4. Tensor Cores</h2>
+<h3 id="41-matrix-multiply-accumulate">4.1 Matrix Multiply-Accumulate</h3>
+<p>Tensor Cores perform small matrix multiplications in hardware:</p>
+<p>$$D = A \times B + C$$</p>
+<p>where $A$ is $m \times k$, $B$ is $k \times n$, and $C$ is $m \times n$.</p>
+<table>
+<thead>
+<tr>
+<th>Generation</th>
+<th>Shape</th>
+<th>Input Types</th>
+<th>Throughput</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Volta (V100)</td>
+<td>4×4×4</td>
+<td>FP16 → FP32</td>
+<td>125 TFLOPS</td>
+</tr>
+<tr>
+<td>Ampere (A100)</td>
+<td>16×8×16</td>
+<td>FP16/BF16/TF32/INT8</td>
+<td>312 TFLOPS</td>
+</tr>
+<tr>
+<td>Hopper (H100)</td>
+<td>16×8×16</td>
+<td>FP8/FP16/BF16/INT8</td>
+<td>990 TFLOPS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="42-why-tensor-cores-matter-for-compilers">4.2 Why Tensor Cores Matter for Compilers</h3>
+<p>Using Tensor Cores requires:
+1. <strong>Correct data types</strong>: FP16/BF16 inputs, FP32 accumulators
+2. <strong>Correct dimensions</strong>: Multiples of the hardware tile (16×8×16)
+3. <strong>Correct memory layout</strong>: Data must be in specific shared memory layout</p>
+<p>The compiler must ensure all three — this is a major job of the TIR lowering pipeline in TVM.</p>
+<hr />
+<h2 id="5-the-roofline-model">5. The Roofline Model</h2>
+<h3 id="51-arithmetic-intensity">5.1 Arithmetic Intensity</h3>
+<p>$$\text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes accessed}}$$</p>
+<p>For A100 at FP16:
+- <strong>Peak compute</strong>: 312 TFLOPS
+- <strong>Peak bandwidth</strong>: 2039 GB/s
+- <strong>Ridge point</strong>: $312 \times 10^{12} / (2039 \times 10^9) = 153$ FLOP/byte</p>
+<pre><code>Performance
+(TFLOPS)
+    312 ──────────────────────────────────── Peak FLOPS
+    │                         ╱
+    │                       ╱  Compute-bound
+    │                     ╱    (matmul, conv)
+    │                   ╱
+    │                 ╱
+    │               ╱
+    │             ╱ ← Ridge point (153 FLOP/byte)
+    │           ╱
+    │         ╱  Memory-bound
+    │       ╱    (activation, normalization)
+    │     ╱
+    │   ╱
+    │ ╱
+    └──────────────────────────────────── Arithmetic Intensity
+                    153
+</code></pre>
+<h3 id="52-what-this-means-for-compilers">5.2 What This Means for Compilers</h3>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>AI (FLOP/byte)</th>
+<th>Bound</th>
+<th>Compiler Strategy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Matmul (large)</td>
+<td>100-1000+</td>
+<td>Compute</td>
+<td>Maximize Tensor Core utilization</td>
+</tr>
+<tr>
+<td>Convolution</td>
+<td>10-100</td>
+<td>Mixed</td>
+<td>Fuse with activations</td>
+</tr>
+<tr>
+<td>LayerNorm</td>
+<td>~5</td>
+<td>Memory</td>
+<td>Fuse with adjacent ops</td>
+</tr>
+<tr>
+<td>Softmax</td>
+<td>~3</td>
+<td>Memory</td>
+<td>Fuse with attention</td>
+</tr>
+<tr>
+<td>GELU/ReLU</td>
+<td>0.25</td>
+<td>Memory</td>
+<td>MUST fuse — never run standalone</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-hands-on-profiling-a-real-model">6. Hands-On: Profiling a Real Model</h2>
+<h3 id="exercise-1-gpu-utilization-analysis">Exercise 1: GPU Utilization Analysis</h3>
+<pre><code class="language-python">import torch
+from torch.profiler import profile, ProfilerActivity, schedule
+
+model = torch.hub.load('pytorch/vision', 'resnet18', pretrained=True).cuda().half()
+x = torch.randn(64, 3, 224, 224, device='cuda', dtype=torch.float16)
+
+with profile(
+    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    schedule=schedule(wait=1, warmup=3, active=5),
+    record_shapes=True,
+    with_stack=True,
+) as prof:
+    for _ in range(10):
+        with torch.no_grad():
+            model(x)
+        prof.step()
+
+# Export for Chrome trace viewer
+prof.export_chrome_trace(&quot;resnet18_trace.json&quot;)
+
+# Summary
+print(prof.key_averages().table(
+    sort_by=&quot;cuda_time_total&quot;, row_limit=15
+))
+</code></pre>
+<h3 id="exercise-2-identify-memory-bound-operations">Exercise 2: Identify Memory-Bound Operations</h3>
+<p>From the profiler output:
+1. Which operations are memory-bound (low arithmetic intensity)?
+2. Which operations could benefit from fusion?
+3. What percentage of GPU time is spent on non-matmul operations?</p>
+<h3 id="exercise-3-roofline-estimation">Exercise 3: Roofline Estimation</h3>
+<pre><code class="language-python"># For a matmul: C[M,N] = A[M,K] @ B[K,N]
+M, K, N = 4096, 4096, 4096
+
+flops = 2 * M * K * N  # multiply + add
+bytes_accessed = (M*K + K*N + M*N) * 2  # FP16 = 2 bytes
+
+ai = flops / bytes_accessed
+print(f&quot;Arithmetic Intensity: {ai:.1f} FLOP/byte&quot;)
+print(f&quot;Above ridge point (153)? {ai &gt; 153}&quot;)
+# → AI ≈ 1365 FLOP/byte → compute-bound ✓
+</code></pre>
+<hr />
+<h2 id="7-key-takeaways">7. Key Takeaways</h2>
+<ol>
+<li><strong>GPUs hide latency with parallelism</strong> — not caches like CPUs</li>
+<li><strong>Warps</strong> (32 threads) are the atomic execution unit — divergence is expensive</li>
+<li><strong>Memory hierarchy</strong>: registers &gt; shared &gt; L2 &gt; global — each 10× slower</li>
+<li><strong>Coalescing</strong> is mandatory — scattered memory access kills performance</li>
+<li><strong>Tensor Cores</strong> accelerate matmul but need specific types and dimensions</li>
+<li><strong>Roofline model</strong> predicts whether a kernel is memory-bound or compute-bound</li>
+<li>Most activation functions are <strong>memory-bound</strong> → fusion is the #1 optimization</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#hardware-implementation">CUDA C++ Programming Guide — Hardware Implementation</a></li>
+<li><a href="https://people.eecs.berkeley.edu/~kubitron/cs252/handouts/papers/RooflineVyworof.pdf">Roofline: An Insightful Visual Performance Model</a></li>
+<li><a href="https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvidia-ampere-architecture-whitepaper.pdf">NVIDIA A100 Architecture Whitepaper</a></li>
+</ul>
+<hr />
+<h2 id="tomorrow">Tomorrow</h2>
+<p>Day 3 shifts from theory to practice: <strong>CUDA programming basics</strong> — writing your first GPU kernels from scratch.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-01-why-ml-needs-compilers.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 1: Why ML Needs Compilers</a>
+            <a href="day-03-cuda-programming-basics.html" class="text-emerald-600 hover:text-emerald-800">Day 3: CUDA Programming Basics &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

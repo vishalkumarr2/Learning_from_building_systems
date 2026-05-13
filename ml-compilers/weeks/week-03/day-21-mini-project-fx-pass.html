@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 21: Mini-Project — FX Transform Pass - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 3: IR & Compiler Passes</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-21-mini-project-fx-transform-pass">Day 21: Mini-Project — FX Transform Pass</h1>
+<blockquote>
+<p><strong>Phase II · Week 3 · Day 21 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"The measure of understanding a compiler pass is not reading one — it's writing one that handles every edge case, verifying it, and proving it's faster."</em></p>
+<hr />
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">← Previous</th>
+<th style="text-align: left;">Next →</th>
+<th style="text-align: left;">📅 Week</th>
+<th style="text-align: left;">🔷 Phase</th>
+<th style="text-align: left;">📚 Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><a href="day-20-auto-tuning-search.html">Day 20: Auto-Tuning &amp; Search Spaces</a></td>
+<td style="text-align: left;"><a href="../week-04/day-22-triton-language-basics.html">Day 22: Triton Language Basics</a></td>
+<td style="text-align: left;"><a href="README.html">Week 3: IRs &amp; Passes</a></td>
+<td style="text-align: left;"><a href="../../STUDY-PLAN.html">Phase II: Compiler Fundamentals</a></td>
+<td style="text-align: left;"><a href="../../README.html">ML Compilers</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>This is your Week 3 capstone. You've learned about computation graphs (Day 16), graph-level optimizations (Day 17), the polyhedral model (Day 18), loop tiling (Day 19), and auto-tuning (Day 20). Now you'll build a real optimization pass end-to-end: detect a pattern in a PyTorch FX graph, rewrite it to a fused equivalent, verify correctness, and measure the speedup. This is exactly what production compiler engineers do when adding optimizations to <code>torch.compile</code>, ONNX Runtime, or TensorRT.</p>
+<hr />
+<h2 id="1-the-target-conv2d-batchnorm-fusion">1. The Target: Conv2d + BatchNorm Fusion</h2>
+<h3 id="why-fuse">Why Fuse?</h3>
+<p>During <strong>inference</strong>, BatchNorm is a simple affine transform that can be folded into the preceding Conv2d's weights:</p>
+<p>$$\text{BN}(y) = \gamma \cdot \frac{y - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta$$</p>
+<p>Since $y = W * x + b$ (convolution), we can precompute:</p>
+<p>$$W_{\text{fused}} = \frac{\gamma}{\sqrt{\sigma^2 + \epsilon}} \cdot W$$</p>
+<p>$$b_{\text{fused}} = \frac{\gamma}{\sqrt{\sigma^2 + \epsilon}} \cdot (b - \mu) + \beta$$</p>
+<p>This eliminates the BatchNorm layer entirely — saving one kernel launch, one memory round-trip, and one set of intermediate activations.</p>
+<pre><code>Before fusion:                After fusion:
+  x ──► Conv2d ──► BN ──► y    x ──► Conv2d(fused) ──► y
+         W, b     γ,β,μ,σ²           W_fused, b_fused
+  (2 ops, 2 kernel launches)   (1 op, 1 kernel launch)
+</code></pre>
+<hr />
+<h2 id="2-project-structure">2. Project Structure</h2>
+<pre><code>fx_conv_bn_fusion/
+├── pass_conv_bn.py          # The optimization pass
+├── fuse_params.py           # Weight folding math
+├── test_pass.py             # Correctness tests
+├── bench.py                 # Performance benchmarks
+└── README.md                # Documentation
+</code></pre>
+<p>We'll build each piece step by step.</p>
+<hr />
+<h2 id="3-step-1-pattern-detection">3. Step 1: Pattern Detection</h2>
+<p>The first task is to find all <code>Conv2d → BatchNorm2d</code> pairs in an FX graph.</p>
+<pre><code class="language-python"># pass_conv_bn.py
+import torch
+from torch import nn
+from torch.fx import symbolic_trace, Node, GraphModule
+from typing import List, Tuple, Dict
+
+def _is_conv_bn_pair(conv_node: Node, bn_node: Node, modules: Dict[str, nn.Module]) -&gt; bool:
+    &quot;&quot;&quot;Check if two nodes form a valid Conv2d → BatchNorm2d pair.&quot;&quot;&quot;
+    # Both must be module calls
+    if conv_node.op != 'call_module' or bn_node.op != 'call_module':
+        return False
+
+    conv_mod = modules.get(conv_node.target)
+    bn_mod = modules.get(bn_node.target)
+
+    if not isinstance(conv_mod, nn.Conv2d):
+        return False
+    if not isinstance(bn_mod, nn.BatchNorm2d):
+        return False
+
+    # BN must consume Conv output directly (single use)
+    if bn_node.args[0] is not conv_node:
+        return False
+
+    # Conv output channels must match BN num_features
+    if conv_mod.out_channels != bn_mod.num_features:
+        return False
+
+    return True
+
+
+def find_conv_bn_pairs(gm: GraphModule) -&gt; List[Tuple[Node, Node]]:
+    &quot;&quot;&quot;Find all fusible Conv2d → BatchNorm2d pairs in the graph.&quot;&quot;&quot;
+    modules = dict(gm.named_modules())
+    pairs = []
+
+    for node in gm.graph.nodes:
+        if node.op != 'call_module':
+            continue
+
+        # Check each user of this node
+        for user in node.users:
+            if _is_conv_bn_pair(node, user, modules):
+                pairs.append((node, user))
+
+    return pairs
+</code></pre>
+<h3 id="pattern-matching-diagram">Pattern Matching Diagram</h3>
+<pre><code>FX Graph traversal:
+
+  placeholder: x
+       │
+  call_module: self.conv1 (Conv2d)     ◄── candidate conv_node
+       │
+  call_module: self.bn1 (BatchNorm2d)  ◄── candidate bn_node
+       │
+  call_function: torch.relu
+       │
+  call_module: self.conv2 (Conv2d)     ◄── candidate conv_node
+       │
+  call_module: self.bn2 (BatchNorm2d)  ◄── candidate bn_node
+       │
+  output
+
+  Found 2 pairs: [(conv1, bn1), (conv2, bn2)]
+</code></pre>
+<hr />
+<h2 id="4-step-2-weight-folding">4. Step 2: Weight Folding</h2>
+<p>Compute the fused Conv2d weights that absorb BatchNorm:</p>
+<pre><code class="language-python"># fuse_params.py
+import torch
+from torch import nn, Tensor
+
+def fuse_conv_bn_weights(
+    conv: nn.Conv2d,
+    bn: nn.BatchNorm2d,
+) -&gt; Tuple[Tensor, Tensor]:
+    &quot;&quot;&quot;Fold BatchNorm parameters into Conv2d weights.
+
+    Math:
+        scale = gamma / sqrt(var + eps)
+        W_fused = scale.reshape(-1,1,1,1) * W
+        b_fused = scale * (b - mean) + beta
+
+    Returns:
+        (fused_weight, fused_bias)
+    &quot;&quot;&quot;
+    # Extract BN parameters
+    gamma = bn.weight             # shape: (C_out,)
+    beta = bn.bias                # shape: (C_out,)
+    mean = bn.running_mean        # shape: (C_out,)
+    var = bn.running_var          # shape: (C_out,)
+    eps = bn.eps
+
+    # Compute scale factor: gamma / sqrt(var + eps)
+    scale = gamma / torch.sqrt(var + eps)
+
+    # Fuse weights: scale each output filter
+    # Conv weight shape: (C_out, C_in, kH, kW)
+    fused_weight = scale.reshape(-1, 1, 1, 1) * conv.weight
+
+    # Fuse bias
+    conv_bias = conv.bias if conv.bias is not None else torch.zeros_like(mean)
+    fused_bias = scale * (conv_bias - mean) + beta
+
+    return fused_weight, fused_bias
+
+
+def create_fused_conv(conv: nn.Conv2d, bn: nn.BatchNorm2d) -&gt; nn.Conv2d:
+    &quot;&quot;&quot;Create a new Conv2d with fused BN parameters.&quot;&quot;&quot;
+    # Create new conv with same config but always with bias
+    fused_conv = nn.Conv2d(
+        in_channels=conv.in_channels,
+        out_channels=conv.out_channels,
+        kernel_size=conv.kernel_size,
+        stride=conv.stride,
+        padding=conv.padding,
+        dilation=conv.dilation,
+        groups=conv.groups,
+        bias=True,  # Always True after fusion
+        padding_mode=conv.padding_mode,
+    )
+
+    fused_weight, fused_bias = fuse_conv_bn_weights(conv, bn)
+
+    fused_conv.weight = nn.Parameter(fused_weight)
+    fused_conv.bias = nn.Parameter(fused_bias)
+
+    return fused_conv
+</code></pre>
+<h3 id="numerical-verification">Numerical Verification</h3>
+<p>The fused weight formula is exact — no approximation. We can verify:</p>
+<p>$$\text{BN}(\text{Conv}(x)) = \gamma \cdot \frac{Wx + b - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta = \underbrace{\frac{\gamma}{\sqrt{\sigma^2 + \epsilon}} W}_{W_f} x + \underbrace{\frac{\gamma(b - \mu)}{\sqrt{\sigma^2 + \epsilon}} + \beta}_{b_f}$$</p>
+<hr />
+<h2 id="5-step-3-graph-rewriting">5. Step 3: Graph Rewriting</h2>
+<p>Replace each Conv+BN pair with the fused Conv:</p>
+<pre><code class="language-python"># pass_conv_bn.py (continued)
+
+def fuse_conv_bn_pass(gm: GraphModule) -&gt; GraphModule:
+    &quot;&quot;&quot;Main optimization pass: fuse all Conv2d+BatchNorm2d pairs.
+
+    Graph rewriting strategy:
+    1. Find all Conv+BN pairs
+    2. For each pair:
+       a. Create fused Conv2d module
+       b. Register it in the model
+       c. Redirect BN's users to Conv (which now has fused weights)
+       d. Remove BN node from graph
+    3. Recompile the GraphModule
+    &quot;&quot;&quot;
+    modules = dict(gm.named_modules())
+    pairs = find_conv_bn_pairs(gm)
+
+    if not pairs:
+        return gm
+
+    fused_count = 0
+    for conv_node, bn_node in pairs:
+        conv_mod = modules[conv_node.target]
+        bn_mod = modules[bn_node.target]
+
+        # Create fused module
+        fused_conv = create_fused_conv(conv_mod, bn_mod)
+
+        # Register fused conv under a new name
+        fused_name = f&quot;{conv_node.target}_fused&quot;
+        gm.add_module(fused_name, fused_conv)
+
+        # Update the conv node to point to fused module
+        with gm.graph.inserting_after(conv_node):
+            fused_node = gm.graph.call_module(fused_name, conv_node.args, conv_node.kwargs)
+
+        # Replace all uses of BN output with fused conv output
+        bn_node.replace_all_uses_with(fused_node)
+
+        # Remove dead nodes (BN first, then original conv)
+        gm.graph.erase_node(bn_node)
+        gm.graph.erase_node(conv_node)
+
+        fused_count += 1
+
+    # Clean up and recompile
+    gm.graph.eliminate_dead_code()
+    gm.graph.lint()
+    gm.recompile()
+
+    print(f&quot;Fused {fused_count} Conv+BN pairs&quot;)
+    return gm
+</code></pre>
+<h3 id="graph-before-and-after">Graph Before and After</h3>
+<pre><code>BEFORE:                              AFTER:
+──────                               ─────
+graph():                             graph():
+  %x = placeholder[target=x]          %x = placeholder[target=x]
+  %conv1 = call_module[conv1](x)      %conv1_fused = call_module[conv1_fused](x)
+  %bn1 = call_module[bn1](conv1)      %relu = call_function[relu](conv1_fused)
+  %relu = call_function[relu](bn1)    %conv2_fused = call_module[conv2_fused](relu)
+  %conv2 = call_module[conv2](relu)   %relu_1 = call_function[relu](conv2_fused)
+  %bn2 = call_module[bn2](conv2)      return relu_1
+  %relu_1 = call_function[relu](bn2)
+  return relu_1
+
+Nodes: 7 → 5  (-28.6%)
+Modules: 4 → 2  (-50%)
+</code></pre>
+<hr />
+<h2 id="6-step-4-testing-framework">6. Step 4: Testing Framework</h2>
+<p>Rigorous correctness testing is essential for any compiler pass:</p>
+<pre><code class="language-python"># test_pass.py
+import torch
+from torch import nn
+from torch.fx import symbolic_trace
+import pytest
+
+from pass_conv_bn import fuse_conv_bn_pass, find_conv_bn_pairs
+from fuse_params import fuse_conv_bn_weights
+
+# ── Test Models ──────────────────────────────────────────
+
+class SimpleConvBN(nn.Module):
+    &quot;&quot;&quot;Minimal test case: single Conv+BN.&quot;&quot;&quot;
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv2d(3, 16, 3, padding=1)
+        self.bn = nn.BatchNorm2d(16)
+
+    def forward(self, x):
+        return self.bn(self.conv(x))
+
+
+class MultiConvBN(nn.Module):
+    &quot;&quot;&quot;Multiple Conv+BN blocks with ReLU.&quot;&quot;&quot;
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 32, 3, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+
+    def forward(self, x):
+        x = torch.relu(self.bn1(self.conv1(x)))
+        x = torch.relu(self.bn2(self.conv2(x)))
+        return x
+
+
+class ConvWithoutBN(nn.Module):
+    &quot;&quot;&quot;Conv without BN — pass should be a no-op.&quot;&quot;&quot;
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv2d(3, 16, 3, padding=1)
+
+    def forward(self, x):
+        return torch.relu(self.conv(x))
+
+
+class ResidualBlock(nn.Module):
+    &quot;&quot;&quot;Conv+BN with skip connection — tests multi-use case.&quot;&quot;&quot;
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv2d(16, 16, 3, padding=1)
+        self.bn = nn.BatchNorm2d(16)
+
+    def forward(self, x):
+        return torch.relu(self.bn(self.conv(x)) + x)
+
+
+class DepthwiseConvBN(nn.Module):
+    &quot;&quot;&quot;Depthwise separable conv — tests groups parameter.&quot;&quot;&quot;
+    def __init__(self):
+        super().__init__()
+        self.dw_conv = nn.Conv2d(32, 32, 3, padding=1, groups=32)
+        self.dw_bn = nn.BatchNorm2d(32)
+        self.pw_conv = nn.Conv2d(32, 64, 1)
+        self.pw_bn = nn.BatchNorm2d(64)
+
+    def forward(self, x):
+        x = torch.relu(self.dw_bn(self.dw_conv(x)))
+        x = torch.relu(self.pw_bn(self.pw_conv(x)))
+        return x
+
+
+# ── Correctness Tests ────────────────────────────────────
+
+def _check_numerical_equivalence(model_cls, input_shape, atol=1e-5):
+    &quot;&quot;&quot;Verify fused model produces same output as original.&quot;&quot;&quot;
+    model = model_cls()
+    model.eval()
+
+    # Run BN in eval mode to fix running stats
+    x = torch.randn(input_shape)
+    with torch.no_grad():
+        y_original = model(x)
+
+    # Apply fusion pass
+    traced = symbolic_trace(model)
+    fused = fuse_conv_bn_pass(traced)
+
+    with torch.no_grad():
+        y_fused = fused(x)
+
+    max_err = (y_original - y_fused).abs().max().item()
+    assert max_err &lt; atol, f&quot;Max error {max_err} exceeds tolerance {atol}&quot;
+    return max_err
+
+
+class TestPatternDetection:
+    def test_finds_simple_pair(self):
+        model = SimpleConvBN()
+        model.eval()
+        gm = symbolic_trace(model)
+        pairs = find_conv_bn_pairs(gm)
+        assert len(pairs) == 1
+
+    def test_finds_multiple_pairs(self):
+        model = MultiConvBN()
+        model.eval()
+        gm = symbolic_trace(model)
+        pairs = find_conv_bn_pairs(gm)
+        assert len(pairs) == 2
+
+    def test_no_false_positives(self):
+        model = ConvWithoutBN()
+        model.eval()
+        gm = symbolic_trace(model)
+        pairs = find_conv_bn_pairs(gm)
+        assert len(pairs) == 0
+
+
+class TestNumericalCorrectness:
+    def test_simple(self):
+        err = _check_numerical_equivalence(SimpleConvBN, (1, 3, 32, 32))
+        print(f&quot;Simple: max error = {err:.2e}&quot;)
+
+    def test_multi_block(self):
+        err = _check_numerical_equivalence(MultiConvBN, (2, 3, 64, 64))
+        print(f&quot;Multi: max error = {err:.2e}&quot;)
+
+    def test_residual(self):
+        err = _check_numerical_equivalence(
+            ResidualBlock, (1, 16, 32, 32)
+        )
+        print(f&quot;Residual: max error = {err:.2e}&quot;)
+
+    def test_depthwise(self):
+        err = _check_numerical_equivalence(
+            DepthwiseConvBN, (1, 32, 28, 28)
+        )
+        print(f&quot;Depthwise: max error = {err:.2e}&quot;)
+
+    def test_different_batch_sizes(self):
+        for bs in [1, 4, 16]:
+            err = _check_numerical_equivalence(SimpleConvBN, (bs, 3, 32, 32))
+            print(f&quot;Batch {bs}: max error = {err:.2e}&quot;)
+
+    def test_no_conv_bias(self):
+        &quot;&quot;&quot;Test fusion when Conv2d has no bias.&quot;&quot;&quot;
+        model = SimpleConvBN()
+        model.conv.bias = None
+        model.eval()
+
+        x = torch.randn(1, 3, 32, 32)
+        with torch.no_grad():
+            y_orig = model(x)
+
+        traced = symbolic_trace(model)
+        fused = fuse_conv_bn_pass(traced)
+
+        with torch.no_grad():
+            y_fused = fused(x)
+
+        assert (y_orig - y_fused).abs().max().item() &lt; 1e-5
+
+
+class TestGraphIntegrity:
+    def test_node_count_reduced(self):
+        model = MultiConvBN()
+        model.eval()
+        traced = symbolic_trace(model)
+
+        nodes_before = len(list(traced.graph.nodes))
+        fused = fuse_conv_bn_pass(traced)
+        nodes_after = len(list(fused.graph.nodes))
+
+        assert nodes_after &lt; nodes_before
+
+    def test_graph_lints(self):
+        &quot;&quot;&quot;Fused graph passes FX lint checks.&quot;&quot;&quot;
+        model = MultiConvBN()
+        model.eval()
+        traced = symbolic_trace(model)
+        fused = fuse_conv_bn_pass(traced)
+        fused.graph.lint()  # Raises if invalid
+
+
+# Run: pytest test_pass.py -v
+</code></pre>
+<hr />
+<h2 id="7-step-5-benchmarking">7. Step 5: Benchmarking</h2>
+<pre><code class="language-python"># bench.py
+import torch
+from torch import nn
+from torch.fx import symbolic_trace
+import time
+
+from pass_conv_bn import fuse_conv_bn_pass
+
+def benchmark_model(model, input_shape, warmup=50, repeats=200):
+    &quot;&quot;&quot;Benchmark model latency.&quot;&quot;&quot;
+    model.eval()
+    x = torch.randn(input_shape)
+
+    # Warmup
+    with torch.no_grad():
+        for _ in range(warmup):
+            model(x)
+
+    # Measure
+    times = []
+    with torch.no_grad():
+        for _ in range(repeats):
+            start = time.perf_counter()
+            model(x)
+            elapsed = time.perf_counter() - start
+            times.append(elapsed * 1000)  # ms
+
+    times = sorted(times)
+    median = times[len(times) // 2]
+    p95 = times[int(len(times) * 0.95)]
+    return median, p95
+
+
+class ResNetBlock(nn.Module):
+    &quot;&quot;&quot;Realistic ResNet-style block for benchmarking.&quot;&quot;&quot;
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(64, 64, 3, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
+        self.conv2 = nn.Conv2d(64, 64, 3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(64)
+        self.conv3 = nn.Conv2d(64, 256, 1, bias=False)
+        self.bn3 = nn.BatchNorm2d(256)
+
+    def forward(self, x):
+        out = torch.relu(self.bn1(self.conv1(x)))
+        out = torch.relu(self.bn2(self.conv2(out)))
+        out = self.bn3(self.conv3(out))
+        return out
+
+
+if __name__ == &quot;__main__&quot;:
+    model = ResNetBlock()
+    model.eval()
+    input_shape = (1, 64, 56, 56)
+
+    # Original
+    med_orig, p95_orig = benchmark_model(model, input_shape)
+
+    # Fused
+    traced = symbolic_trace(model)
+    fused = fuse_conv_bn_pass(traced)
+    med_fused, p95_fused = benchmark_model(fused, input_shape)
+
+    # Report
+    speedup = med_orig / med_fused
+    print(f&quot;┌────────────────────────────────────────┐&quot;)
+    print(f&quot;│       Conv+BN Fusion Benchmark         │&quot;)
+    print(f&quot;├────────────────┬──────────┬────────────┤&quot;)
+    print(f&quot;│                │ Median   │ P95        │&quot;)
+    print(f&quot;├────────────────┼──────────┼────────────┤&quot;)
+    print(f&quot;│ Original       │ {med_orig:6.2f} ms │ {p95_orig:6.2f} ms  │&quot;)
+    print(f&quot;│ Fused          │ {med_fused:6.2f} ms │ {p95_fused:6.2f} ms  │&quot;)
+    print(f&quot;│ Speedup        │ {speedup:6.2f}×  │            │&quot;)
+    print(f&quot;└────────────────┴──────────┴────────────┘&quot;)
+
+    # Count parameters and ops
+    orig_params = sum(p.numel() for p in model.parameters())
+    fused_params = sum(p.numel() for p in fused.parameters())
+    print(f&quot;\nParameters: {orig_params:,} → {fused_params:,} &quot;
+          f&quot;(saved {orig_params - fused_params:,} BN params)&quot;)
+</code></pre>
+<p>Expected output (typical CPU results):</p>
+<pre><code>Fused 3 Conv+BN pairs
+┌────────────────────────────────────────┐
+│       Conv+BN Fusion Benchmark         │
+├────────────────┬──────────┬────────────┤
+│                │ Median   │ P95        │
+├────────────────┼──────────┼────────────┤
+│ Original       │   2.34 ms │   2.89 ms  │
+│ Fused          │   1.87 ms │   2.31 ms  │
+│ Speedup        │   1.25×  │            │
+└────────────────┴──────────┴────────────┘
+
+Parameters: 86,272 → 85,504 (saved 768 BN params)
+</code></pre>
+<hr />
+<h2 id="8-edge-cases-extensions">8. Edge Cases &amp; Extensions</h2>
+<h3 id="edge-cases-to-handle">Edge Cases to Handle</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Case</th>
+<th style="text-align: left;">Status</th>
+<th style="text-align: left;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Conv without bias</td>
+<td style="text-align: left;">✅ Handled</td>
+<td style="text-align: left;">Create zero bias before folding</td>
+</tr>
+<tr>
+<td style="text-align: left;">Depthwise conv (groups &gt; 1)</td>
+<td style="text-align: left;">✅ Handled</td>
+<td style="text-align: left;">Scale factor shape still matches</td>
+</tr>
+<tr>
+<td style="text-align: left;">BN in training mode</td>
+<td style="text-align: left;">❌ Skip</td>
+<td style="text-align: left;">Running stats not fixed; fusion incorrect</td>
+</tr>
+<tr>
+<td style="text-align: left;">Conv output used by both BN and another op</td>
+<td style="text-align: left;">❌ Skip</td>
+<td style="text-align: left;">Multi-use: cannot remove Conv safely</td>
+</tr>
+<tr>
+<td style="text-align: left;">Transposed conv (ConvTranspose2d)</td>
+<td style="text-align: left;">🔧 Extension</td>
+<td style="text-align: left;">Same math, different weight layout</td>
+</tr>
+<tr>
+<td style="text-align: left;">BN with affine=False</td>
+<td style="text-align: left;">🔧 Extension</td>
+<td style="text-align: left;">gamma=1, beta=0 implicitly</td>
+</tr>
+</tbody>
+</table>
+<h3 id="extension-ideas">Extension Ideas</h3>
+<ol>
+<li><strong>Conv + BN + ReLU → FusedConvBNReLU</strong>: Fuse activation too (requires custom CUDA kernel or using <code>torch.ops.aten._native_batch_norm_legit</code>)</li>
+<li><strong>Linear + BN1d fusion</strong>: Same math for 1D case, common in MLPs</li>
+<li><strong>Quantization-aware fusion</strong>: Fold BN into quantized conv weights</li>
+<li><strong>Multi-pass pipeline</strong>: Chain this pass with dead code elimination, constant folding, and CSE</li>
+</ol>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-complete-the-pass-45-min">Exercise 1: Complete the Pass (45 min)</h3>
+<p>Copy the code from Sections 3-7 into your project directory. Run the tests:</p>
+<pre><code class="language-bash">mkdir -p fx_conv_bn_fusion &amp;&amp; cd fx_conv_bn_fusion
+# Create files: pass_conv_bn.py, fuse_params.py, test_pass.py, bench.py
+
+# Run tests
+pytest test_pass.py -v
+
+# Run benchmark
+python bench.py
+</code></pre>
+<p><strong>Deliverables:</strong>
+- [ ] All tests pass
+- [ ] Benchmark shows measurable speedup
+- [ ] Graph lint passes after transformation</p>
+<h3 id="exercise-2-add-linear-layernorm-fusion-30-min">Exercise 2: Add Linear + LayerNorm Fusion (30 min)</h3>
+<p>Extend the pass to also fuse <code>nn.Linear</code> + <code>nn.LayerNorm</code> pairs (common in Transformers):</p>
+<pre><code class="language-python"># Hint: LayerNorm math for the last dimension
+# y = (x - mean) / sqrt(var + eps) * gamma + beta
+# If x = Wx_in + b (Linear output), then:
+# W_fused = diag(gamma / sqrt(var + eps)) @ W
+# b_fused = gamma * (b - mean) / sqrt(var + eps) + beta
+#
+# Note: LayerNorm normalizes over the LAST dim, not batch dim.
+# This fusion is only valid when the Linear output IS that last dim.
+</code></pre>
+<h3 id="exercise-3-write-a-pass-verifier-15-min">Exercise 3: Write a Pass Verifier (15 min)</h3>
+<pre><code class="language-python">def verify_pass(model, pass_fn, input_shape, atol=1e-5, n_samples=10):
+    &quot;&quot;&quot;Generic pass verification harness.
+
+    Tests:
+    1. Numerical equivalence across multiple random inputs
+    2. Gradient equivalence (if model has parameters)
+    3. Graph validity (lint)
+    4. No new parameters introduced (only removed/modified)
+    &quot;&quot;&quot;
+    model.eval()
+    traced = symbolic_trace(model)
+    transformed = pass_fn(traced)
+
+    # TODO: Implement the four checks above
+    # Return a dict: {&quot;numerical&quot;: bool, &quot;gradient&quot;: bool, 
+    #                 &quot;lint&quot;: bool, &quot;params&quot;: bool}
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong>Pattern detection</strong> walks the FX graph looking for adjacent node pairs that match a fusible pattern — the key is checking module types and data flow</li>
+<li><strong>Weight folding</strong> is pure linear algebra: BatchNorm's affine transform absorbs into Conv's weight and bias matrices with no approximation</li>
+<li><strong>Graph rewriting</strong> must be careful about node ordering, multi-use edges, and dead code — always lint after transformation</li>
+<li><strong>Testing compiler passes</strong> requires: numerical equivalence across input shapes, edge case coverage (no bias, depthwise, residual), and graph integrity checks</li>
+<li><strong>Benchmarking</strong> should report median and percentile latencies with proper warmup — Conv+BN fusion typically yields 1.1-1.3× speedup on CPU, more on GPU due to kernel launch overhead savings</li>
+<li><strong>This pass already exists</strong> in <code>torch.quantization.fuse_modules</code> and <code>torch.fx.experimental.optimization</code> — but building it yourself teaches you how every FX pass works</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li>PyTorch FX documentation — <em>Writing Graph Transformations</em> (pytorch.org/docs/stable/fx.html)</li>
+<li>Jacob, B. et al. — <em>Quantization and Training of Neural Networks for Efficient Integer-Arithmetic-Only Inference</em> (CVPR 2018) — BN folding for quantization</li>
+<li>ONNX Runtime Graph Optimizations — <em>Conv+BN Fusion</em> (onnxruntime.ai)</li>
+<li>Reed, D. — <em>torch.compile: The Missing Manual</em> — how production passes are structured</li>
+<li>TensorRT Optimization Passes — <em>Layer Fusion</em> (developer.nvidia.com)</li>
+</ul>
+<hr />
+<h2 id="week-3-wrap-up">Week 3 Wrap-Up</h2>
+<p>This week covered the core compiler toolkit:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Day</th>
+<th style="text-align: left;">Topic</th>
+<th style="text-align: left;">Key Concept</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">15</td>
+<td style="text-align: left;">Compiler 101</td>
+<td style="text-align: left;">Frontend → IR → Optimizer → Backend pipeline</td>
+</tr>
+<tr>
+<td style="text-align: left;">16</td>
+<td style="text-align: left;">Computation Graphs</td>
+<td style="text-align: left;">Graphs as IRs; FX tracing; node types</td>
+</tr>
+<tr>
+<td style="text-align: left;">17</td>
+<td style="text-align: left;">Graph-Level Opts</td>
+<td style="text-align: left;">CSE, DCE, constant folding, operator fusion</td>
+</tr>
+<tr>
+<td style="text-align: left;">18</td>
+<td style="text-align: left;">Polyhedral Model</td>
+<td style="text-align: left;">Iteration domains, schedules, dependence analysis</td>
+</tr>
+<tr>
+<td style="text-align: left;">19</td>
+<td style="text-align: left;">Loop Tiling</td>
+<td style="text-align: left;">Cache locality, multi-level tiling, TVM schedules</td>
+</tr>
+<tr>
+<td style="text-align: left;">20</td>
+<td style="text-align: left;">Auto-Tuning</td>
+<td style="text-align: left;">Search spaces, cost models, TVM ecosystem</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>21</strong></td>
+<td style="text-align: left;"><strong>Mini-Project</strong></td>
+<td style="text-align: left;"><strong>End-to-end FX pass: detect → rewrite → verify → bench</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Next week (Week 4)</strong> shifts from graph-level to <strong>kernel-level</strong> optimization with Triton, GPU memory hierarchies, and writing custom CUDA-level code through Python — starting with <strong>Day 22: Triton Language Basics</strong>.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-20-auto-tuning-search.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 20: Auto-Tuning & Search Spaces</a>
+            <a href="../week-04/day-22-triton-language-basics.html" class="text-emerald-600 hover:text-emerald-800">Day 22: Triton Language Basics &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>

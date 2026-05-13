@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11: torch.profiler & Trace Analysis - ML Compilers - Learning From Building Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX for LaTeX math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Markdown content styling */
+        .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
+        .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .md-content h4 { font-size: 1.1rem; font-weight: 600; color: #4b5563; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .md-content p { margin-bottom: 1rem; line-height: 1.75; color: #374151; }
+        .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
+        .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
+        .md-content code {
+            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
+            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
+        }
+        .md-content pre {
+            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
+            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
+        }
+        .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+        .md-content blockquote {
+            border-left: 4px solid #10b981; background: #ecfdf5; padding: 0.75rem 1rem;
+            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
+        }
+        .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+        .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
+        .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
+        .md-content tr:hover { background-color: #f9fafb; }
+        .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+        .md-content strong { font-weight: 600; }
+        .md-content a { color: #059669; text-decoration: underline; }
+        .md-content a:hover { color: #047857; }
+        .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+        /* Details/summary */
+        .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
+        .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
+        .md-content summary:hover { background: #f3f4f6; }
+        .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
+        .md-content details > *:not(summary) { padding: 0 1rem; }
+        /* Phase badges */
+        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .phase-1 { background: #dbeafe; color: #1e40af; }
+        .phase-2 { background: #d1fae5; color: #065f46; }
+        .phase-3 { background: #fef3c7; color: #92400e; }
+        .phase-4 { background: #fce7f3; color: #9d174d; }
+        .phase-5 { background: #ede9fe; color: #5b21b6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
+        <a href="index.html" class="text-emerald-600 hover:text-emerald-800 mb-4 inline-block">&larr; Week 2: PyTorch Internals</a>
+
+        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+            <div class="md-content">
+<h1 id="day-11-torchprofiler-trace-analysis">Day 11: torch.profiler &amp; Trace Analysis</h1>
+<blockquote>
+<p><strong>Phase I · Week 2 · Day 11 of 70 · 2.5 hours</strong></p>
+</blockquote>
+<p><em>"Profiling without a hypothesis is stamp collecting. Profiling with one is engineering."</em></p>
+<table>
+<thead>
+<tr>
+<th>Previous</th>
+<th>Next</th>
+<th>Week</th>
+<th>Phase</th>
+<th>Curriculum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="day-10-custom-cpp-extensions.html">Day 10: Custom C++ Extensions</a></td>
+<td><a href="day-12-eager-vs-graph-mode.html">Day 12: Eager vs Graph Mode</a></td>
+<td><a href="README.html">Week 2: PyTorch Internals</a></td>
+<td>Phase I: Foundations</td>
+<td><a href="../../STUDY-PLAN.html">Curriculum Home</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-matters">Why This Matters</h2>
+<p>You've written a training loop that takes 400 ms per step. Is the GPU compute-bound
+or memory-bound? Is the CPU feeding data fast enough? Is there dead time between kernel
+launches? Without profiling, you're guessing. <code>torch.profiler</code> answers these questions
+with microsecond-level traces that show exactly where time is spent — from Python-level
+ops down to individual CUDA kernel launches. This is the tool that separates "I think
+it's slow because..." from "it's slow because NCCL all-reduce overlaps 0% with compute."</p>
+<hr />
+<h2 id="1-torchprofiler-api">1. torch.profiler API</h2>
+<h3 id="11-basic-usage">1.1 Basic Usage</h3>
+<pre><code class="language-python">import torch
+from torch.profiler import profile, ProfilerActivity, schedule
+
+model = torch.nn.Linear(4096, 4096).cuda()
+x = torch.randn(64, 4096, device='cuda')
+
+with profile(
+    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    record_shapes=True,
+    profile_memory=True,
+    with_stack=True,
+) as prof:
+    for _ in range(5):
+        y = model(x)
+        y.sum().backward()
+
+# Print a summary table
+print(prof.key_averages().table(
+    sort_by=&quot;cuda_time_total&quot;,
+    row_limit=15,
+))
+</code></pre>
+<p><strong>Output (simplified):</strong></p>
+<pre><code>Name                      CPU total   CUDA total   Calls
+────────────────────────────────────────────────────────
+aten::addmm               120.3 us    89.2 us      5
+aten::sum                   18.1 us    12.4 us      5
+AddmmBackward0             210.5 us   156.3 us      5
+aten::mm                   198.2 us   142.1 us     10
+...
+Self CPU time total: 1.2 ms
+Self CUDA time total: 0.8 ms
+</code></pre>
+<h3 id="12-key-parameters">1.2 Key Parameters</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>activities</code></td>
+<td>What to trace: <code>CPU</code>, <code>CUDA</code>, or both</td>
+</tr>
+<tr>
+<td><code>record_shapes</code></td>
+<td>Log tensor shapes (useful for identifying which call is which)</td>
+</tr>
+<tr>
+<td><code>profile_memory</code></td>
+<td>Track memory allocations/frees</td>
+</tr>
+<tr>
+<td><code>with_stack</code></td>
+<td>Capture Python call stacks (enables source-level attribution)</td>
+</tr>
+<tr>
+<td><code>with_flops</code></td>
+<td>Estimate FLOPs for matrix operations</td>
+</tr>
+<tr>
+<td><code>with_modules</code></td>
+<td>Annotate ops with their <code>nn.Module</code> name</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-scheduled-profiling-for-training-loops">2. Scheduled Profiling for Training Loops</h2>
+<p>Profiling every step wastes resources. Use <code>schedule()</code> to skip warmup and
+capture only a few representative steps:</p>
+<pre><code class="language-python">from torch.profiler import profile, schedule, tensorboard_trace_handler
+
+# Profile steps 5-9 (after 5 warmup steps)
+with profile(
+    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    schedule=schedule(
+        wait=1,       # skip 1 step (cold cache)
+        warmup=4,     # warmup 4 steps (JIT, cache warming)
+        active=5,     # actually record 5 steps
+        repeat=1,     # do this once
+    ),
+    on_trace_ready=tensorboard_trace_handler('./log/profiler'),
+    record_shapes=True,
+    profile_memory=True,
+    with_stack=True,
+) as prof:
+    for step in range(11):
+        # Training step
+        y = model(x)
+        loss = y.sum()
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+        prof.step()  # signal end of step
+</code></pre>
+<pre><code>Timeline:
+  Step:   0    1    2    3    4    5    6    7    8    9   10
+        wait │──── warmup ────│──── active (recorded) ────│
+</code></pre>
+<hr />
+<h2 id="3-trace-visualization">3. Trace Visualization</h2>
+<h3 id="31-chrome-trace-json">3.1 Chrome Trace (JSON)</h3>
+<pre><code class="language-python"># Export Chrome-compatible trace
+prof.export_chrome_trace(&quot;trace.json&quot;)
+
+# Open in:
+#   chrome://tracing     (Chrome browser)
+#   https://ui.perfetto.dev  (Perfetto — better for large traces)
+</code></pre>
+<p>The trace shows a <strong>Gantt chart</strong> of all operations:</p>
+<pre><code>CPU Thread 0:
+├─ addmm ─────────┤          ├─ sum ──┤
+│                  │          │        │
+GPU Stream 0:      │          │        │
+│      ├─ sgemm_128x128 ─────┤ ├─ reduce ──┤
+│      │                      │ │           │
+│  idle│      GPU active      │ │GPU active │
+│ (gap)│                      │ │           │
+└──────┴──────────────────────┴─┴───────────┘
+
+Key observations:
+  - Gap between CPU dispatch and GPU start = launch latency
+  - Gap between GPU kernels = CPU overhead (Python, autograd)
+  - Overlap of CPU prep with GPU execution = good pipelining
+</code></pre>
+<h3 id="32-perfetto-ui">3.2 Perfetto UI</h3>
+<p>For large traces (&gt;50 MB), Perfetto handles them much better than Chrome:</p>
+<ol>
+<li>Go to <code>https://ui.perfetto.dev</code></li>
+<li>Click "Open trace file" → select your <code>trace.json</code></li>
+<li>Use <code>W</code>/<code>S</code> to zoom, <code>A</code>/<code>D</code> to pan</li>
+<li>Click on any event to see duration, call stack, tensor shapes</li>
+</ol>
+<h3 id="33-tensorboard-plugin">3.3 TensorBoard Plugin</h3>
+<pre><code class="language-bash"># Launch TensorBoard with the profiler plugin
+tensorboard --logdir=./log/profiler
+
+# Navigate to: http://localhost:6006/#pytorch_profiler
+</code></pre>
+<p>The TensorBoard plugin provides:
+- <strong>Overview tab</strong> — GPU utilization %, step time breakdown
+- <strong>Operator view</strong> — sorted by self/total time
+- <strong>Trace view</strong> — interactive timeline (uses Perfetto under the hood)
+- <strong>Memory view</strong> — allocation timeline with peak tracking
+- <strong>Module view</strong> — time per <code>nn.Module</code> (requires <code>with_modules=True</code>)</p>
+<hr />
+<h2 id="4-key-metrics-to-extract">4. Key Metrics to Extract</h2>
+<h3 id="41-gpu-utilization-and-idle-time">4.1 GPU Utilization and Idle Time</h3>
+<pre><code class="language-python">events = prof.key_averages()
+
+total_cuda = sum(e.cuda_time_total for e in events)
+total_cpu = sum(e.cpu_time_total for e in events)
+
+# Rough GPU utilization
+# (better metrics come from the trace view)
+print(f&quot;Total CPU time: {total_cpu / 1e3:.1f} ms&quot;)
+print(f&quot;Total CUDA time: {total_cuda / 1e3:.1f} ms&quot;)
+</code></pre>
+<h3 id="42-cpu-gpu-overlap-analysis">4.2 CPU-GPU Overlap Analysis</h3>
+<pre><code>Ideal pipeline (high overlap):
+CPU: [prep1][prep2][prep3][prep4]
+GPU:    [kernel1][kernel2][kernel3][kernel4]
+          ↑ GPU never idles
+
+Bad pipeline (serial execution):
+CPU: [prep1]          [prep2]          [prep3]
+GPU:        [kernel1]          [kernel2]
+                  ↑ GPU idles while CPU prepares
+</code></pre>
+<p>Detect overlap issues by looking at the trace:
+- <strong>Long gaps between GPU kernels</strong> → CPU is the bottleneck (Python overhead,
+  data loading, autograd graph construction)
+- <strong>GPU kernels much shorter than CPU ops</strong> → operations are too small to
+  saturate the GPU (consider kernel fusion or batching)</p>
+<h3 id="43-flops-analysis">4.3 FLOPS Analysis</h3>
+<pre><code class="language-python">with profile(
+    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    with_flops=True,
+) as prof:
+    y = model(x)
+
+# Check FLOPS for each op
+for event in prof.key_averages():
+    if event.flops:
+        gflops = event.flops / 1e9
+        time_s = event.cuda_time_total / 1e6
+        tflops = (gflops / time_s / 1e3) if time_s &gt; 0 else 0
+        print(f&quot;{event.key:30s} {gflops:8.1f} GFLOP  {tflops:6.1f} TFLOP/s&quot;)
+
+# Compare to theoretical peak:
+# A100 FP32: 19.5 TFLOP/s
+# A100 TF32: 156 TFLOP/s
+# A100 FP16: 312 TFLOP/s (with tensor cores)
+</code></pre>
+<hr />
+<h2 id="5-memory-profiling-with-record_memory_history">5. Memory Profiling with record_memory_history</h2>
+<p>For deep memory debugging, use the memory history recorder:</p>
+<pre><code class="language-python">import torch
+
+# Start recording all allocations
+torch.cuda.memory._record_memory_history(
+    max_entries=100000,
+    context=&quot;all&quot;,          # record Python stack traces
+)
+
+# Run your workload
+model = torch.nn.TransformerEncoder(
+    torch.nn.TransformerEncoderLayer(d_model=512, nhead=8),
+    num_layers=6,
+).cuda()
+x = torch.randn(32, 128, 512, device='cuda')
+
+y = model(x)
+y.sum().backward()
+
+# Save snapshot
+torch.cuda.memory._dump_snapshot(&quot;mem_trace.pickle&quot;)
+torch.cuda.memory._record_memory_history(enabled=None)
+
+# Visualize at https://pytorch.org/memory_viz
+# Upload mem_trace.pickle → see allocation timeline with stacks
+</code></pre>
+<h3 id="memory-timeline-interpretation">Memory Timeline Interpretation</h3>
+<pre><code>Memory
+  ▲
+  │  ┌─── forward pass allocations (activations)
+  │  │       ┌─── peak (all activations live)
+  │  │       │          ┌─── backward: activations freed,
+  │  │       │          │    gradients allocated
+  │  ▼       ▼          ▼
+  │ ┌──┬──┬──┬──┐  ┌──┬──┐
+  │ │a1│a2│a3│a4│  │g4│g3│   ← activations freed LIFO
+  ├─┤  │  │  │  ├──┤  │  │
+  │ │params + opt │  │  │  │
+  └─┴──┴──┴──┴──┴──┴──┴──┴──▶ time
+
+Each block shows:
+  - Which Python line allocated it (from stack trace)
+  - Size in bytes
+  - Lifetime (alloc time → free time)
+</code></pre>
+<hr />
+<h2 id="6-practical-profiling-workflow">6. Practical Profiling Workflow</h2>
+<p>A systematic approach to finding and fixing performance bottlenecks:</p>
+<pre><code>Step 1: Profile with torch.profiler
+────────────────────────────────────
+  Export trace.json → open in Perfetto
+
+Step 2: Check GPU utilization
+─────────────────────────────
+  Is GPU busy &gt;80% of the time?
+  YES → compute-bound → look at kernel efficiency
+  NO  → launch-bound or data-starved → find the gaps
+
+Step 3: Identify top-N kernels by time
+──────────────────────────────────────
+  prof.key_averages().table(sort_by=&quot;cuda_time_total&quot;)
+  Focus optimization on the top 3-5 kernels
+
+Step 4: Check arithmetic intensity
+───────────────────────────────────
+  For each top kernel:
+    FLOPS / bytes_accessed = arithmetic intensity
+    Compare to GPU's ops:byte ratio (A100: ~200 for TF32)
+    Low intensity → memory-bound → fuse ops, reduce data movement
+    High intensity → compute-bound → use tensor cores, reduce precision
+
+Step 5: Check CPU-GPU overlap
+─────────────────────────────
+  In trace view: are there gaps between GPU kernels?
+  YES → CPU bottleneck → use CUDA graphs, reduce Python overhead
+  NO  → GPU is fully utilized, optimize individual kernels
+
+Step 6: Profile memory
+──────────────────────
+  Use record_memory_history for peak memory analysis
+  Identify largest activation tensors
+  Apply gradient checkpointing to the worst offenders
+</code></pre>
+<hr />
+<h2 id="hands-on-exercises">Hands-On Exercises</h2>
+<h3 id="exercise-1-profile-a-resnet-training-step-30-min">Exercise 1: Profile a ResNet Training Step (30 min)</h3>
+<pre><code class="language-python">import torch
+import torchvision.models as models
+from torch.profiler import profile, ProfilerActivity
+
+model = models.resnet50().cuda()
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+x = torch.randn(32, 3, 224, 224, device='cuda')
+target = torch.randint(1000, (32,), device='cuda')
+criterion = torch.nn.CrossEntropyLoss()
+
+# Warmup
+for _ in range(3):
+    optimizer.zero_grad()
+    loss = criterion(model(x), target)
+    loss.backward()
+    optimizer.step()
+
+with profile(
+    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    record_shapes=True,
+    with_flops=True,
+    with_stack=True,
+) as prof:
+    optimizer.zero_grad()
+    loss = criterion(model(x), target)
+    loss.backward()
+    optimizer.step()
+
+# TASKS:
+# 1. Print top 10 ops by CUDA time
+print(prof.key_averages().table(sort_by=&quot;cuda_time_total&quot;, row_limit=10))
+
+# 2. Export and view Chrome trace
+prof.export_chrome_trace(&quot;resnet_trace.json&quot;)
+
+# 3. Answer: What fraction of CUDA time is spent in convolutions
+#    vs batch norm vs other ops?
+</code></pre>
+<h3 id="exercise-2-find-the-bottleneck-30-min">Exercise 2: Find the Bottleneck (30 min)</h3>
+<pre><code class="language-python"># This training loop has a deliberate performance bug. Find it.
+
+import torch
+import torch.nn as nn
+
+class SlowModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            nn.Linear(256, 256) for _ in range(10)
+        ])
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = torch.relu(layer(x))
+            # Hint: what does .item() do to CPU-GPU sync?
+            if x.max().item() &gt; 100:
+                x = x / 100
+        return x
+
+model = SlowModel().cuda()
+x = torch.randn(64, 256, device='cuda')
+
+# Profile this and identify why it's slow
+with profile(
+    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+) as prof:
+    for _ in range(10):
+        y = model(x).sum()
+        y.backward()
+
+print(prof.key_averages().table(sort_by=&quot;cpu_time_total&quot;, row_limit=15))
+
+# QUESTION: What is the fix? Implement it and re-profile.
+</code></pre>
+<h3 id="exercise-3-memory-profile-a-transformer-20-min">Exercise 3: Memory Profile a Transformer (20 min)</h3>
+<pre><code class="language-python">import torch
+
+torch.cuda.memory._record_memory_history(max_entries=100000)
+
+model = torch.nn.TransformerEncoder(
+    torch.nn.TransformerEncoderLayer(
+        d_model=1024, nhead=16, dim_feedforward=4096, batch_first=True
+    ),
+    num_layers=12,
+).cuda()
+
+x = torch.randn(16, 256, 1024, device='cuda')
+
+y = model(x)
+y.sum().backward()
+
+torch.cuda.memory._dump_snapshot(&quot;transformer_mem.pickle&quot;)
+torch.cuda.memory._record_memory_history(enabled=None)
+
+# TASKS:
+# 1. Upload transformer_mem.pickle to https://pytorch.org/memory_viz
+# 2. Identify the peak memory point
+# 3. Which layer's activations consume the most memory?
+# 4. How much memory could gradient checkpointing save?
+peak = torch.cuda.max_memory_allocated()
+print(f&quot;Peak memory: {peak / 1e9:.2f} GB&quot;)
+</code></pre>
+<hr />
+<h2 id="key-takeaways">Key Takeaways</h2>
+<ol>
+<li><strong><code>torch.profiler</code></strong> captures CPU ops, CUDA kernels, memory events, and Python
+   stacks in a single unified trace</li>
+<li><strong><code>schedule(wait, warmup, active)</code></strong> avoids profiling cold starts and limits
+   overhead to representative steps only</li>
+<li><strong>Chrome/Perfetto traces</strong> reveal CPU-GPU overlap, kernel launch gaps, and idle
+   time that summary tables hide</li>
+<li><strong>GPU utilization &lt; 80%</strong> usually means CPU overhead, Python-level bottlenecks,
+   or excessive synchronization (<code>.item()</code>, <code>.cpu()</code>, <code>print</code>)</li>
+<li><strong><code>record_memory_history</code></strong> with the PyTorch memory visualizer pinpoints exactly
+   which line of code caused peak memory or fragmentation</li>
+</ol>
+<hr />
+<h2 id="further-reading">Further Reading</h2>
+<ul>
+<li><a href="https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html">PyTorch Profiler tutorial</a></li>
+<li><a href="https://ui.perfetto.dev/">Perfetto UI</a> for trace visualization</li>
+<li><a href="https://github.com/facebookresearch/HolisticTraceAnalysis">Holistic Trace Analysis (HTA)</a> — automated trace analysis</li>
+<li><a href="https://pytorch.org/memory_viz">PyTorch Memory Visualizer</a></li>
+<li><a href="https://developer.nvidia.com/nsight-systems">NVIDIA Nsight Systems</a> — system-level GPU profiling</li>
+</ul>
+<hr />
+<h2 id="tomorrows-preview">Tomorrow's Preview</h2>
+<p><strong>Day 12: Eager vs Graph Mode</strong> — We'll compare PyTorch's default eager execution
+with graph-based execution (<code>torch.jit.trace</code>, <code>torch.jit.script</code>, <code>torch.compile</code>),
+understand why graph capture enables optimization, and see how <code>torch.compile</code>
+bridges the gap with its Dynamo + Inductor pipeline.</p>
+            </div>
+        </div>
+
+        <div class="mt-6 flex justify-between text-sm">
+            <a href="day-10-custom-cpp-extensions.html" class="text-emerald-600 hover:text-emerald-800">&larr; Day 10: Custom C++ Extensions</a>
+            <a href="day-12-eager-vs-graph-mode.html" class="text-emerald-600 hover:text-emerald-800">Day 12: Eager vs Graph Mode &rarr;</a>
+        </div>
+    </div>
+</body>
+</html>
