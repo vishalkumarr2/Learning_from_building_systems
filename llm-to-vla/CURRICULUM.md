@@ -1100,7 +1100,7 @@ If you fail any of these: spend 2 days on Karpathy's "micrograd" video first.
 
 **Implementation:** Train a policy in simulation with domain randomization. Measure: performance in original sim vs randomized sim.
 
-**Hands-on:** [Exercise 12: Robot Manipulation in MuJoCo](exercises/12-robot-manipulation-mujoco.md) covers custom env building, reward engineering, and MuJoCo manipulation. [Exercise 13: Sim-to-Real Transfer](exercises/13-sim-to-real-transfer.md) covers domain randomization, adversarial adaptation, and transfer evaluation. [Exercise 14: Data Collection & Teleoperation](exercises/14-data-collection-teleoperation.md) covers keyboard teleop, HDF5 recording, scripted policies, and data quality filtering. [Exercise 15: Kinematics & Trajectory](exercises/15-kinematics-trajectory.md) covers DH parameters, IK solvers, polynomial interpolation, and trajectory planning for VLA deployment.
+**Hands-on:** [Exercise 12: Robot Manipulation in MuJoCo](exercises/12-robot-manipulation-mujoco.md) covers custom env building, reward engineering, and MuJoCo manipulation. [Exercise 13: Sim-to-Real Transfer](exercises/13-sim-to-real-transfer.md) covers domain randomization, adversarial adaptation, and transfer evaluation. [Exercise 14: Data Collection & Teleoperation](exercises/14-data-collection-teleoperation.md) covers keyboard teleop, HDF5 recording, scripted policies, and data quality filtering. [Exercise 15: Kinematics & Trajectory](exercises/15-kinematics-trajectory.md) covers DH parameters, IK solvers, polynomial interpolation, and trajectory planning for VLA deployment. [Exercise 16: Safety, Monitoring & Failure Recovery](exercises/16-safety-monitoring-recovery.md) covers OOD detection, uncertainty estimation, runtime safety monitors, graceful degradation, and fallback behaviors for deployed VLA policies.
 
 ### Day 102: Sim-to-Real Day 2 (NEW — Finn)
 **Theory:** System identification: tune sim parameters to match real robot. Fine-tuning on small real data: sim pretrain + real fine-tune. When sim-to-real works (visual policies, locomotion) and when it fails (contact-rich manipulation, deformable objects). The "sim-to-real gap" vs "sim-to-real chasm." Hybrid: sim for exploration, real for refinement.
@@ -1312,7 +1312,8 @@ learn/llm-to-vla/
 │   ├── 12-robot-manipulation-mujoco.md    ← MuJoCo manipulation, reward engineering, custom envs
 │   ├── 13-sim-to-real-transfer.md         ← Domain randomization, adversarial adaptation, transfer
 │   ├── 14-data-collection-teleoperation.md ← Robot teleoperation, HDF5 recording, data curation
-│   └── 15-kinematics-trajectory.md        ← DH params, IK solvers, polynomial trajectories
+│   ├── 15-kinematics-trajectory.md        ← DH params, IK solvers, polynomial trajectories
+│   └── 16-safety-monitoring-recovery.md   ← OOD detection, uncertainty, safety monitors, fallbacks
 └── projects/
     ├── 01-rnn-vs-attention/               ← Phase I: character LM comparison
     ├── 02-mini-lm-ablations/              ← Phase II: train LM + ablation report
@@ -1321,7 +1322,8 @@ learn/llm-to-vla/
     ├── 05-warehouse-visual-qa/            ← Phase V: VLM comparison + fine-tuning
     ├── 06-diffusion-policy/               ← Phase VI: own demos → diffusion policy + eval
     ├── 07-vla-capstone/                   ← Phase VII: end-to-end VLA pipeline
-    └── 08-ros2-vla-pipeline/              ← Phase VII: ROS 2 deployment with safety & monitoring
+    ├── 08-ros2-vla-pipeline/              ← Phase VII: ROS 2 deployment with safety & monitoring
+    └── 09-mini-vla-from-scratch/          ← Phase VII: complete VLA (ViT + CLIP + action head)
 ```
 
 ---
