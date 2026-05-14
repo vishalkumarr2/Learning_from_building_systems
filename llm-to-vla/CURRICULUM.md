@@ -1100,6 +1100,8 @@ If you fail any of these: spend 2 days on Karpathy's "micrograd" video first.
 
 **Implementation:** Train a policy in simulation with domain randomization. Measure: performance in original sim vs randomized sim.
 
+**Hands-on:** [Exercise 12: Robot Manipulation in MuJoCo](exercises/12-robot-manipulation-mujoco.md) covers custom env building, reward engineering, and MuJoCo manipulation. [Exercise 13: Sim-to-Real Transfer](exercises/13-sim-to-real-transfer.md) covers domain randomization, adversarial adaptation, and transfer evaluation.
+
 ### Day 102: Sim-to-Real Day 2 (NEW — Finn)
 **Theory:** System identification: tune sim parameters to match real robot. Fine-tuning on small real data: sim pretrain + real fine-tune. When sim-to-real works (visual policies, locomotion) and when it fails (contact-rich manipulation, deformable objects). The "sim-to-real gap" vs "sim-to-real chasm." Hybrid: sim for exploration, real for refinement.
 
@@ -1117,6 +1119,8 @@ If you fail any of these: spend 2 days on Karpathy's "micrograd" video first.
 - VLA inference node: takes camera image + language command → outputs action/waypoint
 - Action server: converts VLA output to robot commands
 - Safety monitor node: checks workspace limits, collision proximity
+
+**Hands-on:** [Project 08: ROS 2 + VLA Deployment Pipeline](projects/08-ros2-vla-pipeline/README.md) — build the full pipeline with policy node, safety gate, action interpolator, and monitoring.
 
 ### Day 105: Hybrid Systems Day 3 — Safety & Recovery (NEW — Levine)
 **Theory:** TAMP (Task and Motion Planning) + LLM: using LLM for task-level planning with classical motion planning. Safety layers: workspace limits, velocity limits, collision checking, force limits. Recovery behaviors: what to do when the VLA outputs a bad action. When to fall back to classical: if VLA confidence is low, or if in a safety-critical regime. Human-in-the-loop: asking for help when uncertain.
@@ -1304,7 +1308,9 @@ learn/llm-to-vla/
 │   ├── 08-clip-vlm-experiments.md         ← CLIP zero-shot, VLM comparison
 │   ├── 09-rl-diffusion-policy.md          ← RL basics, diffusion for actions
 │   ├── 10-imitation-act.md                ← ACT, action tokenization
-│   └── 11-vla-evaluation.md               ← VLA deployment + hybrid systems
+│   ├── 11-vla-evaluation.md               ← VLA deployment + hybrid systems
+│   ├── 12-robot-manipulation-mujoco.md    ← MuJoCo manipulation, reward engineering, custom envs
+│   └── 13-sim-to-real-transfer.md         ← Domain randomization, adversarial adaptation, transfer
 └── projects/
     ├── 01-rnn-vs-attention/               ← Phase I: character LM comparison
     ├── 02-mini-lm-ablations/              ← Phase II: train LM + ablation report
@@ -1312,7 +1318,8 @@ learn/llm-to-vla/
     ├── 04-robot-perception/               ← Phase IV: depth + video + detection pipeline
     ├── 05-warehouse-visual-qa/            ← Phase V: VLM comparison + fine-tuning
     ├── 06-diffusion-policy/               ← Phase VI: own demos → diffusion policy + eval
-    └── 07-vla-capstone/                   ← Phase VII: end-to-end VLA pipeline
+    ├── 07-vla-capstone/                   ← Phase VII: end-to-end VLA pipeline
+    └── 08-ros2-vla-pipeline/              ← Phase VII: ROS 2 deployment with safety & monitoring
 ```
 
 ---
