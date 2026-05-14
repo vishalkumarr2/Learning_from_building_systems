@@ -672,6 +672,205 @@ class TrainingMonitor:
 
 ---
 
+## Exercise 6: KV-Cache for Efficient Generation
+
+**Goal**: Implement the KV-cache optimization that makes autoregressive generation
+$O(n)$ per token instead of $O(n^2)$. This is critical for real-time VLA inference.
+
+### 6.1 — The Problem Without Caching
+
+```python
+# Naive autoregressive generation:
+# To generate token at position t, you recompute attention over ALL previous tokens
+# 
+# Step 1: process [token_0] → compute K,V for pos 0 → output token_1
+# Step 2: process [token_0, token_1] → recompute K,V for pos 0,1 → output token_2
+# Step 3: process [token_0, token_1, token_2] → recompute K,V for 0,1,2 → output token_3
+# ...
+# Step n: process entire sequence again!
+#
+# Total compute: O(1 + 2 + 3 + ... + n) = O(n²) attention computations
+# This is wasteful because K,V for past tokens never change!
+```
+
+### 6.2 — KV-Cache Implementation
+
+```python
+class CachedMultiHeadAttention(nn.Module):
+    """Multi-head attention with KV-cache for efficient generation.
+    
+    During generation:
+    - First call (prefill): process entire prompt, cache all K,V
+    - Subsequent calls: only process the new token, append to cache
+    """
+    
+    def __init__(self, d_model: int, n_heads: int, max_seq_len: int = 2048):
+        super().__init__()
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_k = d_model // n_heads
+        
+        self.W_q = nn.Linear(d_model, d_model)
+        self.W_k = nn.Linear(d_model, d_model)
+        self.W_v = nn.Linear(d_model, d_model)
+        self.W_o = nn.Linear(d_model, d_model)
+        
+        # Cache storage
+        self.cache_k: torch.Tensor | None = None
+        self.cache_v: torch.Tensor | None = None
+    
+    def reset_cache(self):
+        """Clear the KV cache (call at start of each new sequence)."""
+        self.cache_k = None
+        self.cache_v = None
+    
+    def forward(self, x: torch.Tensor, use_cache: bool = False) -> torch.Tensor:
+        """
+        Args:
+            x: (batch, seq_len, d_model) — full sequence or single new token
+            use_cache: if True, use and update the KV cache
+            
+        Returns:
+            output: (batch, seq_len, d_model)
+        """
+        B, T, _ = x.shape
+        
+        # Compute Q, K, V for the input
+        Q = self.W_q(x).view(B, T, self.n_heads, self.d_k).transpose(1, 2)
+        K = self.W_k(x).view(B, T, self.n_heads, self.d_k).transpose(1, 2)
+        V = self.W_v(x).view(B, T, self.n_heads, self.d_k).transpose(1, 2)
+        
+        if use_cache:
+            if self.cache_k is not None:
+                # Append new K, V to cache
+                K = torch.cat([self.cache_k, K], dim=2)  # (B, h, cache_len + T, d_k)
+                V = torch.cat([self.cache_v, V], dim=2)
+            # Update cache
+            self.cache_k = K.detach()
+            self.cache_v = V.detach()
+        
+        # Attention: Q attends to ALL K (including cached)
+        # Q: (B, h, T, d_k), K: (B, h, S, d_k) where S = total sequence so far
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.d_k ** 0.5)
+        
+        # Causal mask (only needed for prefill, not single-token generation)
+        if T > 1:
+            S = K.shape[2]
+            # TODO: Create causal mask that allows attending to all cached tokens
+            # but prevents future tokens within the current chunk
+            causal_mask = torch.triu(torch.ones(T, S, device=x.device), diagonal=S-T+1)
+            scores = scores.masked_fill(causal_mask.bool().unsqueeze(0).unsqueeze(0), -1e9)
+        
+        attn = torch.softmax(scores, dim=-1)
+        out = torch.matmul(attn, V)  # (B, h, T, d_k)
+        
+        out = out.transpose(1, 2).contiguous().view(B, T, self.d_model)
+        return self.W_o(out)
+
+
+def benchmark_generation(model, prompt_len: int = 100, gen_len: int = 200):
+    """Benchmark generation with and without KV-cache.
+    
+    TODO: 
+    1. Generate `gen_len` tokens using naive approach (feed full sequence each step)
+    2. Generate `gen_len` tokens using KV-cache (feed only new token each step)
+    3. Verify outputs are identical
+    4. Measure and compare wall-clock time
+    5. Plot: generation time vs sequence length for both approaches
+    """
+    import time
+    
+    # TODO: Implement benchmarking
+    # Expected speedup: ~5-20x for sequences of length 200+
+    pass
+```
+
+### 6.3 — Exercises
+
+1. Implement `CachedMultiHeadAttention` and verify outputs match non-cached version
+2. Benchmark: plot generation time vs sequence length (50, 100, 200, 500 tokens)
+3. Measure memory: KV-cache grows linearly with sequence length. For a 12-layer model with d_model=768, how much memory does the cache use for 2048 tokens?
+   - Calculate: $2 \times n_{layers} \times seq\_len \times d_{model} \times sizeof(float16)$
+4. **Paged attention** (bonus): Research how vLLM's PagedAttention manages KV-cache memory. Write a 1-paragraph summary.
+5. **VLA connection**: If a VLA needs to generate 7 action tokens conditioned on 256 vision tokens, how much does KV-cache help? (Answer: vision tokens are cached, only 7 forward passes needed.)
+
+---
+
+## Exercise 7: Gradient Checkpointing
+
+**Goal**: Implement gradient checkpointing to trade compute for memory —
+essential for training large models on limited GPU memory.
+
+### 7.1 — The Memory Problem
+
+```python
+# Normal backpropagation stores ALL intermediate activations:
+# 12-layer transformer, batch=32, seq=512, d=768:
+# Memory per layer ≈ 2 * batch * seq * d * sizeof(float32)
+#                  ≈ 2 * 32 * 512 * 768 * 4 bytes ≈ 100 MB per layer
+# Total: 12 layers × 100 MB = 1.2 GB just for activations!
+#
+# Gradient checkpointing: only store activations at "checkpoint" layers.
+# During backward pass, recompute non-stored activations from checkpoints.
+# Tradeoff: ~30% slower training, but ~70% less memory!
+```
+
+### 7.2 — Implementation
+
+```python
+import torch
+from torch.utils.checkpoint import checkpoint
+
+
+class TransformerWithCheckpointing(nn.Module):
+    """Transformer that optionally uses gradient checkpointing."""
+    
+    def __init__(self, n_layers: int = 12, d_model: int = 768, 
+                 n_heads: int = 12, use_checkpointing: bool = False):
+        super().__init__()
+        self.use_checkpointing = use_checkpointing
+        self.layers = nn.ModuleList([
+            TransformerBlock(d_model, n_heads) for _ in range(n_layers)
+        ])
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for layer in self.layers:
+            if self.use_checkpointing and self.training:
+                # Recompute this layer's activations during backward
+                x = checkpoint(layer, x, use_reentrant=False)
+            else:
+                x = layer(x)
+        return x
+
+
+def measure_memory_savings(d_model=768, n_layers=12, seq_len=512, batch_size=32):
+    """Compare memory usage with and without gradient checkpointing.
+    
+    TODO:
+    1. Create model WITHOUT checkpointing, measure peak memory during training step
+    2. Create model WITH checkpointing, measure peak memory during training step
+    3. Also measure time per training step (checkpointing is slower)
+    4. Print: memory savings (%) and time overhead (%)
+    """
+    # Hint: use torch.cuda.max_memory_allocated() if GPU available
+    # Or estimate analytically:
+    # Without: O(n_layers * batch * seq * d_model) activation memory
+    # With (every-other-layer checkpoints): O(n_layers/2 * batch * seq * d_model)
+    pass
+```
+
+### 7.3 — Exercises
+
+1. Implement gradient checkpointing using `torch.utils.checkpoint`
+2. Measure memory savings on your Exercise 5 transformer (if GPU available)
+3. Measure the time overhead (typically 25-35%)
+4. Calculate analytically: for a 24-layer model, checkpointing every 4th layer:
+   - How much activation memory is saved? (75%)
+   - What's the recomputation cost? (each non-checkpointed layer recomputed once)
+5. **When to use**: You're fine-tuning a 7B VLA on a 24GB GPU. Without checkpointing you OOM. With checkpointing, estimate the max batch size that fits.
+
+---
+
 ## Self-Check
 
 Before moving on, verify:
@@ -684,6 +883,8 @@ Before moving on, verify:
 - [ ] You can wire up a full transformer and train it
 - [ ] You know the warmup + cosine schedule formula
 - [ ] You can count parameters for a given config
+- [ ] You can implement KV-cache and explain why it speeds up generation
+- [ ] You understand the memory-compute tradeoff of gradient checkpointing
 
 ## Stretch Goals
 
@@ -693,16 +894,14 @@ Before moving on, verify:
 
 3. **Weight tying**: Share the target embedding matrix with the output projection matrix (a common trick that saves parameters). Does it help on your task?
 
-4. **KV caching**: Modify your decoder to cache K, V during generation. Measure the speedup for generating sequences of length 50, 100, 200.
+4. **Compare activation functions**: Swap GELU for SwiGLU in the FFN. Does training improve? Compare loss curves.
 
-5. **Compare activation functions**: Swap GELU for SwiGLU in the FFN. Does training improve? Compare loss curves.
-
-6. **Deep vs wide**: Train two models with similar parameter counts:
+5. **Deep vs wide**: Train two models with similar parameter counts:
    - Deep: d_model=128, 12 layers
    - Wide: d_model=512, 3 layers
    - Which performs better? Which trains more stably?
 
-7. **Ablation study**: Remove one component at a time and measure the impact:
+6. **Ablation study**: Remove one component at a time and measure the impact:
    - No residual connections
    - No layer norm
    - No positional encoding

@@ -831,6 +831,204 @@ Before moving on, verify you can answer:
 □ Can you implement BPE from scratch without looking at the code?
 □ Can you explain the difference between top-k and top-p sampling?
 □ Can you implement constrained decoding for JSON output?
+□ Can you compute FLOPs for a transformer forward pass?
+□ Can you estimate training cost in GPU-hours for a given model size?
+```
+
+---
+
+## Exercise 6: FLOP Counting and Compute Budgets
+
+**Goal**: Develop the skill of estimating computational cost for any model.
+Essential for deciding if a VLA is feasible for real-time robot control.
+
+### 6.1 — Theory: Counting FLOPs in Transformers
+
+```python
+"""
+FLOP counting for transformer models.
+
+Key formula (forward pass, per token):
+  FLOPs_per_token ≈ 2 * N  (where N = total parameters, ignoring embeddings)
+
+Why 2×? Each parameter participates in one multiply AND one add.
+
+Breakdown per layer:
+  Attention:
+    - QKV projection: 3 * (2 * d_model * d_model) = 6 * d_model²
+    - Attention scores: 2 * seq_len * d_model  (per token)
+    - Attention × V:   2 * seq_len * d_model  (per token)
+    - Output proj:     2 * d_model * d_model = 2 * d_model²
+    Total attention = 8 * d_model² + 4 * seq_len * d_model
+    
+  FFN (with 4× expansion):
+    - Up projection:   2 * d_model * 4*d_model = 8 * d_model²
+    - Down projection: 2 * 4*d_model * d_model = 8 * d_model²
+    Total FFN = 16 * d_model²
+    
+  Per layer total = 24 * d_model² + 4 * seq_len * d_model
+  
+  Full model (forward) = n_layers * (24 * d_model² + 4 * seq_len * d_model)
+  
+Training = 3× forward (forward + backward uses ~2× forward FLOPs)
+"""
+
+
+def count_transformer_flops(
+    n_layers: int,
+    d_model: int,
+    n_heads: int,
+    seq_len: int,
+    vocab_size: int,
+    batch_size: int = 1,
+    include_backward: bool = True,
+) -> dict:
+    """Count FLOPs for a transformer model.
+    
+    Returns dict with breakdown and total.
+    """
+    d_k = d_model // n_heads
+    
+    # Per-layer FLOPs (per token)
+    # QKV projections: 3 matmuls of (d_model → d_model)
+    qkv_flops = 3 * 2 * d_model * d_model
+    
+    # Attention score computation: Q @ K^T → (seq_len, d_k) per head × n_heads
+    attn_score_flops = 2 * seq_len * d_model  # across all heads
+    
+    # Attention @ V
+    attn_v_flops = 2 * seq_len * d_model
+    
+    # Output projection
+    out_proj_flops = 2 * d_model * d_model
+    
+    # FFN (SwiGLU or standard 4x)
+    ffn_flops = 2 * (2 * d_model * 4 * d_model)  # up + down
+    
+    per_layer_per_token = qkv_flops + attn_score_flops + attn_v_flops + out_proj_flops + ffn_flops
+    
+    # Embedding lookup is essentially free (table lookup, not matmul)
+    # But output logit projection: (d_model → vocab_size)
+    logit_flops = 2 * d_model * vocab_size
+    
+    # Totals
+    forward_per_token = n_layers * per_layer_per_token + logit_flops
+    forward_total = forward_per_token * seq_len * batch_size
+    
+    multiplier = 3.0 if include_backward else 1.0
+    total = forward_total * multiplier
+    
+    return {
+        "per_layer_per_token": per_layer_per_token,
+        "forward_per_token": forward_per_token,
+        "forward_total": forward_total,
+        "total_with_backward": total if include_backward else None,
+        "total_flops": total,
+        "tflops": total / 1e12,
+    }
+
+
+def estimate_training_cost(
+    model_params: int,
+    n_tokens: int,
+    gpu_tflops: float = 312.0,  # A100 theoretical peak
+    utilization: float = 0.4,    # Realistic MFU
+) -> dict:
+    """Estimate training cost using the Chinchilla scaling approximation.
+    
+    Rule of thumb: Total training FLOPs ≈ 6 * N * D
+    where N = params, D = tokens
+    
+    Returns GPU-hours and cost estimates.
+    """
+    total_flops = 6 * model_params * n_tokens
+    
+    effective_tflops = gpu_tflops * utilization
+    seconds = total_flops / (effective_tflops * 1e12)
+    gpu_hours = seconds / 3600
+    
+    return {
+        "total_flops": total_flops,
+        "total_pflops": total_flops / 1e15,
+        "gpu_seconds": seconds,
+        "gpu_hours": gpu_hours,
+        "gpu_days": gpu_hours / 24,
+        "cost_a100_spot": gpu_hours * 1.5,  # ~$1.50/hr spot
+        "cost_a100_ondemand": gpu_hours * 3.0,  # ~$3/hr on-demand
+    }
+
+
+# ── Exercises ──
+
+# TODO 6a: Compute FLOPs for GPT-2 Small (12 layers, 768 dim, 12 heads, 1024 seq)
+# gpt2_flops = count_transformer_flops(12, 768, 12, 1024, 50257)
+# Print the breakdown. Does 2*N approximation hold?
+
+# TODO 6b: Compute FLOPs for a VLA (24 layers, 4096 dim, 32 heads)
+# Note: VLA sequence = vision_tokens (256) + language_tokens (128) + action_tokens (7)
+# How many FLOPs per action prediction step?
+
+# TODO 6c: Real-time budget analysis
+# A robot runs at 10 Hz (100ms per action).
+# GPU has 100 TFLOPS effective throughput.
+# What's the maximum model size (in params) that fits in the time budget?
+# max_params = time_budget * tflops / (2 * seq_len)
+
+# TODO 6d: Compare training costs:
+# | Model | Params | Tokens | GPU-hours (A100) | Cost |
+# |-------|--------|--------|------------------|------|
+# | GPT-2 | 124M   | 10B    | ?                | ?    |
+# | LLaMA-7B | 7B  | 1.4T   | ?                | ?    |
+# | OpenVLA | 7B   | 970K demos × 64 tokens | ? | ? |
+```
+
+### 6.2 — Profiling with PyTorch
+
+```python
+"""Profile actual FLOPs using PyTorch's built-in tools."""
+from torch.profiler import profile, ProfilerActivity
+from fvcore.nn import FlopCountAnalysis  # pip install fvcore
+
+
+def profile_model_flops(model: nn.Module, input_shape: tuple):
+    """Use fvcore to count actual FLOPs.
+    
+    Compare with our analytical estimate above.
+    """
+    dummy_input = torch.randn(*input_shape)
+    
+    # fvcore analysis
+    flops = FlopCountAnalysis(model, dummy_input)
+    print(f"Total FLOPs: {flops.total():,.0f}")
+    print(f"Total TFLOPs: {flops.total() / 1e12:.3f}")
+    print(f"\nPer-module breakdown:")
+    print(flops.by_module())
+    
+    return flops.total()
+
+
+# TODO 6e: Build a small transformer, count FLOPs with fvcore,
+# then compare with your count_transformer_flops() output.
+# Are they within 5% of each other?
+```
+
+### 6.3 — Key Insight for VLA Design
+
+```
+Real-time constraint analysis:
+─────────────────────────────────
+Robot control rate: 10 Hz → 100ms per inference
+GPU budget: ~100 TFLOPS (A100 at 30% util)
+
+Available FLOPs per step: 100 TFLOPS × 0.1s = 10 TFLOPs
+
+OpenVLA (7B params):
+  Forward FLOPs ≈ 2 × 7B × 391 tokens = 5.5 TFLOPs → just barely fits!
+  
+Smaller VLA (1B params):
+  Forward FLOPs ≈ 2 × 1B × 391 tokens = 0.78 TFLOPs → comfortable margin
+  
+This is why π₀ and other production VLAs use ~3B params or quantization.
 ```
 
 ---
@@ -850,10 +1048,7 @@ Compare training in fp32, fp16, and bf16. Measure:
 ### Stretch 3: Custom Dataset
 Train nanoGPT on a different dataset (code, Wikipedia, your own writing). How does the optimal architecture change? Do scaling curves shift?
 
-### Stretch 4: Implement KV-Cache
-Add KV-cache to nanoGPT's inference path. Measure the speedup for long generation sequences. This is critical for real-time robot action generation in VLAs.
-
-### Stretch 5: Weight Tying Ablation
+### Stretch 4: Weight Tying Ablation
 Train two versions: one with weight tying, one without. Compare:
 - Parameter count
 - Validation loss
@@ -862,4 +1057,4 @@ Train two versions: one with weight tying, one without. Compare:
 
 ---
 
-*Next exercise: [05-rlhf-alignment.md](05-rlhf-alignment.md) — Fine-tuning with human feedback*
+*Next exercise: [05-finetune-llm.md](05-finetune-llm.md) — Fine-tuning LLMs*

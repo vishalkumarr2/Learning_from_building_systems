@@ -509,9 +509,163 @@ if __name__ == "__main__":
 2. Regression heads avoid quantization error — so why do VLAs prefer discrete tokens?
 3. How does the training stability differ? Which converges faster?
 
----
+### 2.7 Advanced: μ-Law and Learned Tokenization
 
-## Exercise 3 — VLA Fine-tuning with LoRA
+```python
+"""Advanced action tokenization: non-uniform and learned approaches."""
+
+import torch
+import torch.nn as nn
+import numpy as np
+
+
+class MuLawActionTokenizer:
+    """μ-law companding tokenizer (used in audio, applicable to actions).
+    
+    Key idea: Actions near zero need finer resolution than actions at extremes.
+    μ-law compression concentrates bins near zero.
+    
+    Formula: F(x) = sign(x) * ln(1 + μ|x|) / ln(1 + μ)
+    """
+    
+    def __init__(self, n_bins: int = 256, mu: float = 255.0, 
+                 action_range: tuple = (-1.0, 1.0)):
+        self.n_bins = n_bins
+        self.mu = mu
+        self.lo, self.hi = action_range
+    
+    def _compress(self, x: np.ndarray) -> np.ndarray:
+        """Apply μ-law compression: maps [-1,1] → [-1,1] non-linearly."""
+        return np.sign(x) * np.log1p(self.mu * np.abs(x)) / np.log1p(self.mu)
+    
+    def _expand(self, y: np.ndarray) -> np.ndarray:
+        """Inverse μ-law: decompress back to linear."""
+        return np.sign(y) * (np.exp(np.abs(y) * np.log1p(self.mu)) - 1) / self.mu
+    
+    def encode(self, actions: np.ndarray) -> np.ndarray:
+        """Encode actions → token indices using μ-law compression."""
+        # Normalize to [-1, 1]
+        normalized = 2.0 * (actions - self.lo) / (self.hi - self.lo) - 1.0
+        # Compress
+        compressed = self._compress(normalized)
+        # Quantize compressed values to bins
+        indices = ((compressed + 1.0) / 2.0 * (self.n_bins - 1)).astype(int)
+        return np.clip(indices, 0, self.n_bins - 1)
+    
+    def decode(self, indices: np.ndarray) -> np.ndarray:
+        """Decode token indices → actions."""
+        # Indices → compressed values
+        compressed = indices.astype(float) / (self.n_bins - 1) * 2.0 - 1.0
+        # Expand
+        normalized = self._expand(compressed)
+        # Denormalize
+        return (normalized + 1.0) / 2.0 * (self.hi - self.lo) + self.lo
+
+
+class LearnedVQActionTokenizer(nn.Module):
+    """Learned action tokenizer via Vector Quantization (VQ-VAE style).
+    
+    Instead of fixed bins, learn a codebook of action prototypes.
+    The encoder maps continuous actions to the nearest codebook entry.
+    """
+    
+    def __init__(self, action_dim: int = 7, codebook_size: int = 512,
+                 embedding_dim: int = 32):
+        super().__init__()
+        self.codebook_size = codebook_size
+        self.embedding_dim = embedding_dim
+        
+        # Encoder: action → embedding
+        self.encoder = nn.Sequential(
+            nn.Linear(action_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, embedding_dim),
+        )
+        
+        # Codebook: learnable embeddings
+        self.codebook = nn.Embedding(codebook_size, embedding_dim)
+        nn.init.uniform_(self.codebook.weight, -1.0 / codebook_size, 1.0 / codebook_size)
+        
+        # Decoder: embedding → action
+        self.decoder = nn.Sequential(
+            nn.Linear(embedding_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, action_dim),
+            nn.Tanh(),
+        )
+    
+    def encode(self, actions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Encode actions → nearest codebook indices.
+        
+        Returns:
+            indices: (batch,) codebook indices
+            quantized: (batch, embedding_dim) quantized embeddings
+        """
+        z_e = self.encoder(actions)  # (batch, embedding_dim)
+        
+        # Find nearest codebook entry
+        distances = torch.cdist(z_e.unsqueeze(0), 
+                                self.codebook.weight.unsqueeze(0)).squeeze(0)
+        indices = distances.argmin(dim=-1)  # (batch,)
+        
+        # Look up quantized embeddings
+        quantized = self.codebook(indices)  # (batch, embedding_dim)
+        
+        return indices, quantized
+    
+    def decode(self, quantized: torch.Tensor) -> torch.Tensor:
+        """Decode quantized embeddings → reconstructed actions."""
+        return self.decoder(quantized)
+    
+    def forward(self, actions: torch.Tensor) -> tuple[torch.Tensor, dict]:
+        """Full forward pass with VQ loss.
+        
+        Returns reconstructed actions and loss dict.
+        """
+        z_e = self.encoder(actions)
+        indices, z_q = self.encode(actions)
+        
+        # Straight-through estimator: gradient flows through z_q as if it were z_e
+        z_q_st = z_e + (z_q - z_e).detach()
+        
+        reconstructed = self.decoder(z_q_st)
+        
+        # Losses
+        commitment_loss = torch.mean((z_e.detach() - z_q) ** 2)
+        codebook_loss = torch.mean((z_e - z_q.detach()) ** 2)
+        recon_loss = torch.mean((actions - reconstructed) ** 2)
+        
+        losses = {
+            "recon": recon_loss,
+            "codebook": commitment_loss,
+            "commitment": codebook_loss,
+            "total": recon_loss + commitment_loss + 0.25 * codebook_loss,
+        }
+        
+        return reconstructed, losses
+
+
+# TODO: Train the VQ tokenizer on a dataset of robot actions
+# 1. Generate 10000 random trajectories (action sequences)
+# 2. Train VQ-VAE for 100 epochs
+# 3. Compare reconstruction error with uniform binning (256 bins)
+# 4. Visualize the learned codebook: do clusters correspond to action types?
+# 5. Measure codebook utilization: how many entries are actually used?
+
+# TODO: Compare all three on manipulation-specific action distributions:
+# actions = sample_realistic_robot_actions()  # bimodal, clustered near zero
+# errors = {
+#     "Uniform 256": DiscreteActionTokenizer(256).reconstruction_error(actions),
+#     "μ-law 256": MuLawActionTokenizer(256).reconstruction_error(actions),
+#     "VQ 512": vq_model_error(actions),
+# }
+```
+
+**Exercises**:
+1. Implement `MuLawActionTokenizer` — compare MSE with uniform binning at 64 and 256 bins
+2. Train `LearnedVQActionTokenizer` on synthetic 7-DoF actions — visualize codebook usage
+3. **Key experiment**: Create a realistic action distribution (mostly near zero with occasional large motions) — which tokenizer has lowest error?
+4. **π₀ connection**: The π₀ paper uses flow matching instead of discrete tokens. What's the advantage? What's lost?
 
 ### 3.1 Goal
 

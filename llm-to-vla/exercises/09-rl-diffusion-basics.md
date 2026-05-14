@@ -604,20 +604,345 @@ class ConditionalNoisePredictor(nn.Module):
 
 ---
 
+## Exercise 5: PPO from Scratch
+
+**Goal**: Implement Proximal Policy Optimization — the algorithm behind RLHF and many
+robot learning papers. Understand the clipped surrogate objective.
+
+### 5.1 — Actor-Critic Network
+
+```python
+class ActorCritic(nn.Module):
+    """Shared-backbone actor-critic for continuous actions."""
+
+    def __init__(self, obs_dim: int, act_dim: int, hidden: int = 64):
+        super().__init__()
+        self.shared = nn.Sequential(
+            nn.Linear(obs_dim, hidden), nn.Tanh(),
+            nn.Linear(hidden, hidden), nn.Tanh(),
+        )
+        # Actor: outputs mean of Gaussian policy
+        self.actor_mean = nn.Linear(hidden, act_dim)
+        self.actor_log_std = nn.Parameter(torch.zeros(act_dim))
+        # Critic: outputs state value
+        self.critic = nn.Linear(hidden, 1)
+
+    def forward(self, obs: torch.Tensor):
+        features = self.shared(obs)
+        action_mean = self.actor_mean(features)
+        action_std = self.actor_log_std.exp()
+        value = self.critic(features)
+        return action_mean, action_std, value.squeeze(-1)
+
+    def get_action(self, obs: np.ndarray):
+        """Sample action, return (action, log_prob, value)."""
+        obs_t = torch.FloatTensor(obs).unsqueeze(0)
+        mean, std, value = self.forward(obs_t)
+        dist = Normal(mean, std)
+        action = dist.sample()
+        log_prob = dist.log_prob(action).sum(-1)
+        return (
+            action.squeeze(0).detach().numpy(),
+            log_prob.item(),
+            value.item(),
+        )
+```
+
+### 5.2 — GAE (Generalized Advantage Estimation)
+
+```python
+def compute_gae(
+    rewards: list[float],
+    values: list[float],
+    dones: list[bool],
+    next_value: float,
+    gamma: float = 0.99,
+    lam: float = 0.95,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute GAE advantages and returns.
+    
+    Returns:
+        advantages: array of shape (T,)
+        returns: array of shape (T,) — advantages + values
+    """
+    T = len(rewards)
+    advantages = np.zeros(T, dtype=np.float32)
+    
+    # TODO: Implement GAE
+    # gae = 0
+    # for t in reversed(range(T)):
+    #     if dones[t]:
+    #         next_val = 0.0
+    #     else:
+    #         next_val = values[t+1] if t+1 < T else next_value
+    #     delta = rewards[t] + gamma * next_val - values[t]
+    #     gae = delta + gamma * lam * (0 if dones[t] else gae)
+    #     advantages[t] = gae
+    
+    returns = advantages + np.array(values, dtype=np.float32)
+    return advantages, returns
+```
+
+### 5.3 — PPO Update with Clipping
+
+```python
+def ppo_update(
+    model: ActorCritic,
+    optimizer: optim.Optimizer,
+    obs_batch: torch.Tensor,
+    act_batch: torch.Tensor,
+    old_log_probs: torch.Tensor,
+    advantages: torch.Tensor,
+    returns: torch.Tensor,
+    clip_eps: float = 0.2,
+    value_coef: float = 0.5,
+    entropy_coef: float = 0.01,
+    epochs: int = 10,
+    batch_size: int = 64,
+) -> dict:
+    """PPO clipped surrogate update.
+    
+    Key insight: we want to improve the policy but not too much per update.
+    The clip prevents the ratio π_new/π_old from going beyond [1-ε, 1+ε].
+    """
+    N = obs_batch.shape[0]
+    losses = {"policy": [], "value": [], "entropy": []}
+
+    for _ in range(epochs):
+        # Shuffle data
+        indices = torch.randperm(N)
+        for start in range(0, N, batch_size):
+            end = start + batch_size
+            idx = indices[start:end]
+
+            obs = obs_batch[idx]
+            acts = act_batch[idx]
+            old_lp = old_log_probs[idx]
+            adv = advantages[idx]
+            ret = returns[idx]
+
+            # Normalize advantages (crucial for stability)
+            adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+
+            # Forward pass
+            mean, std, values = model(obs)
+            dist = Normal(mean, std)
+            new_log_probs = dist.log_prob(acts).sum(-1)
+            entropy = dist.entropy().sum(-1).mean()
+
+            # TODO: Compute ratio and clipped surrogate objective
+            # ratio = exp(new_log_probs - old_lp)
+            # surr1 = ratio * adv
+            # surr2 = torch.clamp(ratio, 1 - clip_eps, 1 + clip_eps) * adv
+            # policy_loss = -torch.min(surr1, surr2).mean()
+
+            # Value loss (clipped or unclipped)
+            value_loss = F.mse_loss(values, ret)
+
+            # Total loss
+            # loss = policy_loss + value_coef * value_loss - entropy_coef * entropy
+
+            # optimizer.zero_grad()
+            # loss.backward()
+            # nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+            # optimizer.step()
+            pass
+
+    return losses
+```
+
+### 5.4 — Training Loop
+
+```python
+def train_ppo(
+    env_name: str = "Pendulum-v1",
+    total_timesteps: int = 200_000,
+    steps_per_update: int = 2048,
+    gamma: float = 0.99,
+    lam: float = 0.95,
+    lr: float = 3e-4,
+    clip_eps: float = 0.2,
+    seed: int = 42,
+):
+    """Full PPO training loop on continuous control.
+
+    TODO: Implement the collection + update loop:
+    1. Collect `steps_per_update` transitions using current policy
+    2. Compute GAE advantages
+    3. Run ppo_update for multiple epochs
+    4. Log mean episode reward
+
+    Track and plot:
+    - Episode rewards over time
+    - Policy loss and value loss per update
+    - Mean advantage magnitude (should decrease as policy improves)
+    """
+    env = gym.make(env_name)
+    obs_dim = env.observation_space.shape[0]
+    act_dim = env.action_space.shape[0]
+    
+    model = ActorCritic(obs_dim, act_dim)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    
+    # TODO: Implement training loop
+    pass
+
+
+# Run and compare with REINFORCE
+# PPO should solve Pendulum much faster and more stably than REINFORCE
+# train_ppo()
+```
+
+**Exercises**:
+1. Train PPO on Pendulum-v1. Plot reward curve.
+2. Ablate clip_eps: try 0.1, 0.2, 0.3. Which is most stable?
+3. Remove clipping (set clip_eps=1.0). What happens? Why?
+4. Compare PPO vs your REINFORCE on CartPole — measure sample efficiency.
+5. **Connection to RLHF**: If `reward = human_preference_score`, this is exactly how ChatGPT was trained!
+
+---
+
+## Exercise 6: DDIM Deterministic Sampling
+
+**Goal**: Implement DDIM (Denoising Diffusion Implicit Models) — the fast, deterministic
+sampler used by Diffusion Policy. Same trained model, 10× fewer steps.
+
+### 6.1 — Understanding DDIM vs DDPM
+
+```python
+# Key insight: DDPM adds noise at each reverse step (stochastic)
+# DDIM removes the noise term → deterministic, and allows skipping steps
+
+def ddpm_reverse_step(x_t, t, noise_pred, schedule):
+    """DDPM: stochastic reverse step (from Exercise 3)."""
+    alpha_t = schedule.alphas[t]
+    alpha_bar_t = schedule.alpha_bars[t]
+    beta_t = schedule.betas[t]
+    
+    mean = (1 / alpha_t.sqrt()) * (
+        x_t - (beta_t / (1 - alpha_bar_t).sqrt()) * noise_pred
+    )
+    if t > 0:
+        noise = torch.randn_like(x_t)
+        sigma = beta_t.sqrt()
+        return mean + sigma * noise
+    return mean
+
+
+def ddim_reverse_step(x_t, t, t_prev, noise_pred, schedule, eta=0.0):
+    """DDIM: (optionally) deterministic reverse step.
+    
+    When eta=0: fully deterministic (same noise → same output)
+    When eta=1: equivalent to DDPM
+    
+    Formula:
+    x_{t-1} = sqrt(ᾱ_{t-1}) * x0_pred 
+              + sqrt(1 - ᾱ_{t-1} - σ²) * noise_pred
+              + σ * random_noise
+    
+    where x0_pred = (x_t - sqrt(1-ᾱ_t) * noise_pred) / sqrt(ᾱ_t)
+    """
+    alpha_bar_t = schedule.alpha_bars[t]
+    alpha_bar_prev = schedule.alpha_bars[t_prev] if t_prev >= 0 else torch.tensor(1.0)
+    
+    # TODO: Implement DDIM step
+    # 1. Predict x_0 from x_t and noise prediction
+    # x0_pred = (x_t - sqrt(1 - alpha_bar_t) * noise_pred) / sqrt(alpha_bar_t)
+    
+    # 2. Compute sigma (controls stochasticity)
+    # sigma = eta * sqrt((1 - alpha_bar_prev) / (1 - alpha_bar_t)) * sqrt(1 - alpha_bar_t / alpha_bar_prev)
+    
+    # 3. Compute direction pointing to x_t
+    # direction = sqrt(1 - alpha_bar_prev - sigma**2) * noise_pred
+    
+    # 4. Combine
+    # x_prev = sqrt(alpha_bar_prev) * x0_pred + direction + sigma * torch.randn_like(x_t)
+    
+    pass
+```
+
+### 6.2 — Subsampled Timestep Schedules
+
+```python
+def make_ddim_schedule(total_steps: int, ddim_steps: int) -> list[int]:
+    """Create evenly-spaced timestep schedule for DDIM.
+    
+    Example: total_steps=200, ddim_steps=20
+    → [190, 180, 170, ..., 10, 0]
+    """
+    # TODO: Implement
+    # step_size = total_steps // ddim_steps
+    # timesteps = list(range(total_steps - 1, -1, -step_size))[:ddim_steps]
+    pass
+
+
+def ddim_sample(model, schedule, shape, ddim_steps=20, eta=0.0):
+    """Sample using DDIM with fewer steps.
+    
+    Uses the same trained noise-prediction model as DDPM!
+    """
+    timesteps = make_ddim_schedule(schedule.T, ddim_steps)
+    
+    x = torch.randn(shape)
+    
+    for i in range(len(timesteps)):
+        t = timesteps[i]
+        t_prev = timesteps[i + 1] if i + 1 < len(timesteps) else -1
+        
+        t_batch = torch.full((shape[0],), t, dtype=torch.long)
+        noise_pred = model(x, t_batch)
+        
+        x = ddim_reverse_step(x, t, t_prev, noise_pred, schedule, eta=eta)
+    
+    return x
+```
+
+### 6.3 — Comparison Experiment
+
+```python
+# TODO: Using your DDPM model trained in Exercise 3:
+# 1. Sample with DDPM (200 steps) — measure time and quality
+# 2. Sample with DDIM (200 steps, eta=0) — should give same quality
+# 3. Sample with DDIM (50 steps, eta=0) — slightly worse but 4x faster
+# 4. Sample with DDIM (20 steps, eta=0) — much faster, some quality loss
+# 5. Sample with DDIM (10 steps, eta=0) — minimal steps, visible artifacts?
+
+# Metrics to compare:
+# - Wall-clock time per sample batch
+# - Visual quality (plot samples from each)
+# - Wasserstein distance to target distribution (scipy.stats.wasserstein_distance)
+
+# Key takeaway: DDIM enables Diffusion Policy to run at 10 Hz
+# because you only need ~10-16 denoising steps instead of 100-1000
+```
+
+**Exercises**:
+1. Implement `ddim_reverse_step` and verify it reproduces DDPM when `eta=1.0`
+2. Generate the same 2D Swiss Roll distribution with 200, 50, 20, and 10 DDIM steps
+3. Plot quality vs speed tradeoff curve
+4. **Determinism test**: with `eta=0`, starting from the same noise, DDIM always gives the same output. Verify.
+5. **Connection to Diffusion Policy**: if one denoising step takes 5ms on GPU, how many steps can you afford at 10 Hz? (Answer: 10ms per action → 2 steps! This is why DDIM matters.)
+
+---
+
 ## Self-Check
 
 After completing these exercises, you should be able to answer:
 
 - [ ] Why does REINFORCE have high variance, and how does a baseline help?
 - [ ] How does PPO's clip mechanism prevent destructive updates?
+- [ ] What is GAE and why does λ trade off bias vs variance?
+- [ ] How does PPO connect to RLHF for language models?
 - [ ] What happens during DDPM training (forward process) vs sampling (reverse)?
 - [ ] Why can diffusion models represent multimodal distributions while regression cannot?
 - [ ] How do you condition a diffusion model on observations?
+- [ ] What makes DDIM deterministic, and why does that enable fewer steps?
+- [ ] Why is DDIM critical for real-time robot control (Diffusion Policy)?
 
 ## Stretch Goals
 
-1. **Implement DDIM sampling** for Exercise 3 — compare quality at 10 vs 50 vs 200 steps
-2. **Add multi-modal push data**: sometimes push left, sometimes push right around obstacle
+1. **Flow matching**: Implement a simple flow matching variant — compare with DDPM/DDIM
+2. **Multi-modal push data**: sometimes push left, sometimes right around obstacle
    — verify diffusion captures both modes while regression averages them
-3. **Implement a simple flow matching** variant of Exercise 3 — compare with DDPM
-4. **Action chunking**: modify Exercise 4 to predict a sequence of 5 actions at once
+3. **PPO on MuJoCo**: Try PPO on HalfCheetah-v4 (harder continuous control)
+4. **Action chunking**: modify Exercise 4 to predict sequences of 5 actions at once

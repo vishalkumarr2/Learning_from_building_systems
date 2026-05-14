@@ -677,6 +677,213 @@ Before moving on, verify you can:
 - [ ] Benchmark inference speed and memory across precisions
 - [ ] Fine-tune a domain-specific LoRA adapter
 - [ ] Compare base vs fine-tuned model outputs qualitatively
+- [ ] Merge LoRA weights into base model and verify equivalence
+- [ ] Profile peak memory during training and identify the bottleneck
+
+---
+
+## Exercise 6: LoRA Merge and Memory Profiling
+
+**Goal**: Understand LoRA's math deeply by implementing merge/unmerge,
+and profile GPU memory to know exactly where your VRAM goes during training.
+
+### 6.1 — LoRA Merge Implementation
+
+```python
+"""LoRA weight merging: convert adapter back to full-rank weights.
+
+The math:
+  During training:  output = Wx + BAx     (A ∈ R^{r×d_in}, B ∈ R^{d_out×r})
+  After merge:      W_merged = W + B @ A  (full-rank weight, no runtime overhead)
+  
+Why merge?
+  - Inference speed: no extra computation from adapter
+  - Deployment: single model file, works with any inference engine
+  - Can quantize the merged model for even more efficiency
+"""
+
+import torch
+import torch.nn as nn
+import copy
+
+
+class LoRALinear(nn.Module):
+    """Linear layer with LoRA adapter for manual experimentation."""
+    
+    def __init__(self, in_features: int, out_features: int, 
+                 rank: int = 8, alpha: float = 16.0):
+        super().__init__()
+        self.linear = nn.Linear(in_features, out_features, bias=False)
+        
+        # LoRA matrices
+        self.lora_A = nn.Parameter(torch.randn(rank, in_features) * 0.01)
+        self.lora_B = nn.Parameter(torch.zeros(out_features, rank))
+        
+        # Scaling factor
+        self.scaling = alpha / rank
+        
+        # Freeze base weights
+        self.linear.weight.requires_grad = False
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        base_output = self.linear(x)
+        lora_output = (x @ self.lora_A.T @ self.lora_B.T) * self.scaling
+        return base_output + lora_output
+    
+    def merge_weights(self) -> nn.Linear:
+        """Merge LoRA into base weights. Returns a standard nn.Linear.
+        
+        W_merged = W + scaling * B @ A
+        """
+        merged = nn.Linear(
+            self.linear.in_features, self.linear.out_features, bias=False
+        )
+        merged.weight.data = (
+            self.linear.weight.data + self.scaling * self.lora_B @ self.lora_A
+        )
+        return merged
+    
+    def unmerge_weights(self, merged_linear: nn.Linear) -> None:
+        """Extract LoRA from a merged model (for continued training).
+        
+        Warning: This only works if you know the original base weights!
+        ΔW = W_merged - W_base, then approximate with SVD: ΔW ≈ U[:,:r] @ S[:r] @ V[:r,:]
+        """
+        delta_W = merged_linear.weight.data - self.linear.weight.data
+        
+        # Low-rank approximation via SVD
+        U, S, Vh = torch.linalg.svd(delta_W, full_matrices=False)
+        rank = self.lora_A.shape[0]
+        
+        # Reconstruct LoRA factors from top-r singular values
+        self.lora_B.data = U[:, :rank] * S[:rank].sqrt()
+        self.lora_A.data = (Vh[:rank, :].T * S[:rank].sqrt()).T
+        # Adjust for scaling
+        self.lora_B.data /= (self.scaling ** 0.5)
+        self.lora_A.data /= (self.scaling ** 0.5)
+
+
+# TODO 6a: Create a LoRALinear(768, 768, rank=16)
+# 1. Initialize with random base weights
+# 2. Do a few training steps to update LoRA
+# 3. Merge weights
+# 4. Verify: merged_output == original_output for the same input (within fp tolerance)
+
+# TODO 6b: Measure the approximation error of unmerge_weights()
+# 1. Create a LoRA layer, train it
+# 2. Merge it
+# 3. Unmerge it back
+# 4. Compare original LoRA outputs vs reconstructed LoRA outputs
+# 5. What's the maximum rank where SVD reconstruction is nearly perfect?
+```
+
+### 6.2 — GPU Memory Profiling
+
+```python
+"""Profile where GPU memory goes during LLM fine-tuning.
+
+Memory breakdown for training a 7B model:
+  - Model parameters: 7B × 2 bytes (fp16) = 14 GB
+  - Gradients: 7B × 2 bytes = 14 GB  (or 0 for frozen params!)
+  - Optimizer states (Adam): 7B × 8 bytes = 56 GB  (fp32 copy + m + v)
+  - Activations: varies with batch size and seq length
+  - LoRA advantage: only store grads + optimizer for rank*2*n_layers params
+  
+With LoRA (rank=16, on 7B model):
+  - Model: 14 GB (frozen, no gradients needed)
+  - LoRA params: ~16M × 2 bytes = 32 MB
+  - LoRA grads: 32 MB
+  - LoRA optimizer: ~128 MB (Adam states for 16M params)
+  - Activations: ~2-4 GB (still need these for backward!)
+  Total: ~18 GB vs 84+ GB for full fine-tuning
+"""
+
+
+def profile_training_memory(model: nn.Module, batch_size: int = 4, 
+                           seq_len: int = 512) -> dict:
+    """Profile memory usage during a training step.
+    
+    Requires GPU. Measures:
+    1. Model loaded (no gradients)
+    2. After optimizer initialization
+    3. Peak during forward pass
+    4. Peak during backward pass
+    5. After optimizer step
+    """
+    if not torch.cuda.is_available():
+        print("GPU required for memory profiling. Showing analytical estimates.")
+        param_count = sum(p.numel() for p in model.parameters())
+        trainable_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        
+        return {
+            "total_params": param_count,
+            "trainable_params": trainable_count,
+            "model_memory_mb": param_count * 2 / 1e6,  # fp16
+            "gradient_memory_mb": trainable_count * 2 / 1e6,
+            "optimizer_memory_mb": trainable_count * 8 / 1e6,  # Adam states
+            "estimated_activation_mb": batch_size * seq_len * 768 * 12 * 2 / 1e6,
+        }
+    
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.empty_cache()
+    
+    # Baseline
+    model = model.cuda()
+    mem_model = torch.cuda.memory_allocated() / 1e6
+    
+    # Create optimizer
+    optimizer = torch.optim.AdamW(
+        filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4
+    )
+    mem_optimizer = torch.cuda.memory_allocated() / 1e6
+    
+    # Forward pass
+    dummy_input = torch.randint(0, 1000, (batch_size, seq_len)).cuda()
+    output = model(dummy_input)
+    mem_forward = torch.cuda.max_memory_allocated() / 1e6
+    
+    # Backward pass
+    loss = output.sum()
+    loss.backward()
+    mem_backward = torch.cuda.max_memory_allocated() / 1e6
+    
+    # Optimizer step
+    optimizer.step()
+    optimizer.zero_grad()
+    mem_step = torch.cuda.memory_allocated() / 1e6
+    
+    return {
+        "model_loaded_mb": mem_model,
+        "with_optimizer_mb": mem_optimizer,
+        "peak_forward_mb": mem_forward,
+        "peak_backward_mb": mem_backward,
+        "after_step_mb": mem_step,
+        "activation_memory_mb": mem_forward - mem_optimizer,
+    }
+
+
+# TODO 6c: Profile a small transformer (6 layers, 512 dim) with full fine-tuning vs LoRA
+# Print a comparison table showing memory at each stage
+
+# TODO 6d: Experiment: how does batch_size affect activation memory?
+# Profile at batch sizes [1, 2, 4, 8, 16] and plot memory vs batch_size
+# Is the relationship linear? (It should be!)
+
+# TODO 6e: Calculate the maximum batch size that fits in 24GB for:
+# - 1B model, full fine-tuning
+# - 7B model, LoRA rank 16
+# - 7B model, QLoRA (4-bit base + LoRA)
+```
+
+### 6.3 — Exercises
+
+| Task | Description | Difficulty |
+|------|-------------|------------|
+| 6a | Implement and verify LoRA merge | ★☆☆ |
+| 6b | Test unmerge via SVD approximation | ★★☆ |
+| 6c | Profile memory: full vs LoRA | ★★☆ |
+| 6d | Batch size vs memory plot | ★☆☆ |
+| 6e | Max batch size calculations | ★★★ |
 
 ---
 

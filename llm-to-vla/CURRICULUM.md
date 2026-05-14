@@ -1300,20 +1300,24 @@ learn/llm-to-vla/
 ├── exercises/
 │   ├── 01-autograd-cnn.md                 ← Phase I: micrograd, ResNet
 │   ├── 02-attention-from-scratch.md       ← Build attention step by step
-│   ├── 03-build-transformer.md            ← Full transformer implementation
-│   ├── 04-nanogpt-ablations.md            ← nanoGPT experiments + scaling
-│   ├── 05-finetune-llm.md                 ← LoRA fine-tuning
+│   ├── 03-build-transformer.md            ← Full transformer + KV-cache + gradient checkpointing
+│   ├── 04-nanogpt-ablations.md            ← nanoGPT experiments + scaling + FLOP counting
+│   ├── 05-finetune-llm.md                 ← LoRA fine-tuning + merge + memory profiling
 │   ├── 06-implement-vit.md                ← ViT from scratch
 │   ├── 07-3d-depth-video.md               ← Depth estimation, video understanding
 │   ├── 08-clip-vlm-experiments.md         ← CLIP zero-shot, VLM comparison
-│   ├── 09-rl-diffusion-policy.md          ← RL basics, diffusion for actions
-│   ├── 10-imitation-act.md                ← ACT, action tokenization
-│   ├── 11-vla-evaluation.md               ← VLA deployment + hybrid systems
+│   ├── 09-rl-diffusion-policy.md          ← RL basics, PPO from scratch, DDIM sampling
+│   ├── 10-imitation-act.md                ← ACT, temporal ensembling, action tokenization
+│   ├── 11-vla-evaluation.md               ← VLA experiments + μ-law/VQ-VAE tokenization
 │   ├── 12-robot-manipulation-mujoco.md    ← MuJoCo manipulation, reward engineering, custom envs
 │   ├── 13-sim-to-real-transfer.md         ← Domain randomization, adversarial adaptation, transfer
 │   ├── 14-data-collection-teleoperation.md ← Robot teleoperation, HDF5 recording, data curation
 │   ├── 15-kinematics-trajectory.md        ← DH params, IK solvers, polynomial trajectories
-│   └── 16-safety-monitoring-recovery.md   ← OOD detection, uncertainty, safety monitors, fallbacks
+│   ├── 16-safety-monitoring-recovery.md   ← OOD detection, uncertainty, safety monitors, fallbacks
+│   ├── 17-vla-systems-engineering.md      ← Inference profiling, action chunking, failure recovery
+│   └── supplements/
+│       ├── manual-calculations.md         ← 13 pen-and-paper exercises (no code)
+│       └── bridging-exercises.md          ← LLM concept → robot concept connections
 └── projects/
     ├── 01-rnn-vs-attention/               ← Phase I: character LM comparison
     ├── 02-mini-lm-ablations/              ← Phase II: train LM + ablation report
@@ -1355,7 +1359,7 @@ learn/llm-to-vla/
 
 ---
 
-*Last updated: 2026-04-28*
+*Last updated: 2026-05-14*
 *Track: LLM-to-VLA*
-*Version: 2.0 (post expert panel review)*
-*Status: CURRICULUM REVISED — study notes to be updated to match*
+*Version: 2.1 (post expert panel review + depth improvements)*
+*Status: CURRICULUM REVISED — exercises enhanced with systems engineering, pen-and-paper drills, and LLM→robot bridging*

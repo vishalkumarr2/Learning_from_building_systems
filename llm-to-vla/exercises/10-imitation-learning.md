@@ -614,6 +614,159 @@ def train_diffusion_policy(demos: dict, chunk_size: int = 8,
 
 ---
 
+## Exercise 5: Temporal Ensembling for Action Chunking
+
+**Goal**: Implement temporal ensembling — the crucial technique that makes action
+chunking smooth at chunk boundaries. Used by both ACT and Diffusion Policy.
+
+### 5.1 — The Chunk Boundary Problem
+
+```python
+# Without temporal ensembling, naively using action chunks creates jerky motion:
+#
+# Time:    0  1  2  3  4  5  6  7  8  9  10 11 ...
+# Chunk 1: [a0 a1 a2 a3]
+# Chunk 2:             [a4 a5 a6 a7]     ← discontinuity at boundary!
+# Chunk 3:                         [a8 a9 a10 a11]
+#
+# With temporal ensembling (query every step, overlap predictions):
+# Chunk at t=0: [a0|0  a1|0  a2|0  a3|0]
+# Chunk at t=1:  [a1|1  a2|1  a3|1  a4|1]
+# Chunk at t=2:   [a2|2  a3|2  a4|2  a5|2]
+# Chunk at t=3:    [a3|3  a4|3  a5|3  a6|3]
+#
+# At time t=2, we have predictions: a2|0, a2|1, a2|2 → blend them!
+```
+
+### 5.2 — Exponential Weighting Implementation
+
+```python
+class TemporalEnsemble:
+    """Temporal ensembling for overlapping action chunks.
+    
+    Key idea: newer predictions are more trustworthy because they
+    see more recent observations. Weight by recency.
+    """
+    
+    def __init__(self, chunk_size: int, action_dim: int, decay: float = 0.01):
+        self.chunk_size = chunk_size
+        self.action_dim = action_dim
+        self.decay = decay  # λ in exp(-λ * age)
+        # Buffer: stores (prediction_time, action_chunk)
+        self.buffer: list[tuple[int, np.ndarray]] = []
+        self.current_time = 0
+    
+    def add_chunk(self, action_chunk: np.ndarray):
+        """Add a new predicted chunk (shape: [chunk_size, action_dim])."""
+        assert action_chunk.shape == (self.chunk_size, self.action_dim)
+        self.buffer.append((self.current_time, action_chunk.copy()))
+        # Remove chunks that no longer overlap with current time
+        self.buffer = [
+            (t, chunk) for (t, chunk) in self.buffer
+            if t + self.chunk_size > self.current_time
+        ]
+    
+    def get_action(self) -> np.ndarray:
+        """Get the ensembled action for the current timestep.
+        
+        TODO: Implement temporal ensembling:
+        1. For each chunk in buffer, find its prediction for current time
+        2. Compute weight = exp(-decay * age) where age = current_time - chunk_time
+        3. Return weighted average of all predictions
+        """
+        predictions = []
+        weights = []
+        
+        for chunk_time, chunk in self.buffer:
+            # Index within this chunk for current time
+            idx = self.current_time - chunk_time
+            if 0 <= idx < self.chunk_size:
+                predictions.append(chunk[idx])
+                age = self.current_time - chunk_time
+                weights.append(np.exp(-self.decay * age))
+        
+        if not predictions:
+            raise ValueError("No predictions available for current time")
+        
+        # Normalize weights
+        weights = np.array(weights)
+        weights = weights / weights.sum()
+        
+        # Weighted average
+        predictions = np.array(predictions)
+        ensembled = np.sum(predictions * weights[:, None], axis=0)
+        return ensembled
+    
+    def step(self):
+        """Advance time by one step."""
+        self.current_time += 1
+
+
+def evaluate_smoothness(actions: np.ndarray) -> dict:
+    """Compute smoothness metrics for an action trajectory.
+    
+    Args:
+        actions: (T, action_dim) array of executed actions
+    
+    Returns dict with:
+        - velocity: mean absolute first derivative
+        - acceleration: mean absolute second derivative  
+        - jerk: mean absolute third derivative (lower = smoother)
+    """
+    vel = np.diff(actions, axis=0)
+    acc = np.diff(vel, axis=0)
+    jerk = np.diff(acc, axis=0)
+    
+    return {
+        "velocity": np.abs(vel).mean(),
+        "acceleration": np.abs(acc).mean(),
+        "jerk": np.abs(jerk).mean(),
+    }
+```
+
+### 5.3 — Comparison Experiment
+
+```python
+# TODO: Compare three execution strategies on your trained policy:
+# 
+# Strategy A: Execute full chunk, then generate new (no overlap)
+# Strategy B: Query every step, use only first action (no ensembling)
+# Strategy C: Query every step, temporal ensembling (lambda=0.01)
+# Strategy D: Query every step, temporal ensembling (lambda=0.1)
+#
+# For each, run 50 episodes and measure:
+# 1. Success rate
+# 2. Smoothness (jerk metric)
+# 3. Total path length
+# 4. Execution time per step (with inference cost)
+#
+# Plot:
+# - All 4 trajectories overlaid for same initial condition
+# - Smoothness comparison bar chart
+# - Success rate comparison
+
+# Expected results:
+# - Strategy A: jerky at boundaries, fastest inference (query every H steps)
+# - Strategy B: smooth but wasteful (re-predicts whole chunk to use 1 action)
+# - Strategy C: smoothest, best success, most expensive (query every step)
+# - Strategy D: slightly less smooth than C, but still better than A/B
+
+# Key insight: lambda controls the tradeoff between:
+# - responsiveness (high lambda → trust newest chunk more)
+# - smoothness (low lambda → blend many overlapping predictions)
+```
+
+**Exercises**:
+1. Implement `TemporalEnsemble` and run on your ACT model from Exercise 3
+2. Ablate λ: try 0.001, 0.01, 0.1, 1.0, 10.0 — plot jerk vs λ
+3. What happens at λ→0 (uniform weighting)? At λ→∞ (use latest only)?
+4. **Real-time constraint**: If inference takes 50ms and control runs at 20Hz:
+   - Can you query every step? (50ms per step, 20 Hz = 50ms budget ✓ barely)
+   - What if inference takes 100ms? (Must use chunk_size > 1 without ensembling)
+5. **Connection to Diffusion Policy**: ACT paper uses λ=0.01. What does the Diffusion Policy paper use? (Answer: they recede-horizon replan every k steps instead of exponential ensembling.)
+
+---
+
 ## Self-Check
 
 After completing these exercises, you should be able to answer:
@@ -622,6 +775,8 @@ After completing these exercises, you should be able to answer:
 - [ ] How does the CVAE in ACT enable multimodal action generation?
 - [ ] What is the training procedure for Diffusion Policy (what is the loss)?
 - [ ] How does inference work for Diffusion Policy (iterative denoising)?
+- [ ] What is temporal ensembling and why does it improve execution smoothness?
+- [ ] How does λ in temporal ensembling trade off smoothness vs. responsiveness?
 - [ ] Which method works best on your task, and why?
 
 ## Stretch Goals
@@ -629,17 +784,14 @@ After completing these exercises, you should be able to answer:
 1. **LeRobot integration**: Load `lerobot/pusht` dataset and train all three methods on it
    instead of toy data — compare with LeRobot's pretrained checkpoints.
 
-2. **Temporal ensembling**: Implement ACT's temporal ensembling for smoother execution
-   across chunk boundaries.
-
-3. **DDIM sampling**: Implement DDIM for the Diffusion Policy — compare quality at
+2. **DDIM sampling**: Implement DDIM for the Diffusion Policy — compare quality at
    5 vs 10 vs 50 steps.
 
-4. **Language conditioning**: Add a language embedding input to the Diffusion Policy.
+3. **Language conditioning**: Add a language embedding input to the Diffusion Policy.
    Use simple one-hot task IDs as a proxy for language embeddings. Train a multi-task
    policy that can "push left" or "push right" based on the language input.
 
-5. **Multimodal data**: Create a dataset where the expert sometimes goes left and
+4. **Multimodal data**: Create a dataset where the expert sometimes goes left and
    sometimes right around an obstacle. Verify that:
    - BC averages the two modes (goes through the obstacle)
    - ACT and Diffusion Policy can sample both modes
