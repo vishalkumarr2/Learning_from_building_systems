@@ -90,6 +90,7 @@
   - [Learning Plan](electronics/00-learning-plan.md)
   - [01 — Passive Components](electronics/01-passive-components.md)
   - [01A — RLC Foundations](electronics/01a-rlc-foundations.md)
+  - [01B — Impedance & Signal Integrity](electronics/01b-impedance-and-signal-integrity.md)
   - [02 — Semiconductors](electronics/02-semiconductors.md)
   - [03 — Op-Amps & ADC](electronics/03-opamps-adc-sampling.md)
   - [04 — UART / Serial](electronics/04-uart-serial-deep-dive.md)

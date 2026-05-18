@@ -36,7 +36,10 @@ You already know how to call `spi_transceive()` in Zephyr. But when the 100Hz br
 └─────────────┘     └──────────────────┘     └──────────────────┘
 ```
 
-**Reading order:** 01 → 02 → 03 → then 04/05/06/07 in any order (though 02 before 06 is strongly recommended for open-drain).
+**Reading order:** 01 → 01A → 01B → 02 → 03 → then 04/05/06/07 in any order (though 02 before 06 is strongly recommended for open-drain).
+
+> **01A** covers the theory: R, C, L, reactance, impedance, RLC resonance, filters (brief).
+> **01B** is the companion deep-dive: floating pins, pull-up/pull-down rationale, ringing/damping, filters with ELI5, SPI ringing in full detail, ADC source impedance, bus capacitance. Read 01A first, then 01B for every "but WHY?" moment.
 
 ---
 
@@ -45,6 +48,8 @@ You already know how to call `spi_transceive()` in Zephyr. But when the 100Hz br
 | # | Topic | Est. Time | Prerequisites | What It Unlocks |
 |---|-------|-----------|---------------|-----------------|
 | 01 | Passive Components (R, C, L) | 3-4 hrs | Basic algebra | Pull-ups, decoupling, RC filters, voltage dividers, power dissipation, everything |
+| 01A | RLC Foundations | 2-3 hrs | 01 | Reactance, impedance, RLC resonance, filter types, high-Z concept |
+| 01B | Impedance & Signal Integrity | 2-3 hrs | 01A | Floating pins, pull-up/pull-down rationale, ringing, filters ELI5, SPI integrity, ADC source impedance, bus capacitance |
 | 02 | Semiconductors (Diodes, BJTs, MOSFETs) | 3-4 hrs | 01 (Ohm's law, RC) | Level shifting, open-drain, motor drivers, ESD protection, power switching |
 | 03 | Op-Amps, ADC, Sampling Theory | 3-4 hrs | 01 + 02 | Signal conditioning, Nyquist, anti-aliasing, understanding IMU data paths |
 | 04 | UART Serial Deep Dive | 2-3 hrs | 01 (basic) | Debug console, GPS modules, RS-485 industrial sensors, DMA patterns |
