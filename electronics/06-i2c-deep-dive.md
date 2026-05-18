@@ -1,6 +1,6 @@
 # 06 — I2C Deep Dive
 ### From open-drain physics to complete protocol transactions
-**Prerequisites:** Chapter 01 (RC time constants, pull-ups), Chapter 02 (MOSFETs, open-drain)
+**Prerequisites:** Chapter 01 (RC time constants, pull-ups), Chapter 02 (MOSFETs, open-drain), **[01B §2](01b-impedance-and-signal-integrity.md)** (pull-up selection guide and RC rise-time math)
 **Unlocks:** EEPROM access, sensor configuration (IMU, temp, pressure), IO expanders, multi-sensor buses
 
 ---
@@ -569,3 +569,87 @@ I2C level shifting between 3.3V and 5V uses the BSS138 circuit described in chap
 │                                                                                              │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+---
+
+# EXERCISES
+
+---
+
+### Ex 1 — Pull-up calculation for your IMU bus
+
+You have an I2C bus with: ICM-42688 IMU + 24LC08 EEPROM (each ≈12 pF), 20 cm of wire, 3.3 V supply, 400 kHz target.
+
+Calculate the valid pull-up resistor range.
+
+```
+Bus capacitance:
+  Cbus = 2 × 12 pF (device inputs)
+       + 2 × 50 pF/10 cm × 20 cm  (wire parasitic, rough estimate)
+       = 24 pF + 200 pF = 224 pF  ≈ 250 pF (add margin)
+
+Max Rp  (rise-time budget ≤ 300 ns at 400 kHz):
+  0.8473 × Rp × Cbus < 300 ns
+  Rp < 300e-9 / (0.8473 × 250e-12) ≈ 1,418 Ω  →  max ~1.4 kΩ
+
+Min Rp  (3 mA max sink current):
+  Rp > 3.3 V / 3 mA = 1,100 Ω  →  min ~1.1 kΩ
+
+Valid range:  1.1 kΩ – 1.4 kΩ  →  use 1.2 kΩ or 1.3 kΩ
+
+Classic 4.7 kΩ would FAIL: rise time = 0.8473 × 4700 × 250e-12 = 995 ns >> 300 ns
+```
+
+> *ELI5 recap: smaller Rp = stronger pull = faster edges. But too small wastes current and overloads open-drain drivers. The RC rise-time formula from [01B §2](01b-impedance-and-signal-integrity.md) gives the exact boundary.*
+
+---
+
+### Ex 2 — Protocol trace: write-then-read
+
+Trace byte-by-byte what goes on SDA/SCL when you read register `0x1A` from a device at 7-bit address `0x52`.
+
+```
+1.  START  (SDA falls while SCL is HIGH)
+2.  0xA4   = 0x52 << 1 | 0  (address + write bit)
+3.  ACK    (slave pulls SDA LOW on 9th clock)
+4.  0x1A   (register address)
+5.  ACK    (slave ACKs)
+6.  Sr     (Repeated START — SDA falls while SCL is HIGH again)
+7.  0xA5   = 0x52 << 1 | 1  (address + read bit)
+8.  ACK    (slave ACKs)
+9.  data   (slave drives SDA with register content)
+10. NACK   (master releases SDA = HIGH — “no more bytes please”)
+11. STOP   (SDA rises while SCL is HIGH)
+```
+
+*Verify with a Jetson: `i2cget -y 1 0x52 0x1a b` and watch with a logic analyzer. You should see the Repeated START as a dip mid-transaction without a full STOP.*
+
+---
+
+### Ex 3 — Stuck-bus recovery step-by-step
+
+You power-cycle the STM32 mid-transaction. The sensor is stuck holding SDA LOW (it was waiting for more clocks to finish a byte). All subsequent `i2c_write_read()` return `-EIO`. Walk through the exact recovery:
+
+```
+1. Call Zephyr’s  i2c_recover_bus(dev)
+   — it configures SCL as GPIO, bit-bangs 9 clock pulses while watching SDA
+   — each pulse gives the slave a chance to release SDA (advance its state machine)
+
+2. If SDA goes HIGH at any point during the 9 clocks:
+   — generate a STOP condition (SCL HIGH, then SDA LOW→HIGH)
+   — re-initialize the I2C peripheral
+
+3. If SDA is still LOW after 9 clocks:
+   — the device needs a power-cycle or hardware RESET pulse
+   — add a GPIO-controlled RESET line to the sensor on your next PCB rev
+
+4. Prevention: add a 100 Ω series resistor on SCL. On MCU reset, SCL briefly floats;
+   the resistor limits the current spike that could clock the slave unexpectedly.
+```
+
+---
+
+### Ex 4 — The 7-bit vs 8-bit address trap
+
+A sensor datasheet says *“I2C address: 0xD0 (write), 0xD1 (read)”*. You call `i2c_write(dev, buf, len, 0xD0)` in Zephyr and get `-EIO`. What’s wrong?
+
+*Answer: The datasheet gave the 8-bit on-wire format (7-bit address already shifted left, R/W̅ bit appended). Zephyr’s I2C API takes the 7-bit address; the driver shifts and appends the R/W̅ bit internally. Use `0x68` (= `0xD0 >> 1`). If you pass `0xD0`, Zephyr actually addresses device `0x68` with a write, but it will try to reach bus address `0x68` — which might or might not be `0xD0 >> 1` depending on whether you counted correctly. Always convert: `7-bit addr = 8-bit write addr >> 1`.*

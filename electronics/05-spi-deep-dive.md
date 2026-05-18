@@ -1,6 +1,6 @@
 # 05 — SPI Deep Dive
 ### From shift registers to frames: the protocol YOUR bridge uses
-**Prerequisites:** Chapter 01 (RC, decoupling), Chapter 02 (MOSFETs)
+**Prerequisites:** Chapter 01 (RC, decoupling), Chapter 02 (MOSFETs), **[01B §3 + §5](01b-impedance-and-signal-integrity.md)** (ringing, reflections, SPI signal integrity)
 **Unlocks:** 100Hz STM32↔Jetson bridge, IMU reads, flash memory, display drivers
 
 ---
@@ -376,6 +376,15 @@ The STM32H7 has an L1 data cache. DMA operates on physical memory, NOT through t
 
 This is the #1 source of "SPI works in debug mode but fails at speed" on STM32H7.
 
+> **💡 ELI5 — "Why does a CPU cache break DMA?"**
+>
+> The CPU's cache is like a sticky-note pad on your desk. When the CPU writes `tx_buf[0] = 0xAB`, it jots it on the sticky note instead of walking to the filing cabinet (RAM). Fast! But the DMA controller doesn't read sticky notes — it goes straight to RAM. If the CPU never "filed" its note (flushed the cache), the DMA reads stale data from RAM and sends that instead.
+>
+> **Why debug mode hides it:** the debugger often slows execution or configures memory differently, causing the cache to flush incidentally — so tests pass. At full speed the cache stays hot, DMA reads stale RAM, bytes are wrong.
+>
+> **Fix A (per-transfer):** call `SCB_CleanDCache_by_Addr(tx_buf, len)` before TX *("file your notes")* and `SCB_InvalidateDCache_by_Addr(rx_buf, len)` after RX *("throw away your notes, re-read from RAM")*.
+> **Fix B (permanent):** put DMA buffers in a non-cacheable MPU region or in DTCM RAM (see Section 5.3).
+
 ---
 
 # PART 6 — SPI PROTOCOL FRAMING
@@ -512,3 +521,74 @@ If the slave DMA de-synchronizes (e.g., missed a CS̄ edge, noise triggered extr
 │                                                                                              │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+---
+
+# EXERCISES
+
+---
+
+### Ex 1 — Decode CPOL / CPHA from a datasheet sentence
+
+The ICM-42688-P datasheet says: *“The SPI serial interface is a 4-wire interface: CS, SCL, SDI, SDO. **CPOL = 1, CPHA = 1** (Mode 3). Data is latched on the **falling edge** of SCL.”*
+
+Trace what this means physically:
+
+```
+CPOL = 1  →  SCL idles HIGH when CS is de-asserted
+CPHA = 1  →  data is captured on the SECOND active edge (= falling edge when idle is HIGH)
+
+Master changes MOSI on:   rising SCL edge  (set up before the capture edge)
+Slave  presents MISO on:  rising SCL edge
+Master samples  MISO on:  falling SCL edge  ✔
+
+Zephyr:   SPI_MODE_CPOL | SPI_MODE_CPHA  (both flags set)
+Cube MX:  CPOL = High, CPHA = 2Edge
+```
+
+*Verify: look up ICM-42688-P datasheet Figure 5 (SPI timing). Confirm the waveform matches.*
+
+---
+
+### Ex 2 — First byte garbage: root cause + fix
+
+Your Zephyr SPI slave always returns `0xFF` as the first byte of every transaction, then correct data from byte 2 onward. Which root cause is most likely, and what are two concrete fixes?
+
+*Answer: **First-byte-garbage** — DMA wasn’t armed before the master started clocking. The shift register held its power-on state (all ones = `0xFF`). Fix 1: pre-arm the slave TX DMA before CS̅ can ever go low (call `spi_transceive()` once at startup in a loop). Fix 2: ask the master to insert a 5–10µs delay between CS̅ assertion and the first SCLK edge — gives the STM32 ISR time to arm DMA.*
+
+---
+
+### Ex 3 — D-Cache: pick the correct fix
+
+Your STM32H743 SPI master uses DMA. The CPU fills `tx_buf[64]` then calls `spi_transceive()`. Which cache operation must you perform, and at what moment?
+
+```c
+// Before calling spi_transceive() for TX:
+SCB_CleanDCache_by_Addr((uint32_t *)tx_buf, 64);   // ✓ Flush CPU’s sticky notes to RAM
+
+// After spi_transceive() completes for RX:
+SCB_InvalidateDCache_by_Addr((uint32_t *)rx_buf, 64);  // ✓ Discard stale cache, re-read RAM
+
+// WRONG — Clean on RX has no effect:
+SCB_CleanDCache_by_Addr((uint32_t *)rx_buf, 64);   // ✗ CPU has no new data to flush
+```
+
+> *ELI5 recap: Clean = “file your sticky notes to the cabinet” (before TX). Invalidate = “throw away your notes, re-read the cabinet” (after RX).*
+
+---
+
+### Ex 4 — Wire length sanity check
+
+You’re building a prototype with the STM32 Nucleo and the Jetson connected by 25 cm jumper wires. You want to run SPI at 20 MHz. Safe or not?
+
+```
+From signal-integrity rules (Section 4.2 table):
+  10–20 MHz  →  max ~10 cm
+  Your wires:  25 cm  →  OVER LIMIT
+
+At 20 MHz, one bit period = 50 ns.
+Signal propagates ~15 cm/ns in copper ribbon cable.
+25 cm round-trip ≈ 3.3 ns propagation + reflections from impedance mismatch
+→ ringing that crosses the switching threshold multiple times per clock edge.
+```
+
+*Safe fix: drop to 10 MHz (25 cm is fine at 10 MHz), or use a short PCB trace instead of jumpers. See [01B §5](01b-impedance-and-signal-integrity.md) for the full SPI signal-integrity sequence.*

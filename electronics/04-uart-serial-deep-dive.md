@@ -135,6 +135,14 @@ Nowadays, RS-232 is rare. Most "serial" connections are TTL UART through a USB-t
 
 **Total frame size:** 1 (start) + 8 (data) + 0 (no parity) + 1 (stop) = **10 bit-times per byte**
 
+> **💡 ELI5 — "But how can it work without a shared clock wire?"**
+>
+> Think of two musicians who agree on a tempo (baud rate) *before* the concert. When the first musician raises their bow — the start bit, line drops LOW — both players start their internal metronome at exactly that moment. They don't need to look at each other for the next 10 beats (10 bit-times). After the phrase ends (stop bit), they both reset and wait for the next starting-bow.
+>
+> **Why a 2% clock mismatch is tolerable:** drift per byte = 10 bits × 2% = 0.2 bit-times. The receiver samples in the *middle* of each bit, so it tolerates up to ±0.5 bit-times of drift before missing a bit. 0.2 < 0.5 → safe. At 5% mismatch: 10 × 0.05 = 0.5 → right at the limit → unreliable.
+>
+> **The brilliant part:** re-sync happens on *every* start bit — drift never accumulates beyond one frame. This is why you can plug in a USB-UART adapter mid-session and the very next byte works perfectly.
+
 ---
 
 ## 3.2 Worked Example: Transmitting 'U' (0x55) at 115200 Baud
@@ -562,3 +570,57 @@ Values transmitted as raw bytes:
 │                                                                                              │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+---
+
+# EXERCISES
+
+---
+
+### Ex 1 — Predict the mismatch outcome
+
+Your STM32 runs from its internal RC oscillator (±2% accuracy). Your Jetson's UART is crystal-clocked (essentially perfect). You run 8N1 at 115200 baud.
+
+**Question:** How much bit-time drift accumulates across one 10-bit frame? Will it corrupt data?
+
+```
+Drift per frame = 10 bits × 2% = 0.2 bit-times
+Sample-point tolerance = ±0.5 bit-times
+Margin = 0.5 - 0.2 = 0.3 bit-times  →  safe
+
+At 921600 baud, the bit time is only 1.08µs.
+Same 2% RC oscillator → still 0.2 bit-times drift → still safe mathematically,
+but PCB trace resistance + connector contact resistance now matter more.
+Use HSE (crystal) when going above 460800 baud.
+```
+
+---
+
+### Ex 2 — Throughput sanity check for your 100 Hz bridge
+
+You want to log every SPI frame as ASCII hex (52 bytes of payload → 156 hex chars + newline = 157 bytes) at 115200 baud. The bridge runs at 100 Hz. Will UART keep up?
+
+```
+UART throughput  = 115200 / 10 = 11,520 bytes/sec
+Required         = 157 bytes × 100 Hz = 15,700 bytes/sec  →  BOTTLENECK
+
+Fix A: use 921600 baud  →  92,160 bytes/sec, loads of headroom
+Fix B: log binary not hex  →  52 bytes/frame × 100 Hz = 5,200 bytes/sec  →  fine at 115200
+```
+
+---
+
+### Ex 3 — The plug-in timing puzzle
+
+You connect a USB-UART dongle to a running STM32 mid-transmission. The STM32 is streaming data non-stop. Does the first byte the PC receives come through correctly, or is it garbage?
+
+> *ELI5 hint: think about what the start bit does for synchronization.*
+
+*Answer: The first byte may well be garbage — the PC receiver woke up in the middle of a frame and has no start-bit edge to lock on to. But the **second** byte (and every byte after) will be correct, because the start-bit edge gives the PC a fresh sync point. This is why UART never needs a "session handshake" — every byte is self-synchronizing. In practice, your terminal app may show one garbage character when you connect.*
+
+---
+
+### Ex 4 — RS-485 direction bug (classic)
+
+Your RS-485 code: `gpio_set(DE, 1)` → `uart_write(buf, 8)` → `gpio_set(DE, 0)`. The last 1–2 bytes are always corrupted at the receiver. Nothing in the UART ISR fires. What's wrong?
+
+*Answer: `uart_write()` returns when the **TX holding register** is empty — but the last byte is still shifting out through the shift register. De-asserting DE cuts the line before the last bit exits. Fix: wait for the **TC (Transmit Complete)** interrupt / `UART_TX_DONE` callback in Zephyr's async API, which fires only after the last physical bit has left the wire. Then de-assert DE.*
