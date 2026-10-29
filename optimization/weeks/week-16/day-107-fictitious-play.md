@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-OKS AMRs operate in a decentralized fleet where each robot makes local decisions about routing, task acceptance, and charging. Fictitious play models exactly this: each robot best-responds to the historical distribution of other robots' actions, without centralized coordination. Understanding when this converges (and when it cycles) determines whether decentralized fleet policies stabilize.
+## Robotics Relevance
+AMRs operate in a decentralized fleet where each robot makes local decisions about routing, task acceptance, and charging. Fictitious play models exactly this: each robot best-responds to the historical distribution of other robots' actions, without centralized coordination. Understanding when this converges (and when it cycles) determines whether decentralized fleet policies stabilize.
 
 ---
 
@@ -223,7 +223,7 @@ Model: 2 robots, 2 corridors. If both choose the same corridor, they incur delay
 ## Connections
 - **Back**: [Day 106: Computing NE](day-106-computing-nash.md) — FP avoids explicit NE computation
 - **Forward**: [Day 108: No-Regret Learning](day-108-no-regret.md) — FP is "follow the leader"; no-regret improves the guarantee
-- **OKS**: Decentralized fleet learning — robots adjusting routing based on historical fleet behavior
+- **AMR**: Decentralized fleet learning — robots adjusting routing based on historical fleet behavior
 
 ## Self-Check
 - [ ] I can simulate fictitious play and interpret the empirical frequency trajectory

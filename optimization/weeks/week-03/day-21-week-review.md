@@ -9,7 +9,7 @@
 - **Week:** [Week 3 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Every Ceres `Solver::Options` choice maps to this week's content: `minimizer_type` (LINE_SEARCH vs TRUST_REGION), `line_search_direction_type` (STEEPEST_DESCENT, LBFGS, BFGS), `trust_region_strategy_type` (LEVENBERG_MARQUARDT, DOGLEG). Understanding which method wins on which problem is the difference between a 10-second solve and a failed solve.
 
 ---

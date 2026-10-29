@@ -2,14 +2,14 @@
 ### Reflectance estimator deep-dive — source-verified, incident-proven
 
 **Prerequisite:** `03-measurement-models.md` (line constraints), `05-failure-modes.md` (failure taxonomy)
-**Source files:** `estimator_reflectance_bell.cpp` (268 lines), `ceres_solver.cpp` (~200 lines)
+**Source basis:** a typical production reflectance (bell-curve) estimator and its Ceres solver wrapper
 **Unlocks:** Diagnosing cold-start REJECT, geometric parking failures, hardware-vs-algorithmic triage
 
 ---
 
 ## Why This File Exists
 
-Ticket #104718 (amr-robot-scl-site-a105, 2026-04-22) revealed a failure mode that the existing
+Ticket Incident-J (a robot at Site-A, 2026-04-22) revealed a failure mode that the existing
 learning material didn't cover: a robot parked at a **tape intersection** caused all 4 line-sensors
 to REJECT simultaneously on cold-start, with no hardware fault whatsoever.
 
@@ -47,7 +47,7 @@ y(x) = p0 + p1 × exp(-|p2 × (x - p3)|^p4)
 This is the opposite of what you'd intuitively expect. The pull-down circuit in the line-sensor
 hardware inverts the response: more light → lower voltage → lower ADC reading.
 
-### Parameter bounds (from `ceres_solver.cpp`)
+### Parameter bounds (typical Ceres solver wrapper)
 
 ```
 p1  ≤ 0.7 × initial_p1      (amplitude can't shrink more than 30%)
@@ -67,7 +67,7 @@ With a robot crossing a single tape line at moderate speed:
 
 ## Part 2 — The Two Code Paths (CRITICAL)
 
-There are **two completely different sensor disablement mechanisms** in `estimator_reflectance_bell.cpp`.
+There are **two completely different sensor disablement mechanisms** in a typical bell-curve reflectance estimator.
 Which path runs depends on the YAML config flag `reflectance_use_loss_function`.
 
 ### Path A: Loss Function Active (DEFAULT in production)
@@ -81,7 +81,7 @@ Disabled-sensor check uses a **hardcoded constant**:
 
 ```cpp
 constexpr double DISABLED_SENSOR_ERROR_PERCENTAGE = 0.25;
-// Source: estimator_reflectance_bell.cpp
+// Illustrative: typical bell-curve reflectance estimator
 ```
 
 A sensor is disabled if:
@@ -178,11 +178,11 @@ always the narrow Gaussian.
 
 ## Part 4 — The Self-Perpetuating Failure Loop
 
-This is the core mechanism of the #104718 failure.
+This is the core mechanism of the Incident-J failure.
 
 ### `_previous_solutions` cache
 
-In `estimator_reflectance_bell.cpp`:
+In a typical bell-curve reflectance estimator:
 
 ```cpp
 std::map<std::string, Solution> _previous_solutions;
@@ -226,7 +226,7 @@ exceeds the limit. All 4 bars → REJECT simultaneously. The system has no fall-
 
 ---
 
-## Part 5 — Real Data from Ticket #104718
+## Part 5 — Real Data from Ticket Incident-J
 
 ### Sensor readings (mean from recording_001.mcap, ~5 min at 05:21–05:22 UTC)
 
@@ -257,11 +257,11 @@ Each bar has exactly 3 sensors on tape → exceeds `max_disabled_sensor_count=2`
 |---|---|
 | ≤03:46 | Robot already parked at tile (28,0,0) on tape intersection |
 | 05:21:29 | All nodes kill (roslaunch restart — someone triggered a restart) |
-| 05:21:41 | **`EstimatorReflectanceBell: Curve fitting disabled sensors for line-sensor: 4 (max: 2)`** |
+| 05:21:41 | **`Reflectance estimator: Curve fitting disabled sensors for line-sensor: 4 (max: 2)`** |
 | 05:21:46 | Line-sensor calibration: 4/4 bars HEALTHY (not the issue) |
 | 05:21:50 | Map loads, tile (28,0,0) already in state=3 (disabled) |
-| 05:22:00 | `InitializeProcessing::recoverErrors: Recovering error 1 by MCLBC_Navigation` |
-| **05:22:06.916** | `RequestManualAssistance` — MCLBC_Navigation code 1 ⛔ |
+| 05:22:00 | `Error recovery: navigation localization error` |
+| **05:22:06.916** | Manual-assistance request — navigation localization error ⛔ |
 
 ---
 
@@ -269,7 +269,7 @@ Each bar has exactly 3 sensors on tape → exceeds `max_disabled_sensor_count=2`
 
 ### When to suspect this failure mode
 
-Use this checklist when you see `MCLBC_Navigation code 1` or `EstimatorReflectanceBell: Curve fitting disabled sensors for line-sensor: N (max: 2)`:
+Use this checklist when you see a navigation localization error or `Reflectance estimator: Curve fitting disabled sensors for line-sensor: N (max: 2)`:
 
 ```
 □ Does /rosout show "Curve fitting disabled sensors" for ALL 4 bars simultaneously?
@@ -320,7 +320,7 @@ all robots at all sites.
 
 ## Part 7 — Configuration Reference
 
-From `config_default.yaml`:
+Typical default configuration:
 
 ```yaml
 sensor_spacing_x: 0.0069           # 6.9mm between adjacent sensors (12 sensors = 82.8mm span)
@@ -333,7 +333,7 @@ reflectance_max_disabled_sensor_count: 2      # REJECT if more than this many se
 
 Hardcoded in source (NOT configurable via YAML):
 ```cpp
-constexpr double DISABLED_SENSOR_ERROR_PERCENTAGE = 0.25;  // estimator_reflectance_bell.cpp
+constexpr double DISABLED_SENSOR_ERROR_PERCENTAGE = 0.25;
 ```
 
 ---

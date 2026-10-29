@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-OKS fleet coordination combines two game-theoretic challenges: (1) allocating tasks across robots competing for limited resources (auction games), and (2) ensuring perception and navigation are robust to worst-case sensor failures or adversarial conditions (adversarial games). This day bridges multi-agent coordination with adversarial robustness — both critical for warehouse-scale fleet operation.
+## Robotics Relevance
+AMR fleet coordination combines two game-theoretic challenges: (1) allocating tasks across robots competing for limited resources (auction games), and (2) ensuring perception and navigation are robust to worst-case sensor failures or adversarial conditions (adversarial games). This day bridges multi-agent coordination with adversarial robustness — both critical for warehouse-scale fleet operation.
 
 ---
 
@@ -261,7 +261,7 @@ Model as zero-sum: helper minimizes time-to-intercept, adversarial robot maximiz
 ## Connections
 - **Back**: [Day 109: Congestion Games](day-109-congestion-games.md) — auctions extend congestion with strategic bidding
 - **Forward**: [Day 111: Robust Optimization](day-111-robust-optimization.md) — adversarial robustness formalized as games against nature
-- **OKS**: Fleet task allocation, pursuit of malfunctioning robots, robust perception in adversarial environments
+- **AMR**: Fleet task allocation, pursuit of malfunctioning robots, robust perception in adversarial environments
 
 ## Self-Check
 - [ ] I can formulate task allocation as a combinatorial auction and compute VCG payments

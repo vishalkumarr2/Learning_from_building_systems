@@ -77,7 +77,7 @@
   - **Frequency response identification** + loop-shaping
   - **Model-based tuning** (identify plant, compute optimal PID)
   - **Auto-tuning** (embedded identification + optimization)
-- In production OKS robots: we use model-based tuning with per-robot calibration, not Z-N
+- In production warehouse robots: we use model-based tuning with per-robot calibration, not Z-N
 
 ---
 

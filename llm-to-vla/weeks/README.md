@@ -72,7 +72,7 @@ From deep learning foundations to Vision-Language-Action models for robotics.
 - [ ] [Day 45: ViT — Image as Tokens](week-07/day-45-vit.md)
 - [ ] [Day 46: Training ViT + DeiT](week-07/day-46-training-vit-deit.md)
 - [ ] [Day 47: Swin Transformer](week-07/day-47-swin-transformer.md)
-- [ ] [Day 48: DINO & Self-Supervised Vision](week-07/day-48-dino.md)
+- [ ] [Day 48: DINO & Self-Supervised Vision](week-07/day-48-dino-self-supervised.md)
 - [ ] [Day 49: MAE — Masked Autoencoders](week-07/day-49-mae.md)
 
 ### Phase IV: Vision — ViT, 3D, Video (Days 45–58)
@@ -80,10 +80,10 @@ From deep learning foundations to Vision-Language-Action models for robotics.
 #### Week 8 — 3D Vision + Video
 - [ ] [Day 50: Stop & Reflect #3](week-08/day-50-stop-reflect-3.md)
 - [ ] [Day 51: 3D Vision & Depth](week-08/day-51-3d-vision-depth.md)
-- [ ] [Day 52: Point Clouds & 3D Scenes](week-08/day-52-point-clouds.md)
+- [ ] [Day 52: Point Clouds & 3D Scenes](week-08/day-52-point-clouds-3d.md)
 - [ ] [Day 53: Video Understanding Day 1](week-08/day-53-video-understanding-1.md)
 - [ ] [Day 54: Video Understanding Day 2](week-08/day-54-video-understanding-2.md)
-- [ ] [Day 55: DETR + Florence-2 + SAM 2](week-08/day-55-detection-detr-florence-sam.md)
+- [ ] [Day 55: DETR + Florence-2 + SAM 2](week-08/day-55-detr-florence-sam.md)
 - [ ] [Day 56: Vision-Language Bridge](week-08/day-56-vision-language-bridge.md)
 
 #### Week 9 — Phase IV Capstone + VLMs
@@ -99,7 +99,7 @@ From deep learning foundations to Vision-Language-Action models for robotics.
 
 #### Week 10 — VLM Practice
 - [ ] [Day 64: Open VLM Landscape](week-10/day-64-open-vlm-landscape.md)
-- [ ] [Day 65: Spatial Reasoning & Grounding](week-10/day-65-spatial-reasoning-grounding.md)
+- [ ] [Day 65: Spatial Reasoning & Grounding](week-10/day-65-spatial-grounding.md)
 - [ ] [Day 66: Stop & Reflect #4](week-10/day-66-stop-reflect-4.md)
 - [ ] [Day 67: Phase V Capstone Day 1](week-10/day-67-phase5-capstone-1.md)
 - [ ] [Day 68: Phase V Capstone Day 2](week-10/day-68-phase5-capstone-2.md)
@@ -130,7 +130,7 @@ From deep learning foundations to Vision-Language-Action models for robotics.
 - [ ] [Day 85: Data Collection Day 1](week-13/day-85-data-collection-1.md)
 - [ ] [Day 86: Data Collection Day 2](week-13/day-86-data-collection-2.md)
 - [ ] [Day 87: Policy Evaluation](week-13/day-87-policy-evaluation.md)
-- [ ] [Day 88: Debugging Learned Policies](week-13/day-88-debugging-policies.md)
+- [ ] [Day 88: Debugging Learned Policies](week-13/day-88-policy-debugging.md)
 - [ ] [Day 89: Phase VI Capstone Day 1](week-13/day-89-phase6-capstone-1.md)
 - [ ] [Day 90: Phase VI Capstone Day 2](week-13/day-90-phase6-capstone-2.md)
 - [ ] [Day 91: Phase VI Capstone Day 3](week-13/day-91-phase6-capstone-3.md)
@@ -143,23 +143,23 @@ From deep learning foundations to Vision-Language-Action models for robotics.
 - [ ] [Day 94: Octo](week-14/day-94-octo.md)
 - [ ] [Day 95: OpenVLA](week-14/day-95-openvla.md)
 - [ ] [Day 96: π₀ — Flow Matching for Actions](week-14/day-96-pi0.md)
-- [ ] [Day 97: π₀.₅ — Scaling Physical Intelligence](week-14/day-97-pi05.md)
+- [ ] [Day 97: π₀.₅ — Scaling Physical Intelligence](week-14/day-97-pi0-5.md)
 - [ ] [Day 98: GR00T N1 + PaLM-E](week-14/day-98-groot-palme.md)
 
 #### Week 15 — Training, Transfer & Hybrid
-- [ ] [Day 99: GR-2 + Frontier VLAs](week-15/day-99-gr2-frontier.md)
-- [ ] [Day 100: VLA Training Recipes](week-15/day-100-vla-training-recipes.md)
+- [ ] [Day 99: GR-2 + Frontier VLAs](week-15/day-99-gr2.md)
+- [ ] [Day 100: VLA Training Recipes](week-15/day-100-training-recipes.md)
 - [ ] [Day 101: Sim-to-Real Day 1](week-15/day-101-sim-to-real-1.md)
 - [ ] [Day 102: Sim-to-Real Day 2](week-15/day-102-sim-to-real-2.md)
-- [ ] [Day 103: Hybrid VLA + Classical Day 1](week-15/day-103-hybrid-vla-classical-1.md)
-- [ ] [Day 104: Hybrid Systems Day 2 — ROS2](week-15/day-104-hybrid-ros2.md)
-- [ ] [Day 105: Hybrid Systems Day 3 — Safety](week-15/day-105-hybrid-safety.md)
+- [ ] [Day 103: Hybrid VLA + Classical Day 1](week-15/day-103-hybrid-1.md)
+- [ ] [Day 104: Hybrid Systems Day 2 — ROS2](week-15/day-104-hybrid-2.md)
+- [ ] [Day 105: Hybrid Systems Day 3 — Safety](week-15/day-105-stop-reflect-6.md)
 
 #### Week 16 — Deployment & Final Capstone
 - [ ] [Day 106: World Models & Video Prediction](week-16/day-106-world-models.md)
-- [ ] [Day 107: Deployment Day 1 — Inference](week-16/day-107-deployment-inference.md)
-- [ ] [Day 108: Deployment Day 2 — Safety](week-16/day-108-deployment-safety.md)
-- [ ] [Day 109: Deployment Day 3 — Full Pipeline](week-16/day-109-deployment-pipeline.md)
-- [ ] [Day 110: Final Capstone Day 1](week-16/day-110-capstone-1.md)
-- [ ] [Day 111: Final Capstone Day 2](week-16/day-111-capstone-2.md)
-- [ ] [Day 112: Final Capstone Day 3](week-16/day-112-capstone-3.md)
+- [ ] [Day 107: Deployment Day 1 — Inference](week-16/day-107-deployment-1.md)
+- [ ] [Day 108: Deployment Day 2 — Safety](week-16/day-108-deployment-2.md)
+- [ ] [Day 109: Deployment Day 3 — Full Pipeline](week-16/day-109-deployment-3.md)
+- [ ] [Day 110: Final Capstone Day 1](week-16/day-110-final-capstone-1.md)
+- [ ] [Day 111: Final Capstone Day 2](week-16/day-111-final-capstone-2.md)
+- [ ] [Day 112: Final Capstone Day 3](week-16/day-112-final-capstone-3.md)

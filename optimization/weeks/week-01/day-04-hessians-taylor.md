@@ -9,7 +9,7 @@
 - **Week:** [Week 1 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Every Gauss-Newton and Levenberg-Marquardt step in SLAM approximates the Hessian via $J^T J$. The quality of this approximation determines convergence speed. Taylor expansion is how we linearize nonlinear sensor models.
 
 ---

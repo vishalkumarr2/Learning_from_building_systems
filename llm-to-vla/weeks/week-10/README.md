@@ -9,7 +9,7 @@ This week surveys the open VLM landscape, tackles spatial reasoning, reflects on
 | Day | Topic | Phase | Focus |
 |-----|-------|-------|-------|
 | 64 | [Open VLM Landscape](day-64-open-vlm-landscape.md) | V | InternVL, Qwen-VL, Phi-3-Vision |
-| 65 | [Spatial Reasoning & Grounding](day-65-spatial-reasoning-grounding.md) | V | Visual grounding, referring expressions |
+| 65 | [Spatial Reasoning & Grounding](day-65-spatial-grounding.md) | V | Visual grounding, referring expressions |
 | 66 | [Stop & Reflect #4](day-66-stop-reflect-4.md) | V | From seeing to acting |
 | 67 | [Phase V Capstone Day 1](day-67-phase5-capstone-1.md) | V | VLM inference pipeline |
 | 68 | [Phase V Capstone Day 2](day-68-phase5-capstone-2.md) | V | Evaluation + checkpoint |

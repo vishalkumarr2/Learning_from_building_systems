@@ -1,22 +1,22 @@
 # 04 — IMU Fusion & Gyroscope Integration
-### How OKS `imuCallback()` keeps theta honest
+### How AMR `on_imu()` keeps theta honest
 
-**Prerequisite:** `02-kalman-filter.md` — you need to understand Kalman gain and innovation before this makes sense. `03-sensorbar-correction.md` helps but is not required.
+**Prerequisite:** `02-kalman-filter.md` — you need to understand Kalman gain and innovation before this makes sense. `03-line-sensor-correction.md` helps but is not required.
 **Unlocks:** `05-slip-detection.md` — once you know how heading errors accumulate and how the Kalman filter corrects them, you can understand why slip events are so dangerous (they corrupt the odometry-based theta prediction that IMU then tries to correct).
 
 ---
 
-## Why Should I Care? (OKS Project Context)
+## Why Should I Care? (AMR Project Context)
 
 Heading error is the silent killer in AMR navigation. A robot with a 1° heading bias that drives 5 metres has drifted **87 mm sideways** before any correction fires. At 3°, it's 262 mm — enough to miss a bin slot entirely.
 
-The the navigation estimator uses wheel odometry as its primary motion source (`predict()`), but wheel odometry alone can't maintain accurate heading over long distances — it accumulates angular error from unequal wheel slip, floor surface transitions, and asymmetric load. The IMU's gyroscope provides an independent angular velocity measurement that runs at ~100 Hz, far faster than any sensorbar update. `imuCallback()` fuses these two sources to keep θ (heading) well-estimated between sensorbar corrections.
+The navigation estimator uses wheel odometry as its primary motion source (`predict()`), but wheel odometry alone can't maintain accurate heading over long distances — it accumulates angular error from unequal wheel slip, floor surface transitions, and asymmetric load. The IMU's gyroscope provides an independent angular velocity measurement that runs at ~100 Hz, far faster than any line-sensor update. `on_imu()` fuses these two sources to keep θ (heading) well-estimated between line-sensor corrections.
 
 Understanding this material lets you answer:
 
 - **"Why is the robot's heading 8° off when the tile sequence shows only 2° of encoder drift?"** → The gyro bias estimate has gone stale, or the robot ran through vibration that corrupted the bias EMA. You can check by comparing `omega_z` readings against the robot's commanded angular velocity in the bag.
 - **"Why did the estimator flag COLLISION when the robot just drove over a tile gap?"** → Because the floor discontinuity produced a gyro angular acceleration spike exceeding `collision_threshold`. You can calculate this from the geometry before even opening the bag.
-- **"Why does OKS use full Kalman gain for theta but clamp for XY?"** → Because the IMU gives a point measurement in angular space (same state dimension), while sensorbar gives a range measurement that needs asymmetric handling. This note makes that distinction mathematically concrete.
+- **"Why does AMR use full Kalman gain for theta but clamp for XY?"** → Because the IMU gives a point measurement in angular space (same state dimension), while line-sensor gives a range measurement that needs asymmetric handling. This note makes that distinction mathematically concrete.
 
 ---
 
@@ -26,10 +26,10 @@ Understanding this material lets you answer:
 
 A gyroscope measures **angular velocity** — how fast the sensor is rotating, in radians per second. It does **not** directly measure angle; heading is derived by integrating angular velocity over time.
 
-The OKS robot's IMU sits on the chassis with the **z-axis pointing upward**. This means the z-axis gyroscope (`omega_z`, ω_z) measures rotation in the horizontal plane — exactly the heading change we care about for 2-D navigation.
+The warehouse robot's IMU sits on the chassis with the **z-axis pointing upward**. This means the z-axis gyroscope (`omega_z`, ω_z) measures rotation in the horizontal plane — exactly the heading change we care about for 2-D navigation.
 
 ```
-         IMU MOUNTING ON OKS AMR (top view)
+         IMU MOUNTING ON warehouse AMR (top view)
          =====================================
 
                     FRONT  ↑ X
@@ -46,11 +46,11 @@ The OKS robot's IMU sits on the chassis with the **z-axis pointing upward**. Thi
 
          Raw IMU output:
            omega_x, omega_y  ← pitch/roll, NOT USED by the navigation estimator
-           omega_z           ← yaw rate, fed into imuCallback()
+           omega_z           ← yaw rate, fed into on_imu()
            accel_x, accel_y  ← linear accel, NOT USED by the navigation estimator
            accel_z           ← gravity + vertical accel, NOT USED
 
-         OKS only uses omega_z from the IMU.
+         AMR only uses omega_z from the IMU.
          This is the angular velocity around the vertical axis.
 ```
 
@@ -71,7 +71,7 @@ A MEMS (Micro-Electro-Mechanical Systems) gyroscope uses the **Coriolis effect**
 - Power supply noise modulates the drive amplitude → **electrical noise**
 - Manufacturing imperfections create a persistent offset → **bias**
 
-These error sources are why a gyroscope cannot simply be integrated indefinitely. They are the reason `imuCallback()` needs bias compensation and why the Kalman filter is essential.
+These error sources are why a gyroscope cannot simply be integrated indefinitely. They are the reason `on_imu()` needs bias compensation and why the Kalman filter is essential.
 
 ## 1.3 Taxonomy of Gyro Errors
 
@@ -81,7 +81,7 @@ There are three fundamentally different error types, with different effects and 
          GYRO ERROR TAXONOMY
          ====================
 
-  Error Type       |  Signal Character     |  Effect on θ       |  OKS remedy
+  Error Type       |  Signal Character     |  Effect on θ       |  AMR remedy
   -----------------+-----------------------+--------------------+------------------
   White Noise      |  Zero-mean, random    |  Random walk        |  Kalman filter
   (ARW)            |  σ ∝ √(time)          |  √t growth          |  (averages out)
@@ -89,7 +89,7 @@ There are three fundamentally different error types, with different effects and 
   Bias (constant)  |  Fixed DC offset      |  Linear drift       |  EMA bias
                    |  same sign always     |  θ_err = b × t     |  estimator
                    |                       |                     |
-  Random Walk      |  Slowly drifting mean |  Quadratic drift    |  Sensorbar
+  Random Walk      |  Slowly drifting mean |  Quadratic drift    |  Line-Sensor
   (in bias)        |  Correlated samples   |  accelerates over   |  correction
                    |                       |  many minutes       |  resets θ
 
@@ -99,9 +99,9 @@ There are three fundamentally different error types, with different effects and 
 
 **White noise** is the unavoidable background — random measurement uncertainty on every sample. It causes a **random walk** in the integrated angle: after N steps the expected angle error is σ_noise × √N × Δt. This cannot be compensated; the Kalman filter manages it by weighting the IMU measurement appropriately.
 
-**Bias** is a systematic offset: the sensor reads `b` rad/s even when the robot is perfectly still. Over time `t`, this causes linear heading drift of `b × t`. This *can* be estimated and corrected — which is exactly what `imuCallback()` does via its EMA bias estimator.
+**Bias** is a systematic offset: the sensor reads `b` rad/s even when the robot is perfectly still. Over time `t`, this causes linear heading drift of `b × t`. This *can* be estimated and corrected — which is exactly what `on_imu()` does via its EMA bias estimator.
 
-**Random walk in the bias** is the slow, correlated drift of the bias value itself due to temperature and aging. This causes the bias estimate to become wrong over timescales of minutes to hours. It's the reason sensorbar corrections are ultimately necessary even with perfect bias compensation.
+**Random walk in the bias** is the slow, correlated drift of the bias value itself due to temperature and aging. This causes the bias estimate to become wrong over timescales of minutes to hours. It's the reason line-sensor corrections are ultimately necessary even with perfect bias compensation.
 
 ## 1.4 Worked Example: What Happens if You Ignore Bias
 
@@ -149,7 +149,7 @@ Heading angle is computed by summing angular velocity over time — the **discre
   At 100 Hz: Δt_i ≈ 0.010 s (10 ms)
 ```
 
-In OKS `imuCallback()` this is one line:
+In AMR `on_imu()` this is one line:
 ```
 theta += (omega_z - gyro_bias_estimate) * dt
 ```
@@ -195,7 +195,7 @@ The systematic drift (bias term) dominates at short timescales. The random walk 
           lateral = 0.5 × 30 × sin(0.3 rad) ≈ 4.4 m  ← robot crashes
 ```
 
-**Key insight:** The middle row (`b = 0.010 rad/s`) represents a plausible worst-case for a cheap sensor without bias compensation. This is why every OKS bag with suspicious heading drift should have `omega_z` checked against `cmd_vel.angular.z` when the robot is stationary — any non-zero `omega_z` reading during zero-command periods is pure bias.
+**Key insight:** The middle row (`b = 0.010 rad/s`) represents a plausible worst-case for a cheap sensor without bias compensation. This is why every AMR bag with suspicious heading drift should have `omega_z` checked against `cmd_vel.angular.z` when the robot is stationary — any non-zero `omega_z` reading during zero-command periods is pure bias.
 
 ## 2.4 Visualizing Divergence
 
@@ -233,11 +233,11 @@ The systematic drift (bias term) dominates at short timescales. The random walk 
 
 Bias is the gyroscope's output when the robot is **truly stationary** — any non-zero reading at zero angular velocity is bias. The challenge: the robot is not always stationary. During motion, `omega_z` contains both true rotation and bias, and they cannot be separated from the IMU signal alone.
 
-The OKS approach: **use a slow Exponential Moving Average (EMA) that updates continuously** but with a very small learning rate α. When the robot moves, the bias estimate barely changes (correct — we don't know the true bias from a motion reading). When the robot is stationary for many samples, the EMA gradually converges toward the true bias (correct — all `omega_z` readings are pure bias).
+The AMR approach: **use a slow Exponential Moving Average (EMA) that updates continuously** but with a very small learning rate α. When the robot moves, the bias estimate barely changes (correct — we don't know the true bias from a motion reading). When the robot is stationary for many samples, the EMA gradually converges toward the true bias (correct — all `omega_z` readings are pure bias).
 
 ## 3.2 The EMA Update Rule
 
-The bias estimator update in `imuCallback()` is:
+The bias estimator update in `on_imu()` is:
 
 ```
   new_bias = (1 - α) × old_bias  +  α × omega_z_current
@@ -309,7 +309,7 @@ If α is too large (e.g., 0.1), the bias estimate tracks `omega_z` closely. Duri
 
 If α is too small (e.g., 0.00001), the bias estimate barely moves even after hours of stationary time. The initial bias estimate at startup matters enormously, and the system cannot adapt to temperature-induced drift during a shift.
 
-The choice of α is a tuning parameter that reflects the expected timescale of bias drift. For OKS AMRs operating at roughly constant temperature in a warehouse, α ≈ 0.001 is typical.
+The choice of α is a tuning parameter that reflects the expected timescale of bias drift. For warehouse AMRs operating at roughly constant temperature in a warehouse, α ≈ 0.001 is typical.
 
 ---
 
@@ -317,20 +317,20 @@ The choice of α is a tuning parameter that reflects the expected timescale of b
 
 ## 4.1 Why IMU Gets Full Kalman Gain (Not a Clamp)
 
-In OKS, two different correction strategies are used depending on the measurement source:
+In AMR, two different correction strategies are used depending on the measurement source:
 
 ```
         CORRECTION STRATEGY COMPARISON
         ================================
 
-        Source          |  Measurement type      |  OKS correction method
+        Source          |  Measurement type      |  AMR correction method
         ----------------+------------------------+------------------------
-        Sensorbar       |  Range in Y (lateral)  |  CLAMP (asymmetric)
+        Line-Sensor       |  Range in Y (lateral)  |  CLAMP (asymmetric)
         IMU gyro        |  Point in θ (heading)  |  Full Kalman gain
 
         WHY DIFFERENT?
 
-        Sensorbar gives: "I can see the bar at distance d ± uncertainty"
+        Line-Sensor gives: "I can see the bar at distance d ± uncertainty"
           → This is a SIGNED range with physical limits; the bar is
             either detected or not. Innovation can be large and asymmetric.
           → Clamping prevents overcorrection when bar detection is noisy.
@@ -359,7 +359,7 @@ For the heading fusion step:
 ## 4.3 The Kalman Update Equations
 
 ```
-        THETA KALMAN UPDATE (imuCallback)
+        THETA KALMAN UPDATE (on_imu)
         ================================
 
         1. INNOVATION (how much IMU disagrees with odometry):
@@ -456,13 +456,13 @@ When the two distributions are far apart (large ν), either:
 
 ## 5.1 What the Collision Detector Checks
 
-The collision detector in `imuCallback()` monitors **consecutive gyro reading differences**:
+The collision detector in `on_imu()` monitors **consecutive gyro reading differences**:
 
 ```
   angular_acceleration_estimate = (omega_z_current - omega_z_previous) / dt
 
   if |angular_acceleration_estimate| > collision_threshold:
-      NavigatorState = COLLISION
+      EstimatorState = COLLISION
 ```
 
 Note this is computing an approximate **angular acceleration** (change in angular velocity per unit time), not the angular velocity itself. This is the right quantity: a collision typically causes a **sudden stop or angular jerk**, which shows up as a large Δω_z in a single timestep.
@@ -497,12 +497,12 @@ Note this is computing an approximate **angular acceleration** (change in angula
 ## 5.3 Consequence of COLLISION State
 
 When COLLISION fires:
-1. `NavigatorState` is set to `COLLISION` (a terminal state in the OKS FSM).
+1. `EstimatorState` is set to `COLLISION` (a terminal state in the robot FSM).
 2. The robot stops accepting motion commands.
 3. A manual restart (supervisor acknowledgement) is required before operation resumes.
 4. The position estimate at the time of COLLISION is preserved but marked unreliable.
 
-This is intentionally aggressive. A collision is a safety event — the robot may have moved objects or encountered a person. The OKS design treats any ambiguous sudden jerk as "assume the worst." The consequence for false positives (floor bumps, machinery vibration) is operational downtime, which is why floor quality matters for OKS deployments.
+This is intentionally aggressive. A collision is a safety event — the robot may have moved objects or encountered a person. The AMR design treats any ambiguous sudden jerk as "assume the worst." The consequence for false positives (floor bumps, machinery vibration) is operational downtime, which is why floor quality matters for the robot deployments.
 
 ## 5.4 False Positive Sources and How to Identify Them
 
@@ -555,7 +555,7 @@ For a robot driving at `v = 0.3 m/s` over a `2 cm` step bump:
   With collision_threshold = 2.0 rad/s² ... wait, the threshold is on
   Δω_z per sample (not divided by dt):
     Δω_z = 0.99 rad/s in one step → EXCEEDS 2.0 rad/s threshold if threshold
-    is on raw Δω_z. Check the OKS code carefully — if threshold is 2.0 rad/s²:
+    is on raw Δω_z. Check the robot code carefully — if threshold is 2.0 rad/s²:
       angular_accel = 0.99/0.01 = 99 rad/s² >> 2.0 rad/s²  → collision fires
 
   If threshold is on raw Δω_z (not divided by dt = 2.0 rad/s):
@@ -567,14 +567,14 @@ For a robot driving at `v = 0.3 m/s` over a `2 cm` step bump:
 
 ---
 
-# PART 6 — OKS CODE CONNECTION
+# PART 6 — PRODUCTION CODE CONNECTION
 
-## 6.1 imuCallback() — Full Walkthrough
+## 6.1 on_imu() — Full Walkthrough
 
 ```cpp
-// , imuCallback() — annotated with math from this note
+// on_imu() — annotated with math from this note
 
-void Estimator::imuCallback(const ImuMessage& msg) {
+void Estimator::on_imu(const ImuMessage& msg) {
     double omega_z = msg.angular_velocity.z;     // [rad/s], raw gyro
     double dt = computeDt(msg.header.stamp);     // [s], ~0.010 s at 100 Hz
 
@@ -582,7 +582,7 @@ void Estimator::imuCallback(const ImuMessage& msg) {
     // Checks PART 5: Δω_z > threshold?
     double delta_omega = std::abs(omega_z - prev_omega_z_);
     if (delta_omega > collision_threshold_) {
-        state_ = NavigatorState::COLLISION;      // terminal state → requires restart
+        state_ = EstimatorState::COLLISION;      // terminal state → requires restart
         return;                                  // no further updates
     }
     prev_omega_z_ = omega_z;
@@ -613,9 +613,9 @@ void Estimator::imuCallback(const ImuMessage& msg) {
 
 ## 6.2 Full Code-to-Math Mapping Table
 
-| Concept | Math | OKS Code Location | Notes |
+| Concept | Math | AMR Code Location | Notes |
 |---------|------|-------------------|-------|
-| Angular velocity input | ω_z [rad/s] | `msg.angular_velocity.z` in `imuCallback()` | Only z-axis used |
+| Angular velocity input | ω_z [rad/s] | `msg.angular_velocity.z` in `on_imu()` | Only z-axis used |
 | Sample interval | Δt [s] | `computeDt(msg.header.stamp)` | ~10 ms at 100 Hz |
 | Bias EMA update | `b += α(ω_z − b)` | `gyro_bias_ += alpha_ * (omega_z - gyro_bias_)` | α very small, always applied |
 | Corrected rate | ω_z − b | `omega_corrected = omega_z - gyro_bias_` | Fed into integration |
@@ -625,18 +625,18 @@ void Estimator::imuCallback(const ImuMessage& msg) {
 | Theta correction | `θ += K×ν` | `state_.theta += K * innovation` | Full gain, not clamped |
 | Cov update | `P_θ *= (1−K)` | `cov_theta_ *= (1.0 - K)` | Fusion reduces uncertainty |
 | Collision check | `|Δω_z| > thresh` | `delta_omega > collision_threshold_` | Before any update |
-| COLLISION state | terminal FSM state | `state_ = NavigatorState::COLLISION` | Requires restart |
+| COLLISION state | terminal FSM state | `state_ = EstimatorState::COLLISION` | Requires restart |
 | Accumulator reset | after KF update | `theta_imu_ = state_.theta` | Prevents accumulator drift |
 
 ## 6.3 Why XY Uses Clamp but Theta Uses Kalman
 
-This is a common question from engineers new to the OKS codebase.
+This is a common question from engineers new to the robot codebase.
 
 ```
-        SENSORBAR (XY) vs. IMU (THETA): CORRECTION METHOD CHOICE
+        LINE-SENSOR (XY) vs. IMU (THETA): CORRECTION METHOD CHOICE
         ===========================================================
 
-        Sensorbar correction:
+        Line-Sensor correction:
           - Measurement: lateral position Y relative to bar feature
           - The bar is a PHYSICAL LINE; detection can be noisy or ambiguous
           - Large innovations can mean: bar was misidentified, robot is far
@@ -676,14 +676,14 @@ The IMU does **not** replace odometry as the primary motion source. The call seq
                   - Inflate covariance: P += Q (process noise)
 
         2. IMU message arrives (~100 Hz, much faster than odom)
-             └─ imuCallback() called
+             └─ on_imu() called
                   - Check collision (PART 5)
                   - Update bias estimate (PART 3)
                   - Integrate theta_imu (PART 2)
                   - Kalman update on theta (PART 4)
 
-        3. Sensorbar message arrives (when robot is over bar)
-             └─ onSensorbar() called
+        3. Line-Sensor message arrives (when robot is over bar)
+             └─ onLine-Sensor() called
                   - Correct Y position (clamped)
                   - Reset lateral covariance
 
@@ -697,17 +697,17 @@ The IMU does **not** replace odometry as the primary motion source. The call seq
 
 ## Summary — What to Remember
 
-| Topic | Core Fact | OKS Implication |
+| Topic | Core Fact | AMR Implication |
 |-------|-----------|-----------------|
 | Gyro measures | Angular velocity ω_z [rad/s], **not** angle | Heading must be integrated; integration accumulates error |
 | MEMS bias | A fixed DC offset in the gyro output | `b = 0.01 rad/s` → 34° drift in 60 s if uncorrected |
 | EMA bias estimator | `b += α(ω_z − b)`, very small α | Converges in ~3000 steps (30 s); wrong at startup on cold robot |
-| Integration formula | `θ += (ω_z − b) × Δt` each step | One line in `imuCallback()`; the bias subtraction is everything |
+| Integration formula | `θ += (ω_z − b) × Δt` each step | One line in `on_imu()`; the bias subtraction is everything |
 | Kalman gain for θ | `K = P_θ/(P_θ + R_θ)`, full gain | Odometry uncertain → K large → trust IMU more |
 | IMU role | **Correction**, not primary source | Encoder predicts θ; IMU corrects between odometry updates |
 | Collision detector | `|Δω_z| > threshold` | Fires on sudden angular jerk; floor bumps are false positive risk |
 | COLLISION state | Terminal; requires manual restart | Aggressive by design: safety > uptime |
-| Theta vs. XY correction | Theta: full KF; XY: clamp | IMU measurement is Gaussian; sensorbar outliers need rejection |
+| Theta vs. XY correction | Theta: full KF; XY: clamp | IMU measurement is Gaussian; line-sensor outliers need rejection |
 | Bias drift impact | Grows linearly with time | Always check `omega_z` during zero-cmd periods in incident bags |
 
 ---

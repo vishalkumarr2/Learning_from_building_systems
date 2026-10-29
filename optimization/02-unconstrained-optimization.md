@@ -74,7 +74,7 @@ $$f(x_{k+1}) - f(x^*) \leq \left(\frac{\kappa - 1}{\kappa + 1}\right)^2 (f(x_k) 
 - **Bad conditioning ($\kappa \gg 1$) → slow convergence** — the zigzag pattern along narrow valleys
 - For $\kappa = 100$: factor $\approx 0.96$ per step → need ~250 steps for 4 digits of accuracy
 
-**OKS relevance:** This is why pure gradient descent is never used in the navigation estimator. $\kappa$ for the sensorbar problem can be $>10^4$.
+**Robotics relevance:** This is why pure gradient descent is never used in the navigation estimator. $\kappa$ for the line sensor problem can be $>10^4$.
 
 ---
 
@@ -146,7 +146,7 @@ For large $n$: don't store the full $n \times n$ matrix $B_k$. Instead, store th
 - Per-step cost: $O(mn)$ — linear in $n$!
 - The default optimizer in many ML frameworks and scipy's `minimize(method='L-BFGS-B')`
 
-**OKS relevance:** When Ceres uses `DENSE_QR` or `DENSE_NORMAL_CHOLESKY` for small problems, it's effectively doing Newton. For large problems, it uses iterative solvers that share ideas with L-BFGS.
+**Robotics relevance:** When Ceres uses `DENSE_QR` or `DENSE_NORMAL_CHOLESKY` for small problems, it's effectively doing Newton. For large problems, it uses iterative solvers that share ideas with L-BFGS.
 
 ---
 
@@ -231,7 +231,7 @@ def conjugate_gradient(A, b, x0, tol=1e-8, max_iter=None):
 - For clustered eigenvalues: converges much faster
 - Used as the **inner solver** in truncated Newton methods and Ceres' `ITERATIVE_SCHUR`
 
-**OKS relevance:** Ceres uses CG-based solvers (`CGNR`, `ITERATIVE_SCHUR`) for large SLAM-like problems where the Hessian is too large to factorize directly.
+**Robotics relevance:** Ceres uses CG-based solvers (`CGNR`, `ITERATIVE_SCHUR`) for large SLAM-like problems where the Hessian is too large to factorize directly.
 
 ---
 

@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-When the navigation estimator linearizes motion models, it works in the Lie algebra $\mathfrak{se}(2)$ — the tangent space where ordinary linear algebra applies. The Lie bracket captures how rotational and translational perturbations interact, which matters when composing uncertain incremental motions from wheel encoders and sensorbar.
+## Robotics Relevance
+When the navigation estimator linearizes motion models, it works in the Lie algebra $\mathfrak{se}(2)$ — the tangent space where ordinary linear algebra applies. The Lie bracket captures how rotational and translational perturbations interact, which matters when composing uncertain incremental motions from wheel encoders and line sensor.
 
 ---
 
@@ -237,7 +237,7 @@ plt.savefig('bch_error.png')
 - **Back:** [Day 80: Exp/Log](day-80-exponential-map.md) — exp maps Lie algebra elements to group elements
 - **Forward:** [Day 82: Adjoint & BCH](day-82-adjoint-bch.md) — adjoint action on the Lie algebra
 - **Forward:** [Day 83: Jacobians](day-83-jacobians.md) — derivatives of the exp map
-- **OKS:** BCH explains why composing small rotations is approximately additive — and when the approximation breaks down
+- **AMR:** BCH explains why composing small rotations is approximately additive — and when the approximation breaks down
 
 ## Self-Check
 - [ ] I can write down the generators of $\mathfrak{so}(3)$ and compute their brackets

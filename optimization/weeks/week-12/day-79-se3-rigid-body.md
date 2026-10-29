@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 ROS `tf2` maintains a tree of SE(3) transforms: `world → odom → base_link → laser_link → camera_optical`. Every sensor reading requires chaining SE(3) elements. When the navigation estimator publishes `odom → base_link`, it is publishing an SE(3) element. Incorrect composition order is a frequent source of transform bugs in multi-sensor fusion.
 
 ---
@@ -195,7 +195,7 @@ Let $N = \{(I, \mathbf{t})\}$ and $g = (R, \mathbf{s}) \in SE(3)$. Then $g (I, \
 - **Back:** [Day 78: SE(2)](day-78-se2-rigid-motions.md) — SE(3) is the 3D generalization
 - **Back:** [Day 73: SO(3)](../week-11/day-73-so3-rodrigues.md) — rotation subgroup of SE(3)
 - **Forward:** [Day 80: Exp/Log Maps](day-80-exponential-map.md) — mapping between $\mathfrak{se}(3)$ and SE(3)
-- **OKS:** `tf2` transform tree is a directed graph of SE(3) elements
+- **AMR:** `tf2` transform tree is a directed graph of SE(3) elements
 
 ## Self-Check
 - [ ] I can construct an SE(3) matrix from rotation + translation and decompose it back

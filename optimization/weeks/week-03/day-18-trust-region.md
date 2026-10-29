@@ -9,7 +9,7 @@
 - **Week:** [Week 3 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Ceres' default strategy is `LEVENBERG_MARQUARDT` — which is a trust region method applied to least squares. When you see `trust_region_strategy_type` in a Ceres solver config, that's this. Trust regions handle indefinite Hessians, saddle points, and far-from-solution starts — all common in SLAM. The `DOGLEG` option in Ceres is exactly what you'll implement today.
 
 ---

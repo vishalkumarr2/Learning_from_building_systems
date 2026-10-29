@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-Gauss-Newton optimization on SE(3) manifolds requires linearizing $\exp(\boldsymbol{\phi} + \delta\boldsymbol{\phi})$ around the current estimate. The left/right Jacobians provide this linearization. Without them, SLAM and pose-graph optimization cannot compute the correct gradient update. Every manifold optimizer in the OKS stack (from pose-graph SLAM to hand-eye calibration) relies on these Jacobians.
+## Robotics Relevance
+Gauss-Newton optimization on SE(3) manifolds requires linearizing $\exp(\boldsymbol{\phi} + \delta\boldsymbol{\phi})$ around the current estimate. The left/right Jacobians provide this linearization. Without them, SLAM and pose-graph optimization cannot compute the correct gradient update. Every manifold optimizer in the AMR stack (from pose-graph SLAM to hand-eye calibration) relies on these Jacobians.
 
 ---
 
@@ -240,7 +240,7 @@ def se3_left_jacobian(xi):
 - **Back:** [Day 80: Exp/Log](day-80-exponential-map.md) — Jacobians are derivatives of the exp map
 - **Back:** [Day 82: Adjoint](day-82-adjoint-bch.md) — $J_l^{-1}$ appears in the BCH formula
 - **Forward:** [Day 84: Review](day-84-week12-review.md) — Jacobians complete the SE(3) toolkit
-- **OKS:** SLAM pose-graph optimization uses $J_r^{-1}$ to compute the Gauss-Newton update step
+- **AMR:** SLAM pose-graph optimization uses $J_r^{-1}$ to compute the Gauss-Newton update step
 
 ## Self-Check
 - [ ] I can state the closed-form left and right Jacobians for SO(3)

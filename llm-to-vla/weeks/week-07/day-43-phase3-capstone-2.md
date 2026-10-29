@@ -73,7 +73,7 @@ class BenchmarkSuite:
         return [
             # --- Knowledge questions ---
             {
-                "question": "What sensor fusion algorithm does the OKS "
+                "question": "What sensor fusion algorithm does the AMR "
                             "navigation estimator use?",
                 "expected": ["EKF", "Extended Kalman", "IMU", "wheel encoder",
                              "LiDAR"],
@@ -82,7 +82,7 @@ class BenchmarkSuite:
             },
             {
                 "question": "What is the maximum linear velocity of the "
-                            "OKS robot?",
+                            "warehouse robot?",
                 "expected": ["1.5", "m/s"],
                 "category": "knowledge",
                 "difficulty": "easy",
@@ -96,7 +96,7 @@ class BenchmarkSuite:
                 "difficulty": "medium",
             },
             {
-                "question": "How does the Guardian node decide when to trigger "
+                "question": "How does the Safety monitor node decide when to trigger "
                             "an emergency stop?",
                 "expected": ["threshold", "watchdog", "temperature", "battery",
                              "obstacle"],
@@ -105,14 +105,14 @@ class BenchmarkSuite:
             },
             # --- Diagnosis questions ---
             {
-                "question": "Robot OKS-15 shows 'NAV_ESTIMATED_STATE_NOT_FINITE' "
+                "question": "Robot AMR-15 shows 'NAV_ESTIMATED_STATE_NOT_FINITE' "
                             "error. What could cause this?",
-                "expected": ["NaN", "IMU", "encoder", "sensorbar", "SPI"],
+                "expected": ["NaN", "IMU", "encoder", "line sensor", "SPI"],
                 "category": "diagnosis",
                 "difficulty": "medium",
             },
             {
-                "question": "A robot keeps stopping with 'sensorbar SPI timeout' "
+                "question": "A robot keeps stopping with 'line sensor SPI timeout' "
                             "in Zone C. Three robots in Zone C are affected, "
                             "but Zone A robots are fine. What's the likely cause?",
                 "expected": ["environmental", "floor", "debris", "zone",
@@ -122,8 +122,8 @@ class BenchmarkSuite:
             },
             # --- Command questions ---
             {
-                "question": "Send robot OKS-42 to the charging station.",
-                "expected": ["navigate", "charging", "OKS-42"],
+                "question": "Send robot AMR-42 to the charging station.",
+                "expected": ["navigate", "charging", "AMR-42"],
                 "category": "command",
                 "difficulty": "easy",
             },
@@ -144,7 +144,7 @@ class BenchmarkSuite:
                 "difficulty": "hard",
             },
             {
-                "question": "If the sensorbar update rate drops from 50Hz "
+                "question": "If the line sensor update rate drops from 50Hz "
                             "to 10Hz, how does this affect the navigation "
                             "estimator's performance?",
                 "expected": ["accuracy", "drift", "latency", "EKF",

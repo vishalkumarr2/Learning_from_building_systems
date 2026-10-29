@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Robots in a warehouse interact repeatedly at shared corridors, intersections, and charging stations. A robot that aggressively cuts off others gains short-term speed but faces retaliation tomorrow. The folk theorem guarantees that cooperative norms (yield at intersections, share corridors) can be sustained as equilibria when robots value future interactions — exactly the regime of a permanent fleet.
 
 ---
@@ -260,7 +260,7 @@ With noise $\epsilon$, expected punishment is triggered even without defection. 
 ## Connections
 - **Prerequisites:** Nash equilibrium (Day 93) — stage game NE; Backward induction (Day 102) — finite case unravels
 - **Forward:** Mechanism design (Day 104) — repeated interaction enables enforcement; Week 15 review (Day 105)
-- **OKS:** Corridor-sharing norms among robots, reputation-based priority at intersections, cooperative fleet behavior
+- **AMR:** Corridor-sharing norms among robots, reputation-based priority at intersections, cooperative fleet behavior
 
 ## Self-Check
 - [ ] I can compute the threshold $\delta$ for cooperation under grim trigger

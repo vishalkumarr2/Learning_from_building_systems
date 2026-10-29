@@ -8,7 +8,7 @@
 ## Why Should I Care? (STM32/Jetson Project Context)
 
 - CAN is the backbone of automotive and industrial robot communication
-- OKS AMR robots may use CAN for motor controllers, battery management (BMS), and sensor modules
+- warehouse AMR robots may use CAN for motor controllers, battery management (BMS), and sensor modules
 - CAN is designed for harsh electrical environments: factory floors, vehicles, long cable runs
 - Unlike I2C/SPI (board-level buses), CAN is a multi-node fieldbus for distances up to 1km
 - Understanding CAN is essential if you interface with motor drivers, BMS, or industrial IO

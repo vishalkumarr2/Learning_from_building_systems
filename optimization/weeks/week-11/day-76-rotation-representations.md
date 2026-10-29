@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-The OKS stack uses multiple representations simultaneously: quaternions in `tf2` messages, Euler angles for human-readable logging, rotation matrices inside the estimator, and axis-angle for incremental IMU updates. Conversion bugs between representations are a recurring source of navigation failures. Understanding the tradeoffs prevents choosing the wrong tool for the job.
+## Robotics Relevance
+The AMR stack uses multiple representations simultaneously: quaternions in `tf2` messages, Euler angles for human-readable logging, rotation matrices inside the estimator, and axis-angle for incremental IMU updates. Conversion bugs between representations are a recurring source of navigation failures. Understanding the tradeoffs prevents choosing the wrong tool for the job.
 
 ---
 
@@ -231,7 +231,7 @@ The Jacobian $J = \partial R / \partial(\phi,\theta,\psi)$ has 9 rows (matrix en
 ## Connections
 - **Prerequisites:** [Day 72](day-72-so2-rotations.md) SO(2), [Day 73](day-73-so3-rodrigues.md) Rodrigues, [Day 74](day-74-quaternions.md) quaternions, [Day 75](day-75-quaternion-operations.md) SLERP
 - **Forward:** [Day 77](day-77-week11-review.md) — unified review and full conversion pipeline
-- **OKS:** Internal navigation uses quaternions; sensorbar heading uses SO(2); user-facing logs show Euler; IMU increments use axis-angle
+- **AMR:** Internal navigation uses quaternions; line sensor heading uses SO(2); user-facing logs show Euler; IMU increments use axis-angle
 
 ## Self-Check
 - [ ] I can explain gimbal lock geometrically and identify it numerically

@@ -9,7 +9,7 @@
 - **Week:** [Week 3 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Ceres' `LINE_SEARCH` solver uses L-BFGS by default (`line_search_direction_type = LBFGS`). For problems where the Jacobian sparsity makes trust region expensive but gradients are cheap (e.g., trajectory smoothing), L-BFGS is the go-to. The key insight: you approximate the Hessian from gradient differences alone — $O(n)$ memory, no Hessian required.
 
 ---

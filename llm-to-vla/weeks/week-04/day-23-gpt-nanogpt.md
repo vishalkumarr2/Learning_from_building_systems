@@ -7,7 +7,7 @@
 - **Previous:** [Day 22: Tokenization Deep Dive](day-22-tokenization.md)
 - **Next:** [Day 24: nanoGPT Ablations Day 2](day-24-nanogpt-ablations.md)
 - **Week:** [Week 4 Overview](README.md)
-- **Phase:** [Phase II: Attention & Transformers](../../study-notes/03-transformers.md)
+- **Phase:** [Phase II: Attention & Transformers](../../study-notes/03-transformer-architecture.md)
 - **Curriculum:** [Full Curriculum](../../CURRICULUM.md)
 
 ---

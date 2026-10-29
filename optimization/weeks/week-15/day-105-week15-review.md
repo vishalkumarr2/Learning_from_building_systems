@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 This week's tools complete the game-theoretic toolkit for fleet robotics: cooperative games model task coalitions (Day 99), Shapley ensures fair credit (Day 100), bargaining resolves bilateral disputes (Day 101), dynamic games handle sequential decisions (Day 102), repeated games enable cooperative norms (Day 103), and mechanism design creates truthful allocation protocols (Day 104). The review integrates these into a unified BEC scheduling model.
 
 ---
@@ -293,7 +293,7 @@ Leader anticipates follower BR. Substitute BR into leader's objective. Leader co
 - **Week 14:** Normal form (92), Nash (93-94), equilibrium selection (95), zero-sum (96-97) — foundations
 - **Week 15:** Cooperative (99), Shapley (100), bargaining (101), dynamic (102), repeated (103), mechanism design (104) — advanced tools
 - **Forward:** Multi-agent optimization, distributed algorithms, fleet-level decision-making
-- **OKS:** Complete toolkit: coalition formation → fair division → negotiation → sequential priority → norm enforcement → truthful allocation
+- **AMR:** Complete toolkit: coalition formation → fair division → negotiation → sequential priority → norm enforcement → truthful allocation
 
 ## Self-Check
 - [ ] I can draw the concept map connecting all Week 15 topics

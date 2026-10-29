@@ -9,8 +9,8 @@
 - **Week:** [Week 2 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-OKS SLAM generates enormous but sparse systems: each pose only connects to its neighbors and observed landmarks. The Schur complement trick eliminates landmarks cheaply, leaving a camera-only system. This is exactly what Ceres `SPARSE_SCHUR` does. Understanding sparsity patterns lets you choose the right solver and variable ordering.
+## Robotics Relevance
+AMR SLAM generates enormous but sparse systems: each pose only connects to its neighbors and observed landmarks. The Schur complement trick eliminates landmarks cheaply, leaving a camera-only system. This is exactly what Ceres `SPARSE_SCHUR` does. Understanding sparsity patterns lets you choose the right solver and variable ordering.
 
 ---
 

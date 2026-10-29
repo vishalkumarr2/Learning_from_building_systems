@@ -108,9 +108,9 @@ Name the valid argument form (or identify the fallacy) used in each.
 
 Symbolize and test for validity:
 
-"If the sensorbar cable is loose, then either the readings are intermittent or the sensorbar is offline. The readings are not intermittent and the sensorbar is not offline. Therefore, the sensorbar cable is not loose."
+"If the line sensor cable is loose, then either the readings are intermittent or the line sensor is offline. The readings are not intermittent and the line sensor is not offline. Therefore, the line sensor cable is not loose."
 
-Let: p = cable is loose, q = readings are intermittent, r = sensorbar is offline.
+Let: p = cable is loose, q = readings are intermittent, r = line sensor is offline.
 
 ---
 

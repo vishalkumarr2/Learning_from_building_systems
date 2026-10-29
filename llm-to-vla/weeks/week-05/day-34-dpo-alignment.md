@@ -228,12 +228,12 @@ def create_preference_dataset() -> Dataset:
                         "things. It uses sensors or something.",
         },
         {
-            "prompt": "What should I do if a robot's sensorbar shows errors?",
-            "chosen": "First, check the sensorbar LED indicators for fault "
+            "prompt": "What should I do if a robot's line sensor shows errors?",
+            "chosen": "First, check the line sensor LED indicators for fault "
                       "codes. Common issues include SPI communication "
                       "failures (check wiring), stiction from debris (clean "
                       "the sensors), or firmware version mismatch. Restart "
-                      "the sensorbar controller and monitor /diagnostics.",
+                      "the line sensor controller and monitor /diagnostics.",
             "rejected": "Just restart the robot. If it doesn't work, restart "
                         "it again. Maybe call someone who knows robots.",
         },

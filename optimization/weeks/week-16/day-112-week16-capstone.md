@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-This capstone IS the OKS fleet problem. Robots compete for aisle capacity while collaboratively completing pick-and-deliver orders. The simulation integrates: auction-based task allocation (Day 110), congestion-aware routing (Day 109), robust replanning when corridors are blocked (Day 111), and decentralized learning dynamics (Days 107-108). The Price of Anarchy directly measures the cost of decentralization in the OKS warehouse.
+## Robotics Relevance
+This capstone IS the AMR fleet problem. Robots compete for aisle capacity while collaboratively completing pick-and-deliver orders. The simulation integrates: auction-based task allocation (Day 110), congestion-aware routing (Day 109), robust replanning when corridors are blocked (Day 111), and decentralized learning dynamics (Days 107-108). The Price of Anarchy directly measures the cost of decentralization in the warehouse.
 
 ---
 
@@ -405,12 +405,12 @@ Fully centralized: optimal welfare but high communication overhead ($O(n^2)$ mes
 
 ## Connections
 - **Back**: Synthesizes all of Week 15-16: [Days 99-111](../week-15/day-99-cooperative-core.md)
-- **Forward**: This capstone project can be extended into a full OKS fleet simulator
-- **OKS**: This IS the core OKS fleet coordination problem — auctions for task assignment, congestion-aware routing through warehouse aisles, robust replanning when obstacles or robot failures occur
+- **Forward**: This capstone project can be extended into a full AMR fleet simulator
+- **AMR**: This IS the core AMR fleet coordination problem — auctions for task assignment, congestion-aware routing through warehouse aisles, robust replanning when obstacles or robot failures occur
 
 ## Self-Check
 - [ ] I can implement a multi-robot delivery game combining auctions, congestion, and robustness
 - [ ] I can compute and interpret the Price of Anarchy for a warehouse scenario
 - [ ] I understand when decentralized coordination approximates centralized optimality
 - [ ] I can analyze the welfare impact of edge failures and design robust rerouting
-- [ ] I can identify the game-theoretic structure in real OKS fleet operations
+- [ ] I can identify the game-theoretic structure in real AMR fleet operations

@@ -9,7 +9,7 @@
 - **Week:** [Week 1 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 When Ceres or g2o reports "convergence," it means the optimality conditions are satisfied below a threshold. Understanding these conditions helps you diagnose: did the solver find a true minimum, or did it stop at a saddle point?
 
 ---

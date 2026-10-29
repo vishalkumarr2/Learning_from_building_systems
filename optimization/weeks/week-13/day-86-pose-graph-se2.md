@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-OKS AMRs build a map of the warehouse floor by accumulating odometry and detecting loop closures (revisiting known locations). Pose-graph optimization on SE(2) corrects the accumulated drift, producing a globally consistent map. This is the foundation of 2D SLAM used in the OKS mapping pipeline.
+## Robotics Relevance
+AMRs build a map of the warehouse floor by accumulating odometry and detecting loop closures (revisiting known locations). Pose-graph optimization on SE(2) corrects the accumulated drift, producing a globally consistent map. This is the foundation of 2D SLAM used in the AMR mapping pipeline.
 
 ---
 
@@ -242,7 +242,7 @@ Incremental: after adding pose $x_k$ with edge $(k-1, k)$, initialize $x_k = x_{
 ## Connections
 - **Prerequisites**: Day 85 (Manifold GN), Day 78 (SE(2) basics)
 - **Forward**: Day 87 extends this to SE(3) with robust kernels
-- **OKS**: 2D pose-graph optimization is the backend of warehouse floor mapping
+- **AMR**: 2D pose-graph optimization is the backend of warehouse floor mapping
 
 ## Self-Check
 - [ ] I can formulate the pose-graph SLAM cost function on SE(2)

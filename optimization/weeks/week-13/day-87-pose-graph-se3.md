@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-While OKS AMRs primarily operate in 2D, 3D pose-graph SLAM becomes critical for multi-floor warehouses with ramps/elevators, or when fusing lidar point clouds that capture 3D structure. Robust kernels protect against spurious loop closures — a real problem when perceptual aliasing causes false place matches in repetitive warehouse aisles.
+## Robotics Relevance
+While AMRs primarily operate in 2D, 3D pose-graph SLAM becomes critical for multi-floor warehouses with ramps/elevators, or when fusing lidar point clouds that capture 3D structure. Robust kernels protect against spurious loop closures — a real problem when perceptual aliasing causes false place matches in repetitive warehouse aisles.
 
 ---
 
@@ -270,7 +270,7 @@ Marginal covariance of relative transform: $\Sigma_{ij}^{\text{rel}} = F_{ij} \S
 ## Connections
 - **Prerequisites**: Day 86 (SE(2) pose graph), Day 79 (SE(3) basics), Day 80 (Exp/Log)
 - **Forward**: Day 88 connects to production solvers (Ceres, GTSAM) that implement all of this
-- **OKS**: 3D SLAM backend for lidar-based warehouse mapping, robust to perceptual aliasing
+- **AMR**: 3D SLAM backend for lidar-based warehouse mapping, robust to perceptual aliasing
 
 ## Self-Check
 - [ ] I can write the SE(3) edge error from memory

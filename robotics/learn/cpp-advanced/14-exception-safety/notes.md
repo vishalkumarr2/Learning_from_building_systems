@@ -342,9 +342,9 @@ void thread_work(std::promise<int>& p) {
 
 ---
 
-## Real-World: OKS Robot Firmware and `-fno-exceptions`
+## Real-World: AMR Robot Firmware and `-fno-exceptions`
 
-The OKS robot firmware (running on Zephyr RTOS) compiles with `-fno-exceptions`
+The warehouse robot firmware (running on Zephyr RTOS) compiles with `-fno-exceptions`
 because:
 
 1. **Deterministic timing**: Exception handling adds unpredictable latency.
@@ -362,7 +362,7 @@ because:
 - Error callback / handler registration
 - `assert()` / `__builtin_trap()` for unrecoverable errors
 - `std::expected<T, E>` (C++23, or backported)
-- Guardian watchdog: if a subsystem fails, the watchdog reboots it
+- Safety-Monitor watchdog: if a subsystem fails, the watchdog reboots it
 
 This is a valid engineering tradeoff — not a rejection of exception safety
 principles. The same guarantee levels apply, just enforced through different

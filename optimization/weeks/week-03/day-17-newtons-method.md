@@ -9,7 +9,7 @@
 - **Week:** [Week 3 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Ceres uses Gauss-Newton (an approximation of Newton) as its default inner loop. Newton's method on the full problem $\min f(x)$ is the theoretical ideal — quadratic convergence means ~5 iterations vs ~10,000 for GD. The catch: you need the Hessian ($O(n^2)$ storage, $O(n^3)$ solve). For SLAM with 100,000 variables, that's impossible — which is why we'll learn sparse and approximate alternatives.
 
 ---

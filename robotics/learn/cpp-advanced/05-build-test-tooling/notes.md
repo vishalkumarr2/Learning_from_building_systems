@@ -40,7 +40,7 @@ same target work both when building in-tree and after `make install`.
 
 ### Why This Matters for Embedded/Safety-Critical
 
-In an OKS-style project with `rt_core`, `navigation`, `serial_datalink`, etc., each library
+In a robot-style project with `rt_core`, `navigation`, `serial_datalink`, etc., each library
 declares its own requirements. When you `target_link_libraries(navigation PUBLIC rt_core)`,
 CMake automatically propagates rt_core's PUBLIC include paths and compile flags to navigation
 and anything that depends on navigation. No manual tracking.
@@ -338,7 +338,7 @@ The exercises in this week build a complete production setup:
 2. **ex02** — GoogleTest suite for an SPSC queue (concurrent, parameterized, death tests)
 3. **ex03** — Fuzzer harness for a binary message parser
 4. **ex04** — A profiling target with three intentional performance bugs
-5. **ex05** — A full CI-ready project with a `run_all_checks.sh` script
+5. **[ex05](exercises/ex05_ci_project/README.md)** — A full CI-ready project with a `run_all_checks.sh` script
 
 The puzzles demonstrate why individual tools are insufficient:
 - **puzzle01**: 100% line coverage hides a real bug (MC/DC gap)

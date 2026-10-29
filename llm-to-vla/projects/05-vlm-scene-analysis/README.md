@@ -140,4 +140,4 @@ projects/05-vlm-scene-analysis/
 
 ---
 
-*Previous: [04-efficient-finetuning/README.md](../04-efficient-finetuning/README.md) · Next: [06-vla-integration/README.md](../06-vla-integration/README.md)*
+*Previous: [04-efficient-finetuning/README.md](../04-robot-perception/README.md) · Next: [06-vla-integration/README.md](../06-diffusion-policy/README.md)*

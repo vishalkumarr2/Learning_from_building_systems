@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-OKS AMRs face persistent uncertainty: obstacle positions shift, sensor readings drift, motor responses vary with battery level, and network latency fluctuates. Robust optimization frames the controller as a player against "nature" who picks the worst-case disturbance. This yields path plans that work even under worst-case obstacle motion and motor controllers that maintain stability despite parameter uncertainty — exactly the guarantees needed for 24/7 warehouse autonomy.
+## Robotics Relevance
+AMRs face persistent uncertainty: obstacle positions shift, sensor readings drift, motor responses vary with battery level, and network latency fluctuates. Robust optimization frames the controller as a player against "nature" who picks the worst-case disturbance. This yields path plans that work even under worst-case obstacle motion and motor controllers that maintain stability despite parameter uncertainty — exactly the guarantees needed for 24/7 warehouse autonomy.
 
 ---
 
@@ -277,7 +277,7 @@ Robust: $\min_u \max_{d \in \mathcal{U}} \text{cost}(u, d)$ — prepares for wor
 - **Back**: [Day 110: Adversarial ML](day-110-multi-robot-adversarial.md) — adversarial training is minimax
 - **Back**: [Day 96: Zero-Sum & Minimax](../week-14/day-96-zero-sum-minimax.md) — zero-sum foundations
 - **Forward**: [Day 112: Capstone](day-112-week16-capstone.md) — robust rerouting under edge failures
-- **OKS**: Robust path planning, H∞ motor control, worst-case sensor uncertainty
+- **AMR**: Robust path planning, H∞ motor control, worst-case sensor uncertainty
 
 ## Self-Check
 - [ ] I can formulate a robust optimization problem as a minimax game

@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-The OKS AMR body frame has a full 3D orientation relative to the world frame. The IMU measures angular velocity as a 3-vector $\omega \in \mathbb{R}^3$. Converting this to a rotation matrix requires the exponential map on SO(3) — which is precisely the Rodrigues formula. The navigation estimator uses this every cycle.
+## Robotics Relevance
+The AMR body frame has a full 3D orientation relative to the world frame. The IMU measures angular velocity as a 3-vector $\omega \in \mathbb{R}^3$. Converting this to a rotation matrix requires the exponential map on SO(3) — which is precisely the Rodrigues formula. The navigation estimator uses this every cycle.
 
 ---
 
@@ -199,7 +199,7 @@ print(f"Distance: {d:.4f}, expected: {np.pi/2:.4f}")
 ## Connections
 - **Prerequisites:** [Day 71](day-71-group-axioms.md) — SO(3) is a matrix group; [Day 72](day-72-so2-rotations.md) — SO(2) is the 2D case
 - **Forward:** [Day 74](day-74-quaternions.md) gives an alternative parameterization; [Day 76](day-76-rotation-representations.md) compares all representations
-- **OKS:** Rodrigues is the core formula for converting IMU angular velocity to rotation matrix updates
+- **AMR:** Rodrigues is the core formula for converting IMU angular velocity to rotation matrix updates
 
 ## Self-Check
 - [ ] I can write Rodrigues' formula and apply it to a given axis-angle

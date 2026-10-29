@@ -5,21 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Day 18: KV Cache — Why Autoregressive Inference Is Fast - LLM to VLA - Learning From Building Systems</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- KaTeX for LaTeX math -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
-        onload="renderMathInElement(document.body, {
-            delimiters: [
-                {left: '$$', right: '$$', display: true},
-                {left: '$', right: '$', display: false}
-            ],
-            throwOnError: false
-        });"></script>
+        onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}], throwOnError: false});"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
-        /* Markdown content styling */
         .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
         .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
         .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
@@ -28,89 +20,80 @@
         .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
         .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
         .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
-        .md-content code {
-            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
-            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
-        }
-        .md-content pre {
-            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
-            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
-        }
+        .md-content code { background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d; }
+        .md-content pre { background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6; }
         .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
-        .md-content blockquote {
-            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
-            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
-        }
+        .md-content blockquote { border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem; margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151; }
         .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
         .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
         .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
         .md-content tr:hover { background-color: #f9fafb; }
         .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
         .md-content strong { font-weight: 600; }
-        .md-content a { color: #7c3aed; text-decoration: underline; }
-        .md-content a:hover { color: #6d28d9; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
         .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
-        /* Details/summary */
         .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
         .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
         .md-content summary:hover { background: #f3f4f6; }
         .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
-        .md-content details > *:not(summary) { padding: 0 1rem; }
-        /* Phase badges */
-        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-        .phase-1 { background: #dbeafe; color: #1e40af; }
-        .phase-2 { background: #d1fae5; color: #065f46; }
-        .phase-3 { background: #fef3c7; color: #92400e; }
-        .phase-4 { background: #fce7f3; color: #9d174d; }
-        .phase-5 { background: #ede9fe; color: #5b21b6; }
-        .phase-6 { background: #ccfbf1; color: #115e59; }
-        .phase-7 { background: #fef9c3; color: #713f12; }
-        /* Progress bar */
-        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
-        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+        .md-content details > *:not(summary) { padding-left: 1rem; padding-right: 1rem; }
+        .md-content .mermaid { margin: 1.5rem 0; overflow-x: auto; }
+        .md-content .math-display { margin: 1.5rem 0; overflow-x: auto; }
     </style>
+    <!-- lfbs:begin -->
+    <meta name="lfbs-root" content="../../../">
+    <meta name="lfbs-path" content="llm-to-vla/weeks/week-03/day-18-kv-cache.html">
+    <meta name="lfbs-track" content="llm-to-vla">
+    <meta name="lfbs-lesson" content="1">
+    <link rel="stylesheet" href="../../../assets/learn.css">
+    <script defer src="../../../assets/lessons.js"></script>
+    <script defer src="../../../assets/learn.js"></script>
+    <!-- lfbs:end -->
 </head>
 <body class="bg-gray-100 text-gray-800">
     <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
-        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 3: Variants & GPT</a>
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Back to Week 3: Variants + GPT</a>
 
-        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+        <div class="bg-white rounded-xl shadow-md p-5 sm:p-8 md:p-10">
             <div class="md-content">
-<h1 id="day-18-kv-cache-why-autoregressive-inference-is-fast">Day 18: KV Cache — Why Autoregressive Inference Is Fast</h1>
+<h1 id="day-18-kv-cache-why-autoregressive-inference-is-fast" data-plain="Day 18: KV Cache — Why Autoregressive Inference Is Fast">Day 18: KV Cache — Why Autoregressive Inference Is Fast</h1>
 <blockquote>
 <p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 3 | 2.5 hours</strong>
-<em>"The best optimization is the one that eliminates work you never needed to do." — Every systems engineer ever</em></p>
+<em>&ldquo;The best optimization is the one that eliminates work you never needed to do.&rdquo; — Every systems engineer ever</em></p>
 </blockquote>
-<h2 id="navigation">Navigation</h2>
+<h2 id="navigation" data-plain="Navigation">Navigation</h2>
 <ul>
 <li><strong>Previous:</strong> <a href="day-17-efficient-attention.html">Day 17: Efficient Attention</a></li>
 <li><strong>Next:</strong> <a href="day-19-normalization-activations.html">Day 19: Normalization + Activations</a></li>
-<li><strong>Week:</strong> <a href="README.html">Week 3 Overview</a></li>
+<li><strong>Week:</strong> <a href="index.html">Week 3 Overview</a></li>
 <li><strong>Phase:</strong> <a href="../../study-notes/02-attention-mechanism.html">Phase II: Attention &amp; Transformers</a></li>
-<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+<li><strong>Curriculum:</strong> <a href="../../curriculum.html">Full Curriculum</a></li>
 </ul>
 <hr />
-<h2 id="theory-45-min">Theory (45 min)</h2>
-<h3 id="181-the-autoregressive-inference-problem">18.1 The Autoregressive Inference Problem</h3>
+<h2 id="theory-45-min" data-plain="Theory (45 min)">Theory (45 min)</h2>
+<h3 id="181-the-autoregressive-inference-problem" data-plain="18.1 The Autoregressive Inference Problem">18.1 The Autoregressive Inference Problem</h3>
 <p>During generation, a transformer produces one token at a time:</p>
-<pre><code>Step 1: &quot;The&quot;           → predict &quot;cat&quot;
+<div class="highlight"><pre><span></span><code>Step 1: &quot;The&quot;           → predict &quot;cat&quot;
 Step 2: &quot;The cat&quot;       → predict &quot;sat&quot;
 Step 3: &quot;The cat sat&quot;   → predict &quot;on&quot;
 ...
 Step n: &quot;The cat sat on the...&quot; → predict next
-</code></pre>
+</code></pre></div>
+
 <p><strong>Naive approach:</strong> At step $n$, run the FULL transformer on all $n$ tokens.
 - Step 1: process 1 token
 - Step 2: process 2 tokens
 - Step 3: process 3 tokens
 - Step $n$: process $n$ tokens</p>
 <p><strong>Total work:</strong> $1 + 2 + 3 + \ldots + n = \frac{n(n+1)}{2} = O(n^2)$ forward passes through the model.</p>
-<p>This is catastrophically wasteful — we're recomputing the same representations over and over.</p>
-<h3 id="182-the-kv-cache-insight">18.2 The KV Cache Insight</h3>
+<p>This is catastrophically wasteful — we&rsquo;re recomputing the same representations over and over.</p>
+<h3 id="182-the-kv-cache-insight" data-plain="18.2 The KV Cache Insight">18.2 The KV Cache Insight</h3>
 <p>Look at the attention computation for the <strong>new</strong> token at position $t$:</p>
-<p>$$\text{Attention}(q_t, K_{1:t}, V_{1:t}) = \text{softmax}\!\left(\frac{q_t K_{1:t}^T}{\sqrt{d_k}}\right) V_{1:t}$$</p>
+<div class="math-display">$$\text{Attention}(q_t, K_{1:t}, V_{1:t}) = \text{softmax}\!\left(\frac{q_t K_{1:t}^T}{\sqrt{d_k}}\right) V_{1:t}$$</div>
+
 <p><strong>Key observation:</strong> Only $q_t$ changes. The keys $K_{1:t-1}$ and values $V_{1:t-1}$ for all previous tokens are the same as the last step!</p>
-<pre><code>Without KV Cache (step 4):
+<div class="highlight"><pre><span></span><code>Without KV Cache (step 4):
   ┌────────────────────┐
   │ Recompute K,V for  │ ← WASTED: identical to step 3
   │ tokens 1, 2, 3     │
@@ -126,11 +109,13 @@ With KV Cache (step 4):
   │ token 4            │
   │ Append to cache    │
   └────────────────────┘
-</code></pre>
+</code></pre></div>
+
 <p><strong>Speedup:</strong> Each generation step processes 1 token instead of $t$ tokens → total work drops from $O(n^2)$ to $O(n)$.</p>
-<h3 id="183-kv-cache-memory-calculation">18.3 KV Cache Memory Calculation</h3>
+<h3 id="183-kv-cache-memory-calculation" data-plain="18.3 KV Cache Memory Calculation">18.3 KV Cache Memory Calculation</h3>
 <p>The cache stores K and V tensors for all previous tokens across all layers and heads.</p>
-<p>$$\text{KV Cache Size} = 2 \times n_{\text{layers}} \times n_{\text{heads}} \times d_{\text{head}} \times n_{\text{seq}} \times \text{bytes}$$</p>
+<div class="math-display">$$\text{KV Cache Size} = 2 \times n_{\text{layers}} \times n_{\text{heads}} \times d_{\text{head}} \times n_{\text{seq}} \times \text{bytes}$$</div>
+
 <p>The factor of 2 is for K <strong>and</strong> V (both cached).</p>
 <p><strong>Example — LLaMA-7B:</strong></p>
 <table>
@@ -163,21 +148,23 @@ With KV Cache (step 4):
 </tr>
 </tbody>
 </table>
-<p>$$\text{Cache} = 2 \times 32 \times 32 \times 128 \times 4096 \times 2 = 2,147,483,648 \text{ bytes} = \textbf{2 GB}$$</p>
+<div class="math-display">$$\text{Cache} = 2 \times 32 \times 32 \times 128 \times 4096 \times 2 = 2,147,483,648 \text{ bytes} = \textbf{2 GB}$$</div>
+
 <p>For <strong>LLaMA-70B</strong> at 4096 context: ~10 GB of KV cache alone!</p>
 <p><strong>This is why batch size matters:</strong> Each request in a batch needs its OWN KV cache. Serving 32 concurrent users with LLaMA-7B needs 32 × 2 GB = 64 GB just for caches.</p>
-<h3 id="184-paged-attention-vllm">18.4 Paged Attention (vLLM)</h3>
+<h3 id="184-paged-attention-vllm" data-plain="18.4 Paged Attention (vLLM)">18.4 Paged Attention (vLLM)</h3>
 <p>The KV cache problem: requests have <strong>variable</strong> lengths. Pre-allocating max-length cache wastes massive memory.</p>
-<pre><code>Traditional: Pre-allocate max_seq_len for every request
+<div class="highlight"><pre><span></span><code>Traditional: Pre-allocate max_seq_len for every request
 ┌──────────────────────────────────────────────────┐
 │ Request 1: [used: 256 tokens][wasted: 3840 empty]│
 │ Request 2: [used: 2048 tokens][wasted: 2048]     │
 │ Request 3: [used: 100 tokens][wasted: 3996 empty]│
 └──────────────────────────────────────────────────┘
 Utilization: (256+2048+100) / (4096×3) = 19.6% ← terrible!
-</code></pre>
-<p><strong>vLLM's PagedAttention</strong> borrows from OS virtual memory:</p>
-<pre><code>Physical &quot;pages&quot; of KV cache (e.g., 16 tokens each):
+</code></pre></div>
+
+<p><strong>vLLM&rsquo;s PagedAttention</strong> borrows from OS virtual memory:</p>
+<div class="highlight"><pre><span></span><code>Physical &quot;pages&quot; of KV cache (e.g., 16 tokens each):
 ┌────┬────┬────┬────┬────┬────┬────┬────┐
 │ P0 │ P1 │ P2 │ P3 │ P4 │ P5 │ P6 │ P7 │  Physical pages
 └────┴────┴────┴────┴────┴────┴────┴────┘
@@ -188,9 +175,10 @@ Page Table (per request):
 
 New tokens? Allocate a new page on demand.
 Request done? Free its pages immediately.
-</code></pre>
+</code></pre></div>
+
 <p><strong>Result:</strong> Near-optimal memory utilization, 2–4× more requests served concurrently.</p>
-<h3 id="185-multi-query-grouped-query-attention">18.5 Multi-Query &amp; Grouped-Query Attention</h3>
+<h3 id="185-multi-query-grouped-query-attention" data-plain="18.5 Multi-Query &amp; Grouped-Query Attention">18.5 Multi-Query &amp; Grouped-Query Attention</h3>
 <p>Reduce KV cache size by sharing K,V across heads:</p>
 <table>
 <thead>
@@ -224,142 +212,145 @@ Request done? Free its pages immediately.
 </table>
 <p>LLaMA-2 70B uses GQA with 8 KV heads (vs 64 Q heads) → 8× smaller KV cache.</p>
 <hr />
-<h2 id="implementation-60-min">Implementation (60 min)</h2>
-<h3 id="186-kv-cache-from-scratch">18.6 KV Cache from Scratch</h3>
-<pre><code class="language-python">import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import time
+<h2 id="implementation-60-min" data-plain="Implementation (60 min)">Implementation (60 min)</h2>
+<h3 id="186-kv-cache-from-scratch" data-plain="18.6 KV Cache from Scratch">18.6 KV Cache from Scratch</h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">nn</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn.functional</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">F</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
 
 
-class CausalSelfAttention(nn.Module):
-    &quot;&quot;&quot;Self-attention with optional KV cache for fast inference.&quot;&quot;&quot;
+<span class="k">class</span><span class="w"> </span><span class="nc">CausalSelfAttention</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Self-attention with optional KV cache for fast inference.&quot;&quot;&quot;</span>
 
-    def __init__(self, d_model=512, n_heads=8, max_seq_len=1024):
-        super().__init__()
-        self.n_heads = n_heads
-        self.d_head = d_model // n_heads
-        self.scale = self.d_head ** -0.5
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_model</span><span class="o">=</span><span class="mi">512</span><span class="p">,</span> <span class="n">n_heads</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">max_seq_len</span><span class="o">=</span><span class="mi">1024</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span> <span class="o">=</span> <span class="n">n_heads</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">d_head</span> <span class="o">=</span> <span class="n">d_model</span> <span class="o">//</span> <span class="n">n_heads</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">scale</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_head</span> <span class="o">**</span> <span class="o">-</span><span class="mf">0.5</span>
 
-        self.qkv_proj = nn.Linear(d_model, 3 * d_model, bias=False)
-        self.out_proj = nn.Linear(d_model, d_model, bias=False)
+        <span class="bp">self</span><span class="o">.</span><span class="n">qkv_proj</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="mi">3</span> <span class="o">*</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">out_proj</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 
-    def forward(self, x, kv_cache=None, use_cache=False):
-        &quot;&quot;&quot;
-        Args:
-            x: (batch, seq_len, d_model) — full sequence or single new token
-            kv_cache: tuple of (cached_K, cached_V) or None
-            use_cache: whether to return updated cache
-        Returns:
-            output: (batch, seq_len, d_model)
-            new_cache: updated (K, V) if use_cache=True
-        &quot;&quot;&quot;
-        B, T, C = x.shape
-        qkv = self.qkv_proj(x)
-        q, k, v = qkv.chunk(3, dim=-1)
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">kv_cache</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_cache</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Args:</span>
+<span class="sd">            x: (batch, seq_len, d_model) — full sequence or single new token</span>
+<span class="sd">            kv_cache: tuple of (cached_K, cached_V) or None</span>
+<span class="sd">            use_cache: whether to return updated cache</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            output: (batch, seq_len, d_model)</span>
+<span class="sd">            new_cache: updated (K, V) if use_cache=True</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">B</span><span class="p">,</span> <span class="n">T</span><span class="p">,</span> <span class="n">C</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">shape</span>
+        <span class="n">qkv</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">qkv_proj</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">q</span><span class="p">,</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="o">=</span> <span class="n">qkv</span><span class="o">.</span><span class="n">chunk</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
 
-        # Reshape to (B, n_heads, T, d_head)
-        q = q.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
-        k = k.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
-        v = v.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        <span class="c1"># Reshape to (B, n_heads, T, d_head)</span>
+        <span class="n">q</span> <span class="o">=</span> <span class="n">q</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="n">T</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_head</span><span class="p">)</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">k</span> <span class="o">=</span> <span class="n">k</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="n">T</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_head</span><span class="p">)</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">v</span> <span class="o">=</span> <span class="n">v</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="n">T</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_head</span><span class="p">)</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
 
-        # Append to KV cache
-        if kv_cache is not None:
-            cached_k, cached_v = kv_cache
-            k = torch.cat([cached_k, k], dim=2)  # (B, H, T_total, d)
-            v = torch.cat([cached_v, v], dim=2)
+        <span class="c1"># Append to KV cache</span>
+        <span class="k">if</span> <span class="n">kv_cache</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">cached_k</span><span class="p">,</span> <span class="n">cached_v</span> <span class="o">=</span> <span class="n">kv_cache</span>
+            <span class="n">k</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">cached_k</span><span class="p">,</span> <span class="n">k</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>  <span class="c1"># (B, H, T_total, d)</span>
+            <span class="n">v</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">cached_v</span><span class="p">,</span> <span class="n">v</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
 
-        # Standard causal attention
-        scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+        <span class="c1"># Standard causal attention</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">k</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span>
 
-        # Causal mask: only attend to past + current
-        T_total = k.size(2)
-        T_query = q.size(2)
-        causal_mask = torch.triu(
-            torch.ones(T_query, T_total, device=x.device, dtype=torch.bool),
-            diagonal=T_total - T_query + 1
-        )
-        scores.masked_fill_(causal_mask, float('-inf'))
+        <span class="c1"># Causal mask: only attend to past + current</span>
+        <span class="n">T_total</span> <span class="o">=</span> <span class="n">k</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">T_query</span> <span class="o">=</span> <span class="n">q</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">causal_mask</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">triu</span><span class="p">(</span>
+            <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">T_query</span><span class="p">,</span> <span class="n">T_total</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">x</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">bool</span><span class="p">),</span>
+            <span class="n">diagonal</span><span class="o">=</span><span class="n">T_total</span> <span class="o">-</span> <span class="n">T_query</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="p">)</span>
+        <span class="n">scores</span><span class="o">.</span><span class="n">masked_fill_</span><span class="p">(</span><span class="n">causal_mask</span><span class="p">,</span> <span class="nb">float</span><span class="p">(</span><span class="s1">&#39;-inf&#39;</span><span class="p">))</span>
 
-        weights = F.softmax(scores, dim=-1)
-        out = torch.matmul(weights, v)
+        <span class="n">weights</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">weights</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
 
-        # Reshape back
-        out = out.transpose(1, 2).contiguous().view(B, T_query, C)
-        out = self.out_proj(out)
+        <span class="c1"># Reshape back</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">contiguous</span><span class="p">()</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="n">T_query</span><span class="p">,</span> <span class="n">C</span><span class="p">)</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">out_proj</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
 
-        if use_cache:
-            return out, (k, v)
-        return out, None
-
-
-def generate_with_cache(attn, prompt_emb, n_tokens=100):
-    &quot;&quot;&quot;Autoregressive generation WITH KV cache.&quot;&quot;&quot;
-    B, T, C = prompt_emb.shape
-    cache = None
-    outputs = []
-
-    # Prefill: process entire prompt
-    out, cache = attn(prompt_emb, kv_cache=None, use_cache=True)
-    outputs.append(out[:, -1:, :])  # last token's output
-
-    # Decode: one token at a time
-    x = out[:, -1:, :]  # (B, 1, C) — just the new token
-    for _ in range(n_tokens - 1):
-        out, cache = attn(x, kv_cache=cache, use_cache=True)
-        outputs.append(out)
-        x = out  # feed output as next input (simplified)
-
-    return torch.cat(outputs, dim=1)
+        <span class="k">if</span> <span class="n">use_cache</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">out</span><span class="p">,</span> <span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">out</span><span class="p">,</span> <span class="kc">None</span>
 
 
-def generate_without_cache(attn, prompt_emb, n_tokens=100):
-    &quot;&quot;&quot;Autoregressive generation WITHOUT KV cache (naive).&quot;&quot;&quot;
-    B, T, C = prompt_emb.shape
-    all_tokens = prompt_emb.clone()
-    outputs = []
+<span class="k">def</span><span class="w"> </span><span class="nf">generate_with_cache</span><span class="p">(</span><span class="n">attn</span><span class="p">,</span> <span class="n">prompt_emb</span><span class="p">,</span> <span class="n">n_tokens</span><span class="o">=</span><span class="mi">100</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Autoregressive generation WITH KV cache.&quot;&quot;&quot;</span>
+    <span class="n">B</span><span class="p">,</span> <span class="n">T</span><span class="p">,</span> <span class="n">C</span> <span class="o">=</span> <span class="n">prompt_emb</span><span class="o">.</span><span class="n">shape</span>
+    <span class="n">cache</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">outputs</span> <span class="o">=</span> <span class="p">[]</span>
 
-    for i in range(n_tokens):
-        out, _ = attn(all_tokens, kv_cache=None, use_cache=False)
-        next_tok = out[:, -1:, :]
-        outputs.append(next_tok)
-        all_tokens = torch.cat([all_tokens, next_tok], dim=1)
+    <span class="c1"># Prefill: process entire prompt</span>
+    <span class="n">out</span><span class="p">,</span> <span class="n">cache</span> <span class="o">=</span> <span class="n">attn</span><span class="p">(</span><span class="n">prompt_emb</span><span class="p">,</span> <span class="n">kv_cache</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">outputs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">out</span><span class="p">[:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">:,</span> <span class="p">:])</span>  <span class="c1"># last token&#39;s output</span>
 
-    return torch.cat(outputs, dim=1)
-</code></pre>
-<h3 id="187-benchmark-cache-vs-no-cache">18.7 Benchmark: Cache vs No Cache</h3>
-<pre><code class="language-python">attn = CausalSelfAttention(d_model=512, n_heads=8)
-attn.eval()
+    <span class="c1"># Decode: one token at a time</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">out</span><span class="p">[:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">:,</span> <span class="p">:]</span>  <span class="c1"># (B, 1, C) — just the new token</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_tokens</span> <span class="o">-</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">out</span><span class="p">,</span> <span class="n">cache</span> <span class="o">=</span> <span class="n">attn</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">kv_cache</span><span class="o">=</span><span class="n">cache</span><span class="p">,</span> <span class="n">use_cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">outputs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">out</span>  <span class="c1"># feed output as next input (simplified)</span>
 
-prompt = torch.randn(1, 32, 512)  # 32-token prompt
-n_gen = [10, 50, 100, 200]
+    <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
 
-for n in n_gen:
-    # With cache
-    start = time.perf_counter()
-    with torch.no_grad():
-        _ = generate_with_cache(attn, prompt, n_tokens=n)
-    t_cache = time.perf_counter() - start
 
-    # Without cache
-    start = time.perf_counter()
-    with torch.no_grad():
-        _ = generate_without_cache(attn, prompt, n_tokens=n)
-    t_nocache = time.perf_counter() - start
+<span class="k">def</span><span class="w"> </span><span class="nf">generate_without_cache</span><span class="p">(</span><span class="n">attn</span><span class="p">,</span> <span class="n">prompt_emb</span><span class="p">,</span> <span class="n">n_tokens</span><span class="o">=</span><span class="mi">100</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Autoregressive generation WITHOUT KV cache (naive).&quot;&quot;&quot;</span>
+    <span class="n">B</span><span class="p">,</span> <span class="n">T</span><span class="p">,</span> <span class="n">C</span> <span class="o">=</span> <span class="n">prompt_emb</span><span class="o">.</span><span class="n">shape</span>
+    <span class="n">all_tokens</span> <span class="o">=</span> <span class="n">prompt_emb</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+    <span class="n">outputs</span> <span class="o">=</span> <span class="p">[]</span>
 
-    speedup = t_nocache / t_cache
-    print(f&quot;n_tokens={n:3d} | Cache: {t_cache*1000:7.1f}ms | &quot;
-          f&quot;No cache: {t_nocache*1000:7.1f}ms | Speedup: {speedup:.1f}x&quot;)
-</code></pre>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_tokens</span><span class="p">):</span>
+        <span class="n">out</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">attn</span><span class="p">(</span><span class="n">all_tokens</span><span class="p">,</span> <span class="n">kv_cache</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_cache</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">next_tok</span> <span class="o">=</span> <span class="n">out</span><span class="p">[:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">:,</span> <span class="p">:]</span>
+        <span class="n">outputs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">next_tok</span><span class="p">)</span>
+        <span class="n">all_tokens</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">all_tokens</span><span class="p">,</span> <span class="n">next_tok</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="187-benchmark-cache-vs-no-cache" data-plain="18.7 Benchmark: Cache vs No Cache">18.7 Benchmark: Cache vs No Cache</h3>
+<div class="highlight"><pre><span></span><code><span class="n">attn</span> <span class="o">=</span> <span class="n">CausalSelfAttention</span><span class="p">(</span><span class="n">d_model</span><span class="o">=</span><span class="mi">512</span><span class="p">,</span> <span class="n">n_heads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>
+<span class="n">attn</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>
+
+<span class="n">prompt</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="mi">512</span><span class="p">)</span>  <span class="c1"># 32-token prompt</span>
+<span class="n">n_gen</span> <span class="o">=</span> <span class="p">[</span><span class="mi">10</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">200</span><span class="p">]</span>
+
+<span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">n_gen</span><span class="p">:</span>
+    <span class="c1"># With cache</span>
+    <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+    <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+        <span class="n">_</span> <span class="o">=</span> <span class="n">generate_with_cache</span><span class="p">(</span><span class="n">attn</span><span class="p">,</span> <span class="n">prompt</span><span class="p">,</span> <span class="n">n_tokens</span><span class="o">=</span><span class="n">n</span><span class="p">)</span>
+    <span class="n">t_cache</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span> <span class="o">-</span> <span class="n">start</span>
+
+    <span class="c1"># Without cache</span>
+    <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+    <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+        <span class="n">_</span> <span class="o">=</span> <span class="n">generate_without_cache</span><span class="p">(</span><span class="n">attn</span><span class="p">,</span> <span class="n">prompt</span><span class="p">,</span> <span class="n">n_tokens</span><span class="o">=</span><span class="n">n</span><span class="p">)</span>
+    <span class="n">t_nocache</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span> <span class="o">-</span> <span class="n">start</span>
+
+    <span class="n">speedup</span> <span class="o">=</span> <span class="n">t_nocache</span> <span class="o">/</span> <span class="n">t_cache</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;n_tokens=</span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">3d</span><span class="si">}</span><span class="s2"> | Cache: </span><span class="si">{</span><span class="n">t_cache</span><span class="o">*</span><span class="mi">1000</span><span class="si">:</span><span class="s2">7.1f</span><span class="si">}</span><span class="s2">ms | &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;No cache: </span><span class="si">{</span><span class="n">t_nocache</span><span class="o">*</span><span class="mi">1000</span><span class="si">:</span><span class="s2">7.1f</span><span class="si">}</span><span class="s2">ms | Speedup: </span><span class="si">{</span><span class="n">speedup</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">x&quot;</span><span class="p">)</span>
+</code></pre></div>
+
 <p>Expected output pattern:</p>
-<pre><code>n_tokens= 10 | Cache:    5.2ms | No cache:    8.1ms | Speedup: 1.6x
+<div class="highlight"><pre><span></span><code>n_tokens= 10 | Cache:    5.2ms | No cache:    8.1ms | Speedup: 1.6x
 n_tokens= 50 | Cache:   18.3ms | No cache:   89.4ms | Speedup: 4.9x
 n_tokens=100 | Cache:   34.7ms | No cache:  310.2ms | Speedup: 8.9x
 n_tokens=200 | Cache:   68.1ms | No cache: 1142.5ms | Speedup: 16.8x
-</code></pre>
+</code></pre></div>
+
 <hr />
-<h2 id="exercise-45-min">Exercise (45 min)</h2>
-<h3 id="e181-kv-cache-memory-for-real-models">E18.1 KV Cache Memory for Real Models</h3>
+<h2 id="exercise-45-min" data-plain="Exercise (45 min)">Exercise (45 min)</h2>
+<h3 id="e181-kv-cache-memory-for-real-models" data-plain="E18.1 KV Cache Memory for Real Models">E18.1 KV Cache Memory for Real Models</h3>
 <p>Fill in the table (use the formula from §18.3):</p>
 <table>
 <thead>
@@ -413,34 +404,35 @@ n_tokens=200 | Cache:   68.1ms | No cache: 1142.5ms | Speedup: 16.8x
 </tbody>
 </table>
 <p><strong>Bonus:</strong> How many concurrent LLaMA-7B requests can an A100-80GB serve, assuming model weights take 14GB?</p>
-<h3 id="e182-plot-per-token-latency">E18.2 Plot Per-Token Latency</h3>
-<pre><code class="language-python">import matplotlib.pyplot as plt
+<h3 id="e182-plot-per-token-latency" data-plain="E18.2 Plot Per-Token Latency">E18.2 Plot Per-Token Latency</h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
 
-# Measure per-token latency during generation
-def measure_per_token_latency(attn, prompt, n_tokens, use_cache):
-    latencies = []
-    if use_cache:
-        cache = None
-        out, cache = attn(prompt, kv_cache=None, use_cache=True)
-        x = out[:, -1:, :]
-        for _ in range(n_tokens):
-            start = time.perf_counter()
-            out, cache = attn(x, kv_cache=cache, use_cache=True)
-            latencies.append(time.perf_counter() - start)
-            x = out
-    else:
-        all_tokens = prompt.clone()
-        for _ in range(n_tokens):
-            start = time.perf_counter()
-            out, _ = attn(all_tokens, kv_cache=None, use_cache=False)
-            latencies.append(time.perf_counter() - start)
-            all_tokens = torch.cat([all_tokens, out[:, -1:, :]], dim=1)
-    return latencies
+<span class="c1"># Measure per-token latency during generation</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">measure_per_token_latency</span><span class="p">(</span><span class="n">attn</span><span class="p">,</span> <span class="n">prompt</span><span class="p">,</span> <span class="n">n_tokens</span><span class="p">,</span> <span class="n">use_cache</span><span class="p">):</span>
+    <span class="n">latencies</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">if</span> <span class="n">use_cache</span><span class="p">:</span>
+        <span class="n">cache</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">out</span><span class="p">,</span> <span class="n">cache</span> <span class="o">=</span> <span class="n">attn</span><span class="p">(</span><span class="n">prompt</span><span class="p">,</span> <span class="n">kv_cache</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">out</span><span class="p">[:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">:,</span> <span class="p">:]</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_tokens</span><span class="p">):</span>
+            <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+            <span class="n">out</span><span class="p">,</span> <span class="n">cache</span> <span class="o">=</span> <span class="n">attn</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">kv_cache</span><span class="o">=</span><span class="n">cache</span><span class="p">,</span> <span class="n">use_cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">latencies</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span> <span class="o">-</span> <span class="n">start</span><span class="p">)</span>
+            <span class="n">x</span> <span class="o">=</span> <span class="n">out</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">all_tokens</span> <span class="o">=</span> <span class="n">prompt</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_tokens</span><span class="p">):</span>
+            <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+            <span class="n">out</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">attn</span><span class="p">(</span><span class="n">all_tokens</span><span class="p">,</span> <span class="n">kv_cache</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_cache</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="n">latencies</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span> <span class="o">-</span> <span class="n">start</span><span class="p">)</span>
+            <span class="n">all_tokens</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">all_tokens</span><span class="p">,</span> <span class="n">out</span><span class="p">[:,</span> <span class="o">-</span><span class="mi">1</span><span class="p">:,</span> <span class="p">:]],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">latencies</span>
 
-# Your task: plot latency[i] vs token index for both approaches
-# What shape do you expect for each? Why?
-</code></pre>
-<h3 id="e183-the-serving-cost-problem">E18.3 The Serving Cost Problem</h3>
+<span class="c1"># Your task: plot latency[i] vs token index for both approaches</span>
+<span class="c1"># What shape do you expect for each? Why?</span>
+</code></pre></div>
+
+<h3 id="e183-the-serving-cost-problem" data-plain="E18.3 The Serving Cost Problem">E18.3 The Serving Cost Problem</h3>
 <p>A startup serves LLaMA-7B on 8× A100-80GB GPUs.</p>
 <ol>
 <li>Model weights (fp16): 14 GB per GPU (tensor parallel across 8)</li>
@@ -452,7 +444,7 @@ def measure_per_token_latency(attn, prompt, n_tokens, use_cache):
 - How many concurrent requests can the cluster serve?
 - What happens if you switch to GQA with 8 KV heads instead of 32?</p>
 <hr />
-<h2 id="key-takeaways">Key Takeaways</h2>
+<h2 id="key-takeaways" data-plain="Key Takeaways">Key Takeaways</h2>
 <ol>
 <li><strong>KV cache eliminates redundant computation</strong> — reduces autoregressive generation from $O(n^2)$ to $O(n)$</li>
 <li><strong>Memory is the new bottleneck</strong> — the KV cache can consume more memory than the model weights</li>
@@ -460,23 +452,23 @@ def measure_per_token_latency(attn, prompt, n_tokens, use_cache):
 <li><strong>GQA reduces cache size</strong> by sharing K,V across query head groups — LLaMA-2 70B uses this</li>
 <li><strong>Cache size scales linearly</strong> with sequence length, layers, and batch size — this fundamentally limits serving capacity</li>
 </ol>
-<h2 id="connection-to-the-thread">Connection to the Thread</h2>
-<p>Yesterday you learned that Flash Attention solves the O(n²) <strong>training</strong> bottleneck. Today's KV cache solves the O(n²) <strong>inference</strong> bottleneck. Together, they make modern LLM deployment viable. But the KV cache introduces a new constraint: memory per request limits how many users you can serve simultaneously. This tension between compute and memory will recur throughout the curriculum — especially when we get to VLA models that must run on robot hardware (Phase VII).</p>
-<h2 id="further-reading">Further Reading</h2>
+<h2 id="connection-to-the-thread" data-plain="Connection to the Thread">Connection to the Thread</h2>
+<p>Yesterday you learned that Flash Attention solves the O(n²) <strong>training</strong> bottleneck. Today&rsquo;s KV cache solves the O(n²) <strong>inference</strong> bottleneck. Together, they make modern LLM deployment viable. But the KV cache introduces a new constraint: memory per request limits how many users you can serve simultaneously. This tension between compute and memory will recur throughout the curriculum — especially when we get to VLA models that must run on robot hardware (Phase VII).</p>
+<h2 id="further-reading" data-plain="Further Reading">Further Reading</h2>
 <ul>
 <li><strong><a href="https://arxiv.org/abs/2309.06180">vLLM Paper</a></strong> — Kwon et al., 2023 (PagedAttention)</li>
 <li><strong><a href="https://arxiv.org/abs/2305.13245">GQA Paper</a></strong> — Ainslie et al., 2023</li>
 <li><strong><a href="https://arxiv.org/abs/1911.02150">Multi-Query Attention</a></strong> — Shazeer, 2019</li>
 <li><strong><a href="https://arxiv.org/abs/2312.07104">Efficient Memory Management for LLM Serving</a></strong> — Survey</li>
-<li><strong><a href="https://www.youtube.com/watch?v=kCc8FmEb1nY">Karpathy's LLM Inference</a></strong> — KV cache explained visually</li>
+<li><strong><a href="https://www.youtube.com/watch?v=kCc8FmEb1nY">Karpathy&rsquo;s LLM Inference</a></strong> — KV cache explained visually</li>
 </ul>
             </div>
         </div>
 
-        <div class="mt-6 flex justify-between text-sm">
-            <a href="day-17-efficient-attention.html" class="text-violet-600 hover:text-violet-800">&larr; Day 17: Efficient Attention</a>
-            <a href="day-19-normalization-activations.html" class="text-violet-600 hover:text-violet-800">Day 19: Normalization & Activations &rarr;</a>
-        </div>
+        <nav class="lfbs-pager mt-6 flex justify-between gap-4 text-sm" aria-label="Lesson navigation">
+            <a href="day-17-efficient-attention.html" class="lfbs-pager-prev text-violet-600 hover:text-violet-800">&larr; Day 17: Efficient Attention — The O(n²) Problem</a>
+            <a href="day-19-normalization-activations.html" class="lfbs-pager-next text-violet-600 hover:text-violet-800">Day 19: Normalization + Activations — The Hidden Architecture Decisions &rarr;</a>
+        </nav>
     </div>
 </body>
 </html>

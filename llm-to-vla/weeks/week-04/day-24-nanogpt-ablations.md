@@ -4,7 +4,7 @@
 > *"Science is systematic elimination of variables. An ablation study is science applied to architecture."*
 
 ## Navigation
-- **Previous:** [Day 23: GPT & nanoGPT — Ablation Lab](day-23-nanogpt-ablation-lab.md)
+- **Previous:** [Day 23: GPT & nanoGPT — Ablation Lab](day-23-gpt-nanogpt.md)
 - **Next:** [Day 25: Scaling Laws & Emergence](day-25-scaling-laws.md)
 - **Week:** [Week 4 Overview](../README.md)
 - **Phase:** [Phase II: Attention & Transformers](../../study-notes/04-transformer-variants.md)

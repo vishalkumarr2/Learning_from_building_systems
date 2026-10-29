@@ -9,7 +9,7 @@
 - **Week:** [Week 3 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Gradient descent underlies every optimizer you'll use. Ceres starts each LM iteration with a gradient computation $g = J^Tr$. Understanding why plain GD is slow on SLAM problems (ill-conditioned $J^TJ$, $\kappa \sim 10^6$) explains why LM/trust-region methods exist. The convergence rate $\rho = (\kappa - 1)/(\kappa + 1)$ predicts exactly how many iterations you'd waste.
 
 ---

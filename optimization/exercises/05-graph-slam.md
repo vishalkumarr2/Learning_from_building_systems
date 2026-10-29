@@ -213,24 +213,24 @@ For simplicity, you can use finite differences to check your analytic Jacobians.
 
 ---
 
-## Section C — OKS Connection
+## Section C — AMR Connection
 
-**C1.** The OKS navigation estimator uses an EKF with sensorbar (landmark-based) corrections. In a factor-graph view:
+**C1.** The AMR navigation estimator uses an EKF with line sensor (landmark-based) corrections. In a factor-graph view:
 
 1. What are the variable nodes?
 2. What are the factor types?
 3. If the robot drives in a loop and re-detects the same reflectors, what factor does this correspond to?
-4. Why doesn't OKS use full graph optimization instead of an EKF?
+4. Why doesn't the AMR stack use full graph optimization instead of an EKF?
 
 <details><summary>Answer</summary>
 
 1. **Variable nodes:** Robot poses at each timestep: $x_k = (x, y, \theta, v, \omega)_k$
-   (Optionally: reflector positions if doing SLAM, but OKS treats them as known)
+   (Optionally: reflector positions if doing SLAM, but the AMR stack treats them as known)
 
 2. **Factor types:**
    - **Prior:** Initial pose from startup localization
    - **Odometry (between):** Wheel encoder prediction between consecutive timesteps
-   - **Sensorbar (measurement):** Bearing/distance to known reflectors
+   - **Line sensor (measurement):** Bearing/distance to known reflectors
    - **IMU (between):** Angular velocity integration for heading
 
 3. **Re-detecting reflectors** in a loop corresponds to a **loop closure factor** — a measurement factor connecting the current pose to a previously-observed landmark. The information from the landmark provides a "jump" in accuracy, correcting accumulated odometry drift. This is exactly how loop closure works in SLAM.
@@ -238,8 +238,8 @@ For simplicity, you can use finite differences to check your analytic Jacobians.
 4. **Why EKF instead of graph optimization:**
    - **Real-time constraint:** EKF updates in O(n²) where n is state dimension (small, ~5). Graph optimization over all timesteps is O(N³) where N grows with time.
    - **Constant memory:** EKF uses fixed-size matrices. Graph optimization stores all poses.
-   - **Sufficient for OKS:** With known reflector positions (no SLAM needed) and corrections every ~100ms, the EKF doesn't accumulate much drift between corrections.
-   - **Simplicity:** EKF is well-understood, debuggable, and validated in the OKS codebase.
+   - **Sufficient for AMRs:** With known reflector positions (no SLAM needed) and corrections every ~100ms, the EKF doesn't accumulate much drift between corrections.
+   - **Simplicity:** EKF is well-understood, debuggable, and validated in the AMR codebase.
    
    Graph optimization would help if: (1) reflector maps were inaccurate, (2) loop closures were needed, (3) multi-robot map merging was required, or (4) offline trajectory smoothing was desired for diagnostics.
 

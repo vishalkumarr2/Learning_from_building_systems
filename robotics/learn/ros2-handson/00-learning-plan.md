@@ -22,7 +22,7 @@ read a Nav2 behaviour tree without looking anything up.
 
 - Nodes, publishers, subscribers, timers
 - Services (sync) vs Actions (async with feedback)
-- Lifecycle nodes — why OKS uses them
+- Lifecycle nodes — why the AMR stack uses them
 - QoS profiles: reliability, durability, history — when BEST_EFFORT drops frames
 
 **Exercises:** `exercises/01-pub-sub-timer.md`, `exercises/03-action-server.md`
@@ -40,7 +40,7 @@ read a Nav2 behaviour tree without looking anything up.
 
 - BehaviourTree XML: Navigate, ComputePath, FollowPath, Recovery
 - Costmaps: global vs local, inflation radius, lethal obstacles
-- Controller plugins: DWB, RPP — what parameters map to OKS tuning
+- Controller plugins: DWB, RPP — what parameters map to AMR tuning
 - Planner search models: Dijkstra vs A*, Dubins vs Reeds-Shepp, and when kinematics matter
 - Search-space intuition: why NavFn thinks in `(x, y)` but Smac thinks in `(x, y, θ)`
 - Hybrid-A* tuning: how `minimum_turning_radius` changes feasibility

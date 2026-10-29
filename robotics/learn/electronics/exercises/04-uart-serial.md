@@ -4,7 +4,7 @@
 
 **Self-assessment guide:** Write your answer before expanding the details block. If you can answer 80% correctly without peeking, you're ready to move on. If not, re-read the relevant section and try again.
 
-**Project context:** You're building an STM32H7 ↔ Jetson Orin SPI bridge at 100Hz. UART is used for your debug console (115200 baud via ST-Link), and understanding UART DMA patterns transfers directly to SPI DMA. Many OKS robot sensors (LIDAR, GPS) also speak UART or RS-485.
+**Project context:** You're building an STM32H7 ↔ Jetson Orin SPI bridge at 100Hz. UART is used for your debug console (115200 baud via ST-Link), and understanding UART DMA patterns transfers directly to SPI DMA. Many warehouse robot sensors (LIDAR, GPS) also speak UART or RS-485.
 
 ---
 
@@ -502,7 +502,7 @@ At 100 Hz × 52 bytes = 5,200 bytes/sec, even 115200 baud UART (11,520 B/s) has 
 
 ---
 
-**E3.** Your OKS robot uses RS-485 for motor controllers (4 motors on one bus) and UART for GPS. Both connect to the same STM32. If the motor bus runs at 500 kbaud with 10-byte commands at 1 kHz, and the GPS sends 82-byte NMEA sentences at 10 Hz — what is the total CPU interrupt load without DMA? With DMA? Make the case for why DMA is non-negotiable on a real-time robot controller.
+**E3.** Your warehouse robot uses RS-485 for motor controllers (4 motors on one bus) and UART for GPS. Both connect to the same STM32. If the motor bus runs at 500 kbaud with 10-byte commands at 1 kHz, and the GPS sends 82-byte NMEA sentences at 10 Hz — what is the total CPU interrupt load without DMA? With DMA? Make the case for why DMA is non-negotiable on a real-time robot controller.
 
 <details><summary>Answer</summary>
 

@@ -9,7 +9,7 @@
 - **Week:** [Week 1 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Least-squares problems (SLAM, calibration) are convex when the model is linear. When nonlinear, they're locally convex near the solution — which is why good initialization matters. MPC with linear dynamics + quadratic cost → convex QP (solvable in real-time).
 
 ---

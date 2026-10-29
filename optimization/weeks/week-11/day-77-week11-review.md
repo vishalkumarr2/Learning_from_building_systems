@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-This review consolidates everything needed to reason about robot orientation: from abstract group axioms to the practical choice of quaternions in `tf2`, from Rodrigues' formula in the IMU driver to SLERP in the trajectory planner. The full pipeline — read IMU quaternion → convert → compose → display Euler — runs every control cycle on every OKS AMR.
+## Robotics Relevance
+This review consolidates everything needed to reason about robot orientation: from abstract group axioms to the practical choice of quaternions in `tf2`, from Rodrigues' formula in the IMU driver to SLERP in the trajectory planner. The full pipeline — read IMU quaternion → convert → compose → display Euler — runs every control cycle on every AMR.
 
 ---
 
@@ -295,11 +295,11 @@ This works because the standard 4D Gaussian, when normalized, is uniform on $S^3
 ## Connections
 - **All Week 11 Days:** [71](day-71-group-axioms.md) → [72](day-72-so2-rotations.md) → [73](day-73-so3-rodrigues.md) → [74](day-74-quaternions.md) → [75](day-75-quaternion-operations.md) → [76](day-76-rotation-representations.md) → **77**
 - **Forward:** Week 12 extends to SE(2) and SE(3) — rigid-body motions (rotation + translation)
-- **OKS pipeline:** IMU publishes quaternion → estimator composes via matrix multiply → planner interpolates via SLERP → logger displays Euler angles
+- **AMR pipeline:** IMU publishes quaternion → estimator composes via matrix multiply → planner interpolates via SLERP → logger displays Euler angles
 
 ## Self-Check
 - [ ] I can convert between all four rotation representations without reference
 - [ ] I can identify gimbal lock and explain the topological reason it is unavoidable with 3 parameters
 - [ ] I can implement SLERP and explain its constant-velocity property
-- [ ] I understand the full OKS orientation pipeline: IMU → quaternion → matrix → compose → Euler display
+- [ ] I understand the full AMR orientation pipeline: IMU → quaternion → matrix → compose → Euler display
 - [ ] I can state the Rodrigues formula and derive it from the matrix exponential

@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 When three robots complete a multi-pick order, how much credit does each deserve? The Shapley value answers this: evaluate each robot's marginal contribution across every possible joining order. This same principle powers SHAP values in ML — explaining which sensor or subsystem contributed most to a prediction or fault diagnosis.
 
 ---
@@ -210,7 +210,7 @@ For linear models, $v(S) = \beta_0 + \sum_{i \in S} \beta_i x_i + \sum_{j \notin
 ## Connections
 - **Prerequisites:** Core and cooperative games (Day 99) — Shapley value always exists; LP formulations (Day 97)
 - **Forward:** Bargaining (Day 101) extends to bilateral settings; Mechanism design (Day 104) uses Shapley for cost sharing
-- **OKS:** Fair credit assignment for multi-robot task completion; SHAP-based fault attribution in diagnostics
+- **AMR:** Fair credit assignment for multi-robot task completion; SHAP-based fault attribution in diagnostics
 
 ## Self-Check
 - [ ] I can state the four Shapley axioms and explain their intuition

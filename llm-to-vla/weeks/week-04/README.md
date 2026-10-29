@@ -17,5 +17,5 @@ This week dives into tokenization, builds GPT from scratch with nanoGPT, explore
 | 28 | [T5 & Encoder-Decoder LMs](day-28-t5-encoder-decoder.md) | Text-to-text framework |
 
 ## Study Notes Reference
-- [03 — Transformers](../../study-notes/03-transformers.md)
-- [04 — GPT Architecture & Scaling](../../study-notes/04-gpt-architecture.md)
+- [03 — Transformers](../../study-notes/03-transformer-architecture.md)
+- [04 — GPT Architecture & Scaling](../../study-notes/05-gpt-scaling.md)

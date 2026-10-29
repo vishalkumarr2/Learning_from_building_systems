@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-Smooth trajectory generation for the OKS AMR requires interpolating between waypoint orientations. Naive linear interpolation of Euler angles or quaternion components produces jerky, non-uniform motion. SLERP gives constant angular velocity — essential for smooth `cmd_vel` profiles. Quaternion averaging appears in multi-sensor fusion: combining IMU and visual odometry orientation estimates.
+## Robotics Relevance
+Smooth trajectory generation for the AMR requires interpolating between waypoint orientations. Naive linear interpolation of Euler angles or quaternion components produces jerky, non-uniform motion. SLERP gives constant angular velocity — essential for smooth `cmd_vel` profiles. Quaternion averaging appears in multi-sensor fusion: combining IMU and visual odometry orientation estimates.
 
 ---
 
@@ -239,7 +239,7 @@ The logarithmic map is only well-defined for rotations within $\pi$ of the curre
 ## Connections
 - **Prerequisites:** [Day 74](day-74-quaternions.md) — quaternion algebra and rotation correspondence
 - **Forward:** [Day 76](day-76-rotation-representations.md) — comparison table including interpolation properties
-- **OKS:** SLERP is used in trajectory planners for smooth orientation profiles; quaternion averaging appears in EKF orientation fusion
+- **AMR:** SLERP is used in trajectory planners for smooth orientation profiles; quaternion averaging appears in EKF orientation fusion
 
 ## Self-Check
 - [ ] I can derive the SLERP formula and explain its constant-velocity property

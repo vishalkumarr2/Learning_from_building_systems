@@ -8,7 +8,7 @@
 
 ## The Scenario
 
-**Operator report from OKS warehouse:**
+**Operator report from warehouse:**
 
 > After releasing the e-stop button, the robot suddenly lurches forward 20–30 cm before stopping. This happens every time. The e-stop is pressed when the robot is driving forward at 0.3 m/s to stop it near a rack. After clearing the e-stop, the robot jumps forward dangerously close to the rack.
 
@@ -140,7 +140,7 @@ $K_b$ (back-calculation gain) determines how fast the integral "unwinds." Typica
 
 ### 3.2 Fix 2: Reset Integral on E-Stop
 
-Simpler and more robust for the OKS case:
+Simpler and more robust for the robot case:
 
 ```c
 // In the main control loop
@@ -185,7 +185,7 @@ void post_estop_recovery(void) {
 }
 ```
 
-**OKS implements all three:** Reset integral on e-stop, ramp setpoint on release, and back-calculation anti-windup during normal operation.
+**AMR implements all three:** Reset integral on e-stop, ramp setpoint on release, and back-calculation anti-windup during normal operation.
 
 ---
 
@@ -238,5 +238,5 @@ This is the fundamental principle of anti-windup. The integral should only accum
 1. Why doesn't clamping the integral term prevent windup during e-stop?
 2. The integral accumulated to 1.0 during 2.5 seconds of e-stop with error = 5.0 and Ki = 25.0. Show the math: $1.0 = 25.0 \times 5.0 \times t_{windup}$. Solve for $t_{windup}$.
 3. Back-calculation anti-windup uses a gain $K_b$. If $K_b$ is too large, what happens? Too small?
-4. Why does OKS reset the setpoint to zero during e-stop (not just the integral)?
+4. Why does AMR reset the setpoint to zero during e-stop (not just the integral)?
 5. A robot wheel lifts off the ground during a ramp ascent. The speed PID winds up. What happens when the wheel touches down again?

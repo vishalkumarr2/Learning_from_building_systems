@@ -1127,7 +1127,7 @@ class TaskTimeoutMonitor:
 # 5. Verify: the robot NEVER executes a dangerous action when safety fires
 # 6. Design extension: add a "human notification" module that would alert
 #    an operator when fallback level >= SAFE_RETRACT for > 5 seconds.
-#    (This connects to OKS AMR's RequestManualAssistance pattern!)
+#    (This connects to the AMR manual-assistance request pattern!)
 
 # YOUR CODE HERE
 ```
@@ -1292,7 +1292,7 @@ def print_safety_report(metrics: SafetyMetrics):
 #    a) What's the cost of a false positive? (Robot pauses unnecessarily)
 #    b) What's the cost of a false negative? (Robot damages something)
 #    c) For a warehouse robot, which error is MORE acceptable?
-#    d) How does this relate to OKS AMR's safety philosophy?
+#    d) How does this relate to AMR's safety philosophy?
 
 # YOUR CODE HERE
 ```
@@ -1324,7 +1324,7 @@ def print_safety_report(metrics: SafetyMetrics):
 - **Exercise 15**: Velocity/acceleration limits come from kinematics
 - **Project 08**: Safety gate implements these monitors in ROS 2
 - **Exercise 14**: Data quality filtering is a training-time safety measure
-- **Real OKS**: Guardian node, e-stop, RequestManualAssistance — same architecture!
+- **Real AMR fleet**: safety monitor node, e-stop, manual-assistance request — same architecture!
 
 ---
 
@@ -1345,4 +1345,4 @@ def print_safety_report(metrics: SafetyMetrics):
 - [ ] Ran full safety pipeline simulation
 - [ ] Computed safety metrics (TPR, FPR, latency)
 - [ ] Tuned thresholds for >95% TPR, <10% FPR
-- [ ] Connected to real deployment considerations (OKS AMR patterns)
+- [ ] Connected to real deployment considerations (AMR patterns)

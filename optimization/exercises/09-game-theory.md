@@ -10,7 +10,7 @@
 
 ## Section A — Normal Form Games and Dominance
 
-**A1.** ⭐ Two OKS warehouse robots arrive at an intersection simultaneously. Each can **Yield** (wait) or **Go** (proceed). If both Go, they collide (cost −10 each). If both Yield, they waste time (−2 each). If one Goes and the other Yields, the goer gets 0 and the yielder gets −3.
+**A1.** ⭐ Two warehouse robots arrive at an intersection simultaneously. Each can **Yield** (wait) or **Go** (proceed). If both Go, they collide (cost −10 each). If both Yield, they waste time (−2 each). If one Goes and the other Yields, the goer gets 0 and the yielder gets −3.
 
 1. Write the payoff matrix.
 2. Does either player have a strictly dominated strategy?
@@ -128,7 +128,7 @@ But IESDS removes all strictly dominated strategies at each round. So $s_i$ woul
 
 </details>
 
-**A5.** ⭐⭐⭐ **OKS connection.** A fleet of $n$ robots must each choose a corridor (A or B) to reach the charging station. Corridor $i$ has capacity $c_i$ (robots/minute). If $k$ robots choose corridor $i$, each experiences delay $k / c_i$. Let $c_A = 2, c_B = 3, n = 5$.
+**A5.** ⭐⭐⭐ **AMR connection.** A fleet of $n$ robots must each choose a corridor (A or B) to reach the charging station. Corridor $i$ has capacity $c_i$ (robots/minute). If $k$ robots choose corridor $i$, each experiences delay $k / c_i$. Let $c_A = 2, c_B = 3, n = 5$.
 
 1. Model this as a **congestion game**. What is each robot's strategy set and cost function?
 2. Find the Nash equilibrium allocation $(k_A, k_B)$.
@@ -292,7 +292,7 @@ $E[B] = 0 + 3(2/5) + 1(1/4) = 6/5 + 1/4 = 29/20$ ✓.
 
 </details>
 
-**B4.** ⭐⭐⭐ **OKS connection.** Two charging stations serve 4 robots. Station 1 charges at rate $\mu_1 = 2$ robots/hour, station 2 at $\mu_2 = 3$ robots/hour. Each robot independently chooses a station to minimize expected wait time (M/M/1 model: wait $\approx 1/(\mu_i - \lambda_i)$ where $\lambda_i$ is arrival rate at station $i$).
+**B4.** ⭐⭐⭐ **AMR connection.** Two charging stations serve 4 robots. Station 1 charges at rate $\mu_1 = 2$ robots/hour, station 2 at $\mu_2 = 3$ robots/hour. Each robot independently chooses a station to minimize expected wait time (M/M/1 model: wait $\approx 1/(\mu_i - \lambda_i)$ where $\lambda_i$ is arrival rate at station $i$).
 
 1. If each robot chooses station 1 with probability $p$, what is the expected wait for a robot choosing station $i$?
 2. Find the symmetric mixed NE probability $p^*$.
@@ -481,7 +481,7 @@ print(f"Game value: {v:.4f}, Column strategy: {q}")
 
 </details>
 
-**C4.** ⭐⭐⭐ **OKS connection.** An adversary can inject one of 3 sensor noise patterns into an OKS robot's sensorbar. The robot's estimator can use one of 3 filtering strategies. The resulting localization error (in cm) is:
+**C4.** ⭐⭐⭐ **AMR connection.** An adversary can inject one of 3 sensor noise patterns into a warehouse robot's line sensor. The robot's estimator can use one of 3 filtering strategies. The resulting localization error (in cm) is:
 
 |  | Noise A | Noise B | Noise C |
 |---|---|---|---|
@@ -583,7 +583,7 @@ Hence $(p^*, q^{**})$ is a NE with value $v$. ∎
 
 ## Section D — Cooperative Games
 
-**D1.** ⭐ Three OKS robots can complete tasks individually or in coalitions. The value function (tasks completed per hour):
+**D1.** ⭐ Three warehouse robots can complete tasks individually or in coalitions. The value function (tasks completed per hour):
 
 $$v(\emptyset) = 0, \quad v(\{1\}) = 4, \quad v(\{2\}) = 3, \quad v(\{3\}) = 5$$
 $$v(\{1,2\}) = 10, \quad v(\{1,3\}) = 11, \quad v(\{2,3\}) = 9, \quad v(\{1,2,3\}) = 18$$
@@ -881,7 +881,7 @@ For $\delta = 0.9$: Player 1 gets 0.10, Player 2 gets 0.90. The **patience advan
 
 </details>
 
-**E3.** ⭐⭐⭐ **OKS connection.** Consider a repeated interaction between an OKS robot and a Battery Exchange Controller (BEC). In each round, the robot can **Trust** (approach BEC without verification) or **Verify** (run diagnostics first, costing 5s). The BEC can **Work** (function correctly) or **Fail** (malfunction, costing 60s).
+**E3.** ⭐⭐⭐ **AMR connection.** Consider a repeated interaction between a warehouse robot and a Battery Exchange Controller (BEC). In each round, the robot can **Trust** (approach BEC without verification) or **Verify** (run diagnostics first, costing 5s). The BEC can **Work** (function correctly) or **Fail** (malfunction, costing 60s).
 
 |  | Work | Fail |
 |---|---|---|
@@ -942,7 +942,7 @@ class TrustController:
 
 Switch to Verify when $\hat{\epsilon}_t > \tau$. With $\epsilon = 0.01$, steady-state EWMA ≈ 0.01. Set $\tau = 0.05$.
 
-Advantages over the window trigger: smoother response, less memory, tunable sensitivity via $\alpha$. This is exactly the approach used in OKS guardian monitoring — tracking sensor health via EWMA and triggering safety modes when degradation is detected.
+Advantages over the window trigger: smoother response, less memory, tunable sensitivity via $\alpha$. This is exactly the approach used in AMR safety monitoring — tracking sensor health via EWMA and triggering safety modes when degradation is detected.
 
 </details>
 
@@ -1234,7 +1234,7 @@ This game is a coordination game (similar to Battle of the Sexes), and fictitiou
 
 </details>
 
-**F4.** ⭐⭐⭐⭐ **OKS multi-robot task allocation as auction.** A fleet of 4 OKS robots must be assigned to 4 tasks. Robot $i$'s cost for task $j$ is $c_{ij}$:
+**F4.** ⭐⭐⭐⭐ **AMR multi-robot task allocation as auction.** A fleet of 4 warehouse robots must be assigned to 4 tasks. Robot $i$'s cost for task $j$ is $c_{ij}$:
 
 $$C = \begin{pmatrix} 10 & 15 & 9 & 12 \\ 12 & 8 & 14 & 11 \\ 14 & 12 & 10 & 8 \\ 11 & 9 & 13 & 15 \end{pmatrix}$$
 
@@ -1337,7 +1337,7 @@ Let me redo: Without R2, others' optimal = $\min$-cost matching of {R1,R3,R4} to
 
 For proper VCG in assignment: assume there are enough dummy robots at cost $M \gg 0$.
 
-**Simplification:** The VCG transfer ensures truthful reporting is dominant and individual rationality holds. The key insight is that **VCG generalizes the Vickrey auction to multi-item settings**, and for OKS fleet allocation, it provides an incentive-compatible mechanism where robots truthfully report their costs, enabling optimal task assignment without a centralized planner having perfect information.
+**Simplification:** The VCG transfer ensures truthful reporting is dominant and individual rationality holds. The key insight is that **VCG generalizes the Vickrey auction to multi-item settings**, and for AMR fleet allocation, it provides an incentive-compatible mechanism where robots truthfully report their costs, enabling optimal task assignment without a centralized planner having perfect information.
 
 </details>
 
@@ -1435,4 +1435,4 @@ for epoch in range(num_epochs):
 | E | Extensive form, backward induction, auctions | SPE, VCG mechanism design |
 | F | Potential games, PoA, adversarial ML | Braess's paradox, PGD, fleet routing |
 
-**OKS robotics exercises:** A1 (intersection coordination), A5 (corridor congestion), B4 (charging station), C4 (adversarial filtering), E3 (BEC trust strategy), F2 (fleet routing paradox), F4 (multi-robot task auction).
+**Warehouse-robotics exercises:** A1 (intersection coordination), A5 (corridor congestion), B4 (charging station), C4 (adversarial filtering), E3 (BEC trust strategy), F2 (fleet routing paradox), F4 (multi-robot task auction).

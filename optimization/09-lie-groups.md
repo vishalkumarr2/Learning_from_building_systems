@@ -5,12 +5,12 @@
 >
 > Rotations and rigid-body poses live on curved spaces (manifolds), not in Euclidean
 > vector spaces. This guide develops the theory from first principles and connects
-> every concept to concrete robotics applications in the OKS AMR system.
+> every concept to concrete robotics applications in the AMR system.
 
 ## Prerequisites
 - [Day 1: Vectors, Matrices, Transformations](weeks/week-01/day-01-vectors-matrices.md)
 - [Day 2: Eigenvalues, PD, SVD](weeks/week-01/day-02-eigenvalues-svd.md)
-- [Day 6: Nonlinear Least Squares](weeks/week-01/day-06-nonlinear-ls.md)
+- Day 6: Nonlinear Least Squares *(not written yet)*
 - [08: Matrix Essentials](08-matrix-essentials.md) — orthogonal matrices, skew-symmetric matrices
 - [06: Graph-Based Optimization](06-graph-optimization.md) — pose graphs, factor graphs
 
@@ -30,7 +30,7 @@ $\det(R) = 1$. Adding an arbitrary perturbation destroys both properties. Even i
 is small, $R + \Delta R$ will have a determinant that differs from 1, and its columns will no
 longer be orthonormal.
 
-**OKS relevance:** The navigation estimator tracks robot orientation continuously. If the
+**Robotics relevance:** The navigation estimator tracks robot orientation continuously. If the
 filter update simply added a correction to the rotation matrix, the orientation estimate
 would drift off the rotation manifold within seconds, producing physically impossible states.
 
@@ -66,7 +66,7 @@ manifold (Section 7). The algorithm:
 3. Update $\bar{R} \leftarrow \bar{R} \cdot \text{Exp}(\delta)$
 4. Repeat until $\|\delta\| < \varepsilon$
 
-**OKS relevance:** When fusing multiple orientation estimates (wheel odometry, IMU, lidar
+**Robotics relevance:** When fusing multiple orientation estimates (wheel odometry, IMU, lidar
 matching), the estimator must average rotations correctly — this exact algorithm applies.
 
 ---
@@ -211,7 +211,7 @@ Tangent T_p M:  ──── 0 ──── δ ────          (flat, Eucl
                      ↑ solve here
 ```
 
-**OKS relevance:** The OKS navigation estimator's state includes an orientation on $SO(3)$
+**Robotics relevance:** The AMR navigation estimator's state includes an orientation on $SO(3)$
 and a 2D pose on $SE(2)$. All filter corrections are computed in tangent space and applied
 via the exponential map — never by direct matrix addition.
 
@@ -237,8 +237,8 @@ $$\omega^\wedge = \begin{pmatrix} 0 & -\omega \\ \omega & 0 \end{pmatrix}, \quad
 $SO(2)$ is abelian and isomorphic to the unit circle $S^1$. The exponential map wraps the
 real line around the circle — it is a covering map with period $2\pi$.
 
-**OKS relevance:** The OKS AMR operates primarily on a flat warehouse floor. Its heading
-angle lives on $SO(2)$. The sensorbar-based heading correction must use the $SO(2)$
+**Robotics relevance:** The AMR operates primarily on a flat warehouse floor. Its heading
+angle lives on $SO(2)$. The line sensor-based heading correction must use the $SO(2)$
 exponential map to avoid angle-wrapping discontinuities.
 
 ### 4.2 SO(3): 3D Rotations
@@ -247,7 +247,7 @@ exponential map to avoid angle-wrapping discontinuities.
 
 **Representations:**
 
-| Representation | Parameters | Singularities | Interpolation | OKS Use |
+| Representation | Parameters | Singularities | Interpolation | AMR Use |
 |---------------|-----------|--------------|---------------|---------|
 | Rotation matrix $R$ | 9 (with 6 constraints) | None | Hard | Internal representation |
 | Euler angles $(\phi, \theta, \psi)$ | 3 | Gimbal lock | Easy (but wrong) | Human-readable output |
@@ -291,8 +291,8 @@ $$T = \begin{pmatrix} R & t \\ 0^T & 1 \end{pmatrix} = \begin{pmatrix} \cos\thet
 
 $$\xi^\wedge = \begin{pmatrix} [\omega]_\times & v \\ 0^T & 0 \end{pmatrix} = \begin{pmatrix} 0 & -\omega & v_1 \\ \omega & 0 & v_2 \\ 0 & 0 & 0 \end{pmatrix}, \quad \xi = \begin{pmatrix} v \\ \omega \end{pmatrix} \in \mathbb{R}^3$$
 
-**OKS relevance:** This is the primary state representation for the OKS robot's 2D pose.
-The pose graph in the OKS navigation estimator operates on $SE(2)$ — each node is a
+**Robotics relevance:** This is the primary state representation for the warehouse robot's 2D pose.
+The pose graph in the AMR navigation estimator operates on $SE(2)$ — each node is a
 robot pose $(x, y, \theta)$ encoded as an element of $SE(2)$.
 
 ### 4.4 SE(3): 3D Rigid Body Motions
@@ -332,7 +332,7 @@ $$S = \begin{pmatrix} sR & t \\ 0^T & 1 \end{pmatrix} \in Sim(3), \quad s > 0, \
 be determined up to a similarity transformation. The $Sim(3)$ group allows scale drift to be
 corrected during loop closure. ORB-SLAM2/3 uses $Sim(3)$ for this purpose.
 
-**OKS relevance:** While the OKS AMR has wheel encoders (providing scale), if only a
+**Robotics relevance:** While the AMR has wheel encoders (providing scale), if only a
 monocular camera were used for SLAM, $Sim(3)$ optimization would be essential.
 
 ---
@@ -642,7 +642,7 @@ until converged
 
 This is exactly what g2o, GTSAM, and Ceres (with manifold parameterization) implement.
 
-**OKS relevance:** The OKS pose-graph optimizer runs this algorithm on $SE(2)$ with
+**Robotics relevance:** The AMR pose-graph optimizer runs this algorithm on $SE(2)$ with
 odometry and loop-closure constraints. Each iteration linearizes in tangent space and
 retracts onto $SE(2)$.
 
@@ -702,9 +702,9 @@ $$\frac{\partial r_{ij}}{\partial \delta_i} = -J_r^{-1}(r_{ij}) \cdot \text{Ad}_
 
 For small residuals (near convergence), $J_r^{-1}(r_{ij}) \approx I$ and the Jacobians simplify.
 
-**OKS pose graph:** The OKS navigation system maintains a local pose graph in $SE(2)$ with:
+**AMR pose graph:** The AMR navigation system maintains a local pose graph in $SE(2)$ with:
 - Wheel odometry edges (high frequency, moderate accuracy)
-- Sensorbar correction edges (when crossing tile boundaries)
+- Line sensor correction edges (when crossing tile boundaries)
 - Occasionally loop-closure edges from re-observing known landmarks
 
 ```python
@@ -817,7 +817,7 @@ For full rigid-body trajectory interpolation, interpolate rotation (SLERP) and t
 
 $$T(t) = T_0 \cdot \text{Exp}(t \cdot \text{Log}(T_0^{-1} T_1))$$
 
-**OKS relevance:** The motion planner interpolates between waypoints. For smooth 2D
+**Robotics relevance:** The motion planner interpolates between waypoints. For smooth 2D
 trajectories, $SE(2)$ SLERP ensures the robot follows a natural arc rather than an awkward
 straight-line-then-rotate path.
 

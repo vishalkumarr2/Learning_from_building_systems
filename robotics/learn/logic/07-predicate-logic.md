@@ -12,7 +12,7 @@
 Propositional logic treats entire statements as units. But many arguments depend on the *internal structure* of statements — specifically, on quantifiers like "all," "some," "every," and "no."
 
 - "**Every** robot in the fleet needs the firmware update."
-- "**Some** sensorbar readings are invalid."
+- "**Some** line sensor readings are invalid."
 - "**No** robot with firmware v1.24 exhibits the bug."
 
 Predicate logic lets you formalize and reason about these precisely — and it's the foundation for database queries, type systems, formal specifications, and any time you write `for all x in collection` or `there exists x such that`.
@@ -45,7 +45,7 @@ We write: **Mx** where M = "is mortal" and x = a variable that can be any indivi
 |---|---|
 | "All robots are autonomous" | ∀x(Rx ⊃ Ax) |
 | "Every device needs updating" | ∀x(Dx ⊃ Ux) |
-| "Each sensorbar has a code strip" | ∀x(Sx ⊃ Cx) |
+| "Each line sensor has a code strip" | ∀x(Sx ⊃ Cx) |
 
 **Important:** "All S are P" is translated as ∀x(Sx ⊃ Px) — with a **conditional**, not a conjunction. Why?
 
@@ -75,7 +75,7 @@ We write: **Mx** where M = "is mortal" and x = a variable that can be any indivi
 |---|---|
 | "No robots are perfect" | ~∃x(Rx · Px) or equivalently ∀x(Rx ⊃ ~Px) |
 | "Not all tests passed" | ~∀x(Tx ⊃ Px) or equivalently ∃x(Tx · ~Px) |
-| "Only robots have sensorbars" | ∀x(Sx ⊃ Rx) (having a sensorbar implies being a robot) |
+| "Only robots have line sensors" | ∀x(Sx ⊃ Rx) (having a line sensor implies being a robot) |
 | "All and only robots are autonomous" | ∀x(Rx ≡ Ax) |
 | "Some but not all devices failed" | ∃x(Dx · Fx) · ∃x(Dx · ~Fx) |
 

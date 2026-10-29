@@ -120,7 +120,7 @@ Consider:
 - Navigation: ROS nav stack vs learned navigation
 - Manipulation: trajectory optimization vs diffusion policy
 - Where does interpretability/safety override the bitter lesson?
-- Your own OKS system — which components are hand-crafted? Which could be learned?
+- Your own AMR system — which components are hand-crafted? Which could be learned?
 
 ---
 

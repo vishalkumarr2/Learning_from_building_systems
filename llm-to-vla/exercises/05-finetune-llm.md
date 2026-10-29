@@ -541,13 +541,13 @@ robotics_data = [
     },
     {
         "instruction": "What causes a robot to report NAV_ESTIMATED_STATE_NOT_FINITE?",
-        "output": "NAV_ESTIMATED_STATE_NOT_FINITE occurs when the navigation estimator computes NaN or Inf values in the robot's state estimate (position, velocity, or orientation). Common causes include: sensor data gaps (sensorbar disconnect), encoder failures, sudden large jumps in odometry, or numerical instability in the Kalman filter."
+        "output": "NAV_ESTIMATED_STATE_NOT_FINITE occurs when the navigation estimator computes NaN or Inf values in the robot's state estimate (position, velocity, or orientation). Common causes include: sensor data gaps (line sensor disconnect), encoder failures, sudden large jumps in odometry, or numerical instability in the Kalman filter."
     },
     # Add 50+ more robotics-specific QA pairs
     # Topics: ROS2, navigation, sensors, motor control, error codes, etc.
     {
-        "instruction": "What is the sensorbar on an OKS AMR?",
-        "output": "The sensorbar is a downward-facing optical sensor array on OKS AMR robots that reads floor-mounted QR code tiles for localization. It provides absolute position corrections to the navigation estimator, complementing wheel odometry and IMU data. Sensorbar failures can cause localization drift."
+        "instruction": "What is the line sensor on an AMR?",
+        "output": "The line sensor is a downward-facing optical sensor array on AMR robots that reads floor-mounted QR code tiles for localization. It provides absolute position corrections to the navigation estimator, complementing wheel odometry and IMU data. Line sensor failures can cause localization drift."
     },
     {
         "instruction": "Explain ROS 2 topics vs services vs actions.",
@@ -637,8 +637,8 @@ robotics_model = PeftModel.from_pretrained(base_model, "./robotics-lora-adapter"
 
 # Test questions
 test_questions = [
-    "What causes sensorbar stiction on a warehouse robot?",
-    "How does the navigation estimator fuse odometry and sensorbar data?",
+    "What causes line sensor stiction on a warehouse robot?",
+    "How does the navigation estimator fuse odometry and line sensor data?",
     "What is the difference between ROS 2 Humble and Iron?",
     "Explain PID control in simple terms.",
     "What should you check when a robot reports MOTOR_OVERCURRENT?",
@@ -922,7 +922,7 @@ lm_eval --model hf \
 
 ### S5: Full Robotics Assistant (→ Capstone)
 Expand the robotics dataset to 500+ QA pairs. Include:
-- OKS error codes and troubleshooting
+- AMR error codes and troubleshooting
 - ROS 2 concepts and commands
 - Navigation algorithms
 - Sensor fusion explanations

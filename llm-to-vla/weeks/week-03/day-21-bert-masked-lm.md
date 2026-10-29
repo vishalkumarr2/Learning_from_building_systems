@@ -7,7 +7,7 @@
 - **Previous:** [Day 20: Mixture of Experts](day-20-mixture-of-experts.md)
 - **Next:** [Day 22: Tokenization Deep Dive](../week-04/day-22-tokenization.md)
 - **Week:** [Week 3 Overview](README.md)
-- **Phase:** [Phase II: Attention & Transformers](../../study-notes/03-transformers.md)
+- **Phase:** [Phase II: Attention & Transformers](../../study-notes/03-transformer-architecture.md)
 - **Curriculum:** [Full Curriculum](../../CURRICULUM.md)
 
 ---

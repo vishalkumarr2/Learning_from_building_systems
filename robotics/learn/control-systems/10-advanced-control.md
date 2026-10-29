@@ -6,15 +6,15 @@
 
 ---
 
-## Why Should I Care? (OKS Context)
+## Why Should I Care? (Practical Context)
 
-PID handles 90% of OKS motor control. But the remaining 10% causes 50% of the field incidents:
+PID handles 90% of robot motor control. But the remaining 10% causes 50% of the field incidents:
 
 - **Robot loaded vs. unloaded:** A robot carrying 200 kg payload has 3× the inertia. PID gains tuned for empty robot oscillate with load. → **Gain scheduling**
 - **Predictable motion:** When the robot follows a known trajectory, waiting for error to build before reacting is wasteful. → **Feedforward**
 - **Tight constraints:** Navigating through narrow passages while respecting speed, acceleration, and obstacle distance simultaneously. → **MPC**
 
-This lesson covers the three techniques that OKS engineers reach for when PID alone fails.
+This lesson covers the three techniques that AMR engineers reach for when PID alone fails.
 
 ---
 
@@ -84,7 +84,7 @@ duties = [0.08, 0.15, 0.22, 0.37, 0.52, 0.74]  # measured steady-state duty
 # Linear fit: duty = K_ff_v * speed + offset
 K_ff_v, offset = np.polyfit(speeds, duties, 1)
 print(f"K_ff_v = {K_ff_v:.4f}, offset = {offset:.4f}")
-# Typical OKS result: K_ff_v ≈ 0.074, offset ≈ 0.01 (friction)
+# Typical AMR result: K_ff_v ≈ 0.074, offset ≈ 0.01 (friction)
 ```
 
 ## 1.3 Acceleration Feedforward
@@ -112,7 +112,7 @@ float speed_pid_with_full_ff(float sp, float sp_prev, float meas, float dt) {
 }
 ```
 
-**Impact of feedforward on OKS:**
+**Impact of feedforward on AMR:**
 - Without FF: Tracking error during acceleration is 50–100 rpm
 - With velocity FF: Tracking error drops to 10–20 rpm
 - With velocity + acceleration FF: Tracking error drops to 2–5 rpm
@@ -123,7 +123,7 @@ float speed_pid_with_full_ff(float sp, float sp_prev, float meas, float dt) {
 
 ## 2.1 The Problem: One PID Doesn't Fit All
 
-The OKS robot motor has different dynamics depending on operating conditions:
+The warehouse robot motor has different dynamics depending on operating conditions:
 
 | Condition | Inertia $J$ | Friction $B$ | Optimal $K_p$ |
 |-----------|-------------|-------------|---------------|
@@ -186,7 +186,7 @@ PIDGains interpolate_gains(float load_factor) {
 
 ## 2.4 Speed-Dependent Scheduling
 
-At very low speed, stiction dominates. At high speed, back-EMF matters more. OKS uses different integral gains at low vs. high speed:
+At very low speed, stiction dominates. At high speed, back-EMF matters more. AMR uses different integral gains at low vs. high speed:
 
 ```c
 void speed_dependent_gains(PIDController *pid, float speed_abs) {
@@ -349,7 +349,7 @@ def run_mpc(current_state, reference_path, N=10, dt=0.1):
 | Model requirement | Good model needed | Model-free |
 | Real-time feasibility | Hard on MCU | Easy on MCU |
 
-**OKS usage:** MPC runs on the **Jetson** for path tracking (replacing or supplementing DWB). The MCU still runs PID for low-level motor control. This is the standard architecture for mobile robots:
+**AMR usage:** MPC runs on the **Jetson** for path tracking (replacing or supplementing DWB). The MCU still runs PID for low-level motor control. This is the standard architecture for mobile robots:
 - **Jetson (20-50 Hz):** MPC or DWB → cmd_vel (v, ω)
 - **MCU (10 kHz):** PID cascade → motor PWM
 
@@ -407,7 +407,7 @@ def compute_lqr_gain(A, B, Q, R):
 
 **Idea:** Estimate the plant parameters online and adjust the controller in real-time.
 
-For OKS, this means:
+For AMR, this means:
 - Measure motor response to known inputs
 - Estimate inertia $J$ and friction $B$
 - Update PID gains or feedforward parameters
@@ -431,7 +431,7 @@ class SimpleAdaptive:
         return self.theta
 ```
 
-**OKS doesn't use full adaptive control** (too risky for production — stability isn't guaranteed during adaptation). Instead, OKS uses:
+**AMR doesn't use full adaptive control** (too risky for production — stability isn't guaranteed during adaptation). Instead, AMR uses:
 - **Offline calibration** at deployment
 - **Gain scheduling** (Part 2) based on load estimation
 - **Feedforward calibration** during commissioning
@@ -454,7 +454,7 @@ $$\hat{d} = \text{LPF}\{y - \hat{G}(s) \cdot u\}$$
 
 The estimated disturbance $\hat{d}$ is subtracted from the control signal, effectively canceling the disturbance.
 
-**OKS application:** The robot drives over bumps and uneven floor. The DOB estimates the disturbance torque from floor irregularities and compensates, keeping speed constant.
+**AMR application:** The robot drives over bumps and uneven floor. The DOB estimates the disturbance torque from floor irregularities and compensates, keeping speed constant.
 
 ---
 
@@ -507,5 +507,5 @@ The estimated disturbance $\hat{d}$ is subtracted from the control signal, effec
 - **Gain scheduling** handles varying operating conditions (load, speed) with a lookup table or interpolation
 - **MPC** handles constraints explicitly and optimizes over a horizon, but requires a model and heavy computation
 - **The two-layer split persists:** MCU runs PID + FF + gain scheduling (fast, deterministic). Jetson runs path following, MPC, planning (slow, flexible).
-- **Don't over-engineer:** 90% of OKS motor control is PID + velocity feedforward. Add complexity only when evidence shows PID isn't sufficient.
+- **Don't over-engineer:** 90% of robot motor control is PID + velocity feedforward. Add complexity only when evidence shows PID isn't sufficient.
 - **Calibration > algorithms:** A well-calibrated PID + feedforward usually outperforms a poorly-calibrated MPC.

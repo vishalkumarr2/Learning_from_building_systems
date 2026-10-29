@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-The OKS software stack uses GTSAM in its ROS-based navigation pipeline for factor-graph inference, and Ceres for sensor calibration. Understanding how these solvers handle manifold constraints — local parameterizations in Ceres, on-manifold factors in GTSAM — is essential for debugging and extending the robot's estimation pipeline.
+## Robotics Relevance
+The AMR software stack uses GTSAM in its ROS-based navigation pipeline for factor-graph inference, and Ceres for sensor calibration. Understanding how these solvers handle manifold constraints — local parameterizations in Ceres, on-manifold factors in GTSAM — is essential for debugging and extending the robot's estimation pipeline.
 
 ---
 
@@ -280,7 +280,7 @@ For SE(3) poses: Jacobians are computed w.r.t. 6D tangent-space perturbations us
 ## Connections
 - **Prerequisites**: Days 85–87 (manifold GN, pose graphs)
 - **Forward**: Day 89 (IMU preintegration) uses factor graphs with time-varying states
-- **OKS**: GTSAM powers the navigation stack; Ceres handles calibration routines
+- **AMR**: GTSAM powers the navigation stack; Ceres handles calibration routines
 
 ## Self-Check
 - [ ] I can explain Ceres local parameterization and GTSAM on-manifold factors

@@ -105,7 +105,7 @@ $$\frac{\partial f^*}{\partial b_i} = -\mu_i^*$$
 
 where $g_i(x) \leq b_i$ and $b_i = 0$ at the original problem.
 
-**OKS relevance:** In MPC, the multiplier on the velocity constraint tells you how much the tracking error would decrease if the robot could go faster. Active constraints at their limits → the robot is saturating.
+**Robotics relevance:** In MPC, the multiplier on the velocity constraint tells you how much the tracking error would decrease if the robot could go faster. Active constraints at their limits → the robot is saturating.
 
 ---
 
@@ -241,7 +241,7 @@ $$\mathcal{L}_A(x, \lambda, \rho) = f(x) + \lambda^T h(x) + \frac{\rho}{2}\|h(x)
 | FORCES | Code-gen QP/NLP | Embedded MPC | C |
 | `scipy.optimize.minimize` | SQP/trust-constr | General Python | Python |
 
-**OKS relevance:**
+**Robotics relevance:**
 - MPC uses QP solvers (OSQP, qpOASES) at the inner loop
 - Trajectory optimization uses NLP solvers (IPOPT, SNOPT)
 - Ceres doesn't handle general constraints (it's NLLS only), but you can add bounds via `SetParameterLowerBound`/`SetParameterUpperBound`

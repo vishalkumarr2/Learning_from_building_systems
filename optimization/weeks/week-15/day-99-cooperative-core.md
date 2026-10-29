@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-A fleet of OKS robots is a natural cooperative game. A coalition of 3 robots can handle a multi-pick order faster than any single robot. The core tells us which reward allocations are stable — no subset of robots has an incentive to break away and form its own team. This is the foundation for stable task-sharing protocols in warehouse robotics.
+## Robotics Relevance
+A fleet of warehouse robots is a natural cooperative game. A coalition of 3 robots can handle a multi-pick order faster than any single robot. The core tells us which reward allocations are stable — no subset of robots has an incentive to break away and form its own team. This is the foundation for stable task-sharing protocols in warehouse robotics.
 
 ---
 
@@ -231,7 +231,7 @@ $v(S) = \max_{i \in S} c_i$. The core constraints reduce to incremental cost bou
 ## Connections
 - **Prerequisites:** Normal form games (Day 92), LP formulation (Day 97) — core is an LP feasibility problem
 - **Forward:** Shapley value (Day 100) always exists even when core is empty; Bargaining (Day 101) for 2-player cooperative solutions
-- **OKS:** Multi-robot task coalitions use core stability to ensure no subset of robots prefers to defect from the fleet schedule
+- **AMR:** Multi-robot task coalitions use core stability to ensure no subset of robots prefers to defect from the fleet schedule
 
 ## Self-Check
 - [ ] I can define a TU game and compute its characteristic function

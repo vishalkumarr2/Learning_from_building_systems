@@ -6,16 +6,16 @@
 
 ---
 
-## Why Should I Care? (OKS Context)
+## Why Should I Care? (Practical Context)
 
-Every OKS robot has two nested control problems running simultaneously:
+Every warehouse robot has two nested control problems running simultaneously:
 
 1. **Inner loop (STM32):** "Make the left wheel spin at exactly 1.5 rad/s" — a speed control problem
 2. **Outer loop (Jetson):** "Follow this trajectory from tile A to tile B" — a trajectory tracking problem
 
 Both are *feedback control systems*. If you don't understand what that means — what feedback buys you, what happens when it's removed, and how the math describes it — you'll keep seeing symptoms without understanding causes.
 
-**Real OKS failure:** In ticket #98367, a robot's left motor controller lost its encoder feedback (connector vibrated loose). The motor was running **open-loop** — just applying a fixed voltage. Without feedback, the wheel speed drifted with load (turning corners = more friction = slower). The robot veered left on every turn until the estimator delocalized. This note explains *why* that happened and *why* feedback prevents it.
+**Real AMR failure:** In ticket Incident-A, a robot's left motor controller lost its encoder feedback (connector vibrated loose). The motor was running **open-loop** — just applying a fixed voltage. Without feedback, the wheel speed drifted with load (turning corners = more friction = slower). The robot veered left on every turn until the estimator delocalized. This note explains *why* that happened and *why* feedback prevents it.
 
 ---
 
@@ -73,7 +73,7 @@ None of these hold for a motor on an AMR:
 - Battery voltage drops as charge depletes (12.6V → 10.5V over a shift)
 - Wheel diameter changes with tire wear
 
-**Quantified OKS example:** An OKS motor at fresh battery (12.4V) vs depleted battery (10.8V) produces ~13% less torque at the same PWM duty cycle. On a 3-meter tile traverse at 0.3 m/s, that's 0.04 m/s speed error × 10 seconds = **40 cm position error** by the end of the tile. With feedback, the speed PID compensates within 2 control cycles (~0.2 ms).
+**Quantified AMR example:** An robot motor at fresh battery (12.4V) vs depleted battery (10.8V) produces ~13% less torque at the same PWM duty cycle. On a 3-meter tile traverse at 0.3 m/s, that's 0.04 m/s speed error × 10 seconds = **40 cm position error** by the end of the tile. With feedback, the speed PID compensates within 2 control cycles (~0.2 ms).
 
 ## 1.3 What Feedback Buys You (The Three Gifts)
 
@@ -118,7 +118,7 @@ NEGATIVE FEEDBACK:
 
 The **closed-loop transfer function** `T(s) = G(s) / (1 + G(s)·H(s))` is the single most important equation in control theory. Everything else is a variation of it.
 
-**OKS motor example:**
+**robot motor example:**
 - G(s) = PID controller × motor transfer function
 - H(s) = encoder feedback (usually = 1 if measuring speed directly)
 - T(s) = closed-loop speed response
@@ -176,7 +176,7 @@ $$G(s) = \frac{\omega_n^2}{s^2 + 2\zeta\omega_n s + \omega_n^2}$$
   - $\zeta = 1$: fastest non-oscillating response (critically damped)
   - $\zeta > 1$: slow, no oscillation (overdamped)
 
-**OKS motor speed loop:** Typically underdamped ($\zeta \approx 0.5–0.8$) — you *want* a bit of overshoot for fast response, but not so much that the wheel surges.
+**robot motor speed loop:** Typically underdamped ($\zeta \approx 0.5–0.8$) — you *want* a bit of overshoot for fast response, but not so much that the wheel surges.
 
 ## 2.3 Poles and Zeros
 
@@ -211,7 +211,7 @@ The error that remains after the system has settled. Depends on the **system typ
 | Type 1 (one integrator) | 0 | $\frac{1}{K_v}$ | PI controller or position loop with speed controller |
 | Type 2 (two integrators) | 0 | 0 | Rare — double integrator plant |
 
-**OKS relevance:** The STM32 speed PID uses PI control (proportional + integral). The integral term adds a "free" integrator, making the system Type 1 → **zero steady-state error for constant speed commands**. Without the I term (P-only), the wheel speed would always be slightly wrong.
+**AMR relevance:** The STM32 speed PID uses PI control (proportional + integral). The integral term adds a "free" integrator, making the system Type 1 → **zero steady-state error for constant speed commands**. Without the I term (P-only), the wheel speed would always be slightly wrong.
 
 ---
 
@@ -239,7 +239,7 @@ If both happen at the same frequency → sustained oscillation. If the gain is *
 - Phase margin 30–45° → works but oscillates on disturbances
 - Phase margin < 30° → dangerous, may oscillate
 
-**OKS motor tuning:** When the firmware team tunes PID gains on a new motor, they increase Kp until the motor starts to buzz (oscillation). That buzz frequency is the **gain crossover frequency**. They then back off by ~6 dB. This is empirical gain margin tuning.
+**robot motor tuning:** When the firmware team tunes PID gains on a new motor, they increase Kp until the motor starts to buzz (oscillation). That buzz frequency is the **gain crossover frequency**. They then back off by ~6 dB. This is empirical gain margin tuning.
 
 ## 3.3 The Deadly Trio: Gain, Delay, and Resonance
 
@@ -249,10 +249,10 @@ Three things kill control loops in practice:
 2. **Too much delay:** By the time the controller reacts, the error has changed — overcorrection → oscillation
 3. **Resonance:** The mechanical structure has a natural frequency. If the control bandwidth approaches it, the system self-excites.
 
-**OKS example of each:**
+**AMR example of each:**
 - **Gain:** Kp set to 5.0 instead of 0.5 on the speed loop → motor buzzes at 200 Hz
 - **Delay:** SPI bus latency increases from 1 ms to 15 ms after a firmware bug → cmd_vel arrives too late → heading oscillation
-- **Resonance:** The robot's chassis has a mechanical resonance at ~35 Hz. If the motor current loop bandwidth exceeds ~20 Hz, it excites the chassis → vibration → sensorbar readings become noisy
+- **Resonance:** The robot's chassis has a mechanical resonance at ~35 Hz. If the motor current loop bandwidth exceeds ~20 Hz, it excites the chassis → vibration → line-sensor readings become noisy
 
 ---
 
@@ -277,7 +277,7 @@ When you tune a controller, you're trading off these competing metrics:
   └──────────────────────────────── t
 ```
 
-| Metric | Definition | Typical OKS motor spec |
+| Metric | Definition | Typical robot motor spec |
 |--------|-----------|----------------------|
 | **Rise time** ($t_r$) | Time from 10% to 90% of final value | < 5 ms (speed loop) |
 | **Overshoot** ($M_p$) | Peak value above final value, as % | < 15% |
@@ -286,7 +286,7 @@ When you tune a controller, you're trading off these competing metrics:
 
 **The fundamental trade-off:** Faster rise time ↔ more overshoot. You can't have both without a more sophisticated controller (feedforward, MPC).
 
-## 4.2 Why These Numbers Matter for OKS
+## 4.2 Why These Numbers Matter for the robot
 
 The robot receives a new `cmd_vel` every 20 ms (50 Hz). The motor speed PID must settle *within one cmd_vel period* — otherwise the wheel is still responding to the *previous* command when the *next* one arrives. If settling time > 20 ms, the commands pile up and the system becomes effectively open-loop.
 
@@ -298,21 +298,21 @@ This is why the **inner loop must be 10–100x faster than the outer loop**. It'
 
 ## 5.1 The Control Zoo
 
-| Type | What it controls | Example | OKS equivalent |
+| Type | What it controls | Example | AMR equivalent |
 |------|-----------------|---------|----------------|
 | **Regulator** | Keep output constant despite disturbances | Thermostat | Motor speed hold on a slope |
 | **Servo** | Track a changing reference | Robot arm following a trajectory | Wheel speed tracking cmd_vel profile |
-| **State feedback** | Uses full state vector, not just output | LQR | Not used in OKS (estimator is separate) |
-| **Optimal** | Minimizes a cost function | MPC | Used in some research AMRs, not OKS |
-| **Adaptive** | Adjusts controller gains online | MRAC | Not in OKS (gains are fixed at commissioning) |
+| **State feedback** | Uses full state vector, not just output | LQR | Not used in our robot (estimator is separate) |
+| **Optimal** | Minimizes a cost function | MPC | Used in some research AMRs, not AMR |
+| **Adaptive** | Adjusts controller gains online | MRAC | Not in our robot (gains are fixed at commissioning) |
 
-OKS uses **PI servo control** for motor speed and **geometric tracking** (pure pursuit variant) for trajectory following. Simple, robust, well-understood.
+AMR uses **PI servo control** for motor speed and **geometric tracking** (pure pursuit variant) for trajectory following. Simple, robust, well-understood.
 
 ## 5.2 Single-Input Single-Output (SISO) vs MIMO
 
 A differential-drive robot has two motors. You could control them independently (two SISO loops) or as a coupled system (one MIMO loop that accounts for how left wheel affects right wheel heading).
 
-OKS uses **decoupled SISO**: each motor has its own independent speed PID. The coupling between wheels is handled at the *kinematic* level (cmd_vel decomposition into left/right wheel speeds), not at the *dynamic* level.
+AMR uses **decoupled SISO**: each motor has its own independent speed PID. The coupling between wheels is handled at the *kinematic* level (cmd_vel decomposition into left/right wheel speeds), not at the *dynamic* level.
 
 **When does MIMO matter?** When the cross-coupling is strong — e.g., a quadrotor where changing one motor's speed tilts the whole frame, affecting all other motors. For a heavy ground robot on flat floor, SISO is sufficient.
 
@@ -324,7 +324,7 @@ OKS uses **decoupled SISO**: each motor has its own independent speed PID. The c
 2. What is the closed-loop transfer function if G(s) = 10/(s+5) and H(s) = 1?
 3. A P-only controller on a speed loop has steady-state error of 5%. Why? What do you add to eliminate it?
 4. The motor starts oscillating when you increase Kp to 3.0. At Kp = 2.0, it doesn't oscillate. Estimate the gain margin.
-5. Why must the inner speed loop settle in < 20 ms for an OKS robot receiving cmd_vel at 50 Hz?
+5. Why must the inner speed loop settle in < 20 ms for an warehouse robot receiving cmd_vel at 50 Hz?
 
 ---
 

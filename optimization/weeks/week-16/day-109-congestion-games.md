@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-Warehouse aisle routing is a textbook congestion game: each AMR chooses a path, and delay increases with the number of robots on each segment. The Price of Anarchy determines how much worse decentralized routing is compared to a centralized dispatcher. Understanding this gap drives OKS fleet architecture decisions — when to let robots self-route vs. when central coordination is worth the overhead.
+## Robotics Relevance
+Warehouse aisle routing is a textbook congestion game: each AMR chooses a path, and delay increases with the number of robots on each segment. The Price of Anarchy determines how much worse decentralized routing is compared to a centralized dispatcher. Understanding this gap drives AMR fleet architecture decisions — when to let robots self-route vs. when central coordination is worth the overhead.
 
 ---
 
@@ -243,11 +243,11 @@ Use the variational inequality characterization of Wardrop equilibrium. For line
 Starting from any profile, repeatedly let an unsatisfied player switch to a better strategy. Since each switch increases $\Phi$, the process terminates. With 10 players and 5 resources with random linear delays, convergence typically occurs within 20-50 rounds. The final profile is verifiably a NE.
 </details>
 
-**E3**: Model OKS warehouse routing as a congestion game with 6 robots, 4 corridors, and quadratic delay. Compute the PoA and suggest when centralized routing is justified.
+**E3**: Model warehouse routing as a congestion game with 6 robots, 4 corridors, and quadratic delay. Compute the PoA and suggest when centralized routing is justified.
 
 <details><summary>Answer</summary>
 
-With quadratic delays $d_e(x) = a_e x^2$, PoA can exceed $4/3$. For specific parameters: PoA ≈ 1.5 means decentralized routing wastes 50% more time than optimal. Centralized routing is justified when: (1) PoA > 1.3, (2) congestion is frequent (>30% of time), (3) communication latency < replanning latency. For OKS, congestion is intermittent; a hybrid approach (decentralized + congestion alerts) balances overhead vs. efficiency.
+With quadratic delays $d_e(x) = a_e x^2$, PoA can exceed $4/3$. For specific parameters: PoA ≈ 1.5 means decentralized routing wastes 50% more time than optimal. Centralized routing is justified when: (1) PoA > 1.3, (2) congestion is frequent (>30% of time), (3) communication latency < replanning latency. For AMR, congestion is intermittent; a hybrid approach (decentralized + congestion alerts) balances overhead vs. efficiency.
 </details>
 
 ---
@@ -255,7 +255,7 @@ With quadratic delays $d_e(x) = a_e x^2$, PoA can exceed $4/3$. For specific par
 ## Connections
 - **Back**: [Day 108: No-Regret Learning](day-108-no-regret.md) — no-regret dynamics converge in potential games
 - **Forward**: [Day 110: Multi-Robot Games](day-110-multi-robot-adversarial.md) — task allocation extends congestion model
-- **OKS**: Aisle congestion modeling, fleet routing architecture decisions, centralized vs. decentralized tradeoffs
+- **AMR**: Aisle congestion modeling, fleet routing architecture decisions, centralized vs. decentralized tradeoffs
 
 ## Self-Check
 - [ ] I can define a potential game and construct the Rosenthal potential for congestion games

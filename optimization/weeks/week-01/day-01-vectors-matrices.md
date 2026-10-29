@@ -9,7 +9,7 @@
 - **Week:** [Week 1 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Robot pose = vector in $\mathbb{R}^3$ (x, y, θ). Transforming between sensor frames = matrix multiplication. Null space of a measurement Jacobian tells you which directions are unobservable — critical for SLAM and calibration.
 
 ---

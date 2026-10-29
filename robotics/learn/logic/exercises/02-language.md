@@ -27,7 +27,7 @@ Identify the type of ambiguity (semantic, syntactic, or cross-reference) and pro
 
 **B.** "We need to replace defective boards with new screws."
 
-**C.** "The estimator gets data from the sensorbar and the IMU. When it fails, the robot stops."
+**C.** "The estimator gets data from the line sensor and the IMU. When it fails, the robot stops."
 
 **D.** "The engineer tested the motor running the diagnostic script."
 
@@ -65,7 +65,7 @@ Determine whether each disagreement is verbal (about definitions) or genuine (ab
 
 Classify each definition as stipulative, lexical, précising, theoretical, or persuasive.
 
-**A.** "For this investigation, 'STALL' means the sensorbar sequence counter did not increment for 5 or more consecutive cycles."
+**A.** "For this investigation, 'STALL' means the line sensor sequence counter did not increment for 5 or more consecutive cycles."
 
 **B.** "A motor is a device that converts electrical energy into mechanical motion."
 
@@ -81,7 +81,7 @@ Classify each definition as stipulative, lexical, précising, theoretical, or pe
 
 Write genus-and-difference definitions for:
 
-**A.** Sensorbar
+**A.** Line sensor
 
 **B.** Firmware
 
@@ -128,7 +128,7 @@ Each definition violates one or more rules of good definitions. Identify the vio
 
 **B.** Syntactic ambiguity: Replace defective boards using new screws? OR replace defective boards with ones that have new screws? OR replace defective boards and also replace screws?
 
-**C.** Cross-reference ambiguity: "it" could refer to the estimator, the sensorbar, or the IMU.
+**C.** Cross-reference ambiguity: "it" could refer to the estimator, the line sensor, or the IMU.
 
 **D.** Syntactic ambiguity: The engineer tested the motor while running the diagnostic script? OR the engineer tested the motor that was running the diagnostic script?
 
@@ -166,7 +166,7 @@ Each definition violates one or more rules of good definitions. Identify the vio
 
 **Problem 6:**
 
-**A.** A sensorbar (genus: sensor module) is a linear array of optical encoders that measures incremental wheel displacement by detecting alternating stripes on a code strip, providing position feedback to the navigation system.
+**A.** A line sensor (genus: sensor module) is a linear array of optical encoders that measures incremental wheel displacement by detecting alternating stripes on a code strip, providing position feedback to the navigation system.
 
 **B.** Firmware (genus: software) is low-level code stored in non-volatile memory that directly controls a device's hardware functions, typically running on a microcontroller without a general-purpose operating system.
 

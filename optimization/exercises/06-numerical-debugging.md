@@ -255,9 +255,9 @@ Rule of thumb: you lose $\log_{10}(\kappa)$ digits of accuracy. With 16 digits (
 
 ---
 
-## Section C — OKS Debugging Scenarios
+## Section C — AMR Debugging Scenarios
 
-**C1.** You're debugging the OKS navigation estimator and find that the covariance matrix $P$ has grown to have a condition number of $10^{10}$. This causes the Kalman gain computation $K = PH^T(HPH^T + R)^{-1}$ to produce inaccurate results.
+**C1.** You're debugging the AMR navigation estimator and find that the covariance matrix $P$ has grown to have a condition number of $10^{10}$. This causes the Kalman gain computation $K = PH^T(HPH^T + R)^{-1}$ to produce inaccurate results.
 
 1. What causes the covariance to become ill-conditioned?
 2. How can you detect this in production?
@@ -267,7 +267,7 @@ Rule of thumb: you lose $\log_{10}(\kappa)$ digits of accuracy. With 16 digits (
 
 1. **Causes of ill-conditioned covariance:**
    - Unobservable or weakly observable states accumulate infinite/large covariance
-   - Long periods without sensor corrections (sensorbar out of range)
+   - Long periods without sensor corrections (line sensor out of range)
    - Model mismatch: process noise $Q$ too small relative to actual dynamics
    - Numerical drift: small asymmetry errors compound over many EKF iterations
    - One state has very different units/scale than others
@@ -315,7 +315,7 @@ Rule of thumb: you lose $\log_{10}(\kappa)$ digits of accuracy. With 16 digits (
    - Add the missing term (bias, nonlinearity, environmental factor)
    - Re-optimize — residuals should look random (white noise)
 
-3. **In OKS context:** If sensorbar calibration residuals show a pattern vs. angle, it suggests the sensorbar measurement model is missing a nonlinearity (e.g., parallax, mounting offset). The correct fix is to improve the model, not to blame the solver.
+3. **In AMR context:** If line sensor calibration residuals show a pattern vs. angle, it suggests the line sensor measurement model is missing a nonlinearity (e.g., parallax, mounting offset). The correct fix is to improve the model, not to blame the solver.
 
 4. **Validation:** A proper calibration should pass a **chi-squared test** — the sum of squared normalized residuals should be approximately equal to the degrees of freedom ($m - n$).
 

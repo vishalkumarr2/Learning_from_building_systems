@@ -5,21 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Day 19: Normalization + Activations — The Hidden Architecture Decisions - LLM to VLA - Learning From Building Systems</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- KaTeX for LaTeX math -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
-        onload="renderMathInElement(document.body, {
-            delimiters: [
-                {left: '$$', right: '$$', display: true},
-                {left: '$', right: '$', display: false}
-            ],
-            throwOnError: false
-        });"></script>
+        onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}], throwOnError: false});"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
-        /* Markdown content styling */
         .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
         .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
         .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
@@ -28,83 +20,74 @@
         .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
         .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
         .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
-        .md-content code {
-            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
-            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
-        }
-        .md-content pre {
-            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
-            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
-        }
+        .md-content code { background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d; }
+        .md-content pre { background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6; }
         .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
-        .md-content blockquote {
-            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
-            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
-        }
+        .md-content blockquote { border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem; margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151; }
         .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
         .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
         .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
         .md-content tr:hover { background-color: #f9fafb; }
         .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
         .md-content strong { font-weight: 600; }
-        .md-content a { color: #7c3aed; text-decoration: underline; }
-        .md-content a:hover { color: #6d28d9; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
         .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
-        /* Details/summary */
         .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
         .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
         .md-content summary:hover { background: #f3f4f6; }
         .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
-        .md-content details > *:not(summary) { padding: 0 1rem; }
-        /* Phase badges */
-        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-        .phase-1 { background: #dbeafe; color: #1e40af; }
-        .phase-2 { background: #d1fae5; color: #065f46; }
-        .phase-3 { background: #fef3c7; color: #92400e; }
-        .phase-4 { background: #fce7f3; color: #9d174d; }
-        .phase-5 { background: #ede9fe; color: #5b21b6; }
-        .phase-6 { background: #ccfbf1; color: #115e59; }
-        .phase-7 { background: #fef9c3; color: #713f12; }
-        /* Progress bar */
-        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
-        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+        .md-content details > *:not(summary) { padding-left: 1rem; padding-right: 1rem; }
+        .md-content .mermaid { margin: 1.5rem 0; overflow-x: auto; }
+        .md-content .math-display { margin: 1.5rem 0; overflow-x: auto; }
     </style>
+    <!-- lfbs:begin -->
+    <meta name="lfbs-root" content="../../../">
+    <meta name="lfbs-path" content="llm-to-vla/weeks/week-03/day-19-normalization-activations.html">
+    <meta name="lfbs-track" content="llm-to-vla">
+    <meta name="lfbs-lesson" content="1">
+    <link rel="stylesheet" href="../../../assets/learn.css">
+    <script defer src="../../../assets/lessons.js"></script>
+    <script defer src="../../../assets/learn.js"></script>
+    <!-- lfbs:end -->
 </head>
 <body class="bg-gray-100 text-gray-800">
     <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
-        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 3: Variants & GPT</a>
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Back to Week 3: Variants + GPT</a>
 
-        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+        <div class="bg-white rounded-xl shadow-md p-5 sm:p-8 md:p-10">
             <div class="md-content">
-<h1 id="day-19-normalization-activations-the-hidden-architecture-decisions">Day 19: Normalization + Activations — The Hidden Architecture Decisions</h1>
+<h1 id="day-19-normalization-activations-the-hidden-architecture-decisions" data-plain="Day 19: Normalization + Activations — The Hidden Architecture Decisions">Day 19: Normalization + Activations — The Hidden Architecture Decisions</h1>
 <blockquote>
 <p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 3 | 2.5 hours</strong>
-<em>"The devil is in the details — and the details are in the normalization layer."</em></p>
+<em>&ldquo;The devil is in the details — and the details are in the normalization layer.&rdquo;</em></p>
 </blockquote>
-<h2 id="navigation">Navigation</h2>
+<h2 id="navigation" data-plain="Navigation">Navigation</h2>
 <ul>
 <li><strong>Previous:</strong> <a href="day-18-kv-cache.html">Day 18: KV Cache</a></li>
 <li><strong>Next:</strong> <a href="day-20-mixture-of-experts.html">Day 20: Mixture of Experts</a></li>
-<li><strong>Week:</strong> <a href="README.html">Week 3 Overview</a></li>
-<li><strong>Phase:</strong> <a href="../../study-notes/03-transformers.html">Phase II: Attention &amp; Transformers</a></li>
-<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+<li><strong>Week:</strong> <a href="index.html">Week 3 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/03-transformer-architecture.html">Phase II: Attention &amp; Transformers</a></li>
+<li><strong>Curriculum:</strong> <a href="../../curriculum.html">Full Curriculum</a></li>
 </ul>
 <hr />
-<h2 id="theory-45-min">Theory (45 min)</h2>
-<h3 id="191-why-normalization-matters">19.1 Why Normalization Matters</h3>
+<h2 id="theory-45-min" data-plain="Theory (45 min)">Theory (45 min)</h2>
+<h3 id="191-why-normalization-matters" data-plain="19.1 Why Normalization Matters">19.1 Why Normalization Matters</h3>
 <p>Without normalization, transformer training is fragile. Activations grow or shrink exponentially across layers:</p>
-<pre><code>Layer 1 output:  mean ≈ 0.0, std ≈ 1.0   ← fine
+<div class="highlight"><pre><span></span><code>Layer 1 output:  mean ≈ 0.0, std ≈ 1.0   ← fine
 Layer 8 output:  mean ≈ 0.3, std ≈ 4.2   ← drifting
 Layer 16 output: mean ≈ 1.7, std ≈ 18.1  ← unstable
 Layer 32 output: mean ≈ ???, std ≈ ???    ← NaN city
-</code></pre>
+</code></pre></div>
+
 <p><strong>LayerNorm</strong> (Ba et al., 2016) normalizes across the feature dimension:</p>
-<p>$$\text{LayerNorm}(x) = \gamma \cdot \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta$$</p>
+<div class="math-display">$$\text{LayerNorm}(x) = \gamma \cdot \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta$$</div>
+
 <p>where $\mu = \frac{1}{d}\sum_{i=1}^{d} x_i$ and $\sigma^2 = \frac{1}{d}\sum_{i=1}^{d}(x_i - \mu)^2$</p>
-<p>Key: normalizes each token's feature vector independently — no batch dependency.</p>
-<h3 id="192-post-ln-vs-pre-ln">19.2 Post-LN vs Pre-LN</h3>
+<p>Key: normalizes each token&rsquo;s feature vector independently — no batch dependency.</p>
+<h3 id="192-post-ln-vs-pre-ln" data-plain="19.2 Post-LN vs Pre-LN">19.2 Post-LN vs Pre-LN</h3>
 <p>The original transformer (Vaswani et al., 2017) used <strong>Post-LN</strong>:</p>
-<pre><code>Post-LN (original):                    Pre-LN (modern):
+<div class="highlight"><pre><span></span><code>Post-LN (original):                    Pre-LN (modern):
 ┌──────────┐                           ┌──────────┐
 │    x      │                           │    x      │
 ├──────────┤                           ├──────────┤
@@ -120,7 +103,8 @@ Layer 32 output: mean ≈ ???, std ≈ ???    ← NaN city
 ├──────────┤                           ├──────────┤
 │  LN(·)    │ ← normalize AFTER        │  + resid  │
 └──────────┘                           └──────────┘
-</code></pre>
+</code></pre></div>
+
 <p><strong>Why Pre-LN won:</strong></p>
 <table>
 <thead>
@@ -158,37 +142,43 @@ Layer 32 output: mean ≈ ???, std ≈ ???    ← NaN city
 </tr>
 </tbody>
 </table>
-<p><strong>The key insight:</strong> In Pre-LN, the residual path $x + f(\text{LN}(x))$ creates a "gradient highway" — gradients can flow unimpeded through the addition, bypassing the nonlinear sublayers entirely.</p>
-<h3 id="193-rmsnorm-simpler-is-better">19.3 RMSNorm — Simpler Is Better</h3>
+<p><strong>The key insight:</strong> In Pre-LN, the residual path $x + f(\text{LN}(x))$ creates a &ldquo;gradient highway&rdquo; — gradients can flow unimpeded through the addition, bypassing the nonlinear sublayers entirely.</p>
+<h3 id="193-rmsnorm-simpler-is-better" data-plain="19.3 RMSNorm — Simpler Is Better">19.3 RMSNorm — Simpler Is Better</h3>
 <p>LLaMA, Gemma, and most modern LLMs use <strong>RMSNorm</strong> instead of LayerNorm:</p>
-<p>$$\text{RMSNorm}(x) = \gamma \cdot \frac{x}{\text{RMS}(x) + \epsilon}, \quad \text{RMS}(x) = \sqrt{\frac{1}{d}\sum_{i=1}^d x_i^2}$$</p>
-<p><strong>What's different:</strong> No mean subtraction, no learned bias $\beta$. Just scale by the root-mean-square.</p>
+<div class="math-display">$$\text{RMSNorm}(x) = \gamma \cdot \frac{x}{\text{RMS}(x) + \epsilon}, \quad \text{RMS}(x) = \sqrt{\frac{1}{d}\sum_{i=1}^d x_i^2}$$</div>
+
+<p><strong>What&rsquo;s different:</strong> No mean subtraction, no learned bias $\beta$. Just scale by the root-mean-square.</p>
 <p><strong>Why it works:</strong>
 - The re-centering (mean subtraction) in LayerNorm is largely redundant after learning
 - RMSNorm is ~10-15% faster (saves one reduction operation)
 - Empirically matches LayerNorm quality</p>
-<pre><code class="language-python"># LayerNorm: 2 reductions + 2 learned params
-mean = x.mean(-1, keepdim=True)       # reduction 1
-var  = x.var(-1, keepdim=True)        # reduction 2
-out  = gamma * (x - mean) / sqrt(var + eps) + beta
+<div class="highlight"><pre><span></span><code><span class="c1"># LayerNorm: 2 reductions + 2 learned params</span>
+<span class="n">mean</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>       <span class="c1"># reduction 1</span>
+<span class="n">var</span>  <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>        <span class="c1"># reduction 2</span>
+<span class="n">out</span>  <span class="o">=</span> <span class="n">gamma</span> <span class="o">*</span> <span class="p">(</span><span class="n">x</span> <span class="o">-</span> <span class="n">mean</span><span class="p">)</span> <span class="o">/</span> <span class="n">sqrt</span><span class="p">(</span><span class="n">var</span> <span class="o">+</span> <span class="n">eps</span><span class="p">)</span> <span class="o">+</span> <span class="n">beta</span>
 
-# RMSNorm: 1 reduction + 1 learned param
-rms  = sqrt(mean(x^2, dim=-1))        # reduction 1
-out  = gamma * x / (rms + eps)         # no beta!
-</code></pre>
-<h3 id="194-activation-functions-relu-gelu-swiglu">19.4 Activation Functions: ReLU → GELU → SwiGLU</h3>
+<span class="c1"># RMSNorm: 1 reduction + 1 learned param</span>
+<span class="n">rms</span>  <span class="o">=</span> <span class="n">sqrt</span><span class="p">(</span><span class="n">mean</span><span class="p">(</span><span class="n">x</span><span class="o">^</span><span class="mi">2</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">))</span>        <span class="c1"># reduction 1</span>
+<span class="n">out</span>  <span class="o">=</span> <span class="n">gamma</span> <span class="o">*</span> <span class="n">x</span> <span class="o">/</span> <span class="p">(</span><span class="n">rms</span> <span class="o">+</span> <span class="n">eps</span><span class="p">)</span>         <span class="c1"># no beta!</span>
+</code></pre></div>
+
+<h3 id="194-activation-functions-relu-gelu-swiglu" data-plain="19.4 Activation Functions: ReLU → GELU → SwiGLU">19.4 Activation Functions: ReLU → GELU → SwiGLU</h3>
 <p><strong>The evolution of transformer FFN activations:</strong></p>
-<p><strong>ReLU</strong> (original transformers):
-$$\text{FFN}(x) = \text{ReLU}(xW_1 + b_1)W_2 + b_2$$
-$$\text{ReLU}(x) = \max(0, x)$$</p>
+<p><strong>ReLU</strong> (original transformers):</p>
+<div class="math-display">$$\text{FFN}(x) = \text{ReLU}(xW_1 + b_1)W_2 + b_2$$</div>
+
+<div class="math-display">$$\text{ReLU}(x) = \max(0, x)$$</div>
+
 <p>Problem: dead neurons (permanently zero for negative inputs).</p>
-<p><strong>GELU</strong> (GPT-2, BERT):
-$$\text{GELU}(x) = x \cdot \Phi(x) \approx x \cdot \sigma(1.702x)$$</p>
+<p><strong>GELU</strong> (GPT-2, BERT):</p>
+<div class="math-display">$$\text{GELU}(x) = x \cdot \Phi(x) \approx x \cdot \sigma(1.702x)$$</div>
+
 <p>Smooth approximation of ReLU — allows small negative gradients. Used in GPT-2, BERT, ViT.</p>
-<p><strong>SwiGLU</strong> (LLaMA, PaLM, Gemma):
-$$\text{SwiGLU}(x) = (\text{Swish}(xW_{\text{gate}})) \odot (xW_1) \cdot W_2$$</p>
+<p><strong>SwiGLU</strong> (LLaMA, PaLM, Gemma):</p>
+<div class="math-display">$$\text{SwiGLU}(x) = (\text{Swish}(xW_{\text{gate}})) \odot (xW_1) \cdot W_2$$</div>
+
 <p>where $\text{Swish}(x) = x \cdot \sigma(x)$ and $\odot$ is element-wise multiplication.</p>
-<pre><code>Standard FFN:
+<div class="highlight"><pre><span></span><code>Standard FFN:
   x ──→ [W₁] ──→ [ReLU/GELU] ──→ [W₂] ──→ out
   Params: d×4d + 4d×d = 8d²
 
@@ -196,216 +186,223 @@ SwiGLU FFN:
   x ──→ [W_gate] ──→ [Swish] ──┐
   x ──→ [W₁]    ─────────────→ ⊙ ──→ [W₂] ──→ out
   Params: d×(8d/3) × 3 ≈ 8d²  (adjusted to match param count)
-</code></pre>
+</code></pre></div>
+
 <p><strong>Why GLU variants work:</strong> The gate $\text{Swish}(xW_{\text{gate}})$ learns <strong>which features to pass through</strong>. This is a form of learned feature selection — the model can decide to suppress irrelevant information rather than relying on a fixed nonlinearity.</p>
-<h3 id="195-parameter-count-with-swiglu">19.5 Parameter Count with SwiGLU</h3>
-<p>Standard FFN with hidden dim $4d$:
-$$\text{Params} = d \times 4d + 4d \times d = 8d^2$$</p>
-<p>SwiGLU adds a gate projection. To keep total params ≈ same, LLaMA uses hidden dim $\frac{8d}{3}$:
-$$\text{Params} = d \times \frac{8d}{3} + d \times \frac{8d}{3} + \frac{8d}{3} \times d = 3 \times \frac{8d^2}{3} = 8d^2$$</p>
+<h3 id="195-parameter-count-with-swiglu" data-plain="19.5 Parameter Count with SwiGLU">19.5 Parameter Count with SwiGLU</h3>
+<p>Standard FFN with hidden dim $4d$:</p>
+<div class="math-display">$$\text{Params} = d \times 4d + 4d \times d = 8d^2$$</div>
+
+<p>SwiGLU adds a gate projection. To keep total params ≈ same, LLaMA uses hidden dim $\frac{8d}{3}$:</p>
+<div class="math-display">$$\text{Params} = d \times \frac{8d}{3} + d \times \frac{8d}{3} + \frac{8d}{3} \times d = 3 \times \frac{8d^2}{3} = 8d^2$$</div>
+
 <p>In practice, LLaMA rounds to a multiple of 256, so the FFN hidden dim for LLaMA-7B with $d=4096$ is $11008$ (not $\frac{8 \times 4096}{3} = 10923$).</p>
 <hr />
-<h2 id="implementation-60-min">Implementation (60 min)</h2>
-<h3 id="196-rmsnorm-implementation">19.6 RMSNorm Implementation</h3>
-<pre><code class="language-python">import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import matplotlib.pyplot as plt
-import time
+<h2 id="implementation-60-min" data-plain="Implementation (60 min)">Implementation (60 min)</h2>
+<h3 id="196-rmsnorm-implementation" data-plain="19.6 RMSNorm Implementation">19.6 RMSNorm Implementation</h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">nn</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn.functional</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">F</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
 
 
-class RMSNorm(nn.Module):
-    &quot;&quot;&quot;Root Mean Square Layer Normalization (used in LLaMA).&quot;&quot;&quot;
+<span class="k">class</span><span class="w"> </span><span class="nc">RMSNorm</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Root Mean Square Layer Normalization (used in LLaMA).&quot;&quot;&quot;</span>
 
-    def __init__(self, d_model, eps=1e-6):
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(d_model))
-        self.eps = eps
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">eps</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">weight</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">d_model</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">eps</span> <span class="o">=</span> <span class="n">eps</span>
 
-    def forward(self, x):
-        rms = torch.sqrt(torch.mean(x ** 2, dim=-1, keepdim=True) + self.eps)
-        return self.weight * (x / rms)
-
-
-# Verify equivalence on centered data
-x = torch.randn(2, 10, 512)
-ln = nn.LayerNorm(512, elementwise_affine=False)
-rms = RMSNorm(512)
-rms.weight.data.fill_(1.0)
-
-# For zero-mean data, RMSNorm ≈ LayerNorm
-x_centered = x - x.mean(dim=-1, keepdim=True)
-ln_out = ln(x_centered)
-rms_out = rms(x_centered)
-print(f&quot;Max diff (centered data): {(ln_out - rms_out).abs().max():.6f}&quot;)
-</code></pre>
-<h3 id="197-swiglu-implementation">19.7 SwiGLU Implementation</h3>
-<pre><code class="language-python">class SwiGLUFFN(nn.Module):
-    &quot;&quot;&quot;SwiGLU Feed-Forward Network (LLaMA-style).&quot;&quot;&quot;
-
-    def __init__(self, d_model, hidden_dim=None):
-        super().__init__()
-        if hidden_dim is None:
-            # LLaMA uses 8/3 × d_model, rounded to multiple of 256
-            hidden_dim = int(2 * (4 * d_model) / 3)
-            hidden_dim = 256 * ((hidden_dim + 255) // 256)
-
-        self.w_gate = nn.Linear(d_model, hidden_dim, bias=False)
-        self.w1 = nn.Linear(d_model, hidden_dim, bias=False)
-        self.w2 = nn.Linear(hidden_dim, d_model, bias=False)
-
-    def forward(self, x):
-        gate = F.silu(self.w_gate(x))  # Swish = SiLU
-        up = self.w1(x)
-        return self.w2(gate * up)
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="n">rms</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">x</span> <span class="o">**</span> <span class="mi">2</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">eps</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight</span> <span class="o">*</span> <span class="p">(</span><span class="n">x</span> <span class="o">/</span> <span class="n">rms</span><span class="p">)</span>
 
 
-class StandardFFN(nn.Module):
-    &quot;&quot;&quot;Standard FFN with configurable activation.&quot;&quot;&quot;
+<span class="c1"># Verify equivalence on centered data</span>
+<span class="n">x</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">512</span><span class="p">)</span>
+<span class="n">ln</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">LayerNorm</span><span class="p">(</span><span class="mi">512</span><span class="p">,</span> <span class="n">elementwise_affine</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="n">rms</span> <span class="o">=</span> <span class="n">RMSNorm</span><span class="p">(</span><span class="mi">512</span><span class="p">)</span>
+<span class="n">rms</span><span class="o">.</span><span class="n">weight</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">fill_</span><span class="p">(</span><span class="mf">1.0</span><span class="p">)</span>
 
-    def __init__(self, d_model, hidden_dim=None, activation='relu'):
-        super().__init__()
-        hidden_dim = hidden_dim or 4 * d_model
-        self.w1 = nn.Linear(d_model, hidden_dim)
-        self.w2 = nn.Linear(hidden_dim, d_model)
-        self.act = {
-            'relu': nn.ReLU(),
-            'gelu': nn.GELU(),
-        }[activation]
+<span class="c1"># For zero-mean data, RMSNorm ≈ LayerNorm</span>
+<span class="n">x_centered</span> <span class="o">=</span> <span class="n">x</span> <span class="o">-</span> <span class="n">x</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">ln_out</span> <span class="o">=</span> <span class="n">ln</span><span class="p">(</span><span class="n">x_centered</span><span class="p">)</span>
+<span class="n">rms_out</span> <span class="o">=</span> <span class="n">rms</span><span class="p">(</span><span class="n">x_centered</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Max diff (centered data): </span><span class="si">{</span><span class="p">(</span><span class="n">ln_out</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">rms_out</span><span class="p">)</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">max</span><span class="p">()</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
 
-    def forward(self, x):
-        return self.w2(self.act(self.w1(x)))
-</code></pre>
-<h3 id="198-pre-ln-vs-post-ln-transformer-block">19.8 Pre-LN vs Post-LN Transformer Block</h3>
-<pre><code class="language-python">class TransformerBlock(nn.Module):
-    &quot;&quot;&quot;Transformer block supporting both Pre-LN and Post-LN.&quot;&quot;&quot;
+<h3 id="197-swiglu-implementation" data-plain="19.7 SwiGLU Implementation">19.7 SwiGLU Implementation</h3>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">SwiGLUFFN</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;SwiGLU Feed-Forward Network (LLaMA-style).&quot;&quot;&quot;</span>
 
-    def __init__(self, d_model=256, n_heads=8, norm_type='pre',
-                 norm_class='layernorm', ffn_type='standard'):
-        super().__init__()
-        self.norm_type = norm_type
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">hidden_dim</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># LLaMA uses 8/3 × d_model, rounded to multiple of 256</span>
+            <span class="n">hidden_dim</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="p">(</span><span class="mi">4</span> <span class="o">*</span> <span class="n">d_model</span><span class="p">)</span> <span class="o">/</span> <span class="mi">3</span><span class="p">)</span>
+            <span class="n">hidden_dim</span> <span class="o">=</span> <span class="mi">256</span> <span class="o">*</span> <span class="p">((</span><span class="n">hidden_dim</span> <span class="o">+</span> <span class="mi">255</span><span class="p">)</span> <span class="o">//</span> <span class="mi">256</span><span class="p">)</span>
 
-        # Normalization
-        NormClass = nn.LayerNorm if norm_class == 'layernorm' else RMSNorm
-        self.norm1 = NormClass(d_model)
-        self.norm2 = NormClass(d_model)
+        <span class="bp">self</span><span class="o">.</span><span class="n">w_gate</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">w1</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">w2</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">hidden_dim</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 
-        # Attention (simplified — using PyTorch MHA)
-        self.attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
-
-        # FFN
-        if ffn_type == 'swiglu':
-            self.ffn = SwiGLUFFN(d_model)
-        else:
-            self.ffn = StandardFFN(d_model, activation='relu')
-
-    def forward(self, x):
-        if self.norm_type == 'pre':
-            # Pre-LN: normalize → sublayer → residual
-            normed = self.norm1(x)
-            attn_out, _ = self.attn(normed, normed, normed)
-            x = x + attn_out
-
-            normed = self.norm2(x)
-            x = x + self.ffn(normed)
-        else:
-            # Post-LN: sublayer → residual → normalize
-            attn_out, _ = self.attn(x, x, x)
-            x = self.norm1(x + attn_out)
-
-            x = self.norm2(x + self.ffn(x))
-
-        return x
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="n">gate</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">silu</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">w_gate</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>  <span class="c1"># Swish = SiLU</span>
+        <span class="n">up</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">w1</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">w2</span><span class="p">(</span><span class="n">gate</span> <span class="o">*</span> <span class="n">up</span><span class="p">)</span>
 
 
-def compare_training_stability(norm_type, n_layers=24, n_steps=200):
-    &quot;&quot;&quot;Train a deep transformer and track gradient norms.&quot;&quot;&quot;
-    d_model = 256
-    blocks = nn.Sequential(
-        *[TransformerBlock(d_model, norm_type=norm_type) for _ in range(n_layers)]
-    )
-    optimizer = torch.optim.Adam(blocks.parameters(), lr=1e-4)
+<span class="k">class</span><span class="w"> </span><span class="nc">StandardFFN</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Standard FFN with configurable activation.&quot;&quot;&quot;</span>
 
-    losses = []
-    grad_norms = []
-    for step in range(n_steps):
-        x = torch.randn(4, 32, d_model)
-        target = torch.randn(4, 32, d_model)
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">activation</span><span class="o">=</span><span class="s1">&#39;relu&#39;</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="n">hidden_dim</span> <span class="o">=</span> <span class="n">hidden_dim</span> <span class="ow">or</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">d_model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">w1</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">w2</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">hidden_dim</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">act</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;relu&#39;</span><span class="p">:</span> <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(),</span>
+            <span class="s1">&#39;gelu&#39;</span><span class="p">:</span> <span class="n">nn</span><span class="o">.</span><span class="n">GELU</span><span class="p">(),</span>
+        <span class="p">}[</span><span class="n">activation</span><span class="p">]</span>
 
-        out = blocks(x)
-        loss = F.mse_loss(out, target)
-        losses.append(loss.item())
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">w2</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">act</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">w1</span><span class="p">(</span><span class="n">x</span><span class="p">)))</span>
+</code></pre></div>
 
-        optimizer.zero_grad()
-        loss.backward()
+<h3 id="198-pre-ln-vs-post-ln-transformer-block" data-plain="19.8 Pre-LN vs Post-LN Transformer Block">19.8 Pre-LN vs Post-LN Transformer Block</h3>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">TransformerBlock</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Transformer block supporting both Pre-LN and Post-LN.&quot;&quot;&quot;</span>
 
-        # Track gradient norm of first layer
-        total_norm = 0.0
-        for p in blocks[0].parameters():
-            if p.grad is not None:
-                total_norm += p.grad.norm().item() ** 2
-        grad_norms.append(total_norm ** 0.5)
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_model</span><span class="o">=</span><span class="mi">256</span><span class="p">,</span> <span class="n">n_heads</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">norm_type</span><span class="o">=</span><span class="s1">&#39;pre&#39;</span><span class="p">,</span>
+                 <span class="n">norm_class</span><span class="o">=</span><span class="s1">&#39;layernorm&#39;</span><span class="p">,</span> <span class="n">ffn_type</span><span class="o">=</span><span class="s1">&#39;standard&#39;</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">norm_type</span> <span class="o">=</span> <span class="n">norm_type</span>
 
-        optimizer.step()
+        <span class="c1"># Normalization</span>
+        <span class="n">NormClass</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">LayerNorm</span> <span class="k">if</span> <span class="n">norm_class</span> <span class="o">==</span> <span class="s1">&#39;layernorm&#39;</span> <span class="k">else</span> <span class="n">RMSNorm</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">norm1</span> <span class="o">=</span> <span class="n">NormClass</span><span class="p">(</span><span class="n">d_model</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">norm2</span> <span class="o">=</span> <span class="n">NormClass</span><span class="p">(</span><span class="n">d_model</span><span class="p">)</span>
 
-    return losses, grad_norms
+        <span class="c1"># Attention (simplified — using PyTorch MHA)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">attn</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">MultiheadAttention</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">batch_first</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># FFN</span>
+        <span class="k">if</span> <span class="n">ffn_type</span> <span class="o">==</span> <span class="s1">&#39;swiglu&#39;</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">ffn</span> <span class="o">=</span> <span class="n">SwiGLUFFN</span><span class="p">(</span><span class="n">d_model</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">ffn</span> <span class="o">=</span> <span class="n">StandardFFN</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">activation</span><span class="o">=</span><span class="s1">&#39;relu&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">norm_type</span> <span class="o">==</span> <span class="s1">&#39;pre&#39;</span><span class="p">:</span>
+            <span class="c1"># Pre-LN: normalize → sublayer → residual</span>
+            <span class="n">normed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">norm1</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+            <span class="n">attn_out</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">attn</span><span class="p">(</span><span class="n">normed</span><span class="p">,</span> <span class="n">normed</span><span class="p">,</span> <span class="n">normed</span><span class="p">)</span>
+            <span class="n">x</span> <span class="o">=</span> <span class="n">x</span> <span class="o">+</span> <span class="n">attn_out</span>
+
+            <span class="n">normed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">norm2</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+            <span class="n">x</span> <span class="o">=</span> <span class="n">x</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">ffn</span><span class="p">(</span><span class="n">normed</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Post-LN: sublayer → residual → normalize</span>
+            <span class="n">attn_out</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">attn</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
+            <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">norm1</span><span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="n">attn_out</span><span class="p">)</span>
+
+            <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">norm2</span><span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">ffn</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+
+        <span class="k">return</span> <span class="n">x</span>
 
 
-# Run comparison
-print(&quot;Training 24-layer Pre-LN transformer...&quot;)
-pre_losses, pre_grads = compare_training_stability('pre', n_layers=24)
+<span class="k">def</span><span class="w"> </span><span class="nf">compare_training_stability</span><span class="p">(</span><span class="n">norm_type</span><span class="p">,</span> <span class="n">n_layers</span><span class="o">=</span><span class="mi">24</span><span class="p">,</span> <span class="n">n_steps</span><span class="o">=</span><span class="mi">200</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Train a deep transformer and track gradient norms.&quot;&quot;&quot;</span>
+    <span class="n">d_model</span> <span class="o">=</span> <span class="mi">256</span>
+    <span class="n">blocks</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span>
+        <span class="o">*</span><span class="p">[</span><span class="n">TransformerBlock</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">norm_type</span><span class="o">=</span><span class="n">norm_type</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_layers</span><span class="p">)]</span>
+    <span class="p">)</span>
+    <span class="n">optimizer</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">Adam</span><span class="p">(</span><span class="n">blocks</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">lr</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">)</span>
 
-print(&quot;Training 24-layer Post-LN transformer...&quot;)
-post_losses, post_grads = compare_training_stability('post', n_layers=24)
-</code></pre>
-<h3 id="199-visualization">19.9 Visualization</h3>
-<pre><code class="language-python">fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    <span class="n">losses</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">grad_norms</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">step</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_steps</span><span class="p">):</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+        <span class="n">target</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
 
-# Training loss
-axes[0, 0].plot(pre_losses, label='Pre-LN', alpha=0.7)
-axes[0, 0].plot(post_losses, label='Post-LN', alpha=0.7)
-axes[0, 0].set_title('Training Loss (24 layers)')
-axes[0, 0].set_xlabel('Step')
-axes[0, 0].set_ylabel('MSE Loss')
-axes[0, 0].legend()
-axes[0, 0].set_yscale('log')
+        <span class="n">out</span> <span class="o">=</span> <span class="n">blocks</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">mse_loss</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+        <span class="n">losses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">loss</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
 
-# Gradient norms
-axes[0, 1].plot(pre_grads, label='Pre-LN', alpha=0.7)
-axes[0, 1].plot(post_grads, label='Post-LN', alpha=0.7)
-axes[0, 1].set_title('Gradient Norm (Layer 0)')
-axes[0, 1].set_xlabel('Step')
-axes[0, 1].set_ylabel('Gradient Norm')
-axes[0, 1].legend()
-axes[0, 1].set_yscale('log')
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+        <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
 
-# Activation comparison
-x = torch.linspace(-3, 3, 200)
-axes[1, 0].plot(x, F.relu(x), label='ReLU')
-axes[1, 0].plot(x, F.gelu(x), label='GELU')
-axes[1, 0].plot(x, F.silu(x), label='SiLU/Swish')
-axes[1, 0].set_title('Activation Functions')
-axes[1, 0].legend()
-axes[1, 0].grid(True, alpha=0.3)
-axes[1, 0].axhline(y=0, color='k', linewidth=0.5)
-axes[1, 0].axvline(x=0, color='k', linewidth=0.5)
+        <span class="c1"># Track gradient norm of first layer</span>
+        <span class="n">total_norm</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">blocks</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">parameters</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">grad</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">total_norm</span> <span class="o">+=</span> <span class="n">p</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">norm</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span> <span class="o">**</span> <span class="mi">2</span>
+        <span class="n">grad_norms</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">total_norm</span> <span class="o">**</span> <span class="mf">0.5</span><span class="p">)</span>
 
-# SwiGLU gating illustration
-gate_input = torch.randn(1000)
-gate_output = F.silu(gate_input)
-axes[1, 1].scatter(gate_input.numpy(), gate_output.numpy(), alpha=0.3, s=5)
-axes[1, 1].set_title('SiLU/Swish Gating')
-axes[1, 1].set_xlabel('Input')
-axes[1, 1].set_ylabel('Gate Value')
-axes[1, 1].grid(True, alpha=0.3)
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
 
-plt.tight_layout()
-plt.savefig('norm_activation_comparison.png', dpi=150)
-plt.show()
-</code></pre>
+    <span class="k">return</span> <span class="n">losses</span><span class="p">,</span> <span class="n">grad_norms</span>
+
+
+<span class="c1"># Run comparison</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Training 24-layer Pre-LN transformer...&quot;</span><span class="p">)</span>
+<span class="n">pre_losses</span><span class="p">,</span> <span class="n">pre_grads</span> <span class="o">=</span> <span class="n">compare_training_stability</span><span class="p">(</span><span class="s1">&#39;pre&#39;</span><span class="p">,</span> <span class="n">n_layers</span><span class="o">=</span><span class="mi">24</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Training 24-layer Post-LN transformer...&quot;</span><span class="p">)</span>
+<span class="n">post_losses</span><span class="p">,</span> <span class="n">post_grads</span> <span class="o">=</span> <span class="n">compare_training_stability</span><span class="p">(</span><span class="s1">&#39;post&#39;</span><span class="p">,</span> <span class="n">n_layers</span><span class="o">=</span><span class="mi">24</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="199-visualization" data-plain="19.9 Visualization">19.9 Visualization</h3>
+<div class="highlight"><pre><span></span><code><span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">14</span><span class="p">,</span> <span class="mi">10</span><span class="p">))</span>
+
+<span class="c1"># Training loss</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">pre_losses</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Pre-LN&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">post_losses</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Post-LN&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Training Loss (24 layers)&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Step&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;MSE Loss&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_yscale</span><span class="p">(</span><span class="s1">&#39;log&#39;</span><span class="p">)</span>
+
+<span class="c1"># Gradient norms</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">pre_grads</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Pre-LN&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">post_grads</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Post-LN&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Gradient Norm (Layer 0)&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Step&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Gradient Norm&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_yscale</span><span class="p">(</span><span class="s1">&#39;log&#39;</span><span class="p">)</span>
+
+<span class="c1"># Activation comparison</span>
+<span class="n">x</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">200</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">F</span><span class="o">.</span><span class="n">relu</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;ReLU&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">F</span><span class="o">.</span><span class="n">gelu</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;GELU&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">F</span><span class="o">.</span><span class="n">silu</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;SiLU/Swish&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Activation Functions&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">axhline</span><span class="p">(</span><span class="n">y</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">axvline</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+
+<span class="c1"># SwiGLU gating illustration</span>
+<span class="n">gate_input</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">1000</span><span class="p">)</span>
+<span class="n">gate_output</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">silu</span><span class="p">(</span><span class="n">gate_input</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">gate_input</span><span class="o">.</span><span class="n">numpy</span><span class="p">(),</span> <span class="n">gate_output</span><span class="o">.</span><span class="n">numpy</span><span class="p">(),</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;SiLU/Swish Gating&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Input&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Gate Value&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s1">&#39;norm_activation_comparison.png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">150</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</code></pre></div>
+
 <hr />
-<h2 id="exercise-45-min">Exercise (45 min)</h2>
-<h3 id="e191-parameter-count-comparison">E19.1 Parameter Count Comparison</h3>
+<h2 id="exercise-45-min" data-plain="Exercise (45 min)">Exercise (45 min)</h2>
+<h3 id="e191-parameter-count-comparison" data-plain="E19.1 Parameter Count Comparison">E19.1 Parameter Count Comparison</h3>
 <p>For $d_{\text{model}} = 4096$ (LLaMA-7B), compute the FFN parameter counts:</p>
 <table>
 <thead>
@@ -432,54 +429,55 @@ plt.show()
 </tbody>
 </table>
 <p>Do they have approximately the same number of parameters?</p>
-<h3 id="e192-training-stability-experiment">E19.2 Training Stability Experiment</h3>
+<h3 id="e192-training-stability-experiment" data-plain="E19.2 Training Stability Experiment">E19.2 Training Stability Experiment</h3>
 <p>Run the <code>compare_training_stability</code> function with varying depths:
 - 6 layers, 12 layers, 24 layers, 48 layers</p>
 <p>For each, compare Pre-LN vs Post-LN. At what depth does Post-LN fail to converge?</p>
-<h3 id="e193-activation-ablation">E19.3 Activation Ablation</h3>
+<h3 id="e193-activation-ablation" data-plain="E19.3 Activation Ablation">E19.3 Activation Ablation</h3>
 <p>Replace the activation in a small transformer (6 layers, d=256) and train on a language modeling task:
 1. ReLU FFN
 2. GELU FFN
 3. SwiGLU FFN</p>
-<pre><code class="language-python"># Starter: create a simple LM training setup
-configs = [
-    ('ReLU', StandardFFN(256, activation='relu')),
-    ('GELU', StandardFFN(256, activation='gelu')),
-    ('SwiGLU', SwiGLUFFN(256)),
-]
+<div class="highlight"><pre><span></span><code><span class="c1"># Starter: create a simple LM training setup</span>
+<span class="n">configs</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">(</span><span class="s1">&#39;ReLU&#39;</span><span class="p">,</span> <span class="n">StandardFFN</span><span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="n">activation</span><span class="o">=</span><span class="s1">&#39;relu&#39;</span><span class="p">)),</span>
+    <span class="p">(</span><span class="s1">&#39;GELU&#39;</span><span class="p">,</span> <span class="n">StandardFFN</span><span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="n">activation</span><span class="o">=</span><span class="s1">&#39;gelu&#39;</span><span class="p">)),</span>
+    <span class="p">(</span><span class="s1">&#39;SwiGLU&#39;</span><span class="p">,</span> <span class="n">SwiGLUFFN</span><span class="p">(</span><span class="mi">256</span><span class="p">)),</span>
+<span class="p">]</span>
 
-for name, ffn in configs:
-    param_count = sum(p.numel() for p in ffn.parameters())
-    print(f&quot;{name}: {param_count:,} parameters&quot;)
-    # Train each variant for 500 steps, plot loss curves
-</code></pre>
+<span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">ffn</span> <span class="ow">in</span> <span class="n">configs</span><span class="p">:</span>
+    <span class="n">param_count</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">numel</span><span class="p">()</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">ffn</span><span class="o">.</span><span class="n">parameters</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">param_count</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> parameters&quot;</span><span class="p">)</span>
+    <span class="c1"># Train each variant for 500 steps, plot loss curves</span>
+</code></pre></div>
+
 <p>Which converges fastest? Which reaches the lowest loss?</p>
 <hr />
-<h2 id="key-takeaways">Key Takeaways</h2>
+<h2 id="key-takeaways" data-plain="Key Takeaways">Key Takeaways</h2>
 <ol>
 <li><strong>Pre-LN is universally preferred</strong> — normalizing before the sublayer creates a gradient highway through residual connections</li>
 <li><strong>RMSNorm drops mean subtraction</strong> with no quality loss — simpler and ~15% faster than LayerNorm</li>
 <li><strong>SwiGLU uses learned gating</strong> to decide which features pass through the FFN, outperforming fixed nonlinearities</li>
-<li><strong>These "boring" details matter enormously</strong> — the difference between a model that trains and one that diverges often comes down to normalization placement</li>
+<li><strong>These &ldquo;boring&rdquo; details matter enormously</strong> — the difference between a model that trains and one that diverges often comes down to normalization placement</li>
 <li><strong>Modern LLM recipe:</strong> Pre-RMSNorm + SwiGLU + no bias terms (LLaMA, Gemma, Mistral all use this)</li>
 </ol>
-<h2 id="connection-to-the-thread">Connection to the Thread</h2>
-<p>You've built the transformer (Day 14), learned to train it (Day 15), and optimized attention (Day 17) and inference (Day 18). Today fills in the remaining architectural decisions that separate a toy transformer from a production LLM. These choices — Pre-LN, RMSNorm, SwiGLU — are the accumulated wisdom of years of scaling experiments. Tomorrow, you'll see the most dramatic architectural innovation in recent LLM history: Mixture of Experts.</p>
-<h2 id="further-reading">Further Reading</h2>
+<h2 id="connection-to-the-thread" data-plain="Connection to the Thread">Connection to the Thread</h2>
+<p>You&rsquo;ve built the transformer (Day 14), learned to train it (Day 15), and optimized attention (Day 17) and inference (Day 18). Today fills in the remaining architectural decisions that separate a toy transformer from a production LLM. These choices — Pre-LN, RMSNorm, SwiGLU — are the accumulated wisdom of years of scaling experiments. Tomorrow, you&rsquo;ll see the most dramatic architectural innovation in recent LLM history: Mixture of Experts.</p>
+<h2 id="further-reading" data-plain="Further Reading">Further Reading</h2>
 <ul>
 <li><strong><a href="https://arxiv.org/abs/1910.07467">RMSNorm Paper</a></strong> — Zhang &amp; Sennrich, 2019</li>
 <li><strong><a href="https://arxiv.org/abs/2002.05202">GLU Variants Paper</a></strong> — Shazeer, 2020</li>
 <li><strong><a href="https://arxiv.org/abs/2002.04745">On Layer Normalization</a></strong> — Xiong et al., 2020 (Pre-LN analysis)</li>
 <li><strong><a href="https://arxiv.org/abs/2302.13971">LLaMA Paper</a></strong> — Touvron et al., 2023 (see architecture section)</li>
-<li><strong><a href="https://www.youtube.com/watch?v=kCc8FmEb1nY">Karpathy's Building GPT</a></strong> — LayerNorm discussion</li>
+<li><strong><a href="https://www.youtube.com/watch?v=kCc8FmEb1nY">Karpathy&rsquo;s Building GPT</a></strong> — LayerNorm discussion</li>
 </ul>
             </div>
         </div>
 
-        <div class="mt-6 flex justify-between text-sm">
-            <a href="day-18-kv-cache.html" class="text-violet-600 hover:text-violet-800">&larr; Day 18: KV Cache</a>
-            <a href="day-20-mixture-of-experts.html" class="text-violet-600 hover:text-violet-800">Day 20: Mixture of Experts &rarr;</a>
-        </div>
+        <nav class="lfbs-pager mt-6 flex justify-between gap-4 text-sm" aria-label="Lesson navigation">
+            <a href="day-18-kv-cache.html" class="lfbs-pager-prev text-violet-600 hover:text-violet-800">&larr; Day 18: KV Cache — Why Autoregressive Inference Is Fast</a>
+            <a href="day-20-mixture-of-experts.html" class="lfbs-pager-next text-violet-600 hover:text-violet-800">Day 20: Mixture of Experts (MoE) — Sparse Activation at Scale &rarr;</a>
+        </nav>
     </div>
 </body>
 </html>

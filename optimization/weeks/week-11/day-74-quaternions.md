@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-ROS `tf2` represents all orientations as quaternions `[x, y, z, w]`. The OKS IMU publishes orientation in quaternion form. Every `geometry_msgs/Quaternion` in the navigation stack is a unit quaternion. Understanding the double-cover property explains why `q` and `-q` represent the same rotation — a frequent source of sign-flip bugs in sensor fusion.
+## Robotics Relevance
+ROS `tf2` represents all orientations as quaternions `[x, y, z, w]`. The AMR IMU publishes orientation in quaternion form. Every `geometry_msgs/Quaternion` in the navigation stack is a unit quaternion. Understanding the double-cover property explains why `q` and `-q` represent the same rotation — a frequent source of sign-flip bugs in sensor fusion.
 
 ---
 
@@ -227,7 +227,7 @@ A path from $q$ to $-q$ on $S^3$ maps to a closed loop in SO(3) (since $q$ and $
 ## Connections
 - **Prerequisites:** [Day 73](day-73-so3-rodrigues.md) — axis-angle representation and Rodrigues' formula
 - **Forward:** [Day 75](day-75-quaternion-operations.md) — SLERP and averaging; [Day 76](day-76-rotation-representations.md) — comparison of all representations
-- **OKS:** Every `tf2::Quaternion` in the OKS stack is a unit quaternion; IMU drivers publish orientations as quaternions
+- **AMR:** Every `tf2::Quaternion` in the AMR stack is a unit quaternion; IMU drivers publish orientations as quaternions
 
 ## Self-Check
 - [ ] I can convert between axis-angle and quaternion representations in both directions

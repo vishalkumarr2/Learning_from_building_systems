@@ -9,8 +9,8 @@
 - **Week:** [Week 1 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-This review consolidates the exact mathematical toolkit used in every OKS optimization pipeline: the Jacobian linearizations in SLAM, the Hessian approximations in Gauss-Newton, the convexity analysis that tells you when initialization matters, and the optimality checks that tell you if the solver succeeded.
+## Robotics Relevance
+This review consolidates the exact mathematical toolkit used in every AMR optimization pipeline: the Jacobian linearizations in SLAM, the Hessian approximations in Gauss-Newton, the convexity analysis that tells you when initialization matters, and the optimality checks that tell you if the solver succeeded.
 
 ---
 

@@ -18,4 +18,4 @@ Building on the full transformer from Week 2, this week explores training recipe
 
 ## Study Notes Reference
 - [02 — Attention Mechanism](../../study-notes/02-attention-mechanism.md)
-- [03 — Transformers](../../study-notes/03-transformers.md)
+- [03 — Transformers](../../study-notes/03-transformer-architecture.md)

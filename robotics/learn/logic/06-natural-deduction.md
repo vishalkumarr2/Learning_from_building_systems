@@ -219,7 +219,7 @@ p      → Try MP, DS, or Simp from premises
 Very common in debugging — tracing a causal chain:
 ```
 1.  a ⊃ b            "SPI jitter → DMA corruption"
-2.  b ⊃ c            "DMA corruption → stale sensorbar data"
+2.  b ⊃ c            "DMA corruption → stale line sensor data"
 3.  c ⊃ d            "stale data → estimator divergence"
 4.  a                 "SPI jitter occurred"
 5.  a ⊃ c            HS 1, 2

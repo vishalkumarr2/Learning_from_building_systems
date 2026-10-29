@@ -9,8 +9,8 @@
 - **Week:** [Week 4 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-While OKS robots primarily use deterministic optimization (Ceres, OSQP), stochastic methods appear in two key areas: (1) **online parameter estimation** where sensor data arrives as a stream and parameters must be updated incrementally, and (2) **learning-based components** like terrain classifiers or neural SLAM modules. Understanding SGD/Adam also builds intuition for adaptive step size selection.
+## Robotics Relevance
+While warehouse robots primarily use deterministic optimization (Ceres, OSQP), stochastic methods appear in two key areas: (1) **online parameter estimation** where sensor data arrives as a stream and parameters must be updated incrementally, and (2) **learning-based components** like terrain classifiers or neural SLAM modules. Understanding SGD/Adam also builds intuition for adaptive step size selection.
 
 > **Note:** SGD/Adam are primarily ML tools. Robotics optimization rarely uses stochastic methods. Treat this as enrichment — skim if time-constrained, deep-dive if working on learning-based robotics.
 

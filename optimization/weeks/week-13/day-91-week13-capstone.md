@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-Visual-Inertial Odometry (VIO) is the fallback localization method on the OKS robot when primary sensors (sensorbar, wheel odometry) degrade — e.g., during floor transitions, sensorbar stiction events, or on slippery surfaces. This capstone builds a complete mini-VIO pipeline demonstrating exactly how the robot fuses camera and IMU data to maintain pose estimates under adverse conditions.
+## Robotics Relevance
+Visual-Inertial Odometry (VIO) is the fallback localization method on the warehouse robot when primary sensors (line sensor, wheel odometry) degrade — e.g., during floor transitions, line sensor stiction events, or on slippery surfaces. This capstone builds a complete mini-VIO pipeline demonstrating exactly how the robot fuses camera and IMU data to maintain pose estimates under adverse conditions.
 
 ---
 
@@ -371,7 +371,7 @@ For constant velocity (no excitation): global yaw is unobservable — the system
 ## Connections
 - **Prerequisites**: Day 85 (manifold GN), Day 86–87 (pose graphs), Day 88 (factor graphs), Day 89 (IMU preintegration), Day 90 (calibration)
 - **Forward**: this capstone synthesizes all Week 12–13 material into a complete system
-- **OKS**: VIO is the backup localization system when sensorbar data is unreliable (stiction, floor transitions, slippery surfaces)
+- **AMR**: VIO is the backup localization system when line sensor data is unreliable (stiction, floor transitions, slippery surfaces)
 
 ## Self-Check
 - [ ] I can describe the VIO pipeline: states, factors, and optimization

@@ -181,9 +181,9 @@ LP solution: $a = 1.5, b = 3.0$, value $= 28.5$. Since we can't carry half a box
 
 ---
 
-## Section C — OKS Connection
+## Section C — AMR Connection
 
-**C1.** The OKS MPC controller needs to compute velocity commands $(v, \omega)$ that:
+**C1.** The AMR MPC controller needs to compute velocity commands $(v, \omega)$ that:
 - Track a reference path (minimize tracking error)
 - Respect velocity limits: $|v| \leq v_{\max}$, $|\omega| \leq \omega_{\max}$
 - Respect acceleration limits: $|\dot{v}| \leq a_{\max}$, $|\dot{\omega}| \leq \alpha_{\max}$
@@ -209,6 +209,6 @@ LP solution: $a = 1.5, b = 3.0$, value $= 28.5$. Since we can't carry half a box
    - The constraint can appear/disappear as the robot moves (active set changes)
    - For moving obstacles, the constraint depends on time
    
-   This is why many robots use a simpler approach: plan a path that avoids obstacles (using A*/RRT), then track that path with MPC that only handles kinematic constraints. OKS does this — path planning handles obstacles, the controller handles dynamics.
+   This is why many robots use a simpler approach: plan a path that avoids obstacles (using A*/RRT), then track that path with MPC that only handles kinematic constraints. The AMR stack does this — path planning handles obstacles, the controller handles dynamics.
 
 </details>

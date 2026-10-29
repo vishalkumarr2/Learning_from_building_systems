@@ -6,13 +6,13 @@
 
 ---
 
-## Why Should I Care? (OKS Context)
+## Why Should I Care? (Practical Context)
 
-Before you can design a PID controller, you need to know *what you're controlling*. On an OKS robot, that's a **brushed DC motor** (earlier models) or **brushless DC motor** (BLDC, newer models) driving each wheel through a gearbox.
+Before you can design a PID controller, you need to know *what you're controlling*. On an warehouse robot, that's a **brushed DC motor** (earlier models) or **brushless DC motor** (BLDC, newer models) driving each wheel through a gearbox.
 
 When you see a motor oscillating, or the robot can't maintain speed on a ramp, or the current draw spikes unexpectedly — the explanation is in the motor's physics. This lesson derives the motor model from first principles so you can predict these behaviors before they happen.
 
-**Real OKS scenario:** A firmware update changed the motor PWM frequency from 20 kHz to 50 kHz. The motors ran hotter and drew more current at the same speed. Why? Because the motor's electrical time constant ($L/R \approx 0.5$ ms) is comparable to the 20 µs PWM period at 50 kHz — the current ripple increased. You can't predict this without understanding the electrical model.
+**Real AMR scenario:** A firmware update changed the motor PWM frequency from 20 kHz to 50 kHz. The motors ran hotter and drew more current at the same speed. Why? Because the motor's electrical time constant ($L/R \approx 0.5$ ms) is comparable to the 20 µs PWM period at 50 kHz — the current ripple increased. You can't predict this without understanding the electrical model.
 
 ---
 
@@ -61,7 +61,7 @@ where:
 
 **Electrical time constant:** $\tau_e = L/R$
 
-For a typical OKS motor: $L \approx 1$ mH, $R \approx 2$ Ω → $\tau_e = 0.5$ ms.
+For a typical robot motor: $L \approx 1$ mH, $R \approx 2$ Ω → $\tau_e = 0.5$ ms.
 This means the current responds to voltage changes in ~0.5 ms — fast enough that for the *speed* loop (settling in ~10 ms), we can sometimes approximate the electrical dynamics as instantaneous.
 
 ## 1.3 The Mechanical Equation
@@ -80,7 +80,7 @@ where:
 
 **Mechanical time constant:** $\tau_m = J \cdot R / (K_t \cdot K_e)$
 
-For a typical OKS motor+gearbox: $\tau_m \approx 50–200$ ms. This is the dominant dynamic — mechanical response is 100–400× slower than electrical response.
+For a typical robot motor+gearbox: $\tau_m \approx 50–200$ ms. This is the dominant dynamic — mechanical response is 100–400× slower than electrical response.
 
 ## 1.4 The Key Insight: $K_t = K_e$
 
@@ -144,7 +144,7 @@ The current has a *zero* in the numerator — it initially spikes (when you appl
   0   τ_e        τ_m
 ```
 
-**OKS relevance:** This initial current spike is why motor drivers have **current limiting**. At stall (wheel blocked), current = V/R = 12V / 2Ω = 6A. The motor driver may only handle 3A continuous. The current PID loop (innermost loop) prevents this spike from damaging the driver.
+**AMR relevance:** This initial current spike is why motor drivers have **current limiting**. At stall (wheel blocked), current = V/R = 12V / 2Ω = 6A. The motor driver may only handle 3A continuous. The current PID loop (innermost loop) prevents this spike from damaging the driver.
 
 ---
 
@@ -152,7 +152,7 @@ The current has a *zero* in the numerator — it initially spikes (when you appl
 
 ## 3.1 Reading a Motor Datasheet
 
-A typical OKS motor datasheet provides:
+A typical robot motor datasheet provides:
 
 | Parameter | Symbol | Typical value | Unit |
 |-----------|--------|---------------|------|
@@ -182,7 +182,7 @@ $$B = \frac{K_t \cdot I_{nl}}{\omega_{nl}} = \frac{0.083 \times 0.2}{628} = 2.6 
 
 ## 3.2 The Gearbox Changes Everything
 
-OKS motors have a **gearbox** (typical ratio $N$ = 50:1 to 100:1). The gearbox transforms:
+robot motors have a **gearbox** (typical ratio $N$ = 50:1 to 100:1). The gearbox transforms:
 
 | Parameter | Before gearbox | After gearbox |
 |-----------|----------------|---------------|
@@ -196,7 +196,7 @@ OKS motors have a **gearbox** (typical ratio $N$ = 50:1 to 100:1). The gearbox t
 
 $$\tau_m = \frac{(J_{motor} N^2 + J_{wheel}) \cdot R}{K_t^2 + R \cdot B_{total}}$$
 
-For OKS with $N = 50$, $J_{motor} = 5 \times 10^{-6}$:
+For AMR with $N = 50$, $J_{motor} = 5 \times 10^{-6}$:
 - $J_{reflected} = 5 \times 10^{-6} \times 2500 = 0.0125$ kg·m²
 - $J_{wheel} \approx 0.005$ kg·m²
 - $J_{total} \approx 0.0175$ kg·m²
@@ -228,7 +228,7 @@ or equivalently: $\omega = \frac{V}{K_e} - \frac{R}{K_e K_t} \tau$
 
 **Operating point:** The motor settles where the speed-torque line intersects the load curve. If the load increases (slope, heavier payload), the operating point moves left (lower speed, higher torque, higher current).
 
-**OKS relevance:** When a robot carries a heavier bin, the load torque increases. Without feedback, the motor slows down. With speed PID, the controller increases PWM to maintain the setpoint — but current increases. If current exceeds the driver's limit, it saturates. This is **torque saturation** — the controller wants more torque than the motor can provide. The robot slows down despite the controller's best effort.
+**AMR relevance:** When a robot carries a heavier bin, the load torque increases. Without feedback, the motor slows down. With speed PID, the controller increases PWM to maintain the setpoint — but current increases. If current exceeds the driver's limit, it saturates. This is **torque saturation** — the controller wants more torque than the motor can provide. The robot slows down despite the controller's best effort.
 
 ---
 
@@ -240,7 +240,7 @@ or equivalently: $\omega = \frac{V}{K_e} - \frac{R}{K_e K_t} \tau$
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Motor parameters (OKS-like geared motor)
+# Motor parameters (AMR-like geared motor)
 R  = 2.0        # Ω
 L  = 0.001      # H (1 mH — we'll include it for accuracy)
 Kt = 0.083      # N·m/A = V·s/rad
@@ -332,7 +332,7 @@ The transfer function model assumes linearity. Real motors have:
 | **Temperature** | R increases ~0.4%/°C; Kt changes with magnet temperature | Long duty cycles |
 | **Dead zone** | Motor doesn't respond below a minimum voltage (due to friction) | Very low speed commands |
 
-**OKS motors exhibit ALL of these.** The PID controller partially compensates, but extreme cases (stiction at very low speed, saturation on ramps) require explicit handling:
+**robot motors exhibit ALL of these.** The PID controller partially compensates, but extreme cases (stiction at very low speed, saturation on ramps) require explicit handling:
 - **Dead zone compensation:** Add a minimum PWM offset when speed command > 0
 - **Anti-backlash:** In position mode, always approach from the same direction
 - **Current limiting:** Clamp the PID output to prevent driver damage

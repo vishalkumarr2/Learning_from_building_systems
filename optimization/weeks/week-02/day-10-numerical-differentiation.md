@@ -9,7 +9,7 @@
 - **Week:** [Week 2 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Ceres provides `NumericDiffCostFunction` as a fallback when analytic or auto-diff Jacobians aren't available. Understanding the accuracy limits of numerical differentiation tells you why Ceres auto-diff is almost always preferred, and why the numerical Jacobian checker is indispensable for debugging.
 
 ---

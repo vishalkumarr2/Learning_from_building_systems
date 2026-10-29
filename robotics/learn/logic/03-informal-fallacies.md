@@ -176,7 +176,7 @@ The conclusion is assumed in the premises (circular reasoning).
 How do we know the programmer is reliable? Presumably because they write reliable firmware. The argument goes in a circle.
 
 **Subtler form in debugging:**
-> "The estimator is wrong because the sensorbar data is bad. How do we know the sensorbar data is bad? Because the estimator shows the wrong position."
+> "The estimator is wrong because the line sensor data is bad. How do we know the line sensor data is bad? Because the estimator shows the wrong position."
 
 This is circular — each claim depends on the other. You need independent evidence.
 
@@ -219,7 +219,7 @@ This suppresses the fact that there are no integration tests, no hardware-in-the
 
 Using a word with two different meanings in the same argument.
 
-> "The sensorbar gives us a good **reading**. A good **reading** is important for education. Therefore, the sensorbar is important for education."
+> "The line sensor gives us a good **reading**. A good **reading** is important for education. Therefore, the line sensor is important for education."
 
 "Reading" means different things in the two premises. This is an extreme example, but subtler equivocations happen:
 

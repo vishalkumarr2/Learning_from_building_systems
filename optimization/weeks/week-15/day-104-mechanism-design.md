@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 The fleet controller must allocate tasks to robots — each robot privately knows its battery level, distance to task, and current load. Mechanism design provides auction-based allocation where truthful reporting is the dominant strategy. The VCG mechanism ensures efficient task assignment even when robots have private information.
 
 ---
@@ -268,7 +268,7 @@ VCG achieves the first three but the principal may run a deficit ($\sum p_i \leq
 ## Connections
 - **Prerequisites:** Cooperative games (Day 99) — VCG uses Shapley-like marginal contributions; Dynamic games (Day 102) — sequential mechanisms
 - **Forward:** Week 15 review (Day 105) — combine all tools; application to fleet scheduling
-- **OKS:** Auction-based task allocation, truthful battery-level reporting, VCG for multi-robot warehouse optimization
+- **AMR:** Auction-based task allocation, truthful battery-level reporting, VCG for multi-robot warehouse optimization
 
 ## Self-Check
 - [ ] I can state the revelation principle and explain its importance

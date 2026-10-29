@@ -9,11 +9,11 @@
 
 Rate each analogy as strong or weak. Explain which criteria (from the six) support your rating.
 
-**A.** "Robot-42 (Rev C, firmware v1.18, Warehouse A, polished floor) had stale sensorbar data and the root cause was SPI clock jitter. Robot-87 (Rev C, firmware v1.18, Warehouse B, concrete floor) also has stale sensorbar data. Therefore, Robot-87 probably has SPI clock jitter too."
+**A.** "Robot-42 (Rev C, firmware v1.18, Warehouse A, polished floor) had stale line sensor data and the root cause was SPI clock jitter. Robot-87 (Rev C, firmware v1.18, Warehouse B, concrete floor) also has stale line sensor data. Therefore, Robot-87 probably has SPI clock jitter too."
 
 **B.** "My laptop crashed after a software update. A robot crashed after a firmware update. Therefore, the robot crash was probably caused by the firmware update, just like my laptop."
 
-**C.** "In the last 8 incidents involving estimator divergence at Hamamatsu, 7 were caused by sensorbar cable issues. This is another estimator divergence at Hamamatsu. Therefore, it's probably a sensorbar cable issue."
+**C.** "In the last 8 incidents involving estimator divergence at Site-A, 7 were caused by line sensor cable issues. This is another estimator divergence at Site-A. Therefore, it's probably a line sensor cable issue."
 
 ---
 

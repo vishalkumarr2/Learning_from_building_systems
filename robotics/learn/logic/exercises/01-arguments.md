@@ -29,7 +29,7 @@ Identify the conclusion indicator or premise indicator in each argument, then st
 
 **B.** "The test suite should be expanded, given that three bugs were missed in the last release cycle."
 
-**C.** "Owing to the fact that the sensorbar cable was loose, the position readings were intermittent. This means the estimator had insufficient data."
+**C.** "Owing to the fact that the line sensor cable was loose, the position readings were intermittent. This means the estimator had insufficient data."
 
 ---
 

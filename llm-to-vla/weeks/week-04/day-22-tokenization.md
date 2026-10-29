@@ -7,7 +7,7 @@
 - **Previous:** [Day 21: BERT & Masked LM](../week-03/day-21-bert-masked-lm.md)
 - **Next:** [Day 23: GPT & nanoGPT](day-23-gpt-nanogpt.md)
 - **Week:** [Week 4 Overview](README.md)
-- **Phase:** [Phase II: Attention & Transformers](../../study-notes/03-transformers.md)
+- **Phase:** [Phase II: Attention & Transformers](../../study-notes/03-transformer-architecture.md)
 - **Curriculum:** [Full Curriculum](../../CURRICULUM.md)
 
 ---

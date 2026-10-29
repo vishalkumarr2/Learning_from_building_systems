@@ -9,8 +9,8 @@
 - **Week:** [Week 4 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-`scipy.optimize` is the default Python solver for quick prototyping and offline analysis at Rapyuta. When analyzing OKS logs, you'll minimize residuals with `least_squares`, calibrate sensor models with `minimize`, and fit distributions with `curve_fit`. For production, Ceres/OSQP are preferred — but scipy is where you prototype, validate, and debug. Knowing every method and when to use each saves hours of trial and error.
+## Robotics Relevance
+`scipy.optimize` is the default Python solver for quick prototyping and offline analysis at work. When analyzing AMR logs, you'll minimize residuals with `least_squares`, calibrate sensor models with `minimize`, and fit distributions with `curve_fit`. For production, Ceres/OSQP are preferred — but scipy is where you prototype, validate, and debug. Knowing every method and when to use each saves hours of trial and error.
 
 ---
 
@@ -128,7 +128,7 @@ Practical: estimate wheel radius from encoder ticks and measured distances. Use 
 6. When should you use `least_squares` instead of `minimize`? What's the advantage?
 7. How does `trust-constr` handle both equality and inequality constraints?
 8. What is the memory advantage of L-BFGS-B? How does the `m` parameter (history size) affect it?
-9. For the OKS sensor calibration problem with 6 parameters and 100 measurements, which scipy method would you use?
+9. For the AMR sensor calibration problem with 6 parameters and 100 measurements, which scipy method would you use?
 10. Why does scipy's `minimize` default to BFGS when gradients are provided?
 
 ---

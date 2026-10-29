@@ -78,7 +78,7 @@ $$H_{ij} = \nabla^2 f(x) = \frac{\partial^2 f}{\partial x_i \partial x_j}$$
 | Mixed signs | Saddle point | Not a minimum, keep going |
 | Some near zero | Flat valley | Slow convergence, ill-conditioned |
 
-**OKS relevance:** When the sensorbar has too few measurements, the Hessian near the solution has near-zero eigenvalues → the solver oscillates or converges slowly.
+**Robotics relevance:** When the line sensor has too few measurements, the Hessian near the solution has near-zero eigenvalues → the solver oscillates or converges slowly.
 
 ---
 
@@ -130,7 +130,7 @@ For convex functions:
 
 ### Common Convex Functions
 
-| Function | Domain | Convex? | OKS use |
+| Function | Domain | Convex? | AMR use |
 |----------|--------|---------|---------|
 | $\|x\|_2^2$ | $\mathbb{R}^n$ | ✅ Strongly convex | Least-squares cost |
 | $\|x\|_1$ | $\mathbb{R}^n$ | ✅ Convex (not strongly) | L1 regularization |
@@ -146,7 +146,7 @@ For convex functions:
 - Affine transformation: $f(Ax + b)$ is convex if $f$ is convex
 - Non-negative weighted sum: $\sum \alpha_i f_i(x)$, $\alpha_i \geq 0$ → convex
 
-**OKS relevance:** The sum of squared residuals $\sum_i r_i(x)^2$ is convex in $x$ when each $r_i$ is affine. When $r_i$ is nonlinear (sensorbar model), the problem is **non-convex** — which is why Ceres needs good initial guesses and LM damping.
+**Robotics relevance:** The sum of squared residuals $\sum_i r_i(x)^2$ is convex in $x$ when each $r_i$ is affine. When $r_i$ is nonlinear (line sensor model), the problem is **non-convex** — which is why Ceres needs good initial guesses and LM damping.
 
 ---
 

@@ -57,7 +57,7 @@ None. This track assumes no prior logic background. If you can read and understa
 | Inductive strength | "How strong is this failure pattern based on 5 similar incidents?" |
 | Informal fallacies | Spotting bad reasoning in meetings: ad hominem, false dilemma, hasty generalization |
 | Propositional logic | Boolean conditions in code, truth tables for complex if-else chains |
-| Categorical syllogisms | "All OKS robots have sensorbar. This device has no sensorbar. Therefore this is not an OKS robot." |
+| Categorical syllogisms | "All warehouse robots have line sensors. This device has no line sensor. Therefore this is not a warehouse robot." |
 | Predicate logic | "For all robots in fleet X, if battery < 20% then dock" — formalizing fleet policies |
 | Mill's methods | Systematic root cause isolation: method of difference, concomitant variation |
 | Scientific reasoning | Hypothesis formation and testing in debugging; distinguishing correlation from causation |

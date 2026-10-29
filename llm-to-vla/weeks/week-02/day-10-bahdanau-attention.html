@@ -3,23 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Day 10: Bahdanau Attention — "Looking Back at the Source" - LLM to VLA - Learning From Building Systems</title>
+    <title>Day 10: Bahdanau Attention — &quot;Looking Back at the Source&quot; - LLM to VLA - Learning From Building Systems</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- KaTeX for LaTeX math -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
-        onload="renderMathInElement(document.body, {
-            delimiters: [
-                {left: '$$', right: '$$', display: true},
-                {left: '$', right: '$', display: false}
-            ],
-            throwOnError: false
-        });"></script>
+        onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}], throwOnError: false});"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
-        /* Markdown content styling */
         .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
         .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
         .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
@@ -28,80 +20,70 @@
         .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
         .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
         .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
-        .md-content code {
-            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
-            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
-        }
-        .md-content pre {
-            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
-            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
-        }
+        .md-content code { background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d; }
+        .md-content pre { background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6; }
         .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
-        .md-content blockquote {
-            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
-            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
-        }
+        .md-content blockquote { border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem; margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151; }
         .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
         .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
         .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
         .md-content tr:hover { background-color: #f9fafb; }
         .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
         .md-content strong { font-weight: 600; }
-        .md-content a { color: #7c3aed; text-decoration: underline; }
-        .md-content a:hover { color: #6d28d9; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
         .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
-        /* Details/summary */
         .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
         .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
         .md-content summary:hover { background: #f3f4f6; }
         .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
-        .md-content details > *:not(summary) { padding: 0 1rem; }
-        /* Phase badges */
-        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-        .phase-1 { background: #dbeafe; color: #1e40af; }
-        .phase-2 { background: #d1fae5; color: #065f46; }
-        .phase-3 { background: #fef3c7; color: #92400e; }
-        .phase-4 { background: #fce7f3; color: #9d174d; }
-        .phase-5 { background: #ede9fe; color: #5b21b6; }
-        .phase-6 { background: #ccfbf1; color: #115e59; }
-        .phase-7 { background: #fef9c3; color: #713f12; }
-        /* Progress bar */
-        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
-        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+        .md-content details > *:not(summary) { padding-left: 1rem; padding-right: 1rem; }
+        .md-content .mermaid { margin: 1.5rem 0; overflow-x: auto; }
+        .md-content .math-display { margin: 1.5rem 0; overflow-x: auto; }
     </style>
+    <!-- lfbs:begin -->
+    <meta name="lfbs-root" content="../../../">
+    <meta name="lfbs-path" content="llm-to-vla/weeks/week-02/day-10-bahdanau-attention.html">
+    <meta name="lfbs-track" content="llm-to-vla">
+    <meta name="lfbs-lesson" content="1">
+    <link rel="stylesheet" href="../../../assets/learn.css">
+    <script defer src="../../../assets/lessons.js"></script>
+    <script defer src="../../../assets/learn.js"></script>
+    <!-- lfbs:end -->
 </head>
 <body class="bg-gray-100 text-gray-800">
     <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
-        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 2: Attention & Transformers</a>
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Back to Week 2: Phase I Capstone + Attention Begins</a>
 
-        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+        <div class="bg-white rounded-xl shadow-md p-5 sm:p-8 md:p-10">
             <div class="md-content">
-<h1 id="day-10-bahdanau-attention-looking-back-at-the-source">Day 10: Bahdanau Attention — "Looking Back at the Source"</h1>
+<h1 id="day-10-bahdanau-attention-looking-back-at-the-source" data-plain="Day 10: Bahdanau Attention — “Looking Back at the Source”">Day 10: Bahdanau Attention — &ldquo;Looking Back at the Source&rdquo;</h1>
 <blockquote>
 <p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 2 | 2.5 hours</strong>
-<em>"The most important development in neural machine translation was allowing the decoder to look back."</em>
+<em>&ldquo;The most important development in neural machine translation was allowing the decoder to look back.&rdquo;</em>
 — Dzmitry Bahdanau, 2014</p>
 </blockquote>
-<h2 id="navigation">Navigation</h2>
+<h2 id="navigation" data-plain="Navigation">Navigation</h2>
 <ul>
 <li><strong>Previous:</strong> <a href="day-09-phase1-checkpoint.html">Day 9: Phase I Checkpoint</a></li>
 <li><strong>Next:</strong> <a href="day-11-scaled-dot-product-attention.html">Day 11: Scaled Dot-Product Attention</a></li>
-<li><strong>Week:</strong> <a href="../README.html">Week 2 Overview</a></li>
+<li><strong>Week:</strong> <a href="../index.html">Week 2 Overview</a></li>
 <li><strong>Phase:</strong> <a href="../../study-notes/02-attention-mechanism.html">Phase II: Attention &amp; Transformers</a></li>
-<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+<li><strong>Curriculum:</strong> <a href="../../curriculum.html">Full Curriculum</a></li>
 </ul>
 <hr />
-<h2 id="theory-45-min">Theory (45 min)</h2>
-<h3 id="101-the-bottleneck-problem">10.1 The Bottleneck Problem</h3>
+<h2 id="theory-45-min" data-plain="Theory (45 min)">Theory (45 min)</h2>
+<h3 id="101-the-bottleneck-problem" data-plain="10.1 The Bottleneck Problem">10.1 The Bottleneck Problem</h3>
 <p>Recall from Day 7 the seq2seq model: an encoder reads the source sentence and compresses it into a <strong>single fixed-length vector</strong> $c$, which the decoder must use to generate the entire target sentence.</p>
-<pre><code>Source:  x₁ ─→ h₁ ─→ h₂ ─→ h₃ ─→ h₄ ──→ [c]   ← entire sentence in one vector!
+<div class="highlight"><pre><span></span><code>Source:  x₁ ─→ h₁ ─→ h₂ ─→ h₃ ─→ h₄ ──→ [c]   ← entire sentence in one vector!
                                               │
 Target:                                      [c] ─→ s₁ ─→ s₂ ─→ s₃
                                                      y₁    y₂    y₃
-</code></pre>
+</code></pre></div>
+
 <p>This is the <strong>information bottleneck</strong>. No matter how long the source sentence is — 5 words or 50 — everything must be squeezed through a vector of dimension $d$. Performance degrades dramatically on long sentences (Cho et al., 2014).</p>
 <p><strong>The question:</strong> Can the decoder look at <em>all</em> encoder hidden states, not just the last one?</p>
-<h3 id="102-bahdanau-attention-2014">10.2 Bahdanau Attention (2014)</h3>
+<h3 id="102-bahdanau-attention-2014" data-plain="10.2 Bahdanau Attention (2014)">10.2 Bahdanau Attention (2014)</h3>
 <p>Bahdanau, Cho, and Bengio proposed: let the decoder attend to different parts of the source for each target word.</p>
 <p><strong>Key insight:</strong> Attention is a <strong>soft dictionary lookup</strong>.</p>
 <ul>
@@ -109,12 +91,15 @@ Target:                                      [c] ─→ s₁ ─→ s₂ ─→ 
 <li><strong>Keys/Values</strong> ($k, v$): What the encoder offers — all encoder hidden states $h_1, \ldots, h_T$</li>
 </ul>
 <p>For each decoder step $i$, compute a <strong>context vector</strong> $c_i$ as a weighted sum of encoder states:</p>
-<p>$$c_i = \sum_{j=1}^{T} \alpha_{ij} \, h_j$$</p>
+<div class="math-display">$$c_i = \sum_{j=1}^{T} \alpha_{ij} \, h_j$$</div>
+
 <p>where $\alpha_{ij}$ are <strong>attention weights</strong> (soft alignment):</p>
-<p>$$\alpha_{ij} = \frac{\exp(e_{ij})}{\sum_{k=1}^{T} \exp(e_{ik})}$$</p>
+<div class="math-display">$$\alpha_{ij} = \frac{\exp(e_{ij})}{\sum_{k=1}^{T} \exp(e_{ik})}$$</div>
+
 <p>The <strong>energy function</strong> (alignment model) is a learnable feedforward network:</p>
-<p>$$e_{ij} = v^T \tanh(W_s \, s_{i-1} + W_h \, h_j)$$</p>
-<pre><code>                   Encoder hidden states
+<div class="math-display">$$e_{ij} = v^T \tanh(W_s \, s_{i-1} + W_h \, h_j)$$</div>
+
+<div class="highlight"><pre><span></span><code>                   Encoder hidden states
                    h₁    h₂    h₃    h₄
                     │     │     │     │
                     ▼     ▼     ▼     ▼
@@ -133,16 +118,18 @@ Target:                                      [c] ─→ s₁ ─→ s₂ ─→ 
                     │     │     │     │
                     ▼     ▼     ▼     ▼
                   α·h₁ + α·h₂ + α·h₃ + α·h₄ = c_i
-</code></pre>
-<h3 id="103-why-this-is-called-additive-attention">10.3 Why This Is Called "Additive" Attention</h3>
+</code></pre></div>
+
+<h3 id="103-why-this-is-called-additive-attention" data-plain="10.3 Why This Is Called “Additive” Attention">10.3 Why This Is Called &ldquo;Additive&rdquo; Attention</h3>
 <p>The energy function uses <strong>addition</strong> inside the tanh:</p>
-<p>$$e_{ij} = v^T \tanh(\underbrace{W_s \, s_{i-1}}_{\text{query term}} + \underbrace{W_h \, h_j}_{\text{key term}})$$</p>
-<p>This is why Bahdanau attention is classified as <strong>additive attention</strong>, in contrast to the <strong>dot-product attention</strong> we'll see in Day 11.</p>
+<div class="math-display">$$e_{ij} = v^T \tanh(\underbrace{W_s \, s_{i-1}}_{\text{query term}} + \underbrace{W_h \, h_j}_{\text{key term}})$$</div>
+
+<p>This is why Bahdanau attention is classified as <strong>additive attention</strong>, in contrast to the <strong>dot-product attention</strong> we&rsquo;ll see in Day 11.</p>
 <p><strong>Parameters to learn:</strong>
 - $W_s \in \mathbb{R}^{d_a \times d_s}$ — projects decoder state
 - $W_h \in \mathbb{R}^{d_a \times d_h}$ — projects encoder state
 - $v \in \mathbb{R}^{d_a}$ — weight vector that produces a scalar energy</p>
-<h3 id="104-attention-as-soft-alignment">10.4 Attention as Soft Alignment</h3>
+<h3 id="104-attention-as-soft-alignment" data-plain="10.4 Attention as Soft Alignment">10.4 Attention as Soft Alignment</h3>
 <p>In traditional machine translation, <strong>alignment</strong> is a hard mapping between source and target words. Attention replaces this with a <em>soft</em>, differentiable version:</p>
 <table>
 <thead>
@@ -166,121 +153,124 @@ Target:                                      [c] ─→ s₁ ─→ s₂ ─→ 
 </tr>
 </tbody>
 </table>
-<p>The attention weight $\alpha_{ij}$ tells us: "When generating target word $i$, how much should we look at source word $j$?"</p>
-<h3 id="105-the-decoder-update">10.5 The Decoder Update</h3>
+<p>The attention weight $\alpha_{ij}$ tells us: &ldquo;When generating target word $i$, how much should we look at source word $j$?&rdquo;</p>
+<h3 id="105-the-decoder-update" data-plain="10.5 The Decoder Update">10.5 The Decoder Update</h3>
 <p>With attention, the decoder GRU update becomes:</p>
-<p>$$s_i = \text{GRU}(s_{i-1}, [y_{i-1}; c_i])$$</p>
+<div class="math-display">$$s_i = \text{GRU}(s_{i-1}, [y_{i-1}; c_i])$$</div>
+
 <p>where $[y_{i-1}; c_i]$ is the concatenation of the previous target embedding and the context vector. The context changes at every step — the decoder sees a <em>different</em> view of the source for each word it generates.</p>
 <hr />
-<h2 id="implementation-60-min">Implementation (60 min)</h2>
-<h3 id="106-building-a-seq2seq-model-with-bahdanau-attention">10.6 Building a Seq2Seq Model with Bahdanau Attention</h3>
-<pre><code class="language-python">import torch
-import torch.nn as nn
-import torch.nn.functional as F
+<h2 id="implementation-60-min" data-plain="Implementation (60 min)">Implementation (60 min)</h2>
+<h3 id="106-building-a-seq2seq-model-with-bahdanau-attention" data-plain="10.6 Building a Seq2Seq Model with Bahdanau Attention">10.6 Building a Seq2Seq Model with Bahdanau Attention</h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">nn</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn.functional</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">F</span>
 
 
-class BahdanauAttention(nn.Module):
-    &quot;&quot;&quot;Additive (Bahdanau) attention mechanism.&quot;&quot;&quot;
+<span class="k">class</span><span class="w"> </span><span class="nc">BahdanauAttention</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Additive (Bahdanau) attention mechanism.&quot;&quot;&quot;</span>
 
-    def __init__(self, encoder_dim: int, decoder_dim: int, attention_dim: int):
-        super().__init__()
-        self.W_h = nn.Linear(encoder_dim, attention_dim, bias=False)
-        self.W_s = nn.Linear(decoder_dim, attention_dim, bias=False)
-        self.v = nn.Linear(attention_dim, 1, bias=False)
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">encoder_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">decoder_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">attention_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_h</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">encoder_dim</span><span class="p">,</span> <span class="n">attention_dim</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_s</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">decoder_dim</span><span class="p">,</span> <span class="n">attention_dim</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">v</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">attention_dim</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 
-    def forward(
-        self,
-        decoder_state: torch.Tensor,   # (batch, decoder_dim)
-        encoder_outputs: torch.Tensor,  # (batch, src_len, encoder_dim)
-    ) -&gt; tuple[torch.Tensor, torch.Tensor]:
-        # Project encoder outputs: (batch, src_len, attn_dim)
-        keys = self.W_h(encoder_outputs)
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">decoder_state</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>   <span class="c1"># (batch, decoder_dim)</span>
+        <span class="n">encoder_outputs</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>  <span class="c1"># (batch, src_len, encoder_dim)</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
+        <span class="c1"># Project encoder outputs: (batch, src_len, attn_dim)</span>
+        <span class="n">keys</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_h</span><span class="p">(</span><span class="n">encoder_outputs</span><span class="p">)</span>
 
-        # Project decoder state: (batch, 1, attn_dim)
-        query = self.W_s(decoder_state).unsqueeze(1)
+        <span class="c1"># Project decoder state: (batch, 1, attn_dim)</span>
+        <span class="n">query</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_s</span><span class="p">(</span><span class="n">decoder_state</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
 
-        # Energy: (batch, src_len, 1) → squeeze → (batch, src_len)
-        energy = self.v(torch.tanh(keys + query)).squeeze(-1)
+        <span class="c1"># Energy: (batch, src_len, 1) → squeeze → (batch, src_len)</span>
+        <span class="n">energy</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">tanh</span><span class="p">(</span><span class="n">keys</span> <span class="o">+</span> <span class="n">query</span><span class="p">))</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
 
-        # Attention weights: (batch, src_len)
-        alpha = F.softmax(energy, dim=-1)
+        <span class="c1"># Attention weights: (batch, src_len)</span>
+        <span class="n">alpha</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">energy</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
 
-        # Context vector: (batch, encoder_dim)
-        context = torch.bmm(alpha.unsqueeze(1), encoder_outputs).squeeze(1)
+        <span class="c1"># Context vector: (batch, encoder_dim)</span>
+        <span class="n">context</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">bmm</span><span class="p">(</span><span class="n">alpha</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">encoder_outputs</span><span class="p">)</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
 
-        return context, alpha
-
-
-class Encoder(nn.Module):
-    def __init__(self, vocab_size: int, embed_dim: int, hidden_dim: int):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_dim)
-        self.rnn = nn.GRU(embed_dim, hidden_dim, batch_first=True, bidirectional=True)
-        self.fc = nn.Linear(hidden_dim * 2, hidden_dim)
-
-    def forward(self, src: torch.Tensor):
-        # src: (batch, src_len)
-        embedded = self.embedding(src)                # (batch, src_len, embed_dim)
-        outputs, hidden = self.rnn(embedded)          # outputs: (batch, src_len, 2*hidden)
-        # Combine forward/backward final states for decoder init
-        hidden = torch.tanh(self.fc(
-            torch.cat([hidden[-2], hidden[-1]], dim=-1)
-        ))
-        return outputs, hidden
+        <span class="k">return</span> <span class="n">context</span><span class="p">,</span> <span class="n">alpha</span>
 
 
-class AttentionDecoder(nn.Module):
-    def __init__(self, vocab_size: int, embed_dim: int, hidden_dim: int, encoder_dim: int):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_dim)
-        self.attention = BahdanauAttention(encoder_dim, hidden_dim, hidden_dim)
-        self.rnn = nn.GRU(embed_dim + encoder_dim, hidden_dim, batch_first=True)
-        self.fc_out = nn.Linear(hidden_dim + encoder_dim + embed_dim, vocab_size)
+<span class="k">class</span><span class="w"> </span><span class="nc">Encoder</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vocab_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">embed_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">embedding</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Embedding</span><span class="p">(</span><span class="n">vocab_size</span><span class="p">,</span> <span class="n">embed_dim</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rnn</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">GRU</span><span class="p">(</span><span class="n">embed_dim</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">,</span> <span class="n">batch_first</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">bidirectional</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fc</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">hidden_dim</span> <span class="o">*</span> <span class="mi">2</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">)</span>
 
-    def forward(self, token, decoder_state, encoder_outputs):
-        # token: (batch,) — single time step
-        embedded = self.embedding(token)              # (batch, embed_dim)
-        context, alpha = self.attention(decoder_state, encoder_outputs)
-
-        rnn_input = torch.cat([embedded, context], dim=-1).unsqueeze(1)
-        output, hidden = self.rnn(rnn_input, decoder_state.unsqueeze(0))
-
-        prediction = self.fc_out(
-            torch.cat([output.squeeze(1), context, embedded], dim=-1)
-        )
-        return prediction, hidden.squeeze(0), alpha
-</code></pre>
-<h3 id="107-visualizing-attention-weights">10.7 Visualizing Attention Weights</h3>
-<pre><code class="language-python">import matplotlib.pyplot as plt
-import numpy as np
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">src</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+        <span class="c1"># src: (batch, src_len)</span>
+        <span class="n">embedded</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">embedding</span><span class="p">(</span><span class="n">src</span><span class="p">)</span>                <span class="c1"># (batch, src_len, embed_dim)</span>
+        <span class="n">outputs</span><span class="p">,</span> <span class="n">hidden</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">rnn</span><span class="p">(</span><span class="n">embedded</span><span class="p">)</span>          <span class="c1"># outputs: (batch, src_len, 2*hidden)</span>
+        <span class="c1"># Combine forward/backward final states for decoder init</span>
+        <span class="n">hidden</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tanh</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">fc</span><span class="p">(</span>
+            <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">hidden</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">],</span> <span class="n">hidden</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]],</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="p">))</span>
+        <span class="k">return</span> <span class="n">outputs</span><span class="p">,</span> <span class="n">hidden</span>
 
 
-def plot_attention(attention_weights: np.ndarray, src_tokens: list[str], tgt_tokens: list[str]):
-    &quot;&quot;&quot;Plot attention heatmap showing soft alignment between source and target.&quot;&quot;&quot;
-    fig, ax = plt.subplots(figsize=(8, 6))
-    cax = ax.matshow(attention_weights, cmap='viridis')
-    fig.colorbar(cax)
+<span class="k">class</span><span class="w"> </span><span class="nc">AttentionDecoder</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vocab_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">embed_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">encoder_dim</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">embedding</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Embedding</span><span class="p">(</span><span class="n">vocab_size</span><span class="p">,</span> <span class="n">embed_dim</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">attention</span> <span class="o">=</span> <span class="n">BahdanauAttention</span><span class="p">(</span><span class="n">encoder_dim</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rnn</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">GRU</span><span class="p">(</span><span class="n">embed_dim</span> <span class="o">+</span> <span class="n">encoder_dim</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">,</span> <span class="n">batch_first</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fc_out</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">hidden_dim</span> <span class="o">+</span> <span class="n">encoder_dim</span> <span class="o">+</span> <span class="n">embed_dim</span><span class="p">,</span> <span class="n">vocab_size</span><span class="p">)</span>
 
-    ax.set_xticks(range(len(src_tokens)))
-    ax.set_xticklabels(src_tokens, rotation=45, ha='left')
-    ax.set_yticks(range(len(tgt_tokens)))
-    ax.set_yticklabels(tgt_tokens)
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">token</span><span class="p">,</span> <span class="n">decoder_state</span><span class="p">,</span> <span class="n">encoder_outputs</span><span class="p">):</span>
+        <span class="c1"># token: (batch,) — single time step</span>
+        <span class="n">embedded</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">embedding</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>              <span class="c1"># (batch, embed_dim)</span>
+        <span class="n">context</span><span class="p">,</span> <span class="n">alpha</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">attention</span><span class="p">(</span><span class="n">decoder_state</span><span class="p">,</span> <span class="n">encoder_outputs</span><span class="p">)</span>
 
-    ax.set_xlabel('Source')
-    ax.set_ylabel('Target')
-    ax.set_title('Bahdanau Attention Weights')
-    plt.tight_layout()
-    plt.savefig('attention_heatmap.png', dpi=150)
-    plt.show()
+        <span class="n">rnn_input</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">embedded</span><span class="p">,</span> <span class="n">context</span><span class="p">],</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">output</span><span class="p">,</span> <span class="n">hidden</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">rnn</span><span class="p">(</span><span class="n">rnn_input</span><span class="p">,</span> <span class="n">decoder_state</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+
+        <span class="n">prediction</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fc_out</span><span class="p">(</span>
+            <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">output</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">context</span><span class="p">,</span> <span class="n">embedded</span><span class="p">],</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">prediction</span><span class="p">,</span> <span class="n">hidden</span><span class="o">.</span><span class="n">squeeze</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="n">alpha</span>
+</code></pre></div>
+
+<h3 id="107-visualizing-attention-weights" data-plain="10.7 Visualizing Attention Weights">10.7 Visualizing Attention Weights</h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 
 
-# Example: after training, collect attention weights during inference
-# attention_matrix[i, j] = α_{ij} = how much target word i attends to source word j
-# Expect near-diagonal for monotonic languages, crossed patterns for reordering
-</code></pre>
+<span class="k">def</span><span class="w"> </span><span class="nf">plot_attention</span><span class="p">(</span><span class="n">attention_weights</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">src_tokens</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">tgt_tokens</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Plot attention heatmap showing soft alignment between source and target.&quot;&quot;&quot;</span>
+    <span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+    <span class="n">cax</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">matshow</span><span class="p">(</span><span class="n">attention_weights</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;viridis&#39;</span><span class="p">)</span>
+    <span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">cax</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xticks</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">src_tokens</span><span class="p">)))</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xticklabels</span><span class="p">(</span><span class="n">src_tokens</span><span class="p">,</span> <span class="n">rotation</span><span class="o">=</span><span class="mi">45</span><span class="p">,</span> <span class="n">ha</span><span class="o">=</span><span class="s1">&#39;left&#39;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_yticks</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">tgt_tokens</span><span class="p">)))</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_yticklabels</span><span class="p">(</span><span class="n">tgt_tokens</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Source&#39;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Target&#39;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Bahdanau Attention Weights&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s1">&#39;attention_heatmap.png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">150</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+
+
+<span class="c1"># Example: after training, collect attention weights during inference</span>
+<span class="c1"># attention_matrix[i, j] = α_{ij} = how much target word i attends to source word j</span>
+<span class="c1"># Expect near-diagonal for monotonic languages, crossed patterns for reordering</span>
+</code></pre></div>
+
 <hr />
-<h2 id="exercise-45-min">Exercise (45 min)</h2>
-<h3 id="e101-attention-computation-by-hand">E10.1 Attention Computation by Hand</h3>
+<h2 id="exercise-45-min" data-plain="Exercise (45 min)">Exercise (45 min)</h2>
+<h3 id="e101-attention-computation-by-hand" data-plain="E10.1 Attention Computation by Hand">E10.1 Attention Computation by Hand</h3>
 <p>Given encoder states $h_1 = [1, 0]$, $h_2 = [0, 1]$, $h_3 = [1, 1]$ and decoder state $s_0 = [0.5, 0.5]$:</p>
 <ol>
 <li>Assuming $W_s = W_h = I_{2 \times 2}$ (identity) and $v = [1, 1]^T$, compute energies $e_{01}, e_{02}, e_{03}$</li>
@@ -288,7 +278,7 @@ def plot_attention(attention_weights: np.ndarray, src_tokens: list[str], tgt_tok
 <li>Compute the context vector $c_0$</li>
 <li>Which encoder state gets the most attention? Why?</li>
 </ol>
-<h3 id="e102-training-comparison">E10.2 Training Comparison</h3>
+<h3 id="e102-training-comparison" data-plain="E10.2 Training Comparison">E10.2 Training Comparison</h3>
 <p>Train two seq2seq models on Multi30k EN→DE:
 1. Vanilla seq2seq (Day 7 style) with final-state-only context
 2. Seq2seq with Bahdanau attention</p>
@@ -296,37 +286,37 @@ def plot_attention(attention_weights: np.ndarray, src_tokens: list[str], tgt_tok
 - BLEU scores on test set
 - Training curves (loss vs epoch)
 - Performance on short (&lt; 10 tokens) vs long (&gt; 20 tokens) sentences</p>
-<h3 id="e103-attention-heatmap-analysis">E10.3 Attention Heatmap Analysis</h3>
+<h3 id="e103-attention-heatmap-analysis" data-plain="E10.3 Attention Heatmap Analysis">E10.3 Attention Heatmap Analysis</h3>
 <p>Using your trained attention model:
 1. Generate translations for 5 sentences of varying length
 2. Plot attention heatmaps for each
 3. Find examples of: monotonic alignment, reordering, many-to-one alignment
 4. Does the model learn word order differences between EN and DE?</p>
 <hr />
-<h2 id="key-takeaways">Key Takeaways</h2>
+<h2 id="key-takeaways" data-plain="Key Takeaways">Key Takeaways</h2>
 <ul>
 <li>The <strong>information bottleneck</strong> of fixed-context seq2seq is solved by letting the decoder look at all encoder states</li>
 <li><strong>Bahdanau attention</strong> learns a soft alignment: $c_i = \sum_j \alpha_{ij} h_j$</li>
 <li>The energy function $e_{ij} = v^T \tanh(W_s s_{i-1} + W_h h_j)$ is a small learned network</li>
 <li>Attention weights are <strong>interpretable</strong> — they show which source words influence each target word</li>
-<li>This is <strong>additive</strong> attention (addition inside tanh); tomorrow we'll see <strong>multiplicative</strong> (dot-product) attention</li>
+<li>This is <strong>additive</strong> attention (addition inside tanh); tomorrow we&rsquo;ll see <strong>multiplicative</strong> (dot-product) attention</li>
 </ul>
-<h2 id="connection-to-the-thread">Connection to the Thread</h2>
-<p>Attention solves a compression problem. Fixed-context seq2seq tries to compress the entire source into one vector — a lossy compression that loses information for long sequences. Attention is <strong>adaptive decompression</strong>: at each step, the decoder selects which parts of the source to decompress. This is the beginning of the transformer's power: <em>selective access to information beats wholesale compression</em>.</p>
-<h2 id="further-reading">Further Reading</h2>
+<h2 id="connection-to-the-thread" data-plain="Connection to the Thread">Connection to the Thread</h2>
+<p>Attention solves a compression problem. Fixed-context seq2seq tries to compress the entire source into one vector — a lossy compression that loses information for long sequences. Attention is <strong>adaptive decompression</strong>: at each step, the decoder selects which parts of the source to decompress. This is the beginning of the transformer&rsquo;s power: <em>selective access to information beats wholesale compression</em>.</p>
+<h2 id="further-reading" data-plain="Further Reading">Further Reading</h2>
 <ul>
-<li>Bahdanau, Cho, Bengio. <strong>"Neural Machine Translation by Jointly Learning to Align and Translate"</strong> (2014). <a href="https://arxiv.org/abs/1409.0473">arXiv:1409.0473</a></li>
-<li>Luong, Pham, Manning. <strong>"Effective Approaches to Attention-based Neural Machine Translation"</strong> (2015). <a href="https://arxiv.org/abs/1508.04025">arXiv:1508.04025</a></li>
-<li>Olah &amp; Carter. <strong>"Attention and Augmented Recurrent Neural Networks"</strong> (Distill, 2016). <a href="https://distill.pub/2016/augmented-rnns/">distill.pub</a></li>
-<li>Jay Alammar. <strong>"Visualizing A Neural Machine Translation Model"</strong>. <a href="https://jalammar.github.io/visualizing-neural-machine-translation-mechanics-of-seq2seq-models-with-attention/">jalammar.github.io</a></li>
+<li>Bahdanau, Cho, Bengio. <strong>&ldquo;Neural Machine Translation by Jointly Learning to Align and Translate&rdquo;</strong> (2014). <a href="https://arxiv.org/abs/1409.0473">arXiv:1409.0473</a></li>
+<li>Luong, Pham, Manning. <strong>&ldquo;Effective Approaches to Attention-based Neural Machine Translation&rdquo;</strong> (2015). <a href="https://arxiv.org/abs/1508.04025">arXiv:1508.04025</a></li>
+<li>Olah &amp; Carter. <strong>&ldquo;Attention and Augmented Recurrent Neural Networks&rdquo;</strong> (Distill, 2016). <a href="https://distill.pub/2016/augmented-rnns/">distill.pub</a></li>
+<li>Jay Alammar. <strong>&ldquo;Visualizing A Neural Machine Translation Model&rdquo;</strong>. <a href="https://jalammar.github.io/visualizing-neural-machine-translation-mechanics-of-seq2seq-models-with-attention/">jalammar.github.io</a></li>
 </ul>
             </div>
         </div>
 
-        <div class="mt-6 flex justify-between text-sm">
-            <a href="day-09-phase1-checkpoint.html" class="text-violet-600 hover:text-violet-800">&larr; Day 9: Phase I Checkpoint</a>
-            <a href="day-11-scaled-dot-product-attention.html" class="text-violet-600 hover:text-violet-800">Day 11: Scaled Dot-Product Attention &rarr;</a>
-        </div>
+        <nav class="lfbs-pager mt-6 flex justify-between gap-4 text-sm" aria-label="Lesson navigation">
+            <a href="day-09-phase1-checkpoint.html" class="lfbs-pager-prev text-violet-600 hover:text-violet-800">&larr; Day 9: Phase I Checkpoint</a>
+            <a href="day-11-scaled-dot-product-attention.html" class="lfbs-pager-next text-violet-600 hover:text-violet-800">Day 11: Scaled Dot-Product Attention &rarr;</a>
+        </nav>
     </div>
 </body>
 </html>

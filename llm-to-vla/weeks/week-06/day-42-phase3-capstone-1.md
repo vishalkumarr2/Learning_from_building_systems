@@ -76,7 +76,7 @@ def create_robotics_sft_dataset() -> Dataset:
                         "produces NaN or Inf values. Common causes: 1) IMU "
                         "sensor failure producing invalid readings, 2) Wheel "
                         "encoder signal loss causing division by zero in "
-                        "odometry, 3) Sensorbar SPI communication timeout "
+                        "odometry, 3) Line sensor SPI communication timeout "
                         "propagating stale data. Check /diagnostics for the "
                         "first sensor to report errors in the timeline.",
         },
@@ -91,12 +91,12 @@ def create_robotics_sft_dataset() -> Dataset:
                         "6) Fresh battery insertion and electrical verification "
                         "(voltage + CAN handshake), 7) Undock. Total: ~45s.",
         },
-        # Sensorbar
+        # Line sensor
         {
-            "instruction": "How to troubleshoot sensorbar stiction issues?",
-            "response": "Sensorbar stiction (encoder lockup) symptoms: constant "
+            "instruction": "How to troubleshoot line sensor stiction issues?",
+            "response": "Line sensor stiction (encoder lockup) symptoms: constant "
                         "readings despite robot motion, large jumps when "
-                        "unsticking. Diagnosis: 1) Check /sensorbar/raw_data "
+                        "unsticking. Diagnosis: 1) Check /line_sensor/raw_data "
                         "for flat sections, 2) Inspect physical sensor for "
                         "debris or moisture, 3) Verify SPI clock at 10MHz "
                         "with oscilloscope, 4) Check firmware version ≥ v1.2.4. "
@@ -110,14 +110,14 @@ def create_robotics_sft_dataset() -> Dataset:
                         "position (nearest-neighbor heuristic), 2) Stagger "
                         "charging schedules to keep ≥80% of fleet active, "
                         "3) Use zone-based traffic management to prevent "
-                        "congestion at intersections, 4) Monitor via OWM "
-                        "(OKS World Model) for real-time bin/station status, "
+                        "congestion at intersections, 4) Monitor via WM "
+                        "(warehouse World Model) for real-time bin/station status, "
                         "5) Set velocity limits by zone density.",
         },
         # Safety
         {
             "instruction": "What happens during an emergency stop?",
-            "response": "Guardian node triggers e-stop sequence: 1) Publish "
+            "response": "Safety monitor node triggers e-stop sequence: 1) Publish "
                         "zero velocity to /cmd_vel immediately, 2) Engage "
                         "motor brakes within 100ms, 3) Activate warning lights "
                         "and buzzer, 4) Log timestamp + trigger reason to "
@@ -133,7 +133,7 @@ def create_robotics_sft_dataset() -> Dataset:
 # Knowledge base for RAG
 KNOWLEDGE_BASE = [
     {
-        "text": "The OKS robot uses differential drive kinematics with two "
+        "text": "The warehouse robot uses differential drive kinematics with two "
                 "powered wheels (200mm diameter) and two passive caster wheels. "
                 "Maximum linear velocity: 1.5 m/s. Maximum angular velocity: "
                 "1.0 rad/s. The drive controller runs at 100Hz.",
@@ -147,25 +147,25 @@ KNOWLEDGE_BASE = [
         "source": "nav_spec",
     },
     {
-        "text": "Guardian node health monitoring thresholds: CPU temperature > "
+        "text": "Safety monitor node health monitoring thresholds: CPU temperature > "
                 "85°C triggers warning, > 95°C triggers shutdown. Battery "
                 "voltage < 22.0V triggers low battery alert, < 20.5V forces "
                 "return to charging station. Network latency > 500ms triggers "
                 "autonomous mode.",
-        "source": "guardian_spec",
+        "source": "safety_monitor_spec",
     },
     {
-        "text": "The sensorbar communicates via SPI at 10MHz with the main "
+        "text": "The line sensor communicates via SPI at 10MHz with the main "
                 "controller. It provides wheel odometry, floor detection, and "
                 "cliff sensing. Firmware supports self-test mode activated "
-                "via diagnostic service call /sensorbar/self_test.",
-        "source": "sensorbar_spec",
+                "via diagnostic service call /line_sensor/self_test.",
+        "source": "line_sensor_spec",
     },
     {
-        "text": "OKS World Model (OWM) maintains the warehouse digital twin: "
+        "text": "warehouse World Model (WM) maintains the warehouse digital twin: "
                 "bin states (empty/occupied/reserved), station statuses, tile "
-                "traversability, and flow assignments. REST API at /api/v1/owm/.",
-        "source": "owm_spec",
+                "traversability, and flow assignments. REST API at /api/v1/world-model/.",
+        "source": "world_model_spec",
     },
 ]
 
@@ -177,12 +177,12 @@ EVAL_QUESTIONS = [
         "category": "knowledge",
     },
     {
-        "question": "The robot shows sensorbar SPI errors. What should I check first?",
+        "question": "The robot shows line sensor SPI errors. What should I check first?",
         "expected_keywords": ["SPI", "wiring", "firmware", "10MHz", "debris"],
         "category": "diagnosis",
     },
     {
-        "question": "How do I move robot OKS-42 to the charging station?",
+        "question": "How do I move robot AMR-42 to the charging station?",
         "expected_keywords": ["navigate", "charging", "command"],
         "category": "command",
     },

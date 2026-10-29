@@ -13,7 +13,7 @@ zephyr/                         ✅ COMPLETED — 17 reference docs, 5 study not
 cpp-advanced/                   ✅ COMPLETED — 15 of 18 chapters (09, 10 are exercise-only stubs)
 navigation-estimator/           ✅ COMPLETED — 6 lessons + 5 exercises
 ros2-handson/                   ✅ COMPLETED — 5 lessons + 8 exercises
-python-oks/                     ✅ COMPLETED — 3 lessons + 3 exercises
+python-scripting/                     ✅ COMPLETED — 3 lessons + 3 exercises
 control-systems/                ✅ COMPLETED — 10 lessons, 3 debugging, 8 exercises, 3 senior Q&A
 optimization/                   ✅ COMPLETED — 10 lessons + 9 exercises + code implementations
 llm-to-vla/                     ✅ COMPLETED — 16 study notes, 11 exercises, 7 projects, 16 weekly schedules
@@ -24,7 +24,7 @@ llm-to-vla/                     ✅ COMPLETED — 16 study notes, 11 exercises, 
 ## Track 1: Navigation & State Estimation — ✅ COMPLETED
 **Folder:** `learn/navigation-estimator/`
 
-6 core lessons (dead reckoning → Ceres sensorbar deep dive), 5 exercises.
+6 core lessons (dead reckoning → Ceres line sensor deep dive), 5 exercises.
 
 ---
 
@@ -36,8 +36,8 @@ and interview-prep traps.
 
 ---
 
-## Track 3: Python / OKS Scripting — ✅ COMPLETED
-**Folder:** `learn/python-oks/`
+## Track 3: Python / Robot Scripting — ✅ COMPLETED
+**Folder:** `learn/python-scripting/`
 
 3 lessons (types → time-series analysis), 3 exercises.
 
@@ -99,4 +99,4 @@ Start here → [navigation-estimator/00-learning-plan.md](navigation-estimator/0
 **Day 1 goal (2 hrs):** Read `01-dead-reckoning.md` and be able to derive
 `(x', y', θ')` from two encoder counts for a differential-drive robot.
 
-This directly ties to `doPrediction()` in OKS estimator — you'll recognize every variable.
+This directly ties to `predict()` in navigation estimator — you'll recognize every variable.

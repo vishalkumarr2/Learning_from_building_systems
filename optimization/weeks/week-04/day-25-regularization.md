@@ -9,8 +9,8 @@
 - **Week:** [Week 4 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-Regularization is *everywhere* in the OKS stack. The Ceres solver's `LossFunction` applies robust kernels (a form of regularization). OSQP solves regularized QPs internally. The navigation estimator uses process noise $Q$ as a Tikhonov-like regularizer on state transitions. Map building uses L2 regularization to prevent overfitting to noisy sensor data. Understanding regularization deeply means understanding *why* solver parameters are tuned the way they are.
+## Robotics Relevance
+Regularization is *everywhere* in the AMR stack. The Ceres solver's `LossFunction` applies robust kernels (a form of regularization). OSQP solves regularized QPs internally. The navigation estimator uses process noise $Q$ as a Tikhonov-like regularizer on state transitions. Map building uses L2 regularization to prevent overfitting to noisy sensor data. Understanding regularization deeply means understanding *why* solver parameters are tuned the way they are.
 
 ---
 
@@ -112,7 +112,7 @@ Robot calibration problem: estimate sensor parameters from noisy data. Without r
 6. In Ceres, `HuberLoss` is used on residuals. How is this related to regularization?
 7. Why is the regularization path piecewise-linear for L1 but smooth for L2?
 8. Explain: "regularization = Bayesian prior." What does $\lambda$ correspond to in the Bayesian framework?
-9. If you add L2 regularization to the OKS odometry calibration, what does it mean physically?
+9. If you add L2 regularization to the AMR odometry calibration, what does it mean physically?
 10. What is the proximal operator for the indicator function of a box constraint $x \in [l, u]$?
 
 ---

@@ -12,7 +12,7 @@
 Most real-world engineering reasoning is inductive, not deductive. You rarely have perfect information. Instead, you reason from:
 - **Analogies:** "This robot has the same symptoms as the last one — probably the same root cause."
 - **Causal inference:** "The failure started after the firmware update — maybe the update caused it."
-- **Probability:** "95% of robots with this symptom had a sensorbar fault."
+- **Probability:** "95% of robots with this symptom had a line sensor fault."
 
 This lesson teaches you to do inductive reasoning *well* — and to recognize when it's done poorly.
 
@@ -28,8 +28,8 @@ An argument by analogy has this form:
 3. Therefore, entity B probably also has property z.
 
 **Example:**
-- Robot-42 (A) had stale sensorbar data, estimator divergence, and stopped with DELOCALIZED. The root cause was an SPI clock jitter issue.
-- Robot-87 (B) has stale sensorbar data and estimator divergence.
+- Robot-42 (A) had stale line sensor data, estimator divergence, and stopped with DELOCALIZED. The root cause was an SPI clock jitter issue.
+- Robot-87 (B) has stale line sensor data and estimator divergence.
 - Therefore, Robot-87 probably has an SPI clock jitter issue.
 
 ## 1.2 Six Criteria for Evaluating Analogies
@@ -191,7 +191,7 @@ Where:
 
 **Example — Diagnostic reasoning:**
 
-A sensorbar stale-data alarm fires. What's the probability it's an actual SPI bus failure vs. a software glitch?
+A line sensor stale-data alarm fires. What's the probability it's an actual SPI bus failure vs. a software glitch?
 
 - P(SPI failure) = 0.02 (2% of robots have hardware SPI issues)
 - P(software glitch) = 0.05 (5% of robots have software-related stale data)

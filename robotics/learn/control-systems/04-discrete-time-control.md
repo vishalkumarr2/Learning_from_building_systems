@@ -6,7 +6,7 @@
 
 ---
 
-## Why Should I Care? (OKS Context)
+## Why Should I Care? (Practical Context)
 
 The PID equations in Lesson 03 are *continuous-time* — they assume infinitely fast computation with infinitely precise math. Real controllers run on a microcontroller that:
 
@@ -19,7 +19,7 @@ The gap between continuous theory and discrete practice causes real bugs:
 - **Quantization:** Encoder resolution limits the minimum detectable speed
 - **Integration method:** Forward Euler vs. Tustin bilinear transform changes the stability boundary
 
-**OKS example:** The STM32 motor control runs at 10 kHz. At this rate, the electrical time constant (0.5 ms = 2 kHz bandwidth) is adequately sampled. But if someone reduces the rate to 1 kHz (100 µs → 1 ms) "to save CPU," the current loop becomes unstable because the electrical dynamics aren't sampled fast enough.
+**AMR example:** The STM32 motor control runs at 10 kHz. At this rate, the electrical time constant (0.5 ms = 2 kHz bandwidth) is adequately sampled. But if someone reduces the rate to 1 kHz (100 µs → 1 ms) "to save CPU," the current loop becomes unstable because the electrical dynamics aren't sampled fast enough.
 
 ---
 
@@ -38,9 +38,9 @@ where $f_{BW}$ is the closed-loop bandwidth. This is because:
 - But a controller needs to *react* to the signal, not just record it
 - 10× gives enough samples per cycle for the controller to effectively act
 
-**OKS motor control sampling rates:**
+**robot motor control sampling rates:**
 
-| Loop | Bandwidth | Min sample rate (10×) | Actual OKS rate | Margin |
+| Loop | Bandwidth | Min sample rate (10×) | Actual AMR rate | Margin |
 |------|-----------|----------------------|-----------------|--------|
 | Current | ~2 kHz | 20 kHz | 20 kHz | 1× (tight!) |
 | Speed | ~50 Hz | 500 Hz | 10 kHz | 20× (comfortable) |
@@ -51,7 +51,7 @@ where $f_{BW}$ is the closed-loop bandwidth. This is because:
 
 If you sample a 300 Hz vibration at 500 Hz, it appears as a 200 Hz signal (500 - 300 = 200). The controller "sees" a phantom 200 Hz disturbance and tries to reject it — making things worse.
 
-**OKS example:** Motor cogging at 200 Hz + speed loop at 10 kHz = no problem (10000 >> 2×200). But if the SPI bus delays speed feedback to an effective 300 Hz rate, the cogging can alias into the controller's useful bandwidth.
+**AMR example:** Motor cogging at 200 Hz + speed loop at 10 kHz = no problem (10000 >> 2×200). But if the SPI bus delays speed feedback to an effective 300 Hz rate, the cogging can alias into the controller's useful bandwidth.
 
 **Solution:** Anti-alias filter before sampling. A simple first-order low-pass filter:
 
@@ -159,7 +159,7 @@ float pid_compute_tustin(float error) {
 }
 ```
 
-**OKS firmware uses Tustin for the speed loop** because it's the best accuracy-to-cost ratio. The current loop uses Forward Euler because at 20 kHz, even Forward Euler is accurate enough (the electrical time constant is only ~1 ms = 20 samples).
+**robot firmware uses Tustin for the speed loop** because it's the best accuracy-to-cost ratio. The current loop uses Forward Euler because at 20 kHz, even Forward Euler is accurate enough (the electrical time constant is only ~1 ms = 20 samples).
 
 ## 2.5 Comparison of Methods
 
@@ -192,7 +192,7 @@ Then: $u[n] = u[n-1] + \Delta u[n]$
 2. **Bumpless transfer:** Switching to manual mode just means stopping the $\Delta u$ updates. No accumulated integral to manage.
 3. **Simpler anti-windup:** Just clamp $u[n]$ to $[u_{min}, u_{max}]$ after each step.
 
-**OKS firmware velocity-form PID:**
+**robot firmware velocity-form PID:**
 
 ```c
 typedef struct {
@@ -240,11 +240,11 @@ $$\omega[n] = \frac{\theta[n] - \theta[n-1]}{T_s} = \frac{\Delta\theta \cdot \te
 
 $$\omega_{min} = \frac{2\pi}{4N \cdot T_s}$$
 
-**OKS encoder:** $N = 512$ counts/rev, 4× decoding = 2048 edges/rev, $f_s = 10$ kHz:
+**AMR encoder:** $N = 512$ counts/rev, 4× decoding = 2048 edges/rev, $f_s = 10$ kHz:
 
 $$\omega_{min} = \frac{2\pi}{2048 \times 0.0001} = 30.7 \text{ rad/s} = 293 \text{ RPM}$$
 
-That's a terrible resolution for low-speed control! At the wheel (after 50:1 gearbox), the minimum detectable speed is 30.7/50 = 0.61 rad/s. For the OKS wheel (radius ~0.065 m), that's 0.04 m/s.
+That's a terrible resolution for low-speed control! At the wheel (after 50:1 gearbox), the minimum detectable speed is 30.7/50 = 0.61 rad/s. For the robot wheel (radius ~0.065 m), that's 0.04 m/s.
 
 ## 4.2 Improving Speed Resolution
 
@@ -270,7 +270,7 @@ This is a FIR low-pass filter. $M = 10$ gives 10× better resolution with only $
 
 Instead of counting edges per time, measure time per edge. At low speed, this gives much better resolution. At high speed, revert to counting.
 
-**OKS firmware uses a hybrid:** Edge counting at high speed (>100 RPM) and period measurement at low speed (<100 RPM), with crossover blending.
+**robot firmware uses a hybrid:** Edge counting at high speed (>100 RPM) and period measurement at low speed (<100 RPM), with crossover blending.
 
 ## 4.3 ADC Quantization (Current Sensing)
 
@@ -278,7 +278,7 @@ The current sensor's ADC has $n$-bit resolution:
 
 $$\Delta I_{min} = \frac{I_{range}}{2^n}$$
 
-For OKS: 12-bit ADC, ±10A range → $\Delta I = 20/4096 = 4.9$ mA per LSB. This is adequate for current control.
+For AMR: 12-bit ADC, ±10A range → $\Delta I = 20/4096 = 4.9$ mA per LSB. This is adequate for current control.
 
 ---
 
@@ -298,7 +298,7 @@ For OKS: 12-bit ADC, ±10A range → $\Delta I = 20/4096 = 4.9$ mA per LSB. This
 
 ```
 1. Determine the fastest dynamic you need to control
-   → OKS: electrical time constant = 0.5 ms → f_elec = 2 kHz
+   → AMR: electrical time constant = 0.5 ms → f_elec = 2 kHz
 
 2. Multiply by 10-20× for the minimum sample rate
    → f_s_min = 20 kHz for current loop

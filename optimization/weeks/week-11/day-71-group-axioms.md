@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-Robot configurations form groups under composition. The set of all planar poses (x, y, θ) with the composition operation is SE(2) — a matrix Lie group. Understanding group axioms tells us *why* composing two valid poses always gives a valid pose, and *why* every pose has a unique inverse. These guarantees underpin every frame transform in the OKS navigation stack.
+## Robotics Relevance
+Robot configurations form groups under composition. The set of all planar poses (x, y, θ) with the composition operation is SE(2) — a matrix Lie group. Understanding group axioms tells us *why* composing two valid poses always gives a valid pose, and *why* every pose has a unique inverse. These guarantees underpin every frame transform in the AMR navigation stack.
 
 ---
 
@@ -199,7 +199,7 @@ Key products: $ij = k$, $ji = -k$. Since $ij \neq ji$, $Q_8$ is non-abelian. The
 ## Connections
 - **Prerequisites:** Linear algebra (Day 1–2) — matrix operations, determinants
 - **Forward:** [Day 72](day-72-so2-rotations.md) deep-dives into SO(2), [Day 73](day-73-so3-rodrigues.md) into SO(3)
-- **OKS:** SE(2) and SE(3) are the groups that describe robot poses; understanding the abstract axioms makes their properties predictable
+- **AMR:** SE(2) and SE(3) are the groups that describe robot poses; understanding the abstract axioms makes their properties predictable
 
 ## Self-Check
 - [ ] I can state all four group axioms and test them on a given set

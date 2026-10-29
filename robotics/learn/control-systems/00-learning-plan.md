@@ -1,14 +1,14 @@
 # Control Systems — Learning Plan
 ### From a bare DC motor to a Jetson↔MCU real-time control stack
-### For: Software engineer building and debugging OKS AMR motor/navigation control
+### For: Software engineer building and debugging warehouse AMR motor/navigation control
 
 ---
 
 ## Why This Track Exists
 
-You debug OKS robots daily. You've seen:
+You debug warehouse robots daily. You've seen:
 - `cmd_vel` gaps causing the robot to drift mid-tile
-- Integral windup after guardian releases e-stop → overshoot into a rack
+- Integral windup after safety monitor releases e-stop → overshoot into a rack
 - Motor oscillation when PID gains are pushed too high on a new firmware branch
 - The mysterious 10 ms budget between Jetson sending `cmd_vel` and the STM32 executing it
 
@@ -111,7 +111,7 @@ You know the *symptoms*. This track gives you the *theory* to predict them, the 
 |---|------|-------------------|
 | D1 | `debugging/01-motor-oscillation.md` | PID gains too high → limit cycle, diagnose with scope + step response |
 | D2 | `debugging/02-integral-windup.md` | Robot hits wall, integrator winds up, e-stop release → overshoot |
-| D3 | `debugging/03-cmd-vel-gap.md` | Jetson loop jitter → cmd_vel gap → robot drifts (OKS bag analysis) |
+| D3 | `debugging/03-cmd-vel-gap.md` | Jetson loop jitter → cmd_vel gap → robot drifts (AMR bag analysis) |
 
 ### Exercises (Python + C)
 

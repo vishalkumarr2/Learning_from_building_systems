@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 When the navigation estimator needs to express a velocity measured in the body frame as a velocity in the world frame, it uses the **adjoint** of SE(3). The 6×6 adjoint matrix maps twists (linear + angular velocity) between frames — this is how IMU measurements (body frame) get fused with wheel odometry (mixed frame) in the EKF.
 
 ---
@@ -241,7 +241,7 @@ Using $\mathrm{ad}$: $[(\mathbf{v}_1, \boldsymbol{\omega}_1), (\mathbf{v}_2, \bo
 - **Back:** [Day 81: Lie Algebra](day-81-lie-algebra.md) — Lie bracket is the core operation; adjoint formalizes it
 - **Back:** [Day 80: Exp/Log](day-80-exponential-map.md) — Ad connects group and algebra via $\mathrm{Ad}(\exp) = \exp(\mathrm{ad})$
 - **Forward:** [Day 83: Jacobians](day-83-jacobians.md) — left Jacobian $J_l$ appears in BCH formula
-- **OKS:** adjoint transforms velocities/forces between body and world frames in the EKF
+- **AMR:** adjoint transforms velocities/forces between body and world frames in the EKF
 
 ## Self-Check
 - [ ] I can write the 6×6 adjoint matrix for a given SE(3) element

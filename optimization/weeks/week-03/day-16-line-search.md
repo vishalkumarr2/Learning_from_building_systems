@@ -9,7 +9,7 @@
 - **Week:** [Week 3 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Every Ceres solver iteration uses a line search or trust region to pick the step size. The Wolfe conditions guarantee convergence for BFGS — which is why Ceres requires them internally when using the LINE_SEARCH minimizer. Understanding Armijo vs Wolfe helps you debug cases where the solver stalls: often a line-search failure is the root cause of "solver did not converge."
 
 ---

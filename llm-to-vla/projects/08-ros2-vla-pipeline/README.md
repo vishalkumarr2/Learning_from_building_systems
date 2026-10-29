@@ -1252,4 +1252,4 @@ print("Saved: pipeline_actions.png")
 > the monitor compresses pipeline health into actionable alerts. Real robotics
 > requires compressing knowledge at every layer of the stack.
 
-[← Project 07: VLA Capstone](../projects/07-vla-capstone/README.md) | [Back to Curriculum](../CURRICULUM.md)
+[← Project 07: VLA Capstone](../07-vla-capstone/README.md) | [Back to Curriculum](../../CURRICULUM.md)

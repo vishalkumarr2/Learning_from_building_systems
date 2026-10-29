@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 When multiple robots choose charging stations, a stable assignment is one where no single robot benefits by switching. This is a pure Nash equilibrium of the station-selection game. Finding it avoids oscillation in real-time scheduling — robots converge to a consistent plan without central coordination.
 
 ---
@@ -221,7 +221,7 @@ Profiles (station for each robot): (1,1,1), (1,1,2), (1,2,1), (2,1,1), (1,2,2), 
 ## Connections
 - **Back:** Day 92 (normal form, dominance) — NE refines beyond dominance
 - **Forward:** Day 94 (mixed NE — what happens when no pure NE exists), Day 95 (selecting among multiple NE)
-- **OKS:** Station assignment as congestion game — pure NE gives stable fleet allocations
+- **AMR:** Station assignment as congestion game — pure NE gives stable fleet allocations
 
 ## Self-Check
 - [ ] I can apply the underline method to find all pure NE in a bimatrix

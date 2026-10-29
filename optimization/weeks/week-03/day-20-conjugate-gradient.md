@@ -9,7 +9,7 @@
 - **Week:** [Week 3 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Ceres uses Conjugate Gradient internally via `ITERATIVE_SCHUR` and `CGNR` linear solvers. When solving $J^TJ\delta = -J^Tr$ at each Gauss-Newton step, CG avoids forming $J^TJ$ explicitly — just matrix-vector products. For sparse SLAM with 100K parameters, this is essential. CG for optimization (nonlinear CG) is also the core of Newton-CG.
 
 ---

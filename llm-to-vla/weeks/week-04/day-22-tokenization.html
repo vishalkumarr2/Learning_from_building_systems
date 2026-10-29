@@ -5,21 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Day 22: Tokenization Deep Dive — From Characters to Subwords - LLM to VLA - Learning From Building Systems</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- KaTeX for LaTeX math -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
-        onload="renderMathInElement(document.body, {
-            delimiters: [
-                {left: '$$', right: '$$', display: true},
-                {left: '$', right: '$', display: false}
-            ],
-            throwOnError: false
-        });"></script>
+        onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}], throwOnError: false});"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
-        /* Markdown content styling */
         .md-content h1 { font-size: 2rem; font-weight: 700; color: #111827; margin-top: 2rem; margin-bottom: 1rem; }
         .md-content h2 { font-size: 1.5rem; font-weight: 600; color: #1f2937; margin-top: 1.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
         .md-content h3 { font-size: 1.25rem; font-weight: 600; color: #374151; margin-top: 1.5rem; margin-bottom: 0.5rem; }
@@ -28,78 +20,68 @@
         .md-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
         .md-content ol { list-style: decimal; margin-left: 1.5rem; margin-bottom: 1rem; color: #374151; }
         .md-content li { margin-bottom: 0.35rem; line-height: 1.6; }
-        .md-content code {
-            background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem;
-            font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d;
-        }
-        .md-content pre {
-            background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem;
-            overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6;
-        }
+        .md-content code { background-color: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-size: 0.875rem; font-family: 'Fira Code', 'Courier New', monospace; color: #be185d; }
+        .md-content pre { background-color: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.6; }
         .md-content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
-        .md-content blockquote {
-            border-left: 4px solid #8b5cf6; background: #f5f3ff; padding: 0.75rem 1rem;
-            margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151;
-        }
+        .md-content blockquote { border-left: 4px solid #6366f1; background: #eef2ff; padding: 0.75rem 1rem; margin-bottom: 1rem; border-radius: 0 0.5rem 0.5rem 0; color: #374151; }
         .md-content table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
         .md-content th { background: #f9fafb; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; text-align: left; font-weight: 600; font-size: 0.875rem; }
         .md-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; font-size: 0.875rem; }
         .md-content tr:hover { background-color: #f9fafb; }
         .md-content hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
         .md-content strong { font-weight: 600; }
-        .md-content a { color: #7c3aed; text-decoration: underline; }
-        .md-content a:hover { color: #6d28d9; }
+        .md-content a { color: #2563eb; text-decoration: underline; }
+        .md-content a:hover { color: #1d4ed8; }
         .md-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
-        /* Details/summary */
         .md-content details { margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
         .md-content summary { cursor: pointer; padding: 0.75rem 1rem; background: #f9fafb; font-weight: 600; color: #374151; }
         .md-content summary:hover { background: #f3f4f6; }
         .md-content details[open] summary { border-bottom: 1px solid #e5e7eb; }
-        .md-content details > *:not(summary) { padding: 0 1rem; }
-        /* Phase badges */
-        .phase-badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-        .phase-1 { background: #dbeafe; color: #1e40af; }
-        .phase-2 { background: #d1fae5; color: #065f46; }
-        .phase-3 { background: #fef3c7; color: #92400e; }
-        .phase-4 { background: #fce7f3; color: #9d174d; }
-        .phase-5 { background: #ede9fe; color: #5b21b6; }
-        .phase-6 { background: #ccfbf1; color: #115e59; }
-        .phase-7 { background: #fef9c3; color: #713f12; }
-        /* Progress bar */
-        .progress-bar { height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
-        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 2px; }
+        .md-content details > *:not(summary) { padding-left: 1rem; padding-right: 1rem; }
+        .md-content .mermaid { margin: 1.5rem 0; overflow-x: auto; }
+        .md-content .math-display { margin: 1.5rem 0; overflow-x: auto; }
     </style>
+    <!-- lfbs:begin -->
+    <meta name="lfbs-root" content="../../../">
+    <meta name="lfbs-path" content="llm-to-vla/weeks/week-04/day-22-tokenization.html">
+    <meta name="lfbs-track" content="llm-to-vla">
+    <meta name="lfbs-lesson" content="1">
+    <link rel="stylesheet" href="../../../assets/learn.css">
+    <script defer src="../../../assets/lessons.js"></script>
+    <script defer src="../../../assets/learn.js"></script>
+    <!-- lfbs:end -->
 </head>
 <body class="bg-gray-100 text-gray-800">
     <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
-        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Week 4: Scaling & Decoders</a>
+        <a href="index.html" class="text-violet-600 hover:text-violet-800 mb-4 inline-block">&larr; Back to Week 4: Scaling + Decoders + Capstone</a>
 
-        <div class="bg-white rounded-xl shadow-md p-6 sm:p-8 md:p-10">
+        <div class="bg-white rounded-xl shadow-md p-5 sm:p-8 md:p-10">
             <div class="md-content">
-<h1 id="day-22-tokenization-deep-dive-from-characters-to-subwords">Day 22: Tokenization Deep Dive — From Characters to Subwords</h1>
+<h1 id="day-22-tokenization-deep-dive-from-characters-to-subwords" data-plain="Day 22: Tokenization Deep Dive — From Characters to Subwords">Day 22: Tokenization Deep Dive — From Characters to Subwords</h1>
 <blockquote>
 <p><strong>Phase II — Attention, Transformers &amp; Scaling | Week 4 | 2.5 hours</strong>
-<em>"How many Rs in strawberry? If you can't answer that, your tokenizer is showing." — @karpathy</em></p>
+<em>&ldquo;How many Rs in strawberry? If you can&rsquo;t answer that, your tokenizer is showing.&rdquo; — @karpathy</em></p>
 </blockquote>
-<h2 id="navigation">Navigation</h2>
+<h2 id="navigation" data-plain="Navigation">Navigation</h2>
 <ul>
 <li><strong>Previous:</strong> <a href="../week-03/day-21-bert-masked-lm.html">Day 21: BERT &amp; Masked LM</a></li>
 <li><strong>Next:</strong> <a href="day-23-gpt-nanogpt.html">Day 23: GPT &amp; nanoGPT</a></li>
-<li><strong>Week:</strong> <a href="README.html">Week 4 Overview</a></li>
-<li><strong>Phase:</strong> <a href="../../study-notes/03-transformers.html">Phase II: Attention &amp; Transformers</a></li>
-<li><strong>Curriculum:</strong> <a href="../../CURRICULUM.html">Full Curriculum</a></li>
+<li><strong>Week:</strong> <a href="index.html">Week 4 Overview</a></li>
+<li><strong>Phase:</strong> <a href="../../study-notes/03-transformer-architecture.html">Phase II: Attention &amp; Transformers</a></li>
+<li><strong>Curriculum:</strong> <a href="../../curriculum.html">Full Curriculum</a></li>
 </ul>
 <hr />
-<h2 id="theory-45-min">Theory (45 min)</h2>
-<h3 id="221-the-tokenization-problem">22.1 The Tokenization Problem</h3>
-<p>Models don't see text. They see integer sequences. How you convert text → integers has profound consequences:</p>
-<pre><code>Text:      &quot;unhappiness&quot;
+<h2 id="theory-45-min" data-plain="Theory (45 min)">Theory (45 min)</h2>
+<h3 id="221-the-tokenization-problem" data-plain="22.1 The Tokenization Problem">22.1 The Tokenization Problem</h3>
+<p>Models don&rsquo;t see text. They see integer sequences. How you convert text → integers has profound consequences:</p>
+<div class="highlight"><pre><span></span><code>Text:      &quot;unhappiness&quot;
 
-Character: ['u','n','h','a','p','p','i','n','e','s','s']  → 11 tokens
-Word:      ['unhappiness']                                  → 1 token (but vocab=∞)
-Subword:   ['un', 'happiness']                              → 2 tokens ← sweet spot
-BPE:       ['un', 'happ', 'iness']                          → 3 tokens (depends on training)
-</code></pre>
+Character: [&#39;u&#39;,&#39;n&#39;,&#39;h&#39;,&#39;a&#39;,&#39;p&#39;,&#39;p&#39;,&#39;i&#39;,&#39;n&#39;,&#39;e&#39;,&#39;s&#39;,&#39;s&#39;]  → 11 tokens
+Word:      [&#39;unhappiness&#39;]                                  → 1 token (but vocab=∞)
+Subword:   [&#39;un&#39;, &#39;happiness&#39;]                              → 2 tokens ← sweet spot
+BPE:       [&#39;un&#39;, &#39;happ&#39;, &#39;iness&#39;]                          → 3 tokens (depends on training)
+</code></pre></div>
+
 <table>
 <thead>
 <tr>
@@ -134,8 +116,8 @@ BPE:       ['un', 'happ', 'iness']                          → 3 tokens (depend
 </tr>
 </tbody>
 </table>
-<h3 id="222-byte-pair-encoding-bpe-step-by-step">22.2 Byte Pair Encoding (BPE) — Step by Step</h3>
-<p>BPE is the dominant tokenization algorithm. It's a compression algorithm repurposed for NLP.</p>
+<h3 id="222-byte-pair-encoding-bpe-step-by-step" data-plain="22.2 Byte Pair Encoding (BPE) — Step by Step">22.2 Byte Pair Encoding (BPE) — Step by Step</h3>
+<p>BPE is the dominant tokenization algorithm. It&rsquo;s a compression algorithm repurposed for NLP.</p>
 <p><strong>Algorithm:</strong></p>
 <ol>
 <li>Start with a vocabulary of individual characters (or bytes)</li>
@@ -143,42 +125,44 @@ BPE:       ['un', 'happ', 'iness']                          → 3 tokens (depend
 <li>Merge the most frequent pair into a new token</li>
 <li>Repeat steps 2–3 until desired vocabulary size is reached</li>
 </ol>
-<pre><code>Corpus: &quot;low low low low low lowest lowest newer newer newer wider wider&quot;
+<div class="highlight"><pre><span></span><code>Corpus: &quot;low low low low low lowest lowest newer newer newer wider wider&quot;
 
 Step 0 — Character vocabulary:
-  {'l','o','w','e','s','t','n','r','i','d',' '}
+  {&#39;l&#39;,&#39;o&#39;,&#39;w&#39;,&#39;e&#39;,&#39;s&#39;,&#39;t&#39;,&#39;n&#39;,&#39;r&#39;,&#39;i&#39;,&#39;d&#39;,&#39; &#39;}
 
 Step 0 — Tokenized corpus:
   l o w   l o w   l o w   l o w   l o w   l o w e s t   l o w e s t
   n e w e r   n e w e r   n e w e r   w i d e r   w i d e r
 
-Step 1 — Most frequent pair: ('l', 'o') → count: 7
-  Merge 'l'+'o' → 'lo'
+Step 1 — Most frequent pair: (&#39;l&#39;, &#39;o&#39;) → count: 7
+  Merge &#39;l&#39;+&#39;o&#39; → &#39;lo&#39;
   lo w   lo w   lo w   lo w   lo w   lo w e s t   lo w e s t
   n e w e r   n e w e r   n e w e r   w i d e r   w i d e r
 
-Step 2 — Most frequent pair: ('lo', 'w') → count: 7
-  Merge 'lo'+'w' → 'low'
+Step 2 — Most frequent pair: (&#39;lo&#39;, &#39;w&#39;) → count: 7
+  Merge &#39;lo&#39;+&#39;w&#39; → &#39;low&#39;
   low   low   low   low   low   low e s t   low e s t
   n e w e r   n e w e r   n e w e r   w i d e r   w i d e r
 
-Step 3 — Most frequent pair: ('e', 'r') → count: 5
-  Merge 'e'+'r' → 'er'
+Step 3 — Most frequent pair: (&#39;e&#39;, &#39;r&#39;) → count: 5
+  Merge &#39;e&#39;+&#39;r&#39; → &#39;er&#39;
   low   low   low   low   low   low e s t   low e s t
   n e w er   n e w er   n e w er   w i d er   w i d er
 
-Step 4 — Most frequent pair: ('e', 'w') → count: 3
-  Merge 'e'+'w' → 'ew'
+Step 4 — Most frequent pair: (&#39;e&#39;, &#39;w&#39;) → count: 3
+  Merge &#39;e&#39;+&#39;w&#39; → &#39;ew&#39;
   ...and so on until vocab size reached
-</code></pre>
-<h3 id="223-wordpiece-bert-vs-bpe-gpt">22.3 WordPiece (BERT) vs BPE (GPT)</h3>
+</code></pre></div>
+
+<h3 id="223-wordpiece-bert-vs-bpe-gpt" data-plain="22.3 WordPiece (BERT) vs BPE (GPT)">22.3 WordPiece (BERT) vs BPE (GPT)</h3>
 <p>Both are subword tokenization but differ in the merge criterion:</p>
 <p><strong>BPE:</strong> Merges the most <strong>frequent</strong> pair.</p>
-<p><strong>WordPiece:</strong> Merges the pair that maximizes the <strong>likelihood</strong> of the training data:
-$$\text{score}(a, b) = \frac{\text{freq}(ab)}{\text{freq}(a) \times \text{freq}(b)}$$</p>
+<p><strong>WordPiece:</strong> Merges the pair that maximizes the <strong>likelihood</strong> of the training data:</p>
+<div class="math-display">$$\text{score}(a, b) = \frac{\text{freq}(ab)}{\text{freq}(a) \times \text{freq}(b)}$$</div>
+
 <p>This favors merging rare subwords that appear together, rather than just common pairs.</p>
 <p><strong>In practice:</strong> The difference is minor. BPE is more common in modern models.</p>
-<h3 id="224-sentencepiece-and-byte-level-bpe">22.4 SentencePiece and Byte-Level BPE</h3>
+<h3 id="224-sentencepiece-and-byte-level-bpe" data-plain="22.4 SentencePiece and Byte-Level BPE">22.4 SentencePiece and Byte-Level BPE</h3>
 <p><strong>Problem:</strong> Standard BPE depends on pre-tokenization (splitting on spaces). This fails for languages without spaces (Chinese, Japanese) and creates language bias.</p>
 <p><strong>SentencePiece (Kudo &amp; Richardson, 2018):</strong>
 - Treats the input as a raw stream of characters (including spaces as <code>▁</code>)
@@ -188,47 +172,49 @@ $$\text{score}(a, b) = \frac{\text{freq}(ab)}{\text{freq}(a) \times \text{freq}(
 - Start with 256 byte tokens (UTF-8 bytes)
 - Build BPE merges on bytes, not characters
 - Can represent ANY text (including code, emoji, non-Latin scripts)
-- <code>tiktoken</code> is OpenAI's fast implementation</p>
-<pre><code class="language-python"># tiktoken example
-import tiktoken
+- <code>tiktoken</code> is OpenAI&rsquo;s fast implementation</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># tiktoken example</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">tiktoken</span>
 
-enc = tiktoken.get_encoding(&quot;cl100k_base&quot;)  # GPT-4 encoding
+<span class="n">enc</span> <span class="o">=</span> <span class="n">tiktoken</span><span class="o">.</span><span class="n">get_encoding</span><span class="p">(</span><span class="s2">&quot;cl100k_base&quot;</span><span class="p">)</span>  <span class="c1"># GPT-4 encoding</span>
 
-text = &quot;Hello, world! 🌍 こんにちは&quot;
-tokens = enc.encode(text)
-print(f&quot;Text: {text}&quot;)
-print(f&quot;Tokens: {tokens}&quot;)
-print(f&quot;Decoded pieces: {[enc.decode([t]) for t in tokens]}&quot;)
-# ['Hello', ',', ' world', '!', ' 🌍', ' ', 'こん', 'にち', 'は']
-</code></pre>
-<h3 id="225-tokenization-artifacts-and-failure-modes">22.5 Tokenization Artifacts and Failure Modes</h3>
-<p>Tokenization creates <strong>blindness</strong> — the model can't reason about sub-token structure:</p>
-<pre><code>&quot;How many Rs in strawberry?&quot;
+<span class="n">text</span> <span class="o">=</span> <span class="s2">&quot;Hello, world! 🌍 こんにちは&quot;</span>
+<span class="n">tokens</span> <span class="o">=</span> <span class="n">enc</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Text: </span><span class="si">{</span><span class="n">text</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Tokens: </span><span class="si">{</span><span class="n">tokens</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Decoded pieces: </span><span class="si">{</span><span class="p">[</span><span class="n">enc</span><span class="o">.</span><span class="n">decode</span><span class="p">([</span><span class="n">t</span><span class="p">])</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">tokens</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="c1"># [&#39;Hello&#39;, &#39;,&#39;, &#39; world&#39;, &#39;!&#39;, &#39; 🌍&#39;, &#39; &#39;, &#39;こん&#39;, &#39;にち&#39;, &#39;は&#39;]</span>
+</code></pre></div>
+
+<h3 id="225-tokenization-artifacts-and-failure-modes" data-plain="22.5 Tokenization Artifacts and Failure Modes">22.5 Tokenization Artifacts and Failure Modes</h3>
+<p>Tokenization creates <strong>blindness</strong> — the model can&rsquo;t reason about sub-token structure:</p>
+<div class="highlight"><pre><span></span><code>&quot;How many Rs in strawberry?&quot;
 
 GPT-4 tokenization:
-  ['How', ' many', ' Rs', ' in', ' str', 'aw', 'berry', '?']
+  [&#39;How&#39;, &#39; many&#39;, &#39; Rs&#39;, &#39; in&#39;, &#39; str&#39;, &#39;aw&#39;, &#39;berry&#39;, &#39;?&#39;]
                                          ↑
-  'strawberry' is split into 'str' + 'aw' + 'berry'
+  &#39;strawberry&#39; is split into &#39;str&#39; + &#39;aw&#39; + &#39;berry&#39;
   The model sees 3 tokens, not individual characters
   It cannot count letters because it never sees them!
 
 Other artifacts:
   &quot; Hello&quot;  ≠  &quot;Hello&quot;     (leading space is a separate token)
-  &quot;1+1=2&quot;   tokenized as:  ['1', '+', '1', '=', '2']   ← fine
-  &quot;12345&quot;   tokenized as:  ['123', '45']                ← number split!
+  &quot;1+1=2&quot;   tokenized as:  [&#39;1&#39;, &#39;+&#39;, &#39;1&#39;, &#39;=&#39;, &#39;2&#39;]   ← fine
+  &quot;12345&quot;   tokenized as:  [&#39;123&#39;, &#39;45&#39;]                ← number split!
 
   Python code:
-  &quot;    if x:&quot; → ['    ', 'if', ' x', ':']
+  &quot;    if x:&quot; → [&#39;    &#39;, &#39;if&#39;, &#39; x&#39;, &#39;:&#39;]
   vs
-  &quot;  if x:&quot;  → ['  ', 'if', ' x', ':']
+  &quot;  if x:&quot;  → [&#39;  &#39;, &#39;if&#39;, &#39; x&#39;, &#39;:&#39;]
   Different indentation = different first token!
-</code></pre>
+</code></pre></div>
+
 <p><strong>Why this matters for LLMs:</strong>
 - Arithmetic errors (numbers split unpredictably)
 - Spelling/character-level tasks fail
 - Multilingual efficiency varies wildly (English: ~1 token/word, Japanese: ~3 tokens/character)
 - Code formatting sensitivity</p>
-<h3 id="226-vocabulary-size-trade-offs">22.6 Vocabulary Size Trade-offs</h3>
+<h3 id="226-vocabulary-size-trade-offs" data-plain="22.6 Vocabulary Size Trade-offs">22.6 Vocabulary Size Trade-offs</h3>
 <table>
 <thead>
 <tr>
@@ -267,241 +253,246 @@ Other artifacts:
 </table>
 <p><strong>Rule of thumb:</strong> Larger vocab → shorter sequences → faster training, but more embedding parameters and harder to train rare tokens.</p>
 <hr />
-<h2 id="implementation-60-min">Implementation (60 min)</h2>
-<h3 id="227-bpe-from-scratch-karpathys-minbpe">22.7 BPE from Scratch (Karpathy's minbpe)</h3>
-<pre><code class="language-python">&quot;&quot;&quot;
-Minimal BPE implementation.
-Based on Karpathy's minbpe: https://github.com/karpathy/minbpe
-&quot;&quot;&quot;
+<h2 id="implementation-60-min" data-plain="Implementation (60 min)">Implementation (60 min)</h2>
+<h3 id="227-bpe-from-scratch-karpathys-minbpe" data-plain="22.7 BPE from Scratch (Karpathy’s minbpe)">22.7 BPE from Scratch (Karpathy&rsquo;s minbpe)</h3>
+<div class="highlight"><pre><span></span><code><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Minimal BPE implementation.</span>
+<span class="sd">Based on Karpathy&#39;s minbpe: https://github.com/karpathy/minbpe</span>
+<span class="sd">&quot;&quot;&quot;</span>
 
 
-def get_pair_counts(token_ids):
-    &quot;&quot;&quot;Count frequency of adjacent token pairs.&quot;&quot;&quot;
-    counts = {}
-    for a, b in zip(token_ids, token_ids[1:]):
-        counts[(a, b)] = counts.get((a, b), 0) + 1
-    return counts
+<span class="k">def</span><span class="w"> </span><span class="nf">get_pair_counts</span><span class="p">(</span><span class="n">token_ids</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Count frequency of adjacent token pairs.&quot;&quot;&quot;</span>
+    <span class="n">counts</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">token_ids</span><span class="p">,</span> <span class="n">token_ids</span><span class="p">[</span><span class="mi">1</span><span class="p">:]):</span>
+        <span class="n">counts</span><span class="p">[(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)]</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">),</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">counts</span>
 
 
-def merge_pair(token_ids, pair, new_id):
-    &quot;&quot;&quot;Replace all occurrences of pair with new_id.&quot;&quot;&quot;
-    result = []
-    i = 0
-    while i &lt; len(token_ids):
-        if i &lt; len(token_ids) - 1 and (token_ids[i], token_ids[i+1]) == pair:
-            result.append(new_id)
-            i += 2
-        else:
-            result.append(token_ids[i])
-            i += 1
-    return result
+<span class="k">def</span><span class="w"> </span><span class="nf">merge_pair</span><span class="p">(</span><span class="n">token_ids</span><span class="p">,</span> <span class="n">pair</span><span class="p">,</span> <span class="n">new_id</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Replace all occurrences of pair with new_id.&quot;&quot;&quot;</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">while</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">token_ids</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">token_ids</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span> <span class="ow">and</span> <span class="p">(</span><span class="n">token_ids</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">token_ids</span><span class="p">[</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">])</span> <span class="o">==</span> <span class="n">pair</span><span class="p">:</span>
+            <span class="n">result</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">new_id</span><span class="p">)</span>
+            <span class="n">i</span> <span class="o">+=</span> <span class="mi">2</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">result</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">token_ids</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+            <span class="n">i</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">result</span>
 
 
-class MinBPE:
-    &quot;&quot;&quot;Minimal BPE tokenizer.&quot;&quot;&quot;
+<span class="k">class</span><span class="w"> </span><span class="nc">MinBPE</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Minimal BPE tokenizer.&quot;&quot;&quot;</span>
 
-    def __init__(self):
-        self.merges = {}     # (int, int) → int
-        self.vocab = {}      # int → bytes
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">merges</span> <span class="o">=</span> <span class="p">{}</span>     <span class="c1"># (int, int) → int</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">vocab</span> <span class="o">=</span> <span class="p">{}</span>      <span class="c1"># int → bytes</span>
 
-    def train(self, text, vocab_size=276):
-        &quot;&quot;&quot;Train BPE on text. Default: 276 = 256 bytes + 20 merges.&quot;&quot;&quot;
-        assert vocab_size &gt;= 256, &quot;Vocab must include all bytes&quot;
-        n_merges = vocab_size - 256
+    <span class="k">def</span><span class="w"> </span><span class="nf">train</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">,</span> <span class="n">vocab_size</span><span class="o">=</span><span class="mi">276</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Train BPE on text. Default: 276 = 256 bytes + 20 merges.&quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="n">vocab_size</span> <span class="o">&gt;=</span> <span class="mi">256</span><span class="p">,</span> <span class="s2">&quot;Vocab must include all bytes&quot;</span>
+        <span class="n">n_merges</span> <span class="o">=</span> <span class="n">vocab_size</span> <span class="o">-</span> <span class="mi">256</span>
 
-        # Convert text to bytes
-        token_ids = list(text.encode(&quot;utf-8&quot;))
-        print(f&quot;Training BPE: {len(token_ids)} bytes → {n_merges} merges&quot;)
+        <span class="c1"># Convert text to bytes</span>
+        <span class="n">token_ids</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">text</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Training BPE: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">token_ids</span><span class="p">)</span><span class="si">}</span><span class="s2"> bytes → </span><span class="si">{</span><span class="n">n_merges</span><span class="si">}</span><span class="s2"> merges&quot;</span><span class="p">)</span>
 
-        # Build initial vocab: byte → byte
-        self.vocab = {i: bytes([i]) for i in range(256)}
+        <span class="c1"># Build initial vocab: byte → byte</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">vocab</span> <span class="o">=</span> <span class="p">{</span><span class="n">i</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">([</span><span class="n">i</span><span class="p">])</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">256</span><span class="p">)}</span>
 
-        for i in range(n_merges):
-            counts = get_pair_counts(token_ids)
-            if not counts:
-                break
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_merges</span><span class="p">):</span>
+            <span class="n">counts</span> <span class="o">=</span> <span class="n">get_pair_counts</span><span class="p">(</span><span class="n">token_ids</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">counts</span><span class="p">:</span>
+                <span class="k">break</span>
 
-            # Find most frequent pair
-            best_pair = max(counts, key=counts.get)
-            new_id = 256 + i
+            <span class="c1"># Find most frequent pair</span>
+            <span class="n">best_pair</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">counts</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">)</span>
+            <span class="n">new_id</span> <span class="o">=</span> <span class="mi">256</span> <span class="o">+</span> <span class="n">i</span>
 
-            # Merge
-            token_ids = merge_pair(token_ids, best_pair, new_id)
+            <span class="c1"># Merge</span>
+            <span class="n">token_ids</span> <span class="o">=</span> <span class="n">merge_pair</span><span class="p">(</span><span class="n">token_ids</span><span class="p">,</span> <span class="n">best_pair</span><span class="p">,</span> <span class="n">new_id</span><span class="p">)</span>
 
-            # Record
-            self.merges[best_pair] = new_id
-            self.vocab[new_id] = self.vocab[best_pair[0]] + self.vocab[best_pair[1]]
+            <span class="c1"># Record</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">merges</span><span class="p">[</span><span class="n">best_pair</span><span class="p">]</span> <span class="o">=</span> <span class="n">new_id</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">vocab</span><span class="p">[</span><span class="n">new_id</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">vocab</span><span class="p">[</span><span class="n">best_pair</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">vocab</span><span class="p">[</span><span class="n">best_pair</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span>
 
-            if i &lt; 10 or i % 50 == 0:
-                piece = self.vocab[new_id].decode(&quot;utf-8&quot;, errors=&quot;replace&quot;)
-                print(f&quot;  Merge {i}: {best_pair} → {new_id} &quot;
-                      f&quot;('{piece}', count={counts[best_pair]})&quot;)
+            <span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="mi">10</span> <span class="ow">or</span> <span class="n">i</span> <span class="o">%</span> <span class="mi">50</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">piece</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">vocab</span><span class="p">[</span><span class="n">new_id</span><span class="p">]</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Merge </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">best_pair</span><span class="si">}</span><span class="s2"> → </span><span class="si">{</span><span class="n">new_id</span><span class="si">}</span><span class="s2"> &quot;</span>
+                      <span class="sa">f</span><span class="s2">&quot;(&#39;</span><span class="si">{</span><span class="n">piece</span><span class="si">}</span><span class="s2">&#39;, count=</span><span class="si">{</span><span class="n">counts</span><span class="p">[</span><span class="n">best_pair</span><span class="p">]</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
 
-        print(f&quot;Final: {len(token_ids)} tokens &quot;
-              f&quot;(compression: {len(text.encode('utf-8'))/len(token_ids):.1f}x)&quot;)
-        return self
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Final: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">token_ids</span><span class="p">)</span><span class="si">}</span><span class="s2"> tokens &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;(compression: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">))</span><span class="o">/</span><span class="nb">len</span><span class="p">(</span><span class="n">token_ids</span><span class="p">)</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">x)&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span>
 
-    def encode(self, text):
-        &quot;&quot;&quot;Encode text to token IDs.&quot;&quot;&quot;
-        token_ids = list(text.encode(&quot;utf-8&quot;))
-        while len(token_ids) &gt;= 2:
-            counts = get_pair_counts(token_ids)
-            # Find the pair with the lowest merge index (earliest learned)
-            best = min(
-                counts,
-                key=lambda p: self.merges.get(p, float('inf'))
-            )
-            if best not in self.merges:
-                break
-            token_ids = merge_pair(token_ids, best, self.merges[best])
-        return token_ids
+    <span class="k">def</span><span class="w"> </span><span class="nf">encode</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Encode text to token IDs.&quot;&quot;&quot;</span>
+        <span class="n">token_ids</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">text</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span>
+        <span class="k">while</span> <span class="nb">len</span><span class="p">(</span><span class="n">token_ids</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="n">counts</span> <span class="o">=</span> <span class="n">get_pair_counts</span><span class="p">(</span><span class="n">token_ids</span><span class="p">)</span>
+            <span class="c1"># Find the pair with the lowest merge index (earliest learned)</span>
+            <span class="n">best</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span>
+                <span class="n">counts</span><span class="p">,</span>
+                <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">p</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">merges</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="nb">float</span><span class="p">(</span><span class="s1">&#39;inf&#39;</span><span class="p">))</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="n">best</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">merges</span><span class="p">:</span>
+                <span class="k">break</span>
+            <span class="n">token_ids</span> <span class="o">=</span> <span class="n">merge_pair</span><span class="p">(</span><span class="n">token_ids</span><span class="p">,</span> <span class="n">best</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">merges</span><span class="p">[</span><span class="n">best</span><span class="p">])</span>
+        <span class="k">return</span> <span class="n">token_ids</span>
 
-    def decode(self, token_ids):
-        &quot;&quot;&quot;Decode token IDs back to text.&quot;&quot;&quot;
-        raw = b&quot;&quot;.join(self.vocab[t] for t in token_ids)
-        return raw.decode(&quot;utf-8&quot;, errors=&quot;replace&quot;)
+    <span class="k">def</span><span class="w"> </span><span class="nf">decode</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">token_ids</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Decode token IDs back to text.&quot;&quot;&quot;</span>
+        <span class="n">raw</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">vocab</span><span class="p">[</span><span class="n">t</span><span class="p">]</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">token_ids</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">raw</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
 
 
-# Train on a sample corpus
-corpus = &quot;&quot;&quot;
-The transformer architecture has revolutionized natural language processing.
-Attention is all you need. Self-attention allows each token to attend to every
-other token in the sequence. Multi-head attention splits the attention into
-multiple heads, each learning different patterns. The transformer uses
-positional encodings to inject sequence order information.
-&quot;&quot;&quot; * 100  # Repeat for more data
+<span class="c1"># Train on a sample corpus</span>
+<span class="n">corpus</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">The transformer architecture has revolutionized natural language processing.</span>
+<span class="s2">Attention is all you need. Self-attention allows each token to attend to every</span>
+<span class="s2">other token in the sequence. Multi-head attention splits the attention into</span>
+<span class="s2">multiple heads, each learning different patterns. The transformer uses</span>
+<span class="s2">positional encodings to inject sequence order information.</span>
+<span class="s2">&quot;&quot;&quot;</span> <span class="o">*</span> <span class="mi">100</span>  <span class="c1"># Repeat for more data</span>
 
-bpe = MinBPE()
-bpe.train(corpus, vocab_size=356)  # 256 bytes + 100 merges
+<span class="n">bpe</span> <span class="o">=</span> <span class="n">MinBPE</span><span class="p">()</span>
+<span class="n">bpe</span><span class="o">.</span><span class="n">train</span><span class="p">(</span><span class="n">corpus</span><span class="p">,</span> <span class="n">vocab_size</span><span class="o">=</span><span class="mi">356</span><span class="p">)</span>  <span class="c1"># 256 bytes + 100 merges</span>
 
-# Test encoding
-test = &quot;The transformer uses attention mechanisms.&quot;
-encoded = bpe.encode(test)
-decoded = bpe.decode(encoded)
-print(f&quot;\nOriginal:  '{test}'&quot;)
-print(f&quot;Encoded:   {encoded}&quot;)
-print(f&quot;N tokens:  {len(encoded)} (vs {len(test)} chars)&quot;)
-print(f&quot;Decoded:   '{decoded}'&quot;)
-print(f&quot;Roundtrip: {test == decoded}&quot;)
+<span class="c1"># Test encoding</span>
+<span class="n">test</span> <span class="o">=</span> <span class="s2">&quot;The transformer uses attention mechanisms.&quot;</span>
+<span class="n">encoded</span> <span class="o">=</span> <span class="n">bpe</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">test</span><span class="p">)</span>
+<span class="n">decoded</span> <span class="o">=</span> <span class="n">bpe</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">encoded</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Original:  &#39;</span><span class="si">{</span><span class="n">test</span><span class="si">}</span><span class="s2">&#39;&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Encoded:   </span><span class="si">{</span><span class="n">encoded</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;N tokens:  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">encoded</span><span class="p">)</span><span class="si">}</span><span class="s2"> (vs </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">test</span><span class="p">)</span><span class="si">}</span><span class="s2"> chars)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Decoded:   &#39;</span><span class="si">{</span><span class="n">decoded</span><span class="si">}</span><span class="s2">&#39;&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Roundtrip: </span><span class="si">{</span><span class="n">test</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">decoded</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
-# Show the learned vocabulary pieces
-print(&quot;\nLearned merges (first 20):&quot;)
-for (a, b), new_id in list(bpe.merges.items())[:20]:
-    piece = bpe.vocab[new_id].decode(&quot;utf-8&quot;, errors=&quot;replace&quot;)
-    print(f&quot;  {a} + {b} → {new_id} = '{piece}'&quot;)
-</code></pre>
-<h3 id="228-compare-tokenizers">22.8 Compare Tokenizers</h3>
-<pre><code class="language-python">import tiktoken
+<span class="c1"># Show the learned vocabulary pieces</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Learned merges (first 20):&quot;</span><span class="p">)</span>
+<span class="k">for</span> <span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">),</span> <span class="n">new_id</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">bpe</span><span class="o">.</span><span class="n">merges</span><span class="o">.</span><span class="n">items</span><span class="p">())[:</span><span class="mi">20</span><span class="p">]:</span>
+    <span class="n">piece</span> <span class="o">=</span> <span class="n">bpe</span><span class="o">.</span><span class="n">vocab</span><span class="p">[</span><span class="n">new_id</span><span class="p">]</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">a</span><span class="si">}</span><span class="s2"> + </span><span class="si">{</span><span class="n">b</span><span class="si">}</span><span class="s2"> → </span><span class="si">{</span><span class="n">new_id</span><span class="si">}</span><span class="s2"> = &#39;</span><span class="si">{</span><span class="n">piece</span><span class="si">}</span><span class="s2">&#39;&quot;</span><span class="p">)</span>
+</code></pre></div>
 
-enc = tiktoken.get_encoding(&quot;cl100k_base&quot;)  # GPT-4 encoding
+<h3 id="228-compare-tokenizers" data-plain="22.8 Compare Tokenizers">22.8 Compare Tokenizers</h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">tiktoken</span>
 
-test_texts = [
-    &quot;Hello, world!&quot;,
-    &quot;The quick brown fox jumps over the lazy dog.&quot;,
-    &quot;unhappiness&quot;,
-    &quot;How many Rs in strawberry?&quot;,
-    &quot;def fibonacci(n):\n    if n &lt;= 1:\n        return n&quot;,
-    &quot;こんにちは世界&quot;,  # &quot;Hello world&quot; in Japanese
-    &quot;🎉🎊🎈&quot;,  # Emoji
-    &quot;3.14159265358979323846&quot;,  # Pi digits
-]
+<span class="n">enc</span> <span class="o">=</span> <span class="n">tiktoken</span><span class="o">.</span><span class="n">get_encoding</span><span class="p">(</span><span class="s2">&quot;cl100k_base&quot;</span><span class="p">)</span>  <span class="c1"># GPT-4 encoding</span>
 
-print(f&quot;{'Text':&lt;50} {'tiktoken':&gt;10} {'BPE':&gt;10} {'Chars':&gt;10}&quot;)
-print(&quot;-&quot; * 85)
-for text in test_texts:
-    n_tiktoken = len(enc.encode(text))
-    n_bpe = len(bpe.encode(text))
-    n_chars = len(text)
-    display = text[:47] + &quot;...&quot; if len(text) &gt; 50 else text
-    print(f&quot;{display:&lt;50} {n_tiktoken:&gt;10} {n_bpe:&gt;10} {n_chars:&gt;10}&quot;)
+<span class="n">test_texts</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">&quot;Hello, world!&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;The quick brown fox jumps over the lazy dog.&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;unhappiness&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;How many Rs in strawberry?&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;def fibonacci(n):</span><span class="se">\n</span><span class="s2">    if n &lt;= 1:</span><span class="se">\n</span><span class="s2">        return n&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;こんにちは世界&quot;</span><span class="p">,</span>  <span class="c1"># &quot;Hello world&quot; in Japanese</span>
+    <span class="s2">&quot;🎉🎊🎈&quot;</span><span class="p">,</span>  <span class="c1"># Emoji</span>
+    <span class="s2">&quot;3.14159265358979323846&quot;</span><span class="p">,</span>  <span class="c1"># Pi digits</span>
+<span class="p">]</span>
 
-# Inspect tokenization of tricky cases
-for text in [&quot;strawberry&quot;, &quot;How many Rs in strawberry?&quot;]:
-    tokens = enc.encode(text)
-    pieces = [enc.decode([t]) for t in tokens]
-    print(f&quot;\ntiktoken({text!r}):&quot;)
-    print(f&quot;  Pieces: {pieces}&quot;)
-    print(f&quot;  IDs:    {tokens}&quot;)
-</code></pre>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;Text&#39;</span><span class="si">:</span><span class="s2">&lt;50</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;tiktoken&#39;</span><span class="si">:</span><span class="s2">&gt;10</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;BPE&#39;</span><span class="si">:</span><span class="s2">&gt;10</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;Chars&#39;</span><span class="si">:</span><span class="s2">&gt;10</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">85</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">text</span> <span class="ow">in</span> <span class="n">test_texts</span><span class="p">:</span>
+    <span class="n">n_tiktoken</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">enc</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">text</span><span class="p">))</span>
+    <span class="n">n_bpe</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">bpe</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">text</span><span class="p">))</span>
+    <span class="n">n_chars</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">display</span> <span class="o">=</span> <span class="n">text</span><span class="p">[:</span><span class="mi">47</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;...&quot;</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">50</span> <span class="k">else</span> <span class="n">text</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">display</span><span class="si">:</span><span class="s2">&lt;50</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">n_tiktoken</span><span class="si">:</span><span class="s2">&gt;10</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">n_bpe</span><span class="si">:</span><span class="s2">&gt;10</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">n_chars</span><span class="si">:</span><span class="s2">&gt;10</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Inspect tokenization of tricky cases</span>
+<span class="k">for</span> <span class="n">text</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;strawberry&quot;</span><span class="p">,</span> <span class="s2">&quot;How many Rs in strawberry?&quot;</span><span class="p">]:</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="n">enc</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">pieces</span> <span class="o">=</span> <span class="p">[</span><span class="n">enc</span><span class="o">.</span><span class="n">decode</span><span class="p">([</span><span class="n">t</span><span class="p">])</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">tokens</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">tiktoken(</span><span class="si">{</span><span class="n">text</span><span class="si">!r}</span><span class="s2">):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Pieces: </span><span class="si">{</span><span class="n">pieces</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  IDs:    </span><span class="si">{</span><span class="n">tokens</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+
 <hr />
-<h2 id="exercise-45-min">Exercise (45 min)</h2>
-<h3 id="e221-compression-ratio-analysis">E22.1 Compression Ratio Analysis</h3>
+<h2 id="exercise-45-min" data-plain="Exercise (45 min)">Exercise (45 min)</h2>
+<h3 id="e221-compression-ratio-analysis" data-plain="E22.1 Compression Ratio Analysis">E22.1 Compression Ratio Analysis</h3>
 <p>Train your MinBPE on different corpus types and measure compression:</p>
-<pre><code class="language-python">corpora = {
-    &quot;english&quot;: &quot;The quick brown fox...&quot; * 1000,
-    &quot;python_code&quot;: &quot;def func(x):\n    return x * 2\n&quot; * 1000,
-    &quot;numbers&quot;: &quot;3141592653589793238462643383279&quot; * 100,
-    &quot;repetitive&quot;: &quot;aaabbbcccaaabbbccc&quot; * 1000,
-}
+<div class="highlight"><pre><span></span><code><span class="n">corpora</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;english&quot;</span><span class="p">:</span> <span class="s2">&quot;The quick brown fox...&quot;</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span>
+    <span class="s2">&quot;python_code&quot;</span><span class="p">:</span> <span class="s2">&quot;def func(x):</span><span class="se">\n</span><span class="s2">    return x * 2</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span>
+    <span class="s2">&quot;numbers&quot;</span><span class="p">:</span> <span class="s2">&quot;3141592653589793238462643383279&quot;</span> <span class="o">*</span> <span class="mi">100</span><span class="p">,</span>
+    <span class="s2">&quot;repetitive&quot;</span><span class="p">:</span> <span class="s2">&quot;aaabbbcccaaabbbccc&quot;</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span>
+<span class="p">}</span>
 
-for name, text in corpora.items():
-    bpe = MinBPE()
-    bpe.train(text, vocab_size=356)
-    encoded = bpe.encode(text)
-    ratio = len(text.encode('utf-8')) / len(encoded)
-    print(f&quot;{name}: {ratio:.1f}x compression&quot;)
-</code></pre>
+<span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">text</span> <span class="ow">in</span> <span class="n">corpora</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="n">bpe</span> <span class="o">=</span> <span class="n">MinBPE</span><span class="p">()</span>
+    <span class="n">bpe</span><span class="o">.</span><span class="n">train</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="n">vocab_size</span><span class="o">=</span><span class="mi">356</span><span class="p">)</span>
+    <span class="n">encoded</span> <span class="o">=</span> <span class="n">bpe</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">ratio</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">))</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">encoded</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">ratio</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">x compression&quot;</span><span class="p">)</span>
+</code></pre></div>
+
 <p>Which corpus compresses best? Why?</p>
-<h3 id="e222-tokenization-blindness-demo">E22.2 Tokenization Blindness Demo</h3>
+<h3 id="e222-tokenization-blindness-demo" data-plain="E22.2 Tokenization Blindness Demo">E22.2 Tokenization Blindness Demo</h3>
 <p>Test multiple tokenizers on character-level tasks:</p>
-<pre><code class="language-python"># Task: Count occurrences of 'r' in these words
-words = [&quot;strawberry&quot;, &quot;mirror&quot;, &quot;raspberry&quot;, &quot;error&quot;, &quot;corridor&quot;]
+<div class="highlight"><pre><span></span><code><span class="c1"># Task: Count occurrences of &#39;r&#39; in these words</span>
+<span class="n">words</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;strawberry&quot;</span><span class="p">,</span> <span class="s2">&quot;mirror&quot;</span><span class="p">,</span> <span class="s2">&quot;raspberry&quot;</span><span class="p">,</span> <span class="s2">&quot;error&quot;</span><span class="p">,</span> <span class="s2">&quot;corridor&quot;</span><span class="p">]</span>
 
-for word in words:
-    tokens_gpt4 = enc.encode(word)
-    pieces = [enc.decode([t]) for t in tokens_gpt4]
-    actual_count = word.count('r')
-    print(f&quot;'{word}': actual r-count={actual_count}, &quot;
-          f&quot;tokens={pieces}, n_tokens={len(tokens_gpt4)}&quot;)
-    # Can the model count 'r's if it sees these pieces?
-    # Does any piece split an 'r' from its context?
-</code></pre>
-<h3 id="e223-vocabulary-efficiency-across-languages">E22.3 Vocabulary Efficiency Across Languages</h3>
+<span class="k">for</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">words</span><span class="p">:</span>
+    <span class="n">tokens_gpt4</span> <span class="o">=</span> <span class="n">enc</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">word</span><span class="p">)</span>
+    <span class="n">pieces</span> <span class="o">=</span> <span class="p">[</span><span class="n">enc</span><span class="o">.</span><span class="n">decode</span><span class="p">([</span><span class="n">t</span><span class="p">])</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">tokens_gpt4</span><span class="p">]</span>
+    <span class="n">actual_count</span> <span class="o">=</span> <span class="n">word</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="s1">&#39;r&#39;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;&#39;</span><span class="si">{</span><span class="n">word</span><span class="si">}</span><span class="s2">&#39;: actual r-count=</span><span class="si">{</span><span class="n">actual_count</span><span class="si">}</span><span class="s2">, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;tokens=</span><span class="si">{</span><span class="n">pieces</span><span class="si">}</span><span class="s2">, n_tokens=</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">tokens_gpt4</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="c1"># Can the model count &#39;r&#39;s if it sees these pieces?</span>
+    <span class="c1"># Does any piece split an &#39;r&#39; from its context?</span>
+</code></pre></div>
+
+<h3 id="e223-vocabulary-efficiency-across-languages" data-plain="E22.3 Vocabulary Efficiency Across Languages">E22.3 Vocabulary Efficiency Across Languages</h3>
 <p>Compare token count for the same meaning in different languages:</p>
-<pre><code class="language-python">sentences = {
-    &quot;English&quot;: &quot;Artificial intelligence will transform the world.&quot;,
-    &quot;Japanese&quot;: &quot;人工知能は世界を変革するでしょう。&quot;,
-    &quot;Chinese&quot;: &quot;人工智能将改变世界。&quot;,
-    &quot;Russian&quot;: &quot;Искусственный интеллект изменит мир.&quot;,
-    &quot;Arabic&quot;: &quot;سيغير الذكاء الاصطناعي العالم.&quot;,
-}
+<div class="highlight"><pre><span></span><code><span class="n">sentences</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;English&quot;</span><span class="p">:</span> <span class="s2">&quot;Artificial intelligence will transform the world.&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Japanese&quot;</span><span class="p">:</span> <span class="s2">&quot;人工知能は世界を変革するでしょう。&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Chinese&quot;</span><span class="p">:</span> <span class="s2">&quot;人工智能将改变世界。&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Russian&quot;</span><span class="p">:</span> <span class="s2">&quot;Искусственный интеллект изменит мир.&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Arabic&quot;</span><span class="p">:</span> <span class="s2">&quot;سيغير الذكاء الاصطناعي العالم.&quot;</span><span class="p">,</span>
+<span class="p">}</span>
 
-for lang, text in sentences.items():
-    tokens = enc.encode(text)
-    chars = len(text)
-    ratio = len(tokens) / len(text.split()) if ' ' in text else len(tokens)
-    print(f&quot;{lang:10s}: {len(tokens):3d} tokens, {chars:3d} chars, &quot;
-          f&quot;tokens/char={len(tokens)/chars:.2f}&quot;)
-</code></pre>
+<span class="k">for</span> <span class="n">lang</span><span class="p">,</span> <span class="n">text</span> <span class="ow">in</span> <span class="n">sentences</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="n">enc</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">chars</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">ratio</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">tokens</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="o">.</span><span class="n">split</span><span class="p">())</span> <span class="k">if</span> <span class="s1">&#39; &#39;</span> <span class="ow">in</span> <span class="n">text</span> <span class="k">else</span> <span class="nb">len</span><span class="p">(</span><span class="n">tokens</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">lang</span><span class="si">:</span><span class="s2">10s</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">tokens</span><span class="p">)</span><span class="si">:</span><span class="s2">3d</span><span class="si">}</span><span class="s2"> tokens, </span><span class="si">{</span><span class="n">chars</span><span class="si">:</span><span class="s2">3d</span><span class="si">}</span><span class="s2"> chars, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;tokens/char=</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">tokens</span><span class="p">)</span><span class="o">/</span><span class="n">chars</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+
 <p>Why is this ratio so different across languages? What are the implications for multilingual LLMs?</p>
 <hr />
-<h2 id="key-takeaways">Key Takeaways</h2>
+<h2 id="key-takeaways" data-plain="Key Takeaways">Key Takeaways</h2>
 <ol>
 <li><strong>BPE is a compression algorithm</strong> — it learns the most efficient subword vocabulary for a given corpus</li>
-<li><strong>Tokenization determines what the model "sees"</strong> — it can never reason below the token level</li>
-<li><strong>"Strawberry" problem:</strong> Tokenization blindness means LLMs struggle with character-level tasks, arithmetic, and spelling</li>
+<li><strong>Tokenization determines what the model &ldquo;sees&rdquo;</strong> — it can never reason below the token level</li>
+<li><strong>&ldquo;Strawberry&rdquo; problem:</strong> Tokenization blindness means LLMs struggle with character-level tasks, arithmetic, and spelling</li>
 <li><strong>Byte-level BPE (tiktoken)</strong> handles any input text but creates efficiency imbalances across languages</li>
 <li><strong>Vocabulary size is a trade-off:</strong> larger vocab → shorter sequences (faster) but more embedding parameters and harder to learn rare tokens</li>
-<li><strong>This preprocessing step profoundly affects model behavior</strong> — it's not just an implementation detail</li>
+<li><strong>This preprocessing step profoundly affects model behavior</strong> — it&rsquo;s not just an implementation detail</li>
 </ol>
-<h2 id="connection-to-the-thread">Connection to the Thread</h2>
-<p>Tokenization is the invisible foundation under everything you've built. Every attention matrix, every embedding, every generation step operates on tokens — not characters or words. Understanding tokenization explains many "surprising" LLM failures (arithmetic, spelling, multilingual inconsistency). Tomorrow, you'll build GPT from scratch with nanoGPT, and you'll see tokenization in action as the first step of the entire pipeline.</p>
-<h2 id="further-reading">Further Reading</h2>
+<h2 id="connection-to-the-thread" data-plain="Connection to the Thread">Connection to the Thread</h2>
+<p>Tokenization is the invisible foundation under everything you&rsquo;ve built. Every attention matrix, every embedding, every generation step operates on tokens — not characters or words. Understanding tokenization explains many &ldquo;surprising&rdquo; LLM failures (arithmetic, spelling, multilingual inconsistency). Tomorrow, you&rsquo;ll build GPT from scratch with nanoGPT, and you&rsquo;ll see tokenization in action as the first step of the entire pipeline.</p>
+<h2 id="further-reading" data-plain="Further Reading">Further Reading</h2>
 <ul>
-<li><strong><a href="https://github.com/karpathy/minbpe">Karpathy's minbpe</a></strong> — The clearest BPE implementation</li>
-<li><strong><a href="https://www.youtube.com/watch?v=zduSFxRajkE">Karpathy's Tokenization Video</a></strong> — 2+ hours, essential viewing</li>
+<li><strong><a href="https://github.com/karpathy/minbpe">Karpathy&rsquo;s minbpe</a></strong> — The clearest BPE implementation</li>
+<li><strong><a href="https://www.youtube.com/watch?v=zduSFxRajkE">Karpathy&rsquo;s Tokenization Video</a></strong> — 2+ hours, essential viewing</li>
 <li><strong><a href="https://arxiv.org/abs/1808.06226">SentencePiece Paper</a></strong> — Kudo &amp; Richardson, 2018</li>
-<li><strong><a href="https://github.com/openai/tiktoken">tiktoken</a></strong> — OpenAI's fast BPE implementation</li>
+<li><strong><a href="https://github.com/openai/tiktoken">tiktoken</a></strong> — OpenAI&rsquo;s fast BPE implementation</li>
 <li><strong><a href="https://arxiv.org/abs/1508.07909">BPE Original Paper</a></strong> — Sennrich et al., 2016 (BPE for NMT)</li>
 <li><strong><a href="https://arxiv.org/abs/2404.01373">Tokenization Effects</a></strong> — Analysis of tokenization artifacts</li>
 </ul>
             </div>
         </div>
 
-        <div class="mt-6 flex justify-between text-sm">
-            <a href="../week-03/day-21-bert-masked-lm.html" class="text-violet-600 hover:text-violet-800">&larr; Day 21: BERT & Masked LM</a>
-            <a href="day-23-gpt-nanogpt.html" class="text-violet-600 hover:text-violet-800">Day 23: GPT & nanoGPT &rarr;</a>
-        </div>
+        <nav class="lfbs-pager mt-6 flex justify-between gap-4 text-sm" aria-label="Lesson navigation">
+            <a href="../week-03/day-21-bert-masked-lm.html" class="lfbs-pager-prev text-violet-600 hover:text-violet-800">&larr; Day 21: BERT &amp; Masked Language Modeling — The Encoder Paradigm</a>
+            <a href="day-23-gpt-nanogpt.html" class="lfbs-pager-next text-violet-600 hover:text-violet-800">Day 23: GPT &amp; nanoGPT — Decoder-Only Transformers (Ablation Lab Day 1) &rarr;</a>
+        </nav>
     </div>
 </body>
 </html>

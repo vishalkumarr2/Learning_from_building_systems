@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 A robot and the BEC scheduler negotiate over charging time: the robot wants a full charge (more uptime), the BEC wants to minimize station occupancy (serve more robots). Bargaining theory provides principled solutions that balance both objectives — Nash for product-fairness, Kalai-Smorodinsky for proportional fairness.
 
 ---
@@ -236,7 +236,7 @@ Maximize $u_1^{0.7} u_2^{0.3}$ subject to $u_1 + u_2 = 1$. Lagrange: $0.7/u_1 = 
 ## Connections
 - **Prerequisites:** Cooperative games (Day 99) — bargaining is the 2-player cooperative case; Nash equilibrium (Day 93) — Nash used equilibrium ideas
 - **Forward:** Dynamic games (Day 102) — Rubinstein embeds bargaining in extensive form; Mechanism design (Day 104) — mechanisms must satisfy participation constraints
-- **OKS:** Robot-BEC charging negotiation; bandwidth allocation between competing robot tasks
+- **AMR:** Robot-BEC charging negotiation; bandwidth allocation between competing robot tasks
 
 ## Self-Check
 - [ ] I can compute the Nash bargaining solution by maximizing the Nash product

@@ -6,9 +6,9 @@
 
 ---
 
-## Why Should I Care? (OKS Context)
+## Why Should I Care? (Practical Context)
 
-The OKS robot runs **two computers** that must cooperate in real-time:
+The warehouse robot runs **two computers** that must cooperate in real-time:
 
 | | STM32 MCU | Jetson (Linux + ROS2) |
 |---|---|---|
@@ -20,9 +20,9 @@ The OKS robot runs **two computers** that must cooperate in real-time:
 
 **The SPI bus is the handshake** between these two worlds. When the handshake breaks, the robot drifts, stops, or (worst case) drives into a rack.
 
-**Real OKS failures from architecture issues:**
-- Jetson GC pause (50 ms) → no SPI update → MCU watchdog → emergency stop (#99589)
-- SPI frame corruption → MCU interprets noise as speed command → motor spike (#98367)
+**Real AMR failures from architecture issues:**
+- Jetson GC pause (50 ms) → no SPI update → MCU watchdog → emergency stop (Incident-C)
+- SPI frame corruption → MCU interprets noise as speed command → motor spike (Incident-A)
 - Clock drift between MCU and Jetson → cmd_vel timestamps misaligned → estimator rejects data
 
 ---
@@ -43,7 +43,7 @@ Jetson (SPI Master)              STM32 (SPI Slave)
 └──────────────┘                 └──────────────┘
 ```
 
-**OKS SPI parameters:**
+**AMR SPI parameters:**
 - Clock: 2 MHz (500 ns per bit)
 - Frame size: 64 bytes (32 bytes each direction)
 - Transfer rate: 1 kHz (every 1 ms)
@@ -101,7 +101,7 @@ uint16_t crc16_ccitt(const uint8_t *data, size_t len) {
 }
 ```
 
-**OKS failure rate:** Approximately 1 in 10,000 SPI frames is corrupted (0.01%), usually from EMI near the motor drivers. The CRC catches all of these.
+**AMR failure rate:** Approximately 1 in 10,000 SPI frames is corrupted (0.01%), usually from EMI near the motor drivers. The CRC catches all of these.
 
 ---
 
@@ -257,7 +257,7 @@ The phase margin typically has ~40° to spare, so 9.4° is acceptable. But at 10
 
 ## 3.3 The cmd_vel Gap Problem
 
-**OKS-specific:** If the Jetson's Nav2 controller runs at 20 Hz and the motor bridge runs at 1 kHz, there are ~50 SPI cycles between each new cmd_vel. The motor bridge sends the **same** cmd_vel 50 times.
+**robot-specific:** If the Jetson's Nav2 controller runs at 20 Hz and the motor bridge runs at 1 kHz, there are ~50 SPI cycles between each new cmd_vel. The motor bridge sends the **same** cmd_vel 50 times.
 
 If Nav2 misses a cycle (garbage collection, CPU spike), there's a **100 ms gap** in cmd_vel updates. The velocity smoother helps, but the MCU sees stale commands.
 

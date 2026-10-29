@@ -9,7 +9,7 @@
 - **Week:** [Week 1 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Every optimization step in SLAM, calibration, and MPC requires computing gradients and Jacobians. The Jacobian of the sensor model maps state perturbations to measurement changes — it's the linearization that makes nonlinear problems tractable.
 
 ---

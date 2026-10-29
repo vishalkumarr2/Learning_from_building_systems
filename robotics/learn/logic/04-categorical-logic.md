@@ -11,7 +11,7 @@
 
 Categorical logic is about reasoning with "all," "some," and "none." In engineering:
 - "**All** robots with firmware < v1.20 have the SPI bug."
-- "**Some** sensorbar readings are stale."
+- "**Some** line sensor readings are stale."
 - "**No** robot in the fleet passed the thermal test."
 
 These statements have precise logical structure, and you can combine them into syllogisms to draw valid conclusions — or detect invalid ones.
@@ -26,9 +26,9 @@ Every categorical proposition relates two categories (called **terms**). There a
 
 | Form | Code | Structure | Example |
 |---|---|---|---|
-| Universal Affirmative | **A** | All S are P | All OKS robots are differential-drive |
+| Universal Affirmative | **A** | All S are P | All warehouse robots are differential-drive |
 | Universal Negative | **E** | No S are P | No firmware builds passed testing |
-| Particular Affirmative | **I** | Some S are P | Some sensorbar readings are stale |
+| Particular Affirmative | **I** | Some S are P | Some line sensor readings are stale |
 | Particular Negative | **O** | Some S are not P | Some robots are not operational |
 
 **Memory aid:** **A**ff**I**rmo (A and I are affirmative), n**E**g**O** (E and O are negative).
@@ -173,8 +173,8 @@ Conclusion:     [S ... P]
 **Example:**
 ```
 All SPI-connected devices (M) are susceptible to clock jitter (P).     [A]
-All sensorbars (S) are SPI-connected devices (M).                       [A]
-∴ All sensorbars (S) are susceptible to clock jitter (P).               [A]
+All line sensors (S) are SPI-connected devices (M).                       [A]
+∴ All line sensors (S) are susceptible to clock jitter (P).               [A]
 ```
 
 This is Figure **AAA-1** — valid. (We'll explain figures and moods shortly.)
@@ -259,8 +259,8 @@ No robots in fleet X (S) have firmware ≥ v1.24 (M).
 **Undistributed Middle:**
 ```
 All robots with the bug (P) run Linux (M).
-All OKS robots (S) run Linux (M).
-∴ All OKS robots (S) have the bug (P).    ← INVALID!
+All warehouse robots (S) run Linux (M).
+∴ All warehouse robots (S) have the bug (P).    ← INVALID!
 ```
 M (run Linux) is predicate of two A-propositions → never distributed. Lots of things run Linux without having the bug.
 

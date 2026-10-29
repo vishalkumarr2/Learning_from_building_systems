@@ -81,7 +81,7 @@ $$\min_x \frac{1}{2} x^T Q x + c^T x \quad \text{s.t.} \quad Ax \leq b, \quad Cx
 
 where $Q \succeq 0$ (positive semidefinite) for convexity.
 
-### Where QP Appears in OKS
+### Where QP Appears in AMR Software
 
 | Application | Q matrix | Constraints |
 |-------------|----------|-------------|
@@ -100,7 +100,7 @@ $$\phantom{\text{s.t.}} \quad x_{\min} \leq x_k \leq x_{\max} \quad \text{(state
 
 Stack all decision variables into one vector → standard QP form.
 
-**OKS relevance:** The robot's MPC runs a QP at each control cycle to compute wheel velocities that track the desired path while respecting max velocity/acceleration.
+**Robotics relevance:** The robot's MPC runs a QP at each control cycle to compute wheel velocities that track the desired path while respecting max velocity/acceleration.
 
 ### QP Solvers
 
@@ -150,7 +150,7 @@ Many practical constraints are SOC representable:
 | Quadratic-over-linear: $\frac{\|x\|^2}{t} \leq s$ | Rotated SOC |
 | Euclidean distance | $\|p_1 - p_2\| \leq d$ |
 
-**OKS relevance:** Path planning with distance constraints (stay $\geq d$ from obstacles) can be formulated as SOCP.
+**Robotics relevance:** Path planning with distance constraints (stay $\geq d$ from obstacles) can be formulated as SOCP.
 
 ---
 

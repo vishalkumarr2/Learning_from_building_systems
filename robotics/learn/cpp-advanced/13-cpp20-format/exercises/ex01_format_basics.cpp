@@ -152,9 +152,9 @@ int main() {
 
     // Data rows — aligned columns for readability
     std::cout << std::format("{:<18} {:>8.2f} {:>8.2f} {:>8.2f} {:>6}\n",
-                             "sensorbar_front", 72.5, 60.0, 85.0, "raw");
+                             "line_sensor_front", 72.5, 60.0, 85.0, "raw");
     std::cout << std::format("{:<18} {:>8.2f} {:>8.2f} {:>8.2f} {:>6}\n",
-                             "sensorbar_rear", 68.3, 55.0, 80.0, "raw");
+                             "line_sensor_rear", 68.3, 55.0, 80.0, "raw");
     std::cout << std::format("{:<18} {:>8.2f} {:>8.2f} {:>8.2f} {:>6}\n",
                              "motor_temp_L", 45.2, 20.0, 80.0, "°C");
     std::cout << std::format("{:<18} {:>8.2f} {:>8.2f} {:>8.2f} {:>6}\n",

@@ -9,8 +9,8 @@
 - **Week:** [Week 2 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-When OKS SLAM's Hessian has eigenvalues spanning $10^6$, gradient descent crawls along narrow valleys while overshooting across ridges. The condition number $\kappa(H)$ quantifies this. Preconditioning and variable scaling transform the problem into a rounder landscape where solvers converge fast. Ceres's `JACOBI` scaling and `CLUSTER_JACOBI` preconditioner exist for exactly this reason.
+## Robotics Relevance
+When AMR SLAM's Hessian has eigenvalues spanning $10^6$, gradient descent crawls along narrow valleys while overshooting across ridges. The condition number $\kappa(H)$ quantifies this. Preconditioning and variable scaling transform the problem into a rounder landscape where solvers converge fast. Ceres's `JACOBI` scaling and `CLUSTER_JACOBI` preconditioner exist for exactly this reason.
 
 ---
 

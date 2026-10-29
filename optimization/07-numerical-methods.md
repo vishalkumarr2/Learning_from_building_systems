@@ -81,7 +81,7 @@ print(f"Hessian condition: {np.linalg.cond(H):.0f}")
 # Note: cond(J^T J) = cond(J)^2  ← squaring makes things worse!
 ```
 
-**OKS relevance:** The normal equations $J^TJ \Delta x = -J^Tr$ square the condition number. This is why Ceres prefers QR factorization (`DENSE_QR`) over normal equations for ill-conditioned problems.
+**Robotics relevance:** The normal equations $J^TJ \Delta x = -J^Tr$ square the condition number. This is why Ceres prefers QR factorization (`DENSE_QR`) over normal equations for ill-conditioned problems.
 
 ---
 
@@ -346,11 +346,11 @@ ceres::CostFunction* cost =
 
 ---
 
-## 9. Common Numerical Pitfalls in OKS
+## 9. Common Numerical Pitfalls in AMR Software
 
 | Pitfall | Where | Symptom | Fix |
 |---------|-------|---------|-----|
-| $\tan(\theta)$ at $\pm\pi/2$ | Sensorbar model | NaN in residual | Use $\sin/\cos$ parameterization |
+| $\tan(\theta)$ at $\pm\pi/2$ | Line sensor model | NaN in residual | Use $\sin/\cos$ parameterization |
 | Division by small distance | Distance-based costs | Huge gradients | Add epsilon: $d + \epsilon$ |
 | Angle wrapping | Pose error computation | 2π jumps in residual | Use `atan2`, normalize to $[-\pi, \pi]$ |
 | Quaternion normalization | 3D rotation | Drift off unit sphere | Use manifold, or renormalize each step |

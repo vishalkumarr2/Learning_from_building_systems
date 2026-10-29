@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-OKS robots mount multiple sensors (cameras, lidars, IMUs) that must be precisely calibrated relative to each other. Hand-eye calibration (AX = XB) determines the extrinsic transform between sensor pairs. Smooth trajectory interpolation on SE(3) is needed for motion planning and for interpolating between discrete pose estimates when fusing asynchronous sensors.
+## Robotics Relevance
+warehouse robots mount multiple sensors (cameras, lidars, IMUs) that must be precisely calibrated relative to each other. Hand-eye calibration (AX = XB) determines the extrinsic transform between sensor pairs. Smooth trajectory interpolation on SE(3) is needed for motion planning and for interpolating between discrete pose estimates when fusing asynchronous sensors.
 
 ---
 
@@ -294,7 +294,7 @@ A cumulative B-spline on SE(3) uses the formula: $T(t) = T_0 \prod_{j=1}^{p} \te
 ## Connections
 - **Prerequisites**: Day 79 (SE(3) basics), Day 80 (Exp/Log), Day 85 (manifold optimization)
 - **Forward**: Day 91 capstone uses calibrated sensor transforms and smooth trajectories
-- **OKS**: camera-lidar extrinsic calibration, smooth trajectory generation for motion planning
+- **AMR**: camera-lidar extrinsic calibration, smooth trajectory generation for motion planning
 
 ## Self-Check
 - [ ] I can formulate and solve AX = XB using the Tsai-Lenz method

@@ -795,4 +795,4 @@ Build a Gradio interface:
 
 ---
 
-*Previous: [07-detection-segmentation.md](07-detection-segmentation.md) · Next: [09-robot-learning.md](09-robot-learning.md)*
+*Previous: [07-detection-segmentation.md](07-3d-depth-video.md) · Next: [09-robot-learning.md](09-rl-diffusion-basics.md)*

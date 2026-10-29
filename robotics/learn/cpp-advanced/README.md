@@ -123,7 +123,7 @@ learn/cpp-advanced/
 | Marker | Meaning |
 |--------|---------|
 | 💀 | "99% fail" puzzle — tests deep understanding |
-| 🤖 | ROS/robotics tie-in — connects to OKS robot work |
+| 🤖 | ROS/robotics tie-in — connects to warehouse robot work |
 | 🧓 | Senior lesson — 20-year veteran wisdom |
 | ⚡ | Hardware lesson — what the electrons do |
 | 🛡️ | Safety lesson — when code can kill |

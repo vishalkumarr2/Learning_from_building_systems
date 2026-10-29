@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Robust control for an AMR minimizes worst-case cost — a zero-sum game between the controller and disturbances. Casting this as an LP connects to the duality theory from Chapters 4–5: the dual variables are the adversary's optimal strategy, and strong duality guarantees that the robot's guarantee equals the adversary's threat. This is how real-time robust MPC is solved.
 
 ---
@@ -258,7 +258,7 @@ Player 1 can guarantee at least $\max_i \min_j A_{ij} \geq \min_{ij} A_{ij}$ by 
 ## Connections
 - **Back:** Day 96 (minimax concept), Days 29–31 (LP and duality), Day 33 (strong duality)
 - **Forward:** Day 98 (review — unified solver), Week 15 (mechanism design via optimization)
-- **OKS:** Robust MPC as LP — minimize worst-case trajectory cost; dual = adversary's strategy
+- **AMR:** Robust MPC as LP — minimize worst-case trajectory cost; dual = adversary's strategy
 
 ## Self-Check
 - [ ] I can formulate a zero-sum game as a primal-dual LP pair

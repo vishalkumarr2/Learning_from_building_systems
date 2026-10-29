@@ -54,7 +54,7 @@ int main() {
     constexpr int N = 100'000;
 
     // Test data — simulates formatting a sensor log line
-    const char* sensor_name = "sensorbar_front";
+    const char* sensor_name = "line_sensor_front";
     double value = 72.345678;
     int seq_num = 42;
     unsigned int reg = 0xDEADBEEF;

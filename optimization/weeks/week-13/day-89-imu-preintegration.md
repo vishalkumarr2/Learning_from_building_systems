@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-The OKS robot fuses wheel odometry with IMU data for state estimation. Between visual keyframes (or sensorbar readings), the IMU fires at 200+ Hz. Preintegration compresses all those samples into a single constraint between keyframe states, avoiding re-integration when the bias estimate changes — a crucial efficiency for real-time operation.
+## Robotics Relevance
+The warehouse robot fuses wheel odometry with IMU data for state estimation. Between visual keyframes (or line sensor readings), the IMU fires at 200+ Hz. Preintegration compresses all those samples into a single constraint between keyframe states, avoiding re-integration when the bias estimate changes — a crucial efficiency for real-time operation.
 
 ---
 
@@ -263,7 +263,7 @@ At 200 Hz ($\Delta t = 5$ms) with moderate dynamics: Euler error $\sim O(\Delta 
 ## Connections
 - **Prerequisites**: Day 80 (Exp/Log on SO(3)), Day 85 (manifold optimization), Day 88 (factor graphs)
 - **Forward**: Day 91 capstone combines IMU preintegration with visual factors in a VIO system
-- **OKS**: IMU preintegration enables efficient wheel-IMU fusion in the navigation estimator
+- **AMR**: IMU preintegration enables efficient wheel-IMU fusion in the navigation estimator
 
 ## Self-Check
 - [ ] I can explain why preintegration avoids recomputation during optimization

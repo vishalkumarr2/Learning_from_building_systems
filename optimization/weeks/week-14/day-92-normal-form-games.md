@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-Two OKS robots approaching the same intersection must decide: yield or proceed. Each robot's best action depends on the other's choice. This is a coordination game in normal form. Understanding dominance lets the fleet controller prune clearly bad strategies before computing equilibria — reducing the dimension of the decision space for real-time dispatch.
+## Robotics Relevance
+Two warehouse robots approaching the same intersection must decide: yield or proceed. Each robot's best action depends on the other's choice. This is a coordination game in normal form. Understanding dominance lets the fleet controller prune clearly bad strategies before computing equilibria — reducing the dimension of the decision space for real-time dispatch.
 
 ---
 
@@ -227,7 +227,7 @@ print(is_dominance_solvable(*[prisoners_dilemma().payoff1, prisoners_dilemma().p
 ## Connections
 - **Prereq:** Matrix operations (Day 1), LP basics (Day 29–31) — needed for Ch 10 later
 - **Forward:** Day 93 (Nash equilibrium), Day 96 (zero-sum games)
-- **OKS:** Intersection coordination modeled as 2×2 game; IESDS prunes infeasible robot actions before dispatching
+- **AMR:** Intersection coordination modeled as 2×2 game; IESDS prunes infeasible robot actions before dispatching
 
 ## Self-Check
 - [ ] I can write the bimatrix for any two-player game from a verbal description

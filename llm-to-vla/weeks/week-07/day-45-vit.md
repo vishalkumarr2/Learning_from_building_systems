@@ -4,7 +4,7 @@
 > *"An image is worth 16×16 words — and the transformer doesn't care which kind of token it processes." — Dosovitskiy et al., 2020*
 
 ## Navigation
-- **Previous:** [Day 44: Phase III Capstone Day 3](../week-06/day-44-phase3-capstone-3.md)
+- **Previous:** [Day 44: Phase III Capstone Day 3](day-44-phase3-capstone-3.md)
 - **Next:** [Day 46: Training ViT + DeiT](day-46-training-vit-deit.md)
 - **Week:** [Week 7 Overview](README.md)
 - **Phase:** [Phase IV: Vision](../../study-notes/08-vision-transformers.md)

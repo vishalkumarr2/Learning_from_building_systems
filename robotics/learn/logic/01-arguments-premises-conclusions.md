@@ -12,7 +12,7 @@
 Every time you debug a system, write an RCA report, or argue for a design decision, you're constructing arguments. The question is whether you're constructing *good* ones.
 
 Consider this from a real incident report:
-> "The robot stopped because the sensorbar reported stale data. The sensorbar data was stale because the SPI bus locked up. The SPI bus locked up because of a firmware timing conflict."
+> "The robot stopped because the line sensor reported stale data. The line sensor data was stale because the SPI bus locked up. The SPI bus locked up because of a firmware timing conflict."
 
 That's a chain of three arguments. Each link claims that one thing follows from another. If any link is broken — if the SPI bus lockup *doesn't actually cause* stale data, or if the stale data wasn't what stopped the robot — the whole chain collapses. Logic gives you the tools to evaluate each link.
 
@@ -26,12 +26,12 @@ A **statement** (or **proposition**) is a sentence that is either true or false.
 
 **Statements:**
 - "The battery voltage is 12.4V" (true or false — you can measure it)
-- "All OKS robots use differential drive" (true or false — you can check)
+- "All warehouse robots use differential drive" (true or false — you can check)
 - "Python is faster than C++" (false, but it's still a statement — it has a truth value)
 
 **Not statements:**
 - "Restart the robot" (command — neither true nor false)
-- "Is the sensorbar working?" (question)
+- "Is the line sensor working?" (question)
 - "Wow, that crash was spectacular!" (exclamation)
 - "Let's try firmware v1.24" (proposal)
 
@@ -132,8 +132,8 @@ All arguments fall into one of two categories:
 - C: This robot has the SPI timing bug. ✓ (must be true if premises are true)
 
 **Inductive example:**
-- P1: The last 12 robots we tested with firmware v1.24 passed the sensorbar regression.
-- C: Firmware v1.24 fixes the sensorbar regression issue. (probably true, but the 13th robot might fail)
+- P1: The last 12 robots we tested with firmware v1.24 passed the line sensor regression.
+- C: Firmware v1.24 fixes the line sensor regression issue. (probably true, but the 13th robot might fail)
 
 ## 2.2 How to Tell Them Apart
 
@@ -211,11 +211,11 @@ The *form* of an argument can be separated from its *content*. Consider:
 - Therefore, P
 
 **Example of Form 2 (invalid):**
-- If the SPI bus locked up, the sensorbar reports stale data.
-- The sensorbar reports stale data.
+- If the SPI bus locked up, the line sensor reports stale data.
+- The line sensor reports stale data.
 - Therefore, the SPI bus locked up.
 
-This is **invalid!** The sensorbar could report stale data for other reasons (loose connector, software bug, power glitch). Just because the consequent is true doesn't mean the antecedent caused it. This is one of the most common reasoning errors in debugging — seeing a symptom and jumping to a specific cause without ruling out alternatives.
+This is **invalid!** The line sensor could report stale data for other reasons (loose connector, software bug, power glitch). Just because the consequent is true doesn't mean the antecedent caused it. This is one of the most common reasoning errors in debugging — seeing a symptom and jumping to a specific cause without ruling out alternatives.
 
 **Form 3 (Modus Tollens — valid):**
 - If P then Q
@@ -223,8 +223,8 @@ This is **invalid!** The sensorbar could report stale data for other reasons (lo
 - Therefore, not P
 
 **Example:**
-- If the SPI bus locked up, the sensorbar *would* report stale data.
-- The sensorbar is *not* reporting stale data.
+- If the SPI bus locked up, the line sensor *would* report stale data.
+- The line sensor is *not* reporting stale data.
 - Therefore, the SPI bus did *not* lock up.
 
 This one is valid. If the SPI lockup *always* causes stale data, and we don't see stale data, we can safely rule out SPI lockup.
@@ -277,7 +277,7 @@ P1 + P2 ──→ Conclusion
 "DMA transfer corrupted"
         │
         ▼
-"Sensorbar reads wrong position"
+"Line sensor reads wrong position"
         │
         ▼
 "Estimator diverges from ground truth"

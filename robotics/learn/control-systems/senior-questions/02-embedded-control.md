@@ -100,7 +100,7 @@ Example: $K_i T_s = 0.1$ (Q16.16: 6553), error = 0.00001 rad/s (Q16.16: 0 — ro
 - **Disadvantage:** If the ISR is delayed (by another ISR), the ADC sample point shifts, corrupting the current reading
 - **Disadvantage:** ADC conversion time (1-5 µs) is wasted in the ISR
 
-**For OKS motor control:** DMA is preferred. The ADC-trigger-PWM hardware chain guarantees consistent sampling regardless of software load. The ISR computation budget is 100 µs (10 kHz), and wasting 5 µs on ADC wait is acceptable but unnecessary.
+**For robot motor control:** DMA is preferred. The ADC-trigger-PWM hardware chain guarantees consistent sampling regardless of software load. The ISR computation budget is 100 µs (10 kHz), and wasting 5 µs on ADC wait is acceptable but unnecessary.
 
 ---
 
@@ -205,7 +205,7 @@ For guaranteed 100 µs timing:
 - **Good approach:** RTOS task at highest priority with timer interrupt as trigger. Jitter: 1–5 µs.
 - **Bad approach:** RTOS periodic task with vTaskDelayUntil(). Jitter: 5–50 µs depending on system load.
 
-**OKS approach:** The current loop runs in a timer ISR, not an RTOS task. The speed loop runs in a lower-priority ISR. Only the communication and monitoring tasks use RTOS scheduling.
+**AMR approach:** The current loop runs in a timer ISR, not an RTOS task. The speed loop runs in a lower-priority ISR. Only the communication and monitoring tasks use RTOS scheduling.
 
 ---
 
@@ -251,7 +251,7 @@ This runs once at every boot (takes ~2 seconds). Benefits:
 3. **Active braking:** Continue running the PID with setpoint = 0, decelerating at the maximum safe rate. Best tracking performance, but requires the controller to still be functional.
 4. **Mechanical brake:** Engage a physical brake (spring-loaded, power-off-to-engage). Guaranteed stop but harsh — can damage goods on the robot.
 
-**OKS braking cascade:**
+**AMR braking cascade:**
 ```
 Level 0: Active deceleration (PID running, normal stop)
 Level 1: Passive regen braking (short motor terminals via H-bridge low-side)

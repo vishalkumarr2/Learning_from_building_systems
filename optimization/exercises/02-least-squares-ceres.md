@@ -269,13 +269,13 @@ Note: For a line fit, this is overkill — you'd use linear least squares. But t
 
 </details>
 
-**C2.** The OKS sensorbar measurement model computes a distance from a reflector detection angle. Write a Ceres-style cost functor for: given a robot pose $(x, y, \theta)$ and a known reflector position $(rx, ry)$, the expected bearing is $\alpha = \text{atan2}(ry - y, rx - x) - \theta$, and the measured bearing is $\alpha_{\text{meas}}$.
+**C2.** The AMR line sensor measurement model computes a distance from a reflector detection angle. Write a Ceres-style cost functor for: given a robot pose $(x, y, \theta)$ and a known reflector position $(rx, ry)$, the expected bearing is $\alpha = \text{atan2}(ry - y, rx - x) - \theta$, and the measured bearing is $\alpha_{\text{meas}}$.
 
 <details><summary>Answer</summary>
 
 ```cpp
-struct SensorbarBearingCost {
-    SensorbarBearingCost(double rx, double ry, double alpha_measured)
+struct LineSensorBearingCost {
+    LineSensorBearingCost(double rx, double ry, double alpha_measured)
         : rx_(rx), ry_(ry), alpha_measured_(alpha_measured) {}
     
     template <typename T>
@@ -300,7 +300,7 @@ struct SensorbarBearingCost {
 // Ceres auto-diff handles the atan2 Jacobian automatically.
 ```
 
-This is conceptually what the OKS estimator does in its sensorbar measurement update, but formulated as an optimization cost instead of an EKF innovation.
+This is conceptually what the AMR estimator does in its line sensor measurement update, but formulated as an optimization cost instead of an EKF innovation.
 
 </details>
 

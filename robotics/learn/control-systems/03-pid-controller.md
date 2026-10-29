@@ -6,16 +6,16 @@
 
 ---
 
-## Why Should I Care? (OKS Context)
+## Why Should I Care? (Practical Context)
 
-Every motor on every OKS robot uses PID. The sensorbar controller uses PID. The lifter position controller uses PID. Nav2's DWB uses a PID-like feedback law. When firmware tunes a new robot model, they're tuning PID gains.
+Every motor on every warehouse robot uses PID. The line-sensor controller uses PID. The lifter position controller uses PID. Nav2's DWB uses a PID-like feedback law. When firmware tunes a new robot model, they're tuning PID gains.
 
 When you see a robot oscillating, overshooting, or sluggishly following commands — it's a PID problem. This lesson teaches you to *predict* the behavior from the gains, *tune* the gains systematically, and *recognize* when PID isn't enough.
 
-**Real OKS failures caused by PID issues:**
-- Ticket #98382: Motor oscillation at 180 Hz — Kp set too high after firmware update
-- Ticket #99589: Robot overshoot into rack after e-stop release — integral windup
-- Ticket #100413: Sluggish trajectory following — Kp reduced to 40% of original during "safety fix"
+**Real AMR failures caused by PID issues:**
+- Ticket Incident-B: Motor oscillation at 180 Hz — Kp set too high after firmware update
+- Ticket Incident-C: Robot overshoot into rack after e-stop release — integral windup
+- Ticket Incident-D: Sluggish trajectory following — Kp reduced to 40% of original during "safety fix"
 
 ---
 
@@ -49,7 +49,7 @@ The output is proportional to the current error. Like a spring: the further from
 **What it gives you:** Immediate response to error. Higher $K_p$ → faster response.
 **What it costs you:** Higher $K_p$ → more overshoot, eventually oscillation. **Never** zero steady-state error alone (unless the plant already has an integrator).
 
-**OKS intuition:** $K_p$ = "how aggressively do we correct speed error?" High $K_p$ → motor snaps to target speed quickly but may overshoot and ring. Low $K_p$ → motor slowly drifts toward target.
+**AMR intuition:** $K_p$ = "how aggressively do we correct speed error?" High $K_p$ → motor snaps to target speed quickly but may overshoot and ring. Low $K_p$ → motor slowly drifts toward target.
 
 ```
 Response with increasing Kp:
@@ -74,7 +74,7 @@ Accumulates past error. Even a tiny persistent error eventually builds up a larg
 **What it gives you:** Eliminates steady-state error. If the motor runs 0.1 rad/s too slow, the integral keeps growing until the PWM increases enough to close the gap.
 **What it costs you:** Slows down the response (adds phase lag). Can cause **integral windup** (see Part 3).
 
-**OKS intuition:** $K_i$ = "how impatient are we about persistent error?" High $K_i$ → drives error to zero quickly but makes the system more oscillatory. Low $K_i$ → takes a long time to eliminate offset.
+**AMR intuition:** $K_i$ = "how impatient are we about persistent error?" High $K_i$ → drives error to zero quickly but makes the system more oscillatory. Low $K_i$ → takes a long time to eliminate offset.
 
 ### Derivative (D): The Prediction
 
@@ -85,19 +85,19 @@ Responds to the *rate of change* of error. If the error is decreasing fast (we'r
 **What it gives you:** Reduced overshoot, improved stability. Acts as a damper.
 **What it costs you:** Amplifies high-frequency noise. In practice, ALWAYS used with a low-pass filter (see 1.4).
 
-**OKS intuition:** $K_d$ = "how much do we brake as we approach the target?" High $K_d$ → smooth approach, no overshoot, but slow. Low $K_d$ → less damping, may overshoot.
+**AMR intuition:** $K_d$ = "how much do we brake as we approach the target?" High $K_d$ → smooth approach, no overshoot, but slow. Low $K_d$ → less damping, may overshoot.
 
 ## 1.3 Combining the Terms
 
 | Controller | Steady-state error | Overshoot | Oscillation risk | Use case |
 |-----------|-------------------|-----------|-----------------|----------|
 | P only | Yes (offset) | Moderate | Low | Quick regulation, don't need zero error |
-| PI | Zero | Moderate→High | Medium | Most OKS motor loops |
+| PI | Zero | Moderate→High | Medium | Most robot motor loops |
 | PD | Yes (reduced) | Low | Low | Position loops where speed has integral |
 | PID | Zero | Tunable | Medium→High | General purpose, need zero error + damping |
 
-**OKS motor speed loop:** Uses PI (no derivative — encoder noise makes D noisy at 10 kHz).
-**OKS motor current loop:** Uses P-only (fast response, steady-state error is absorbed by outer speed loop).
+**robot motor speed loop:** Uses PI (no derivative — encoder noise makes D noisy at 10 kHz).
+**robot motor current loop:** Uses P-only (fast response, steady-state error is absorbed by outer speed loop).
 
 ## 1.4 Derivative Filter (Practical D-Term)
 
@@ -119,7 +119,7 @@ $$u_D = -K_d \cdot \frac{dy(t)}{dt} \quad \text{(derivative on measurement)}$$
 
 The measurement $y(t)$ changes smoothly (motor can't teleport), so no spike. Many textbooks use $\frac{de}{dt}$, but production code uses $-\frac{dy}{dt}$.
 
-**OKS firmware uses derivative-on-measurement.** If you ever see derivative-on-error in embedded code, it's a bug.
+**robot firmware uses derivative-on-measurement.** If you ever see derivative-on-error in embedded code, it's a bug.
 
 ---
 
@@ -133,7 +133,7 @@ The measurement $y(t)$ changes smoothly (motor can't teleport), so no spike. Man
 4. **Add $K_i$** starting small. Increase until steady-state error disappears without excessive overshoot.
 5. **Add $K_d$** (if needed) to reduce overshoot. Start small.
 
-**The feel-based approach used by OKS firmware engineers:**
+**The feel-based approach used by robot firmware engineers:**
 
 ```
 Start with Kp only:
@@ -166,7 +166,7 @@ Add Kd (rarely needed for speed loops):
 | PI | $0.45 \cdot K_u$ | $0.54 \cdot K_u / T_u$ | — |
 | PID | $0.60 \cdot K_u$ | $1.2 \cdot K_u / T_u$ | $0.075 \cdot K_u \cdot T_u$ |
 
-**Warning:** Ziegler-Nichols gives aggressive tuning (quarter-decay ratio — 25% overshoot). For OKS, you usually want less overshoot. Use the values as a starting point and reduce $K_p$ by 30–50%.
+**Warning:** Ziegler-Nichols gives aggressive tuning (quarter-decay ratio — 25% overshoot). For AMR, you usually want less overshoot. Use the values as a starting point and reduce $K_p$ by 30–50%.
 
 ### Method 2: Step Response Method
 
@@ -187,7 +187,7 @@ Then:
 
 If $L/T > 0.3$ (significant delay relative to time constant), Cohen-Coon gives better results than Ziegler-Nichols. Tables omitted for brevity — the point is: **no single tuning formula works for all systems**. Use them as starting points, then iterate.
 
-## 2.4 Rule-of-Thumb Gains for OKS Motors
+## 2.4 Rule-of-Thumb Gains for Robot Motors
 
 From firmware team's experience (these are starting points, not final values):
 
@@ -206,7 +206,7 @@ From firmware team's experience (these are starting points, not final values):
 
 When the control output **saturates** (PWM at 100%, current at maximum), the error persists but the controller can't increase the output further. However, the integral term *keeps accumulating*. When the saturation condition ends, the accumulated integral causes a massive overshoot.
 
-**The scenario (OKS ticket #99589):**
+**The scenario (AMR ticket Incident-C):**
 
 ```
 Timeline:
@@ -294,11 +294,11 @@ float pid_compute(float error, float dt) {
 }
 ```
 
-**OKS firmware uses back-calculation** for the speed PID loop. The current loop uses simple clamping since it rarely saturates (the speed loop limits the current command).
+**robot firmware uses back-calculation** for the speed PID loop. The current loop uses simple clamping since it rarely saturates (the speed loop limits the current command).
 
 ### Strategy 4: Reset on E-Stop
 
-For OKS specifically, the simplest additional protection:
+For AMR specifically, the simplest additional protection:
 
 ```c
 void on_estop_release(void) {
@@ -338,7 +338,7 @@ $$\omega_n = \sqrt{\frac{K_m K_i}{\tau_m}}, \quad \zeta = \frac{1 + K_m K_p}{2\s
 
 $$K_i = \frac{\omega_n^2 \tau_m}{K_m}, \quad K_p = \frac{2\zeta\omega_n\tau_m - 1}{K_m}$$
 
-## 4.2 Numerical Example (OKS Motor)
+## 4.2 Numerical Example (AMR Motor)
 
 Motor: $K_m = 10$ rad/s/V, $\tau_m = 0.1$ s
 
@@ -412,7 +412,7 @@ Sometimes you want the P and D terms to respond differently to setpoint changes 
 
 $$u = K_p(b \cdot r - y) + K_i \int(r - y)dt + K_d \frac{d(c \cdot r - y)}{dt}$$
 
-- $b = 0$: P-term only responds to measurement (no setpoint overshoot). **Common in OKS.**
+- $b = 0$: P-term only responds to measurement (no setpoint overshoot). **Common in our robot.**
 - $b = 1$: Normal PID (responds to setpoint changes)
 - $c = 0$: D-term on measurement only (eliminates derivative kick)
 
@@ -425,7 +425,7 @@ $$u = K_p(b \cdot r - y) + K_i \int(r - y)dt + K_d \frac{d(c \cdot r - y)}{dt}$$
 3. You increase $K_p$ and the motor starts oscillating at 200 Hz. What happened in terms of poles?
 4. Explain integral windup in 3 sentences. Why does back-calculation fix it?
 5. Ziegler-Nichols ultimate gain method: you find $K_u = 2.0$, $T_u = 0.05$ s. What are the ZN-recommended PID gains?
-6. Why does OKS firmware use derivative-on-measurement instead of derivative-on-error?
+6. Why does robot firmware use derivative-on-measurement instead of derivative-on-error?
 7. Design a PI controller for a motor with $K_m = 8$ rad/s/V, $\tau_m = 0.15$ s, targeting $\zeta = 0.7$, $\omega_n = 40$ rad/s.
 
 ---

@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-Every OKS AMR operates on a 2D plane. The robot heading $\theta$ is an element of SO(2). The navigation estimator fuses wheel odometry and sensorbar data to estimate heading — both produce rotation increments that compose via SO(2) multiplication. Getting angle wrapping wrong is a classic source of estimator bugs in the OKS stack.
+## Robotics Relevance
+Every AMR operates on a 2D plane. The robot heading $\theta$ is an element of SO(2). The navigation estimator fuses wheel odometry and line sensor data to estimate heading — both produce rotation increments that compose via SO(2) multiplication. Getting angle wrapping wrong is a classic source of estimator bugs in the AMR stack.
 
 ---
 
@@ -187,7 +187,7 @@ For a figure-eight, $n = 0$ — the two loops cancel. This matters for SLAM beca
 ## Connections
 - **Prerequisites:** [Day 71](day-71-group-axioms.md) — group axioms and matrix groups
 - **Forward:** [Day 73](day-73-so3-rodrigues.md) extends to 3D rotations, [Day 76](day-76-rotation-representations.md) compares all representations
-- **OKS:** SO(2) directly represents robot heading; every `cmd_vel` angular velocity integrates on SO(2)
+- **AMR:** SO(2) directly represents robot heading; every `cmd_vel` angular velocity integrates on SO(2)
 
 ## Self-Check
 - [ ] I can write the 2D rotation matrix from memory and verify its properties

@@ -184,7 +184,7 @@ Each ad hoc modification makes the hypothesis less falsifiable and less elegant.
 > You suspect firmware. You only look at firmware logs. You find something suspicious. You declare firmware is the cause — without checking hardware, environment, or configuration.
 
 **Anchoring:** Over-relying on the first piece of information.
-> The first person to look at the incident says "it's probably the sensorbar." Every subsequent investigator focuses on the sensorbar, even when evidence points elsewhere.
+> The first person to look at the incident says "it's probably the line sensor." Every subsequent investigator focuses on the line sensor, even when evidence points elsewhere.
 
 **Availability heuristic:** Overweighting recent or memorable examples.
 > The last three incidents were all SPI issues. When a new incident comes in, you assume SPI without checking — but this one is actually a power supply problem.

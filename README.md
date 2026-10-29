@@ -1,5 +1,40 @@
 # Learning_from_building_systems
 
+Notes and self-study curricula from building real systems: robotics, embedded
+software, optimization, and machine learning.
+
+**Read it here:** https://vishalkumarr2.github.io/Learning_from_building_systems/
+
+## Where to start
+
+| Curriculum | What it covers | Size |
+|---|---|---|
+| [Robotics](https://vishalkumarr2.github.io/Learning_from_building_systems/robotics/) | Embedded C++, Zephyr RTOS, electronics, control, navigation estimation, ROS 2, Python, logic | 8 tracks |
+| [LLM to VLA](https://vishalkumarr2.github.io/Learning_from_building_systems/llm-to-vla/) | Deep learning foundations to Vision-Language-Action models | 112 daily lessons |
+| [ML Compilers](https://vishalkumarr2.github.io/Learning_from_building_systems/ml-compilers/) | CUDA, TVM, Triton, torch.compile, distributed training | 70 daily lessons |
+| [Optimization](https://vishalkumarr2.github.io/Learning_from_building_systems/optimization/) | Linear algebra to Lie groups and game theory | 70 daily lessons (weeks 5–10 not written yet) |
+
+Every lesson page has a **Mark as done** button. Progress and the "continue where
+you left off" link are stored in your browser only.
+
+## Editing the content
+
+Lessons are written in Markdown. The `.html` file next to each `.md` file is
+generated, so edit the Markdown and rebuild:
+
+```bash
+pip install markdown                 # once
+python3 tools/build_site.py          # render all curriculum markdown to HTML
+python3 tools/check_site.py          # broken links, orphan pages, unrendered markdown
+python3 -m unittest discover -s testing -p 'test_*.py'
+```
+
+`ml-compilers/` and the top-level area pages are hand-written HTML; edit those directly.
+`check_site.py` also scans for internal names listed in a local, untracked
+`.internal-terms` file (one regex per line) so they never reach the public site.
+
+## Principles I keep returning to
+
 -  Setup way to debug before you build something
   -  like loggers in software or electronics( this will improve your development time exponentially)
   -  How do you debug mechanical

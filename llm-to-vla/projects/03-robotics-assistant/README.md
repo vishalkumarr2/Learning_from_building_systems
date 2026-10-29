@@ -9,7 +9,7 @@
 
 Fine-tune a small LLM (1–3B parameters) to be a knowledgeable robotics domain
 assistant using QLoRA. The model should answer questions about ROS 2, navigation,
-sensors, OKS robot systems, and common failure modes significantly better than
+sensors, warehouse robot systems, and common failure modes significantly better than
 the base model.
 
 ---
@@ -26,7 +26,7 @@ the base model.
 │  │ 4-bit quantized │  │ ~2.5M params  │  │
 │  └────────────────┘  └───────────────┘  │
 │                                          │
-│  Input:  "What causes sensorbar drift?"  │
+│  Input:  "What causes line sensor drift?"  │
 │  Output: Domain-accurate explanation     │
 └──────────────────────────────────────────┘
 ```
@@ -37,13 +37,13 @@ the base model.
 
 | Source | Content | Estimated QA Pairs |
 |--------|---------|-------------------|
-| `knowledge/systems/` | OKS subsystem docs | 100+ |
+| `knowledge/systems/` | AMR subsystem docs | 100+ |
 | `knowledge/errors.json` | Error codes + causes | 50+ |
-| `knowledge/oks-system-overview.md` | System architecture | 30+ |
+| `knowledge/amr-system-overview.md` | System architecture | 30+ |
 | ROS 2 documentation | Concepts, nodes, topics | 100+ |
 | `docs/rca/` | Past RCA reports | 50+ |
 | Navigation algorithms | SLAM, path planning, localization | 50+ |
-| Sensor fusion | IMU, odometry, sensorbar | 30+ |
+| Sensor fusion | IMU, odometry, line sensor | 30+ |
 
 **Target:** 400–500 high-quality instruction-response pairs.
 
@@ -83,7 +83,7 @@ Create an evaluation set of 50+ robotics questions:
 | Troubleshooting | "Robot stopped with MOTOR_OVERCURRENT, what to check?" | 10 |
 | ROS 2 | "How do ROS 2 lifecycle nodes work?" | 10 |
 | Navigation | "Explain the difference between DWA and TEB planners" | 10 |
-| System architecture | "What components make up the OKS navigation stack?" | 10 |
+| System architecture | "What components make up the AMR navigation stack?" | 10 |
 
 **Metrics:**
 - Qualitative: side-by-side comparison (base vs LoRA vs GPT-4)

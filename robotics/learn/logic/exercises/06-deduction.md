@@ -125,7 +125,7 @@ Use indirect proof (proof by contradiction) to derive the conclusion.
 
 Translate the engineering scenario into propositional logic, then construct a formal proof.
 
-**A.** "If the SPI clock is unstable (s), then the DMA transfer corrupts (d). If the DMA transfer corrupts (d), the sensorbar reads stale data (b). If the sensorbar reads stale data (b), the estimator diverges (e). The SPI clock is unstable. Prove: the estimator diverges."
+**A.** "If the SPI clock is unstable (s), then the DMA transfer corrupts (d). If the DMA transfer corrupts (d), the line sensor reads stale data (b). If the line sensor reads stale data (b), the estimator diverges (e). The SPI clock is unstable. Prove: the estimator diverges."
 
 **B.** "The failure is either hardware (h), firmware (f), or software (w). If it's hardware, bench testing would fail (b). Bench testing passed (~b). If it's software, the same binary on another robot would fail (a). The same binary works fine on another robot (~a). Prove: the failure is firmware."
 

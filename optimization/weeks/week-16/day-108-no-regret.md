@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-OKS task allocation is an online problem: tasks arrive over time, and robots must choose which to accept without knowing future arrivals. No-regret algorithms guarantee that over time, no robot would have been better off following any fixed strategy — critical for fair, efficient fleet-wide task distribution without central planning.
+## Robotics Relevance
+AMR task allocation is an online problem: tasks arrive over time, and robots must choose which to accept without knowing future arrivals. No-regret algorithms guarantee that over time, no robot would have been better off following any fixed strategy — critical for fair, efficient fleet-wide task distribution without central planning.
 
 ---
 
@@ -243,7 +243,7 @@ Each robot runs MWU over 3 task types. Loss for robot $r$ choosing task $k$ at t
 ## Connections
 - **Back**: [Day 107: Fictitious Play](day-107-fictitious-play.md) — FP is "follow the leader"; MWU adds randomization for better worst-case
 - **Forward**: [Day 109: Congestion Games](day-109-congestion-games.md) — no-regret dynamics in congestion settings
-- **OKS**: Online task allocation, corridor bandwidth sharing, charging schedule optimization
+- **AMR**: Online task allocation, corridor bandwidth sharing, charging schedule optimization
 
 ## Self-Check
 - [ ] I can define external regret and state the $O(\sqrt{T \log n})$ bound

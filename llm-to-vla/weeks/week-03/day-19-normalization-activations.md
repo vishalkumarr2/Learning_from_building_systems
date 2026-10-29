@@ -7,7 +7,7 @@
 - **Previous:** [Day 18: KV Cache](day-18-kv-cache.md)
 - **Next:** [Day 20: Mixture of Experts](day-20-mixture-of-experts.md)
 - **Week:** [Week 3 Overview](README.md)
-- **Phase:** [Phase II: Attention & Transformers](../../study-notes/03-transformers.md)
+- **Phase:** [Phase II: Attention & Transformers](../../study-notes/03-transformer-architecture.md)
 - **Curriculum:** [Full Curriculum](../../CURRICULUM.md)
 
 ---

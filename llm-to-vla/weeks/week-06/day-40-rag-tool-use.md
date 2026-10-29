@@ -137,12 +137,12 @@ LLMs can be trained to invoke external tools:
 **Tool use for robotics:**
 
 ```
-User: "What's the battery level of robot OKS-42?"
+User: "What's the battery level of robot AMR-42?"
 
 LLM reasoning:
-  1. I need to call get_robot_status(robot_id="OKS-42")
+  1. I need to call get_robot_status(robot_id="AMR-42")
   2. [TOOL CALL] → {"battery": 67, "status": "navigating", ...}
-  3. "Robot OKS-42 has 67% battery and is currently navigating."
+  3. "Robot AMR-42 has 67% battery and is currently navigating."
 ```
 
 ### 40.6 RAG for Robotics Applications
@@ -346,17 +346,17 @@ def format_tool_call_prompt(query: str, tools: list[dict]) -> str:
 if __name__ == "__main__":
     # Build RAG system
     knowledge_base = [
-        "The sensorbar uses SPI communication at 10MHz. Common failure modes "
+        "The line sensor uses SPI communication at 10MHz. Common failure modes "
         "include stiction from debris and firmware version mismatch.",
         "Battery exchange robots dock using IR alignment sensors. The docking "
         "sequence takes approximately 45 seconds including verification.",
         "NAV_ESTIMATED_STATE_NOT_FINITE indicates the navigation estimator "
         "received NaN values. Check IMU calibration and wheel encoder signals.",
-        "The OKS robot uses differential drive with two powered wheels and "
+        "The warehouse robot uses differential drive with two powered wheels and "
         "two caster wheels. Maximum speed is 1.5 m/s in open areas.",
         "LiDAR-based SLAM provides centimeter-level localization accuracy. "
         "Degradation occurs in large open areas with few features.",
-        "The guardian node monitors robot health. It triggers emergency stop "
+        "The safety monitor node monitors robot health. It triggers emergency stop "
         "when critical errors exceed threshold within a time window.",
     ]
 
@@ -375,7 +375,7 @@ if __name__ == "__main__":
     # Tool call
     print("\n" + "=" * 60)
     tool_prompt = format_tool_call_prompt(
-        "Check the error logs for robot OKS-42 from the last hour",
+        "Check the error logs for robot AMR-42 from the last hour",
         ROBOT_TOOLS,
     )
     print(tool_prompt)

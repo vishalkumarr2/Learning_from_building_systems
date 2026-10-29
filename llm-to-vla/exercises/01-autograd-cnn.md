@@ -1197,4 +1197,4 @@ def train_bpe(text, vocab_size=1000):
 | 5. Info Theory | Learning = compression | BPC → 1.5 for English |
 | 6. Stability | Monitor + warmup + scaling = stable | Zero NaN, smooth curves |
 
-**Next:** → [Exercise 02: Attention & Transformers](02-attention-transformers.md)
+**Next:** → [Exercise 02: Attention & Transformers](02-attention-from-scratch.md)

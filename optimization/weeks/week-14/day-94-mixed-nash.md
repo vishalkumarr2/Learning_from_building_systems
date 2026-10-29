@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Deterministic robot patrol routes are predictable and exploitable (by adversaries or by congestion). Mixed strategies assign randomized probabilities over routes, ensuring unpredictability. In warehouse pick optimization, stochastic task selection prevents bottlenecks at popular aisles — each robot randomizes according to a mixed NE.
 
 ---
@@ -274,7 +274,7 @@ Pure NE payoffs: (3,2) and (2,3). Mixed NE: $p^*=3/5$, $q^*=2/5$, expected payof
 ## Connections
 - **Back:** Day 93 (pure NE, best response), Day 5 (convexity — NE existence via fixed-point)
 - **Forward:** Day 95 (selecting among equilibria), Day 96 (zero-sum mixed strategies via minimax)
-- **OKS:** Stochastic patrol scheduling; mixed NE in robot task selection prevents herding
+- **AMR:** Stochastic patrol scheduling; mixed NE in robot task selection prevents herding
 
 ## Self-Check
 - [ ] I can solve for the mixed NE of any 2×2 game using the indifference principle

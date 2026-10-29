@@ -9,8 +9,8 @@
 - **Week:** [Week 4 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-The OKS estimator's Kalman filter is itself a form of momentum-based update — the state prediction carries forward information from previous steps. Understanding momentum methods explains why the estimator can track fast-moving robots without overshooting, and why tuning the process noise covariance $Q$ (which controls how much the estimator "trusts" its momentum) is critical for navigation stability.
+## Robotics Relevance
+The AMR estimator's Kalman filter is itself a form of momentum-based update — the state prediction carries forward information from previous steps. Understanding momentum methods explains why the estimator can track fast-moving robots without overshooting, and why tuning the process noise covariance $Q$ (which controls how much the estimator "trusts" its momentum) is critical for navigation stability.
 
 ---
 

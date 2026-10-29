@@ -13,7 +13,7 @@ The culmination of the curriculum: study every major Vision-Language-Action mode
 | 94 | [Octo](day-94-octo.md) | Generalist policy, multi-embodiment |
 | 95 | [OpenVLA](day-95-openvla.md) | Open-source VLA, Prismatic backbone |
 | 96 | [π₀](day-96-pi0.md) | Flow matching for robot actions |
-| 97 | [π₀.₅](day-97-pi05.md) | Scaling Physical Intelligence |
+| 97 | [π₀.₅](day-97-pi0-5.md) | Scaling Physical Intelligence |
 | 98 | [GR00T N1 + PaLM-E](day-98-groot-palme.md) | NVIDIA humanoid model, embodied reasoning |
 
 ## Study Notes Reference

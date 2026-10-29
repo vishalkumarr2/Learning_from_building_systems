@@ -46,11 +46,11 @@ In engineering, you want to maximize cognitive meaning and minimize emotive mean
 Two ways to specify what a word means:
 
 **Extension (denotation):** The set of all things the word refers to.
-- Extension of "OKS robot" = {oksbot-1, oksbot-2, ..., oksbot-N} — every actual OKS robot.
+- Extension of "warehouse robot" = {robot-1, robot-2, ..., robot-N} — every actual warehouse robot.
 - Extension of "prime number" = {2, 3, 5, 7, 11, 13, ...}
 
 **Intension (connotation):** The properties or attributes that define membership.
-- Intension of "OKS robot" = an autonomous mobile robot manufactured by Rapyuta Robotics using the OKS platform.
+- Intension of "warehouse robot" = an autonomous mobile robot that moves goods inside a warehouse.
 - Intension of "prime number" = a natural number greater than 1 that has no positive divisors other than 1 and itself.
 
 **Why this matters:** Two words can have the same extension but different intension.
@@ -65,7 +65,7 @@ Words have a hierarchy of intension:
 
 In engineering, we constantly use stipulative definitions:
 - "DELOCALIZED" doesn't mean what a dictionary says — it means the robot's estimated position diverged from ground truth beyond a threshold.
-- "STALL" in our context means the sensorbar sequence counter didn't increment for N cycles.
+- "STALL" in our context means the line sensor sequence counter didn't increment for N cycles.
 
 **Rule:** When using technical terms in arguments, always make sure everyone agrees on the stipulative definition. Many debugging debates are actually definition disputes.
 
@@ -92,11 +92,11 @@ The sentence structure allows multiple interpretations:
 
 ### Cross-Reference Ambiguity
 Pronouns or references are unclear:
-- "The estimator gets data from the sensorbar and the IMU. It sometimes fails." — What fails? The estimator, the sensorbar, or the IMU?
+- "The estimator gets data from the line sensor and the IMU. It sometimes fails." — What fails? The estimator, the line sensor, or the IMU?
 
 **Fix:** In technical writing, eliminate ambiguity by being specific:
 - ~~"The port is not responding"~~ → "TCP port 8080 is not responding to health checks"
-- ~~"It sometimes fails"~~ → "The estimator occasionally diverges when sensorbar data is stale"
+- ~~"It sometimes fails"~~ → "The estimator occasionally diverges when line sensor data is stale"
 
 ## 2.2 Vagueness
 
@@ -140,7 +140,7 @@ This is a factual disagreement. No amount of redefining words will resolve it �
 
 | Type | Purpose | Example |
 |---|---|---|
-| **Stipulative** | Assigns a new meaning to a new or existing term | "For this RCA, 'STALL' means sensorbar sequence unchanged for ≥5 cycles" |
+| **Stipulative** | Assigns a new meaning to a new or existing term | "For this RCA, 'STALL' means line sensor sequence unchanged for ≥5 cycles" |
 | **Lexical** | Reports existing standard meaning | "A motor is a machine that converts electrical energy into mechanical motion" |
 | **Précising** | Reduces vagueness of an existing term | "'High temperature' for this system means above 75°C at the motor driver" |
 | **Theoretical** | Provides meaning within a theory or framework | "'Delocalization' means the Mahalanobis distance between estimated and true pose exceeds 3σ" |
@@ -160,7 +160,7 @@ This is a factual disagreement. No amount of redefining words will resolve it �
 1. Name the broader category (genus)
 2. State what distinguishes this term from others in that category (difference)
 
-Example: "A **sensorbar** (genus: sensor module) is a linear array of optical encoders that measures wheel displacement by detecting alternating stripes on a code strip, providing incremental position feedback to the navigation estimator."
+Example: "A **line sensor** (genus: sensor module) is a linear array of optical encoders that measures wheel displacement by detecting alternating stripes on a code strip, providing incremental position feedback to the navigation estimator."
 
 ## 3.3 Rules for Good Definitions
 

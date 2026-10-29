@@ -206,7 +206,7 @@ normalizer = ActionNormalizer(
 
 2. **Rotation continuity:** Sample 1000 random rotations. Convert to Euler, quaternion, and 6D. Perturb slightly and convert back. Which representation is most stable (smallest reconstruction error)?
 
-3. **Action space for OKS:** Your OKS AMR robot has $(v, \omega)$ velocity commands. Design the action representation: continuous delta? Discrete bins? What chunk size? Write a specification.
+3. **Action space for AMRs:** Your AMR robot has $(v, \omega)$ velocity commands. Design the action representation: continuous delta? Discrete bins? What chunk size? Write a specification.
 
 4. **Normalization impact:** Train a BC policy on unnormalized vs normalized actions. Compare learning curves.
 

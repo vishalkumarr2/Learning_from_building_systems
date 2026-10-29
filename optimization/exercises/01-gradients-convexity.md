@@ -213,9 +213,9 @@ Typical results: GD ~10,000+ iterations (with lr=0.001), Newton ~15–25 iterati
 
 ---
 
-## Section C — OKS Connection
+## Section C — AMR Connection
 
-**C1.** The OKS navigation estimator's EKF state includes $(x, y, \theta, v, \omega)$. The position variables are in metres ($\sim 0$ to $100$), while the heading $\theta$ is in radians ($\sim 0$ to $6.28$).
+**C1.** The AMR navigation estimator's EKF state includes $(x, y, \theta, v, \omega)$. The position variables are in metres ($\sim 0$ to $100$), while the heading $\theta$ is in radians ($\sim 0$ to $6.28$).
 
 1. Why might this cause numerical issues if you were solving an optimization problem with these variables?
 2. How would you rescale? What scaling factors would you choose?

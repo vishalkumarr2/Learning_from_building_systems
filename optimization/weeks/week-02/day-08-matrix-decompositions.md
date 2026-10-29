@@ -9,7 +9,7 @@
 - **Week:** [Week 2 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Every Ceres Solver call internally decomposes the Hessian approximation $J^T J$. Cholesky is the default for dense problems; sparse Cholesky (with ordering) for SLAM. Knowing which decomposition to use — and why — lets you configure Ceres and g2o for 10× speedups.
 
 ---

@@ -6,15 +6,15 @@
 
 ---
 
-## Why Should I Care? (OKS Context)
+## Why Should I Care? (Practical Context)
 
-The STM32F4 in OKS *has* a floating-point unit (FPU), so you might think: "Why bother with fixed-point?" Three reasons:
+The STM32F4 in our robot *has* a floating-point unit (FPU), so you might think: "Why bother with fixed-point?" Three reasons:
 
 1. **Deterministic timing:** Fixed-point operations take exactly the same time every call. Floating-point can vary with denormalized numbers, NaN propagation, and FPU pipeline stalls.
-2. **Smaller MCUs:** The sensorbar controller (STM32G0 series) has NO FPU. All math must be integer.
+2. **Smaller MCUs:** The line-sensor controller (STM32G0 series) has NO FPU. All math must be integer.
 3. **FPGA/DSP targets:** When porting PID to an FPGA (for current loop offloading), you need integer math.
 
-**Real OKS failure:** A firmware developer used `float` for the current PID on an STM32G0-based sensorbar board. Compilation succeeded (soft-float), but execution was 20× slower (software float emulation). The 10 kHz ISR took 150 µs instead of 7 µs, causing timer overruns and erratic sensor readings.
+**Real AMR failure:** A firmware developer used `float` for the current PID on an STM32G0-based line-sensor board. Compilation succeeded (soft-float), but execution was 20× slower (software float emulation). The 10 kHz ISR took 150 µs instead of 7 µs, causing timer overruns and erratic sensor readings.
 
 ---
 
@@ -119,7 +119,7 @@ The format determines your **range vs precision** trade-off:
 | Q24.8 | 32 | 24 | 8 | ±8M | 0.0039 |
 | Q1.31 | 32 | 1 | 31 | ±1.0 | 0.00000000047 |
 
-## 2.2 OKS Motor Control Q-Format Choices
+## 2.2 AMR Motor Control Q-Format Choices
 
 | Signal | Physical range | Needed resolution | Q format | Reasoning |
 |--------|---------------|-------------------|----------|-----------|
@@ -196,7 +196,7 @@ q16_t pid_compute(FixedPID *pid, q16_t error) {
 
 Notice: `Ki = ki * ts` and `Kd = kd / ts` are computed once at initialization. This eliminates two multiplies per loop iteration. At 10 kHz on a Cortex-M0+ (no hardware multiplier), saving 2 multiplies = saving 40 µs.
 
-**But:** If $T_s$ changes (e.g., adaptive rate), you must recalculate the gains. In OKS, $T_s$ is fixed, so pre-multiplication is safe.
+**But:** If $T_s$ changes (e.g., adaptive rate), you must recalculate the gains. In AMR, $T_s$ is fixed, so pre-multiplication is safe.
 
 ## 3.3 Why Velocity Form Avoids Integrator Overflow
 
@@ -414,7 +414,7 @@ The Cortex-M4 FPU does single-precision float in **1 cycle** (multiply) or **14 
 | Porting to FPGA later | ✅ Fixed | Must convert |
 | Team familiarity | Lower | ✅ Higher |
 
-**OKS decision:** Float for speed/position PID on STM32F4 (has FPU). Fixed-point for sensorbar controller on STM32G0 (no FPU) and for any future FPGA offloading.
+**AMR decision:** Float for speed/position PID on STM32F4 (has FPU). Fixed-point for line-sensor controller on STM32G0 (no FPU) and for any future FPGA offloading.
 
 ---
 

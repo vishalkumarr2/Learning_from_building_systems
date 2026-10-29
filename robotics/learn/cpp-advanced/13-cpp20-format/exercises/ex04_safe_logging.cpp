@@ -196,7 +196,7 @@ int main() {
     Logger::debug("This won't appear");
     Logger::info("Neither will this");
     Logger::warn("Low battery: {}%", 10);
-    Logger::error("Sensorbar dropout on {}", "sensorbar_front");
+    Logger::error("Line sensor dropout on {}", "line_sensor_front");
 
     // --- Practical robotics examples ---
     std::cout << "\n--- Robotics examples (all levels) ---\n\n";

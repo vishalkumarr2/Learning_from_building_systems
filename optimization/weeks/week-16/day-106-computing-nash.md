@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 When multiple AMRs must compute equilibrium strategies in real-time — for corridor negotiation, charging station allocation, or task bidding — the computational complexity of Nash equilibrium directly limits what's feasible onboard. Understanding PPAD-completeness explains why we rely on approximate or structured equilibria (potential games, zero-sum) rather than general NE computation.
 
 ---
@@ -207,7 +207,7 @@ For zero-sum $(A, -A)$: $\max_{x} \min_{y} x^\top A y = \max_{x,v} \{v : A^\top 
 ## Connections
 - **Back**: Builds on [Day 97: Zero-Sum LP](../week-14/day-97-zero-sum-lp.md) — minimax and LP for zero-sum
 - **Forward**: [Day 107: Fictitious Play](day-107-fictitious-play.md) uses iterative methods that bypass NE computation
-- **OKS**: Real-time robot negotiation must use structured games (zero-sum, potential) where polynomial algorithms exist
+- **AMR**: Real-time robot negotiation must use structured games (zero-sum, potential) where polynomial algorithms exist
 
 ## Self-Check
 - [ ] I can explain why NE computation is PPAD-complete and what that implies

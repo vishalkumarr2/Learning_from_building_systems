@@ -3,7 +3,7 @@
 // TSan:    g++ -std=c++20 -Wall -Wextra -Wpedantic -pthread -fsanitize=thread -O1 ex07_spsc_queue.cpp -o ex07_tsan && ./ex07_tsan
 //
 // ROS NOTE: This is the sensor→controller data path in your robot.
-// The sensorbar SPI reader (producer) pushes readings at ~200Hz,
+// The line sensor SPI reader (producer) pushes readings at ~200Hz,
 // the navigation estimator (consumer) pops them for state estimation.
 // A lock-free SPSC queue ensures the producer (RT thread) never blocks
 // on a mutex contention with the consumer (non-RT thread).

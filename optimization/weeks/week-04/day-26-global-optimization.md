@@ -9,8 +9,8 @@
 - **Week:** [Week 4 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-Most OKS optimization is local (sensor calibration, pose estimation — all start near the solution). But global optimization appears in two critical scenarios: (1) **loop closure detection** in SLAM where the initial alignment between scans may be far from correct, and (2) **scan matching initialization** where ICP needs a reasonable starting point. Understanding when you need global search vs when good initialization suffices is a key engineering judgment.
+## Robotics Relevance
+Most AMR optimization is local (sensor calibration, pose estimation — all start near the solution). But global optimization appears in two critical scenarios: (1) **loop closure detection** in SLAM where the initial alignment between scans may be far from correct, and (2) **scan matching initialization** where ICP needs a reasonable starting point. Understanding when you need global search vs when good initialization suffices is a key engineering judgment.
 
 ---
 

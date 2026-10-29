@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 A warehouse fleet may have multiple stable task allocations (multiple NE). The fleet controller must pick one — the "equilibrium selection" problem. Risk-dominant solutions tolerate communication failures; Pareto-dominant ones maximize throughput. Correlated equilibrium uses a central dispatcher signal to coordinate robots beyond what decentralized NE can achieve.
 
 ---
@@ -210,7 +210,7 @@ Total welfare: 5.0000
 
 <details><summary>Answer</summary>
 
-(Stag, Stag) requires mutual trust — if one robot deviates, the cooperator gets 0. (Hare, Hare) guarantees at least 2 regardless. With reliable communication, Pareto dominance wins — use (Stag, Stag). With unreliable communication or unknown partners, risk dominance is safer — use (Hare, Hare). In OKS: if the fleet controller can broadcast coordination signals reliably, go for the higher-throughput assignment. If communication is lossy, fall back to individually-safe allocations.
+(Stag, Stag) requires mutual trust — if one robot deviates, the cooperator gets 0. (Hare, Hare) guarantees at least 2 regardless. With reliable communication, Pareto dominance wins — use (Stag, Stag). With unreliable communication or unknown partners, risk dominance is safer — use (Hare, Hare). In AMR software: if the fleet controller can broadcast coordination signals reliably, go for the higher-throughput assignment. If communication is lossy, fall back to individually-safe allocations.
 </details>
 
 **P2.** Verify that the Battle of Sexes CE with $\pi(0,0) = \pi(1,1) = 1/2$ satisfies all incentive constraints.
@@ -261,7 +261,7 @@ $A = \begin{pmatrix} -1 & 0 \\ 2 & -10 \end{pmatrix}$, $B = \begin{pmatrix} -1 &
 ## Connections
 - **Back:** Day 93 (multiple pure NE), Day 94 (mixed NE as alternative selection), Day 29–31 (LP for CE)
 - **Forward:** Day 96 (zero-sum — unique NE, no selection needed), Week 15 (mechanism design as equilibrium engineering)
-- **OKS:** Fleet coordination protocol = correlated equilibrium mediator; dispatcher signals resolve multi-robot deadlocks
+- **AMR:** Fleet coordination protocol = correlated equilibrium mediator; dispatcher signals resolve multi-robot deadlocks
 
 ## Self-Check
 - [ ] I can distinguish Pareto dominance from risk dominance and explain when each matters

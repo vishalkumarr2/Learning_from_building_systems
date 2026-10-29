@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-The OKS navigation estimator refines robot poses on SE(2)/SE(3) — a manifold, not a vector space. Naive $R + \Delta R$ leaves SO(3), producing invalid rotations. Manifold Gauss-Newton uses Exp/Log maps to keep every iterate on the manifold, which is exactly how pose refinement works in the robot's localization stack.
+## Robotics Relevance
+The AMR navigation estimator refines robot poses on SE(2)/SE(3) — a manifold, not a vector space. Naive $R + \Delta R$ leaves SO(3), producing invalid rotations. Manifold Gauss-Newton uses Exp/Log maps to keep every iterate on the manifold, which is exactly how pose refinement works in the robot's localization stack.
 
 ---
 
@@ -246,7 +246,7 @@ This perturbs along each tangent-space basis direction using the Exp map, ensuri
 ## Connections
 - **Prerequisites**: Day 80 (Exp/Log maps), Day 83 (Jacobians on Lie groups)
 - **Forward**: Day 86 builds on this to solve full pose-graph SLAM on SE(2)
-- **OKS**: every pose refinement step in the navigation estimator is a manifold GN iteration
+- **AMR**: every pose refinement step in the navigation estimator is a manifold GN iteration
 
 ## Self-Check
 - [ ] I can explain why $R + \Delta R \notin \text{SO}(3)$ and why retraction is needed

@@ -7,7 +7,7 @@
 - **Previous:** [Day 19: Normalization + Activations](day-19-normalization-activations.md)
 - **Next:** [Day 21: BERT & Masked LM](day-21-bert-masked-lm.md)
 - **Week:** [Week 3 Overview](README.md)
-- **Phase:** [Phase II: Attention & Transformers](../../study-notes/03-transformers.md)
+- **Phase:** [Phase II: Attention & Transformers](../../study-notes/03-transformer-architecture.md)
 - **Curriculum:** [Full Curriculum](../../CURRICULUM.md)
 
 ---

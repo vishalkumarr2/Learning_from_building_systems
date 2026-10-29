@@ -7,11 +7,11 @@
 
 ## Why This Track Exists
 
-Every major OKS subsystem runs an optimizer:
+Every major AMR subsystem runs an optimizer:
 
 | Subsystem | Optimizer | What it solves |
 |-----------|-----------|----------------|
-| Navigation estimator | Ceres Solver (LM) | Sensorbar line-fit, pose correction |
+| Navigation estimator | Ceres Solver (LM) | Line sensor line-fit, pose correction |
 | Control (MPC path) | QP / NLP solver | Trajectory tracking with constraints |
 | SLAM / localization | Pose-graph optimizer (g2o) | Loop closure, map consistency |
 | Path planner | Graph search + cost minimization | Shortest/safest path through costmap |
@@ -30,7 +30,7 @@ If you can't read an optimizer's cost function, you can't debug why the robot dr
 ├──→ 02-unconstrained-optimization
 │      (gradient descent, Newton, line search, trust region)
 │      │
-│      ├──→ 03-least-squares  ← HIGHEST OKS VALUE
+│      ├──→ 03-least-squares  ← HIGHEST AMR VALUE
 │      │      (Gauss-Newton, Levenberg-Marquardt, Ceres Solver)
 │      │
 │      └──→ 07-numerical-methods
@@ -42,11 +42,11 @@ If you can't read an optimizer's cost function, you can't debug why the robot dr
 │      └──→ 05-convex-optimization
 │             (LP, QP, SDP, interior-point, CVXPy)
 │
-└──→ 06-graph-optimization  ← SECOND HIGHEST OKS VALUE
+└──→ 06-graph-optimization  ← SECOND HIGHEST AMR VALUE
        (factor graphs, pose-graph SLAM, g2o, GTSAM)
 ```
 
-**Critical path for OKS work:** 01 → 02 → 03 (least-squares / Ceres) — this is 60% of the RCA value.
+**Critical path for AMR work:** 01 → 02 → 03 (least-squares / Ceres) — this is 60% of the RCA value.
 
 ---
 
@@ -68,7 +68,7 @@ learn/optimization/
 ├── exercises/
 │   ├── 01-gradients-convexity.md           ← Hand-derive gradients, classify convexity
 │   ├── 02-gradient-descent.md              ← Implement GD/Newton from scratch in Python
-│   ├── 03-least-squares-ceres.md           ← Fit curves with scipy + Ceres, reproduce sensorbar fit
+│   ├── 03-least-squares-ceres.md           ← Fit curves with scipy + Ceres, reproduce line sensor fit
 │   ├── 04-constrained-kkt.md               ← Solve KKT by hand, verify with solver
 │   ├── 05-convex-cvxpy.md                  ← Model LP/QP problems in CVXPy
 │   ├── 06-pose-graph.md                    ← Build a mini pose-graph optimizer
@@ -103,7 +103,7 @@ learn/optimization/
 - [ ] Gauss-Newton approximates the Hessian as $J^T J$. Why is this valid for small residuals?
 - [ ] LM adds $\lambda I$ to $J^T J$. What happens as $\lambda → 0$? As $\lambda → ∞$?
 - [ ] In Ceres, what is a `CostFunction`, a `LossFunction`, and a `ParameterBlock`?
-- [ ] The sensorbar uses `CauchyLoss(c=40.0)`. What does this do to outliers?
+- [ ] The line sensor uses `CauchyLoss(c=40.0)`. What does this do to outliers?
 
 ### Week 3 — Constrained Optimization (8 hrs)
 **Read:** `04-constrained-optimization.md`
@@ -150,7 +150,7 @@ learn/optimization/
 
 ## Key External Resources
 
-See [RESOURCES.md — Optimization section](../RESOURCES.md#optimization) for the full curated list.
+See [RESOURCES.md — Optimization section](../robotics/learn/RESOURCES.md#optimization) for the full curated list.
 
 **Start with these three:**
 1. **Boyd & Vandenberghe — Convex Optimization** (free PDF) — the bible, chapters 1–5 + 9–11
@@ -164,13 +164,13 @@ See [RESOURCES.md — Optimization section](../RESOURCES.md#optimization) for th
 
 ---
 
-## OKS Relevance Map
+## Robotics Relevance Map
 
-| Study note | Directly used in OKS for... |
+| Study note | Directly used in AMR software for... |
 |------------|-----------------------------|
 | 01 Foundations | Reading any cost function in the codebase |
 | 02 Unconstrained | Understanding why GD is used in ML tuning but Newton in estimator |
-| 03 Least squares | **Ceres sensorbar fit**, calibration, every NLLS in the stack |
+| 03 Least squares | **Ceres line sensor fit**, calibration, every NLLS in the stack |
 | 04 Constrained | Understanding MPC constraint formulation |
 | 05 Convex | QP in MPC, understanding solver guarantees |
 | 06 Graph optimization | **Pose-graph SLAM**, loop closure, localization |

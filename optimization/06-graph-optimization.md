@@ -2,7 +2,7 @@
 
 > **Goal:** Understand how SLAM and multi-sensor fusion are formulated as optimization on graphs — factor graphs, pose graphs, and the solvers (g2o, GTSAM, Ceres) that make them tractable.
 
-> **Second highest OKS value.** The navigation estimator's state estimation and any future SLAM capability depend on graph-based optimization.
+> **Second highest AMR value.** The navigation estimator's state estimation and any future SLAM capability depend on graph-based optimization.
 
 ---
 
@@ -124,7 +124,7 @@ where:
 - $\Delta x$ is in the tangent space (Lie algebra) — a regular vector
 - $\exp$ maps back to the manifold
 
-### For SE(2) — What OKS Uses
+### For SE(2) — What AMRs Use
 
 A pose is $(x, y, \theta)$. The "manifold" aspect is $\theta$ wrapping around.
 
@@ -304,11 +304,11 @@ gtsam::Values current_estimate = isam2.calculateEstimate();
 
 ---
 
-## 8. OKS Connections
+## 8. AMR Connections
 
 ### Navigation Estimator
 
-The OKS navigation estimator uses an EKF, not full graph optimization. But the concepts connect:
+The AMR navigation estimator uses an EKF, not full graph optimization. But the concepts connect:
 
 | Graph concept | EKF equivalent |
 |---------------|---------------|
@@ -320,10 +320,10 @@ The OKS navigation estimator uses an EKF, not full graph optimization. But the c
 
 **Why the connection matters for RCA:**
 - Understanding the information matrix helps debug why certain sensor failures cause estimator divergence
-- The "graph view" explains why losing sensorbar measurements degrades pose accuracy — you're removing high-information factors
+- The "graph view" explains why losing line sensor measurements degrades pose accuracy — you're removing high-information factors
 - Loop closure ↔ re-localization: when the robot re-detects a known landmark
 
-### When Would OKS Need Full Graph Optimization?
+### When Would an AMR Need Full Graph Optimization?
 
 - Multi-robot map merging
 - Offline map refinement

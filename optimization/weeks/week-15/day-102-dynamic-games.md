@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Two robots approach an intersection. Robot A arrives first and decides: proceed or yield. Robot B observes A's choice and reacts. This sequential structure is an extensive-form game. Backward induction finds the subgame-perfect strategy — eliminating non-credible threats like "I'll crash into you if you don't yield," which no rational robot would execute.
 
 ---
@@ -251,7 +251,7 @@ With imperfect info, B's information set groups nodes where A chose different sp
 ## Connections
 - **Prerequisites:** Normal form games (Day 92) — every extensive game has a normal form; Nash equilibrium (Day 93) — SPE refines NE
 - **Forward:** Repeated games (Day 103) — repeat a stage game over time; Mechanism design (Day 104) — sequential revelation
-- **OKS:** Intersection priority protocols, sequential task assignment, leader-follower fleet coordination
+- **AMR:** Intersection priority protocols, sequential task assignment, leader-follower fleet coordination
 
 ## Self-Check
 - [ ] I can convert a game tree to extensive form and identify subgames

@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-This review synthesizes all Lie group machinery needed for robot state estimation and SLAM. The complete pipeline — build SE(3) from sensor data, chain transforms, compute residuals via log map, linearize via Jacobians, update via exp map — runs in every pose-graph optimizer. Mastering this toolkit is prerequisite for understanding the OKS navigation estimator's manifold-aware EKF.
+## Robotics Relevance
+This review synthesizes all Lie group machinery needed for robot state estimation and SLAM. The complete pipeline — build SE(3) from sensor data, chain transforms, compute residuals via log map, linearize via Jacobians, update via exp map — runs in every pose-graph optimizer. Mastering this toolkit is prerequisite for understanding the AMR navigation estimator's manifold-aware EKF.
 
 ---
 
@@ -259,7 +259,7 @@ def pose_graph_step(poses, measurements):
 - **Back:** All of Week 12 — this review ties together SE(2/3), exp/log, Lie algebra, adjoint, and Jacobians
 - **Back:** [Week 11](../week-11/day-77-week11-review.md) — SO(3) foundations underpin everything here
 - **Forward:** [Week 13: Manifold Optimization](../week-13/day-85-manifold-gauss-newton.md) — applying this toolkit to real optimization problems
-- **OKS:** The complete world→sensor transform pipeline and pose-graph SLAM use every concept from this week
+- **AMR:** The complete world→sensor transform pipeline and pose-graph SLAM use every concept from this week
 
 ## Self-Check
 - [ ] I can chain SE(3) transforms for a multi-frame robot system

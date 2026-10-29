@@ -47,61 +47,61 @@
 ### Phase III: Nonlinear Least Squares + Ceres (Weeks 5–6)
 
 #### Week 5 — NLS Theory & scipy
-- [ ] [Day 29: Linear Least Squares](week-05/day-29-linear-least-squares.md)
-- [ ] [Day 30: Weighted & Generalized LS](week-05/day-30-weighted-ls.md)
-- [ ] [Day 31: Gauss-Newton](week-05/day-31-gauss-newton.md)
-- [ ] [Day 32: Levenberg-Marquardt](week-05/day-32-levenberg-marquardt.md)
-- [ ] [Day 33: Robust Estimation](week-05/day-33-robust-estimation.md)
-- [ ] [Day 34: scipy least_squares](week-05/day-34-scipy-least-squares.md)
-- [ ] [Day 35: Fisher Info + Capstone](week-05/day-35-week-review.md)
+- [ ] Day 29: Linear Least Squares *(not written yet)*
+- [ ] Day 30: Weighted & Generalized LS *(not written yet)*
+- [ ] Day 31: Gauss-Newton *(not written yet)*
+- [ ] Day 32: Levenberg-Marquardt *(not written yet)*
+- [ ] Day 33: Robust Estimation *(not written yet)*
+- [ ] Day 34: scipy least_squares *(not written yet)*
+- [ ] Day 35: Fisher Info + Capstone *(not written yet)*
 
 #### Week 6 — Ceres Solver (C++)
-- [ ] [Day 36: Ceres Introduction](week-06/day-36-ceres-intro.md)
-- [ ] [Day 37: Ceres AutoDiff](week-06/day-37-ceres-autodiff.md)
-- [ ] [Day 38: Ceres Loss Functions](week-06/day-38-ceres-loss-functions.md)
-- [ ] [Day 39: Ceres Robotics](week-06/day-39-ceres-robotics.md)
-- [ ] [Day 40: Solver Config & Debugging](week-06/day-40-ceres-solver-config.md)
-- [ ] [Day 41: Lie Groups & Manifolds](week-06/day-41-lie-groups-manifolds.md)
-- [ ] [Day 42: Multi-Sensor Calib Capstone](week-06/day-42-week-review.md)
+- [ ] Day 36: Ceres Introduction *(not written yet)*
+- [ ] Day 37: Ceres AutoDiff *(not written yet)*
+- [ ] Day 38: Ceres Loss Functions *(not written yet)*
+- [ ] Day 39: Ceres Robotics *(not written yet)*
+- [ ] Day 40: Solver Config & Debugging *(not written yet)*
+- [ ] Day 41: Lie Groups & Manifolds *(not written yet)*
+- [ ] Day 42: Multi-Sensor Calib Capstone *(not written yet)*
 
 ### Phase IV: Constrained + Convex Optimization (Weeks 7–8)
 
 #### Week 7 — Constrained Optimization
-- [ ] [Day 43: Lagrange Multipliers](week-07/day-43-lagrange-multipliers.md)
-- [ ] [Day 44: KKT Conditions](week-07/day-44-kkt-conditions.md)
-- [ ] [Day 45: Penalty & Barrier](week-07/day-45-penalty-barrier.md)
-- [ ] [Day 46: Linear Programming](week-07/day-46-linear-programming.md)
-- [ ] [Day 47: Quadratic Programming](week-07/day-47-quadratic-programming.md)
-- [ ] [Day 48: Nonlinear Programming](week-07/day-48-nonlinear-programming.md)
-- [ ] [Day 49: Robot Arm Capstone](week-07/day-49-week-review.md)
+- [ ] Day 43: Lagrange Multipliers *(not written yet)*
+- [ ] Day 44: KKT Conditions *(not written yet)*
+- [ ] Day 45: Penalty & Barrier *(not written yet)*
+- [ ] Day 46: Linear Programming *(not written yet)*
+- [ ] Day 47: Quadratic Programming *(not written yet)*
+- [ ] Day 48: Nonlinear Programming *(not written yet)*
+- [ ] Day 49: Robot Arm Capstone *(not written yet)*
 
 #### Week 8 — Convex Optimization + MPC
-- [ ] [Day 50: Convex Theory + SOCP/SDP](week-08/day-50-convex-theory.md)
-- [ ] [Day 51: CVXPY](week-08/day-51-cvxpy.md)
-- [ ] [Day 52: OSQP Real-Time](week-08/day-52-osqp-realtime.md)
-- [ ] [Day 53: MPC Theory](week-08/day-53-mpc-theory.md)
-- [ ] [Day 54: MPC 2D Robot](week-08/day-54-mpc-2d-robot.md)
-- [ ] [Day 55: NMPC + CasADi](week-08/day-55-nmpc-casadi.md)
-- [ ] [Day 56: Warehouse MPC Capstone](week-08/day-56-week-review.md)
+- [ ] Day 50: Convex Theory + SOCP/SDP *(not written yet)*
+- [ ] Day 51: CVXPY *(not written yet)*
+- [ ] Day 52: OSQP Real-Time *(not written yet)*
+- [ ] Day 53: MPC Theory *(not written yet)*
+- [ ] Day 54: MPC 2D Robot *(not written yet)*
+- [ ] Day 55: NMPC + CasADi *(not written yet)*
+- [ ] Day 56: Warehouse MPC Capstone *(not written yet)*
 
 ### Phase V: Robotics Applications (Weeks 9–10)
 
 #### Week 9 — SLAM & Factor Graphs
-- [ ] [Day 57: Factor Graphs](week-09/day-57-factor-graphs.md)
-- [ ] [Day 58: 1D Pose Graph](week-09/day-58-1d-pose-graph.md)
-- [ ] [Day 59: 2D Pose Graph](week-09/day-59-2d-pose-graph.md)
-- [ ] [Day 60: g2o](week-09/day-60-g2o.md)
-- [ ] [Day 61: GTSAM + iSAM2](week-09/day-61-gtsam-isam2.md)
-- [ ] [Day 62: Robust SLAM](week-09/day-62-robust-slam.md)
-- [ ] [Day 63: SLAM Pipeline Capstone](week-09/day-63-week-review.md)
+- [ ] Day 57: Factor Graphs *(not written yet)*
+- [ ] Day 58: 1D Pose Graph *(not written yet)*
+- [ ] Day 59: 2D Pose Graph *(not written yet)*
+- [ ] Day 60: g2o *(not written yet)*
+- [ ] Day 61: GTSAM + iSAM2 *(not written yet)*
+- [ ] Day 62: Robust SLAM *(not written yet)*
+- [ ] Day 63: SLAM Pipeline Capstone *(not written yet)*
 
 #### Week 10 — Advanced Applications
-- [ ] [Day 64: Calibration + Temporal](week-10/day-64-calibration.md)
-- [ ] [Day 65: Trajectory Optimization](week-10/day-65-trajectory-optimization.md)
-- [ ] [Day 66: Numerical Debugging](week-10/day-66-numerical-debugging.md)
-- [ ] [Day 67: Real-Time Optimization](week-10/day-67-realtime-optimization.md)
-- [ ] [Day 68: Software Landscape + Distributed](week-10/day-68-software-landscape.md)
-- [ ] [Day 69-70: Final Capstone](week-10/day-69-70-final-capstone.md)
+- [ ] Day 64: Calibration + Temporal *(not written yet)*
+- [ ] Day 65: Trajectory Optimization *(not written yet)*
+- [ ] Day 66: Numerical Debugging *(not written yet)*
+- [ ] Day 67: Real-Time Optimization *(not written yet)*
+- [ ] Day 68: Software Landscape + Distributed *(not written yet)*
+- [ ] Day 69-70: Final Capstone *(not written yet)*
 
 ---
 

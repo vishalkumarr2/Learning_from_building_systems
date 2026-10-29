@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-An OKS AMR moving on a warehouse floor has pose $(x, y, \theta)$. This triple is **not** a vector — you cannot simply add two poses. The correct composition rule comes from SE(2), the group of 2D rigid motions. The navigation estimator internally composes incremental SE(2) transforms from wheel odometry and sensorbar data every control cycle.
+## Robotics Relevance
+An AMR moving on a warehouse floor has pose $(x, y, \theta)$. This triple is **not** a vector — you cannot simply add two poses. The correct composition rule comes from SE(2), the group of 2D rigid motions. The navigation estimator internally composes incremental SE(2) transforms from wheel odometry and line sensor data every control cycle.
 
 ---
 
@@ -198,7 +198,7 @@ This traces the geodesic from $T_1$ to $T_2$ on SE(2).
 - **Back:** [Day 72: SO(2)](../week-11/day-72-so2-rotations.md) — SE(2) extends SO(2) with translation
 - **Back:** [Day 71: Group Axioms](../week-11/day-71-group-axioms.md) — SE(2) satisfies all group axioms
 - **Forward:** [Day 79: SE(3)](day-79-se3-rigid-body.md) — the 3D generalization
-- **OKS:** Planar robot pose is SE(2); the nav estimator composes incremental SE(2) transforms
+- **AMR:** Planar robot pose is SE(2); the nav estimator composes incremental SE(2) transforms
 
 ## Self-Check
 - [ ] I can build an SE(2) matrix from $(x, y, \theta)$ and extract parameters back

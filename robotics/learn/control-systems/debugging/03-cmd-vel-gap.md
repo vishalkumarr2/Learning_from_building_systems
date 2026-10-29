@@ -8,7 +8,7 @@
 
 ## The Scenario
 
-**Field report from OKS warehouse (automated site, no operator present):**
+**Field report from warehouse (automated site, no operator present):**
 
 > Multiple robots intermittently drift 5–15 cm off the planned path during corridor transit. The drift happens mid-straight-line, not at corners. It corrects within 1–2 seconds but causes near-misses with rack posts. AMCL localization is accurate (checked). Path planner output is correct (checked). The issue happens more under heavy CPU load (many robots active, cameras streaming).
 
@@ -345,7 +345,7 @@ CPU budget at 20 Hz (50 ms per cycle):
 
 ## Key Takeaways
 
-- **cmd_vel gaps** are the most common source of path tracking drift in OKS
+- **cmd_vel gaps** are the most common source of path tracking drift in our robot
 - **Root cause:** Linux scheduler jitter under CPU load — not a control algorithm bug
 - **Defense in depth:** RT priority + CPU pinning + DDS isolation + staleness detection + graceful deceleration
 - **Timing between layers** matters as much as the algorithms in each layer

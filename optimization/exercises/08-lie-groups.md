@@ -235,7 +235,7 @@ This is a general property: the product of unit quaternions is always a unit qua
 
 **B4.** ⭐⭐⭐ Prove the **double cover** property: the map $\phi: S^3 \to \text{SO}(3)$ defined by $q \mapsto R(q)$ satisfies $\phi(q) = \phi(-q)$.
 
-Then explain why this matters for interpolation in robotics. **(OKS connection: OKS AMR heading representation.)**
+Then explain why this matters for interpolation in robotics. **(AMR connection: AMR heading representation.)**
 
 <details><summary>Answer</summary>
 
@@ -247,7 +247,7 @@ Every entry is **quadratic** in $(w,x,y,z)$. Replacing $q$ with $-q$ (i.e., $w\t
 
 Therefore $R(q) = R(-q)$: two antipodal quaternions map to the same rotation. The map is exactly 2-to-1.
 
-**Robotics implication:** When interpolating (SLERP) between quaternions $q_0$ and $q_1$, you must check the sign: if $q_0 \cdot q_1 < 0$, negate one quaternion first, otherwise SLERP will take the long path around $S^3$ (a 270° rotation instead of 90°). On the OKS AMR, heading is stored as a quaternion $(w, 0, 0, z)$ in the $z$-plane. Failing to handle the sign ambiguity can cause the robot to spin 270° instead of 90° during a turn command — a real bug class in AMR navigation.
+**Robotics implication:** When interpolating (SLERP) between quaternions $q_0$ and $q_1$, you must check the sign: if $q_0 \cdot q_1 < 0$, negate one quaternion first, otherwise SLERP will take the long path around $S^3$ (a 270° rotation instead of 90°). On the AMR, heading is stored as a quaternion $(w, 0, 0, z)$ in the $z$-plane. Failing to handle the sign ambiguity can cause the robot to spin 270° instead of 90° during a turn command — a real bug class in AMR navigation.
 
 </details>
 
@@ -407,7 +407,7 @@ where $[A,B] = AB - BA$ is the Lie bracket.
 
 1. For $\mathfrak{so}(3)$, show that $[\omega_1^\wedge, \omega_2^\wedge] = (\omega_1 \times \omega_2)^\wedge$.
 2. Why does the first-order approximation $\log(\exp(A)\exp(B)) \approx A + B$ fail for large rotations?
-3. **(OKS connection)** On an AMR fusing wheel odometry rotation $\delta\theta_{\text{odom}}$ with gyroscope $\delta\theta_{\text{gyro}}$ over a timestep, when is the first-order BCH acceptable?
+3. **(AMR connection)** On an AMR fusing wheel odometry rotation $\delta\theta_{\text{odom}}$ with gyroscope $\delta\theta_{\text{gyro}}$ over a timestep, when is the first-order BCH acceptable?
 
 <details><summary>Answer</summary>
 
@@ -421,7 +421,7 @@ For $3\times 3$ skew matrices, this equals $(\omega_1 \times \omega_2)^\wedge$. 
 
 **2.** First-order BCH says $R_1 R_2 \approx \exp((\omega_1 + \omega_2)^\wedge)$. This neglects the commutator $\frac{1}{2}[\omega_1^\wedge, \omega_2^\wedge]$. For large rotations, this commutator can be significant — e.g., two 90° rotations about different axes compose to something far from a simple sum (recall B1: the result was 120°, not $90° + 90° = 180°$).
 
-**3.** For the OKS AMR at typical update rates (100–200 Hz), per-timestep rotations are $< 1°$ ($< 0.02$ rad). The commutator term is $O(\delta\theta^2) \approx O(10^{-4})$ rad, which is negligible compared to sensor noise ($\sim 10^{-2}$ rad). So first-order BCH is safe at high IMU rates but would fail for low-rate updates or aggressive maneuvers.
+**3.** For the AMR at typical update rates (100–200 Hz), per-timestep rotations are $< 1°$ ($< 0.02$ rad). The commutator term is $O(\delta\theta^2) \approx O(10^{-4})$ rad, which is negligible compared to sensor noise ($\sim 10^{-2}$ rad). So first-order BCH is safe at high IMU rates but would fail for low-rate updates or aggressive maneuvers.
 
 </details>
 
@@ -505,7 +505,7 @@ $$T = \begin{pmatrix} R & t \\ 0 & 1 \end{pmatrix} \in \mathbb{R}^{3\times 3}, \
 
 1. Compute $T_1 T_2$ for $T_1 = (R_1, t_1)$ and $T_2 = (R_2, t_2)$.
 2. What is $T^{-1}$?
-3. **(OKS connection)** An OKS AMR at pose $(x_1, y_1, \theta_1)$ observes a landmark at relative position $(\ell_x, \ell_y)$ in body frame. What is the landmark's world-frame position?
+3. **(AMR connection)** An AMR at pose $(x_1, y_1, \theta_1)$ observes a landmark at relative position $(\ell_x, \ell_y)$ in body frame. What is the landmark's world-frame position?
 
 <details><summary>Answer</summary>
 
@@ -537,7 +537,7 @@ $$\xi^\wedge = \begin{pmatrix}\omega^\wedge & v \\ 0 & 0\end{pmatrix} \in \mathb
 
 1. What is the dimension of $\mathfrak{se}(3)$?
 2. Write out $\xi^\wedge$ explicitly for $\xi = (0, 0, \omega_z, v_x, v_y, 0)^T$. What kind of motion does this represent?
-3. **(OKS connection)** What twist corresponds to the OKS AMR driving straight forward at speed $v$ while turning at rate $\omega$?
+3. **(AMR connection)** What twist corresponds to the AMR driving straight forward at speed $v$ while turning at rate $\omega$?
 
 <details><summary>Answer</summary>
 
@@ -549,9 +549,9 @@ $$\xi^\wedge = \begin{pmatrix}0 & -\omega_z & 0 & v_x \\ \omega_z & 0 & 0 & v_y 
 
 This is **planar motion** — rotation about $z$ plus translation in the $xy$-plane. The full $\text{SE}(3)$ twist reduces to an $\text{SE}(2)$ twist when $\omega_x = \omega_y = v_z = 0$.
 
-**3.** The OKS AMR moves in the ground plane. In body frame, forward is $+x$ (or $+y$ depending on convention). For forward speed $v$ and yaw rate $\omega$:
+**3.** The AMR moves in the ground plane. In body frame, forward is $+x$ (or $+y$ depending on convention). For forward speed $v$ and yaw rate $\omega$:
 
-$$\xi_{\text{OKS}} = (0, 0, \omega, v, 0, 0)^T$$
+$$\xi_{\text{AMR}} = (0, 0, \omega, v, 0, 0)^T$$
 
 This is a screw motion: pure rotation about a point offset from the robot (the instantaneous center of rotation, at distance $r = v/\omega$ from the robot center).
 
@@ -731,7 +731,7 @@ $$\delta\phi \approx \frac{1}{N}\sum_i \log(R^{-1}\tilde{R}_i)^\vee$$
 
 </details>
 
-**E3.** ⭐⭐⭐ **(OKS connection)** Solve a small 2D pose-graph SLAM problem on $\text{SE}(2)$. Given:
+**E3.** ⭐⭐⭐ **(AMR connection)** Solve a small 2D pose-graph SLAM problem on $\text{SE}(2)$. Given:
 
 - 3 robot poses: $T_0, T_1, T_2 \in \text{SE}(2)$
 - Odometry constraints: $T_0^{-1}T_1 \approx \Delta_{01}$, $T_1^{-1}T_2 \approx \Delta_{12}$
@@ -776,7 +776,7 @@ Solve the $6\times 6$ system for $\delta\xi = (\delta\xi_1, \delta\xi_2)$, then 
 
 $$T_1 \gets T_1 \exp(\delta\xi_1^\wedge), \quad T_2 \gets T_2 \exp(\delta\xi_2^\wedge)$$
 
-This is the core algorithm of every pose-graph SLAM solver (g2o, GTSAM, Ceres). The OKS AMR uses this structure for fusing wheel odometry and lidar scan-matching constraints.
+This is the core algorithm of every pose-graph SLAM solver (g2o, GTSAM, Ceres). The AMR uses this structure for fusing wheel odometry and lidar scan-matching constraints.
 
 </details>
 
@@ -867,7 +867,7 @@ This result extends to $\text{SE}(3)$ and other Lie groups, and is the theoretic
 
 ## Section F — Applications and Integration
 
-**F1.** ⭐⭐ **(OKS connection)** The OKS AMR navigation estimator fuses wheel encoders (providing $\Delta\text{SE}(2)$ increments) with an IMU gyroscope (providing angular rate $\omega_z$). The discrete-time state update is:
+**F1.** ⭐⭐ **(AMR connection)** The AMR navigation estimator fuses wheel encoders (providing $\Delta\text{SE}(2)$ increments) with an IMU gyroscope (providing angular rate $\omega_z$). The discrete-time state update is:
 
 $$T_{k+1} = T_k \cdot \exp(\xi_k^\wedge \cdot \Delta t)$$
 
@@ -1010,7 +1010,7 @@ This is exactly the approach used in GTSAM's `PreintegratedImuMeasurements` and 
 
 </details>
 
-**F5.** ⭐⭐⭐⭐ **(OKS connection)** Design a mini visual-inertial odometry (VIO) pipeline for the OKS AMR. The robot has:
+**F5.** ⭐⭐⭐⭐ **(AMR connection)** Design a mini visual-inertial odometry (VIO) pipeline for the AMR. The robot has:
 - A forward-facing camera (10 Hz)
 - An IMU (200 Hz)
 - Wheel encoders (50 Hz)
@@ -1072,7 +1072,7 @@ For a sliding window of $K = 10$ keyframes with $L = 200$ landmarks:
 - Reduced system: $150 \times 150$ — trivially solvable
 - Each GN iteration: $\sim 1\text{ms}$ on modern hardware
 
-This is the architecture used by VINS-Mono, OKVIS, and similar VIO systems. For the OKS AMR, the wheel encoder factor provides a strong prior on planar motion, making the system more robust in feature-poor warehouse environments than pure visual-inertial systems.
+This is the architecture used by VINS-Mono, OKVIS, and similar VIO systems. For the AMR, the wheel encoder factor provides a strong prior on planar motion, making the system more robust in feature-poor warehouse environments than pure visual-inertial systems.
 
 </details>
 
@@ -1091,4 +1091,4 @@ This is the architecture used by VINS-Mono, OKVIS, and similar VIO systems. For 
 
 **Difficulty distribution:** ⭐ ×6 (A1, A2, B1, C1, D1, E1) | ⭐⭐ ×8 (A3, A4, B2, B3, C2, D2, E2, F1) | ⭐⭐⭐ ×10 (A5, B4, B5, C3, C4, D3, D4, E3, F2, F3) | ⭐⭐⭐⭐ ×6 (C5, D5, E4, E5, F4, F5)
 
-**OKS robotics exercises:** B4 (heading double cover), D1 (body-to-world transform), E3 (pose-graph SLAM), F1 (odometry integration), F5 (VIO pipeline design).
+**Warehouse-robotics exercises:** B4 (heading double cover), D1 (body-to-world transform), E3 (pose-graph SLAM), F1 (odometry integration), F5 (VIO pipeline design).

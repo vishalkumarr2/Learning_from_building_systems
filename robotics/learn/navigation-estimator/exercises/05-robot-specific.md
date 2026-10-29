@@ -18,7 +18,7 @@
 
 When SLIPPED is detected, `cov_xx = cov_yy = cov_theta = INF`. The estimator still holds a position estimate `(x, y, theta)` but with infinite uncertainty.
 
-`executePoseGoal()` then computes a velocity command using that state. The PID controller or path-following algorithm would try to compute: "how far am I from the goal?" using `(goal.x - state.x)` and `(goal.y - state.y)`. Those are still finite. So far so good.
+`execute_goal()` then computes a velocity command using that state. The PID controller or path-following algorithm would try to compute: "how far am I from the goal?" using `(goal.x - state.x)` and `(goal.y - state.y)`. Those are still finite. So far so good.
 
 But the Kalman gain computation uses `P` (the covariance matrix): `K = P × Hᵀ × (H × P × Hᵀ + R)⁻¹`. With `P = INF`, this produces `K = INF × (INF + R)⁻¹ = INF × (1/INF) = NaN` (not a number, because `INF/INF` is undefined). NaN propagates into the velocity command. The robot may issue a NaN velocity — the motor controller behaviour with a NaN command is undefined and platform-dependent. On some systems it would command full speed, on others zero, on others oscillate.
 
@@ -30,7 +30,7 @@ But the Kalman gain computation uses `P` (the covariance matrix): `K = P × Hᵀ
 
 ---
 
-**A2.** An incident bag shows `status=MISSED_LINE_UPDATES (8)` for 8 seconds, then `status=DELOCALIZED (1)` for 3 seconds, then the robot stops. During the entire 11 seconds, the line-sensor topic was publishing at 100 Hz with `is_reliable=True`. Explain the complete sequence of events in the estimator and why two different status codes appear.
+**A2.** An incident bag shows `status=MISSED_LINE_UPDATES` for 8 seconds, then `status=DELOCALIZED` for 3 seconds, then the robot stops. During the entire 11 seconds, the line-sensor topic was publishing at 100 Hz with `is_reliable=True`. Explain the complete sequence of events in the estimator and why two different status codes appear.
 
 <details><summary>Answer</summary>
 
@@ -43,17 +43,17 @@ The line-sensor was physically detecting lines and publishing measurements, but 
 
 During this phase, the estimator kept running but received no useful line-sensor updates. The prediction step (`predict()`) continued adding motion noise each odom cycle, but no update step (`update()`) ran to reduce the covariance. So covariance grew monotonically.
 
-**Why status=8 and not DELOCALIZED immediately:** The covariance had not yet crossed the DELOCALIZED threshold. Status=8 is reported as soon as line-sensor updates stop being accepted, which can happen with covariance still below the threshold.
+**Why status=MISSED_LINE_UPDATES and not DELOCALIZED immediately:** The covariance had not yet crossed the DELOCALIZED threshold. Status=MISSED_LINE_UPDATES is reported as soon as line-sensor updates stop being accepted, which can happen with covariance still below the threshold.
 
 **DELOCALIZED phase (8–11s):**
 
-After 8 seconds without line-sensor corrections, the covariance finally crossed the `delocalized_threshold` (typically 0.03–0.1 depending on config). Status transitions to 1 (DELOCALIZED). The estimator continues running and reporting position but with lower confidence.
+After 8 seconds without line-sensor corrections, the covariance finally crossed the `delocalized_threshold` (typically 0.03–0.1 depending on config). Status transitions to DELOCALIZED. The estimator continues running and reporting position but with lower confidence.
 
 **The robot stops:**
 
-Covariance has grown further, possibly to INF (if the DELOCALIZED phase is also accompanied by slip, or if this trajectory eventually leads to a executePoseGoal() call where isFinite() fails). Or the navigation planner refused to proceed with DELOCALIZED state.
+Covariance has grown further, possibly to INF (if the DELOCALIZED phase is also accompanied by slip, or if this trajectory eventually leads to a execute_goal() call where isFinite() fails). Or the navigation planner refused to proceed with DELOCALIZED state.
 
-**The critical takeaway:** Status=8 is a **warning** that DELOCALIZED is coming. If you see status=8 in a live system, investigate immediately — a stop is 8–30 seconds away unless the root cause is fixed.
+**The critical takeaway:** Status=MISSED_LINE_UPDATES is a **warning** that DELOCALIZED is coming. If you see status=MISSED_LINE_UPDATES in a live system, investigate immediately — a stop is 8–30 seconds away unless the root cause is fixed.
 
 </details>
 
@@ -73,11 +73,11 @@ Include: what `cov_xx` looks like over time, what `status` looks like, what the 
 | Signal | Before T=30s | At T=30s | After T=30s |
 |--------|-------------|---------|-------------|
 | `cov_xx` | 0.001–0.010 (normal) | **Steps to 1e5 or INF** in one sample | Stays at INF |
-| `status` | 0 (OK) | **4 (SLIPPED)** | Stays at 4 |
+| `status` | OK | **SLIPPED** | Stays SLIPPED |
 | velocity | Normal (e.g. 0.4 m/s) | **Sudden drop to 0** within 50–100ms | 0 (robot stopped) |
 | `cmd_vel` | Normally commanded | Goes to 0 when NAV_NOT_FINITE fires | 0 |
 
-After line-sensor crossing: `cov_xx` **drops sharply** from INF back to the measurement quality (≈ line-sensor noise, e.g. 0.0001). Status → 0 (OK). This is an abrupt, large decrease.
+After line-sensor crossing: `cov_xx` **drops sharply** from INF back to the measurement quality (≈ line-sensor noise, e.g. 0.0001). Status → OK. This is an abrupt, large decrease.
 
 **Bag signature:** `cov_xx` time series looks like a step function — flat, then vertical.
 
@@ -88,11 +88,11 @@ After line-sensor crossing: `cov_xx` **drops sharply** from INF back to the meas
 | Signal | 0–20s | At threshold crossing | After |
 |--------|-------|----------------------|-------|
 | `cov_xx` | 0.001, slowly rising: 0.003, 0.007, 0.015, 0.024, **0.040** | 0.040 (threshold) | Continues rising |
-| `status` | 0 (OK) during rise | **1 (DELOCALIZED)** | Stays at 1 |
+| `status` | OK during rise | **DELOCALIZED** | Stays DELOCALIZED |
 | velocity | Normal, commanded motion | Normal (robot NOT stopped) | Robot continues moving |
 | `cmd_vel` | Normal | Normal | Normal |
 
-After line-sensor crossing: `cov_xx` **drops from ~0.04 to ~0.001** in one update. Status → 0 (OK). A moderate, expected decrease.
+After line-sensor crossing: `cov_xx` **drops from ~0.04 to ~0.001** in one update. Status → OK. A moderate, expected decrease.
 
 **Bag signature:** `cov_xx` time series looks like a ramp — gradual, consistent slope.
 
@@ -106,7 +106,7 @@ The **slope and magnitude** of the covariance change. A step from 0.001 to 1e5 i
 
 ---
 
-**A4.** COLLISION (status=5) is described as "terminal" while SLIPPED (status=4) is "not terminal." Both stop the robot. What is the architectural reason for this difference? (Hint: think about whether autonomous recovery is safe for each.)
+**A4.** COLLISION is described as "terminal" while SLIPPED is "not terminal." Both stop the robot. What is the architectural reason for this difference? (Hint: think about whether autonomous recovery is safe for each.)
 
 <details><summary>Answer</summary>
 
@@ -135,19 +135,19 @@ Issuing an autonomous "recover by driving forward" command after a collision cou
 
 ---
 
-**A5.** Two engineers are debugging separate incidents. Engineer A says: "Status=8 means the SPI bus is broken." Engineer B says: "Status=8 means the line-sensor is physically off the lines." Who is right, and what is the precise condition that sets status=8?
+**A5.** Two engineers are debugging separate incidents. Engineer A says: "Status=MISSED_LINE_UPDATES means the SPI bus is broken." Engineer B says: "Status=MISSED_LINE_UPDATES means the line-sensor is physically off the lines." Who is right, and what is the precise condition that sets status=MISSED_LINE_UPDATES?
 
 <details><summary>Answer</summary>
 
-**Neither is fully right.** Both are describing *causes* that can lead to status=8, but they have incorrectly equated the cause with the mechanism.
+**Neither is fully right.** Both are describing *causes* that can lead to status=MISSED_LINE_UPDATES, but they have incorrectly equated the cause with the mechanism.
 
-**The precise condition for status=8 (MISSED_LINE_UPDATES):**
+**The precise condition for status=MISSED_LINE_UPDATES:**
 
 Status is set to 8 when the estimator detects that a **statistically expected line-sensor update has not been incorporated** for longer than a threshold period. Specifically: the line-sensor topic is alive (messages arriving) but the EKF update step has not accepted any measurement.
 
 This can happen for multiple reasons:
 1. **SPI conflict (Engineer A's case):** SPI bus issues cause all measurements to have the same timestamp or corrupted values → all measurements rejected by innovation gate or deduplication logic
-2. **Physical off-path (Engineer B's case):** But this would typically set status=3 (NO_LINE), not status=8. Status=8 specifically requires measurements to be *present but rejected*, not absent.
+2. **Physical off-path (Engineer B's case):** But this would typically set status=NO_LINE, not status=MISSED_LINE_UPDATES. Status=MISSED_LINE_UPDATES specifically requires measurements to be *present but rejected*, not absent.
 3. **Large estimator position error:** If the estimated position diverged badly, real line-sensor measurements look like outliers and are rejected by the Mahalanobis gate
 4. **Dirty lines:** Measurements are so noisy they all fail the gate
 
@@ -172,14 +172,14 @@ For each scenario below, you will see a synthetic ROS bag extract (text represen
 **B1. Log Extract: The Afternoon Stop**
 
 ```
-[12:34:15.001] /estimated_state: status=0, x=45.23, y=12.44, cov_xx=0.0045
-[12:34:15.051] /estimated_state: status=0, x=45.31, y=12.44, cov_xx=0.0046
+[12:34:15.001] /estimated_state: status=OK, x=45.23, y=12.44, cov_xx=0.0045
+[12:34:15.051] /estimated_state: status=OK, x=45.31, y=12.44, cov_xx=0.0046
 [12:34:15.101] /odom: linear.x=0.401, angular.z=0.002
-[12:34:15.101] /estimated_state: status=0, x=45.39, y=12.44, cov_xx=0.0047
+[12:34:15.101] /estimated_state: status=OK, x=45.39, y=12.44, cov_xx=0.0047
 [12:34:15.151] /odom: linear.x=0.392, angular.z=0.001
 [12:34:15.201] /odom: linear.x=0.380, angular.z=0.001
 [12:34:15.251] /odom: linear.x=0.028  <══ velocity drop
-[12:34:15.261] /estimated_state: status=4, x=45.47, y=12.44, cov_xx=1e6
+[12:34:15.261] /estimated_state: status=SLIPPED, x=45.47, y=12.44, cov_xx=1e6
 [12:34:15.263] /rosout [ERROR]: ERROR_STATE_INVALID
 [12:34:15.263] /cmd_vel: linear.x=0.0  <══ stop command
 [12:34:15.400] /line-sensor: rate=0Hz (no messages)
@@ -214,18 +214,18 @@ For each scenario below, you will see a synthetic ROS bag extract (text represen
 **B2. Log Extract: The Long Hallway**
 
 ```
-[09:15:00.000] /estimated_state: status=0, cov_xx=0.0011, cov_yy=0.0012
-[09:15:05.000] /estimated_state: status=0, cov_xx=0.0065, cov_yy=0.0063
-[09:15:10.000] /estimated_state: status=0, cov_xx=0.0141, cov_yy=0.0138
-[09:15:15.000] /estimated_state: status=0, cov_xx=0.0217, cov_yy=0.0213
-[09:15:20.000] /estimated_state: status=0, cov_xx=0.0298, cov_yy=0.0291
-[09:15:25.000] /estimated_state: status=1, cov_xx=0.0381, cov_yy=0.0373
+[09:15:00.000] /estimated_state: status=OK, cov_xx=0.0011, cov_yy=0.0012
+[09:15:05.000] /estimated_state: status=OK, cov_xx=0.0065, cov_yy=0.0063
+[09:15:10.000] /estimated_state: status=OK, cov_xx=0.0141, cov_yy=0.0138
+[09:15:15.000] /estimated_state: status=OK, cov_xx=0.0217, cov_yy=0.0213
+[09:15:20.000] /estimated_state: status=OK, cov_xx=0.0298, cov_yy=0.0291
+[09:15:25.000] /estimated_state: status=DELOCALIZED, cov_xx=0.0381, cov_yy=0.0373
                 ↑ status just changed!
 [09:15:25.000] /line-sensor: rate=98Hz, is_reliable=True, detections=[]
 [09:15:25.000] /odom: rate=49Hz (normal)
-[09:15:35.000] /estimated_state: status=1, cov_xx=0.0521, cov_yy=0.0508
+[09:15:35.000] /estimated_state: status=DELOCALIZED, cov_xx=0.0521, cov_yy=0.0508
 [09:15:37.800] /line-sensor: is_reliable=True, detections=[line_at_offset=-0.012]
-[09:15:37.810] /estimated_state: status=0, cov_xx=0.0014, cov_yy=0.0013
+[09:15:37.810] /estimated_state: status=OK, cov_xx=0.0014, cov_yy=0.0013
 ```
 
 <details><summary>Answer</summary>
@@ -258,15 +258,15 @@ For each scenario below, you will see a synthetic ROS bag extract (text represen
 **B3. Log Extract: The Invisible Shelf**
 
 ```
-[16:22:04.001] /estimated_state: status=0, cov_xx=0.0031
+[16:22:04.001] /estimated_state: status=OK, cov_xx=0.0031
 [16:22:04.021] /imu/data: angular_velocity.z=0.012 rad/s  (normal)
 [16:22:04.041] /imu/data: angular_velocity.z=0.008 rad/s  (normal)
 [16:22:04.061] /imu/data: angular_velocity.z=2.847 rad/s  <══ SPIKE
-[16:22:04.063] /estimated_state: status=5
+[16:22:04.063] /estimated_state: status=COLLISION
 [16:22:04.063] /cmd_vel: linear.x=0.0  (stop)
 [16:22:04.081] /imu/data: angular_velocity.z=0.021 rad/s  (back to normal)
-[16:22:04.100] /estimated_state: status=5
-[16:22:30.000] /estimated_state: status=5  (still terminal, 26 seconds later)
+[16:22:04.100] /estimated_state: status=COLLISION
+[16:22:30.000] /estimated_state: status=COLLISION  (still terminal, 26 seconds later)
 [16:22:30.000] /rosout [INFO]: Waiting for operator reset
 ```
 
@@ -278,7 +278,7 @@ For each scenario below, you will see a synthetic ROS bag extract (text represen
 - `angular_velocity.z` spikes from ~0.010 rad/s (normal rotation) to 2.847 rad/s — this is approximately 163 degrees/second angular velocity, consistent with a physical impact
 - The spike is **impulsive** (one sample at 2.847, then immediately back to 0.021) — not sinusoidal/oscillatory
 - `status` transitions to 5 simultaneously with the spike
-- Robot stops immediately and **does not recover** — status=5 persists 26 seconds later
+- Robot stops immediately and **does not recover** — status=COLLISION persists 26 seconds later
 - Note: **`ERROR_STATE_INVALID` is NOT logged** — this uses the collision stop path, not the isFinite() path
 
 **(2) Root cause:**
@@ -300,19 +300,19 @@ For each scenario below, you will see a synthetic ROS bag extract (text represen
 **B4. Log Extract: The Healthy-Looking Failure**
 
 ```
-[11:05:10.000] /estimated_state: status=0, cov_xx=0.0018
+[11:05:10.000] /estimated_state: status=OK, cov_xx=0.0018
 [11:05:10.000] /line-sensor: rate=102Hz, is_reliable=True, detections=[line_at=-0.001]
-[11:05:15.000] /estimated_state: status=0, cov_xx=0.0072
+[11:05:15.000] /estimated_state: status=OK, cov_xx=0.0072
 [11:05:15.000] /line-sensor: rate=99Hz, is_reliable=True, detections=[line_at=-0.002]
-[11:05:20.000] /estimated_state: status=8, cov_xx=0.0198
+[11:05:20.000] /estimated_state: status=MISSED_LINE_UPDATES, cov_xx=0.0198
 [11:05:20.000] /line-sensor: rate=101Hz, is_reliable=True, detections=[line_at=-0.004]
-                ↑ status=8 but line-sensor looks healthy!
-[11:05:25.000] /estimated_state: status=8, cov_xx=0.0312
+                ↑ status=MISSED_LINE_UPDATES but line-sensor looks healthy!
+[11:05:25.000] /estimated_state: status=MISSED_LINE_UPDATES, cov_xx=0.0312
 [11:05:25.000] /line-sensor: rate=100Hz, is_reliable=True, detections=[line_at=-0.004]
                                                                       ↑ same value as 5s ago?
 [11:05:30.000] /rosout [WARN]: SPI transaction timeout on line-sensor_controller
 [11:05:30.000] /line-sensor: rate=97Hz, is_reliable=True, detections=[line_at=-0.004]
-[11:05:35.000] /estimated_state: status=1, cov_xx=0.0401
+[11:05:35.000] /estimated_state: status=DELOCALIZED, cov_xx=0.0401
 ```
 
 <details><summary>Answer</summary>
@@ -328,8 +328,8 @@ For each scenario below, you will see a synthetic ROS bag extract (text represen
 
 **(2) Root cause:**
 - **SPI bus conflict or line-sensor controller fault** causing the line-sensor to repeat the same measurement with the same timestamp
-- The estimator correctly identifies that `timestamp(t) == timestamp(t-1)` and discards the duplicate, preventing false updates from being incorporated. But this means NO updates are accepted, leading to status=8.
-- This matches the documented dual-SPI conflict failure mode in this codebase (see repo memory: `dual-spi-conflict-reproduction.md`)
+- The estimator correctly identifies that `timestamp(t) == timestamp(t-1)` and discards the duplicate, preventing false updates from being incorporated. But this means NO updates are accepted, leading to status=MISSED_LINE_UPDATES.
+- This matches the documented dual-SPI conflict failure mode in production line-sensor stacks
 
 **(3) What to check next:**
 - Check SPI error logs on the robot — is there a conflicting SPI device on the same bus as the line-sensor?
@@ -351,15 +351,15 @@ You are given a bag from an incident at Site-A. The following time series was ex
 ```
     Time     cov_xx    status    line-sensor_rate    notes
     ──────   ──────    ──────    ──────────────    ─────────────────────────
-    T=10.3s  0.0012    0 (OK)    100 Hz
-    T=10.4s  0.0012    0 (OK)    0 Hz              ← LINE-SENSOR GAP (1 sample)
-    T=10.5s  0.0013    0 (OK)    100 Hz            ← line-sensor resumes
-    T=11.0s  0.0045    0 (OK)    100 Hz
-    T=11.5s  0.0082    0 (OK)    100 Hz
-    T=12.0s  0.0145    0 (OK)    100 Hz
-    T=12.5s  0.0209    0 (OK)    100 Hz
-    T=12.6s  0.0234    1 (DELOCALIZED) 100 Hz      ← threshold crossed
-    T=12.8s  0.0004    0 (OK)    100 Hz            ← line-sensor crossing, cov reset
+    T=10.3s  0.0012    OK        100 Hz
+    T=10.4s  0.0012    OK        0 Hz              ← LINE-SENSOR GAP (1 sample)
+    T=10.5s  0.0013    OK        100 Hz            ← line-sensor resumes
+    T=11.0s  0.0045    OK        100 Hz
+    T=11.5s  0.0082    OK        100 Hz
+    T=12.0s  0.0145    OK        100 Hz
+    T=12.5s  0.0209    OK        100 Hz
+    T=12.6s  0.0234    DELOCALIZED     100 Hz      ← threshold crossed
+    T=12.8s  0.0004    OK        100 Hz            ← line-sensor crossing, cov reset
 ```
 
 Note: line-sensor was not publishing for exactly 0.1 seconds (one sample) at T=10.4s.
@@ -395,25 +395,25 @@ This is below the display precision in the data extract (rounds to 0.0012 or wou
 
 ---
 
-**Question C2:** The line-sensor rate returned to 100Hz at T=10.5s. Yet status did NOT transition to `MISSED_LINE_UPDATES (8)`. Why not? What would need to be true for status=8 to appear here?
+**Question C2:** The line-sensor rate returned to 100Hz at T=10.5s. Yet status did NOT transition to `MISSED_LINE_UPDATES`. Why not? What would need to be true for status=MISSED_LINE_UPDATES to appear here?
 
 <details><summary>Answer</summary>
 
-**Why status=8 did NOT appear:**
+**Why status=MISSED_LINE_UPDATES did NOT appear:**
 
-Status=8 (MISSED_LINE_UPDATES) requires that the estimator is **expecting** line-sensor updates and not receiving them. Specifically, it tracks whether any updates have been *accepted* by the EKF over a time window.
+Status=MISSED_LINE_UPDATES requires that the estimator is **expecting** line-sensor updates and not receiving them. Specifically, it tracks whether any updates have been *accepted* by the EKF over a time window.
 
 At T=10.5s, the line-sensor resumed publishing at 100Hz. However, the topic was publishing — it just had no **line detections** in the messages (the `detections=[]` list was empty). This is **NO_LINE behaviour, not MISSED_LINE_UPDATES**. The robot was traversing floor with no lines underneath the line-sensor, so the line-sensor correctly reported "I see nothing." An empty detection is not a "missed update" — it is an accurate report.
 
-For status=8 to appear, the line-sensor would need to be **reporting line detections** (`detections=[line_at=xxx]`) but those detections would need to be **rejected by the EKF** (failing the innovation gate). In this scenario, the detections list appears to be empty during the T=10.5–12.6s window (inferred from the fact that covariance grows steadily without any corrections).
+For status=MISSED_LINE_UPDATES to appear, the line-sensor would need to be **reporting line detections** (`detections=[line_at=xxx]`) but those detections would need to be **rejected by the EKF** (failing the innovation gate). In this scenario, the detections list appears to be empty during the T=10.5–12.6s window (inferred from the fact that covariance grows steadily without any corrections).
 
-**Formally:** `MISSED_LINE_UPDATES = detections_available AND update_not_accepted`. In this scenario, `detections_available = False` (empty detections), so the condition for status=8 is not met.
+**Formally:** `MISSED_LINE_UPDATES = detections_available AND update_not_accepted`. In this scenario, `detections_available = False` (empty detections), so the condition for status=MISSED_LINE_UPDATES is not met.
 
-**What would need to be true for status=8 here:**
+**What would need to be true for status=MISSED_LINE_UPDATES here:**
 - The floor between T=10.5s and T=12.6s would need to have line-sensor lines painted on it
 - The line-sensor would need to be detecting those lines (non-empty detections)
 - But the EKF would need to be rejecting those measurements (innovation too large, or duplicate timestamps from SPI issue)
-- This combination → status=8
+- This combination → status=MISSED_LINE_UPDATES
 
 </details>
 

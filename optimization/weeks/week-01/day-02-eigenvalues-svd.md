@@ -9,7 +9,7 @@
 - **Week:** [Week 1 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 The information matrix in SLAM (inverse covariance) must be PD. SVD reveals which directions of a state have strong measurements vs weak. Condition number predicts whether your optimizer will converge reliably.
 
 ---

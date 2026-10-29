@@ -16,38 +16,38 @@ A real-world embedded architecture where:
 
 | File | What it covers |
 |---|---|
-| [01_zephyr_intro.md](01_zephyr_intro.md) | What Zephyr is, key features, west build system, prj.conf + app.overlay, comparison with RTOSes |
-| [02_pipeline_architecture.md](02_pipeline_architecture.md) | Full STM32→Jetson pipeline overview, data flow diagram, 10ms timing budget, design rationale |
+| [01_zephyr_intro.md](01-zephyr-intro.md) | What Zephyr is, key features, west build system, prj.conf + app.overlay, comparison with RTOSes |
+| [02_pipeline_architecture.md](02-pipeline-architecture.md) | Full STM32→Jetson pipeline overview, data flow diagram, 10ms timing budget, design rationale |
 
 ### STM32 Zephyr middleware
 
 | File | What it covers |
 |---|---|
-| [03_zbus.md](03_zbus.md) | ZBus message bus — channels, publishers, subscribers, listeners, pub/sub internals |
-| [04_nanopb.md](04_nanopb.md) | nanopb / Protocol Buffers — wire format, code generation, pb_encode, Python decode |
-| [12_zephyr_threads.md](12_zephyr_threads.md) | Threads — K_THREAD_DEFINE, priorities, preemption, stack sizing, lifecycle |
-| [13_zephyr_kernel_services.md](13_zephyr_kernel_services.md) | Sync primitives — k_sem, k_mutex, k_msgq, k_timer, k_event, k_work |
-| [14_zephyr_devicetree.md](14_zephyr_devicetree.md) | Devicetree + Kconfig — app.overlay syntax, DT macros in C, bindings YAML, prj.conf |
-| [15_zephyr_interrupts_gpio.md](15_zephyr_interrupts_gpio.md) | Interrupts + GPIO — ISR rules, gpio_dt_spec, output/input/interrupt, IMU DRDY pattern |
+| [03_zbus.md](03-zbus.md) | ZBus message bus — channels, publishers, subscribers, listeners, pub/sub internals |
+| [04_nanopb.md](04-nanopb.md) | nanopb / Protocol Buffers — wire format, code generation, pb_encode, Python decode |
+| [12_zephyr_threads.md](12-zephyr-threads.md) | Threads — K_THREAD_DEFINE, priorities, preemption, stack sizing, lifecycle |
+| [13_zephyr_kernel_services.md](13-zephyr-kernel-services.md) | Sync primitives — k_sem, k_mutex, k_msgq, k_timer, k_event, k_work |
+| [14_zephyr_devicetree.md](14-zephyr-devicetree.md) | Devicetree + Kconfig — app.overlay syntax, DT macros in C, bindings YAML, prj.conf |
+| [15_zephyr_interrupts_gpio.md](15-zephyr-interrupts-gpio.md) | Interrupts + GPIO — ISR rules, gpio_dt_spec, output/input/interrupt, IMU DRDY pattern |
 
 ### Communication protocols
 
 | File | What it covers |
 |---|---|
-| [08_spi_protocol.md](08_spi_protocol.md) | SPI protocol — 4 wires, 4 CPOL/CPHA modes, multi-slave, Zephyr master + slave API |
-| [05_spi_slave_dma.md](05_spi_slave_dma.md) | SPI slave on STM32 — DMA, double buffering, CS interrupt, framing protocol |
-| [06_dma.md](06_dma.md) | DMA deep dive — modes, streams, interrupts, circular, double buffer, cache coherency bugs |
-| [09_i2c.md](09_i2c.md) | I2C protocol — 2-wire addressing, ACK/NACK, burst read, Zephyr API, ICM-42688 example |
-| [10_can_bus.md](10_can_bus.md) | CAN bus — differential signaling, arbitration, frame format, Zephyr API, error handling |
-| [11_uart.md](11_uart.md) | UART — async serial, baud rate, ring buffer pattern, GPS NMEA parsing, debug console |
+| [08_spi_protocol.md](08-spi-protocol.md) | SPI protocol — 4 wires, 4 CPOL/CPHA modes, multi-slave, Zephyr master + slave API |
+| [05_spi_slave_dma.md](05-spi-slave-dma.md) | SPI slave on STM32 — DMA, double buffering, CS interrupt, framing protocol |
+| [06_dma.md](06-dma.md) | DMA deep dive — modes, streams, interrupts, circular, double buffer, cache coherency bugs |
+| [09_i2c.md](09-i2c.md) | I2C protocol — 2-wire addressing, ACK/NACK, burst read, Zephyr API, ICM-42688 example |
+| [10_can_bus.md](10-can-bus.md) | CAN bus — differential signaling, arbitration, frame format, Zephyr API, error handling |
+| [11_uart.md](11-uart.md) | UART — async serial, baud rate, ring buffer pattern, GPS NMEA parsing, debug console |
 
 ### Jetson / ROS2 side
 
 | File | What it covers |
 |---|---|
-| [16_ros2_fundamentals.md](16_ros2_fundamentals.md) | ROS2 — nodes, topics, services, actions, QoS, launch files, colcon build, debug tools |
-| [07_jetson_ros2_bridge.md](07_jetson_ros2_bridge.md) | Jetson ROS2 node — spidev, 100Hz timer, nanopb decode, sync recovery, error handling |
-| [17_jetson_orin_hardware.md](17_jetson_orin_hardware.md) | Jetson Orin hardware — GPU, DLA, UMA, SPI/GPIO interfaces, JetPack, power modes |
+| [16_ros2_fundamentals.md](16-ros2-fundamentals.md) | ROS2 — nodes, topics, services, actions, QoS, launch files, colcon build, debug tools |
+| [07_jetson_ros2_bridge.md](07-jetson-ros2-bridge.md) | Jetson ROS2 node — spidev, 100Hz timer, nanopb decode, sync recovery, error handling |
+| [17_jetson_orin_hardware.md](17-jetson-orin-hardware.md) | Jetson Orin hardware — GPU, DLA, UMA, SPI/GPIO interfaces, JetPack, power modes |
 
 ---
 

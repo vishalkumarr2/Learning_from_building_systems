@@ -345,7 +345,7 @@ int main() {
     std::cout << "Spinlock is fast for low-contention short critical sections.\n";
     std::cout << "std::mutex is general-purpose — it parks threads (good for long waits).\n";
     std::cout << "\nIn robotics: seqlock is ideal for sensor data (many readers, one writer).\n";
-    std::cout << "The sensorbar publisher writes at 200Hz, multiple consumers read.\n";
+    std::cout << "The line sensor publisher writes at 200Hz, multiple consumers read.\n";
 
     return 0;
 }

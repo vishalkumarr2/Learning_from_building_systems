@@ -10,8 +10,8 @@
 - **Chapter:** [Chapter 09: Lie Groups Reference](../../09-lie-groups.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-Pose-graph optimization in SLAM requires perturbing SE(3) poses. You cannot add a small vector to a 4×4 matrix and get a valid SE(3) element. Instead, you perturb in the Lie algebra via $T' = T \cdot \exp(\delta\xi)$. This is the fundamental operation in every manifold optimizer the OKS stack uses.
+## Robotics Relevance
+Pose-graph optimization in SLAM requires perturbing SE(3) poses. You cannot add a small vector to a 4×4 matrix and get a valid SE(3) element. Instead, you perturb in the Lie algebra via $T' = T \cdot \exp(\delta\xi)$. This is the fundamental operation in every manifold optimizer the AMR stack uses.
 
 ---
 
@@ -229,7 +229,7 @@ def V_inv_stable(omega):
 - **Back:** [Day 78: SE(2)](day-78-se2-rigid-motions.md) — SE(2) exp map uses a 2D $V$ matrix
 - **Forward:** [Day 81: Lie Algebra](day-81-lie-algebra.md) — deeper structure of the tangent space
 - **Forward:** [Day 83: Jacobians](day-83-jacobians.md) — $V$ matrix reappears as the left Jacobian
-- **OKS:** incremental pose update $T_{k+1} = T_k \cdot \exp(\delta\xi)$ is the core of manifold optimization
+- **AMR:** incremental pose update $T_{k+1} = T_k \cdot \exp(\delta\xi)$ is the core of manifold optimization
 
 ## Self-Check
 - [ ] I can state the closed-form exp map for both SO(3) and SE(3)

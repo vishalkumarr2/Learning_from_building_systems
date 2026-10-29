@@ -9,7 +9,7 @@
 - **Week:** [Week 2 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 This review pulls together the computational pipeline that Ceres and GTSAM use internally. When you call `ceres::Solve()`, this is what happens: the Jacobian $J$ is assembled (sparse), the normal equations $J^TJ \Delta x = -J^Tg$ are formed (exploiting sparsity via Schur complement), the system is solved (sparse Cholesky or preconditioned CG), and variable scaling ensures good conditioning. Every topic from this week is part of that pipeline.
 
 ---

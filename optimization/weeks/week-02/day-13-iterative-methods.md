@@ -9,7 +9,7 @@
 - **Week:** [Week 2 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 When solving the Schur complement system $Sx_c = g_c$ in BA, $S$ is dense and moderately sized (hundreds to thousands). Ceres uses CG with block-Jacobi preconditioning on $S$ (the `ITERATIVE_SCHUR` strategy). For large-scale SLAM, preconditioned CG on the full sparse system is sometimes preferred over direct factorization. CG's convergence rate depends directly on $\kappa(S)$ — everything from Day 12 feeds into this.
 
 ---

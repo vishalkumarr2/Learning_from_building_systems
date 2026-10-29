@@ -9,8 +9,8 @@
 > the daily lessons or as a standalone study guide.
 
 ## Prerequisites
-- [Day 4: Linear Programming](weeks/week-01/day-04-linear-programming.md)
-- [Day 5: LP Duality](weeks/week-01/day-05-lp-duality.md)
+- Day 4: Linear Programming *(not written yet)*
+- Day 5: LP Duality *(not written yet)*
 - [Chapter 05: Convex Optimization](05-convex-optimization.md)
 - [Chapter 08: Matrix Essentials](08-matrix-essentials.md)
 - [Chapter 09: Lie Groups](09-lie-groups.md) (for robotics examples)
@@ -79,7 +79,7 @@ for all $i$ with strict inequality for at least one.
 an *efficiency* concept (no waste). The prisoner's dilemma shows they can diverge — the NE
 wastes utility that cooperation would capture.
 
-> **OKS Relevance:** When multiple AMRs compete for shared resources (corridors, charging
+> **Robotics Relevance:** When multiple AMRs compete for shared resources (corridors, charging
 > stations, elevators), each robot locally optimizes its own path. The resulting "traffic
 > equilibrium" may be inefficient — two robots may deadlock in a corridor when a slight
 > detour by one would benefit both. This is precisely the Nash-vs-Pareto gap.
@@ -333,7 +333,7 @@ This bridges directly to [Chapter 04–05](04-constrained-optimization.md): LP d
 engine behind the minimax theorem. Von Neumann proved minimax in 1928; Dantzig invented
 the simplex method in 1947 partly inspired by this connection.
 
-> **OKS Relevance:** The minimax framework applies directly to worst-case path planning.
+> **Robotics Relevance:** The minimax framework applies directly to worst-case path planning.
 > When an AMR must traverse an area with uncertain obstacles (an adversarial environment),
 > finding the minimax path means finding the route that minimizes the maximum possible cost
 > — a robust planning strategy against worst-case scenarios.
@@ -442,7 +442,7 @@ SHAP (SHapley Additive exPlanations) uses the Shapley value to explain ML predic
 This is a direct application of cooperative game theory to ML interpretability, connecting
 Shapley's 1953 result to modern explainable AI.
 
-> **OKS Relevance:** Cooperative game theory applies to multi-robot coalition formation.
+> **Robotics Relevance:** Cooperative game theory applies to multi-robot coalition formation.
 > When a fleet of AMRs must decide which robots serve which zones, the Shapley value
 > gives a fair way to allocate "credit" for completed tasks — useful for load balancing
 > and performance analysis.
@@ -541,7 +541,7 @@ $$\max_x \; u_L(x, y^*(x)) \quad \text{s.t. } y^*(x) \in \arg\max_y u_F(x, y)$$
 The leader's payoff in a Stackelberg equilibrium is at least as good as in the corresponding
 Nash equilibrium (first-mover advantage).
 
-> **OKS Relevance:** Multi-robot coordination often has implicit leader-follower dynamics.
+> **Robotics Relevance:** Multi-robot coordination often has implicit leader-follower dynamics.
 > The fleet management system (RCS) acts as a "leader" assigning tasks; individual robots
 > are "followers" that optimize their local execution. Stackelberg models also apply to
 > elevator allocation: the BEC controller (leader) schedules battery swaps, and robots
@@ -613,7 +613,7 @@ Conditions for revenue equivalence:
 3. Bidder with the lowest type gets zero surplus
 4. The item goes to the bidder with the highest value
 
-> **OKS Relevance:** Multi-robot task allocation can be modeled as an auction. Each robot
+> **Robotics Relevance:** Multi-robot task allocation can be modeled as an auction. Each robot
 > "bids" its estimated cost to complete a task, and the auctioneer (RCS) assigns tasks to
 > minimize total cost. Second-price auctions ensure robots truthfully report their costs.
 > This is used in market-based multi-robot coordination systems.
@@ -711,7 +711,7 @@ def price_of_anarchy(payoff_matrix_A, payoff_matrix_B, ne_profiles, all_profiles
     return opt_welfare / worst_ne_welfare
 ```
 
-> **OKS Relevance:** The Price of Anarchy quantifies the cost of decentralized AMR
+> **Robotics Relevance:** The Price of Anarchy quantifies the cost of decentralized AMR
 > decision-making. If each robot greedily picks the shortest path, the fleet-level
 > performance may degrade — the PoA tells us how much. A PoA close to 1 means selfish
 > routing is nearly optimal; high PoA signals the need for centralized coordination (RCS).
@@ -823,9 +823,9 @@ def exp3(payoff_fn, n_actions, T, gamma=0.1):
     return cumulative_rewards
 ```
 
-> **OKS Relevance:** Learning in games applies to adaptive fleet management. As warehouse
+> **Robotics Relevance:** Learning in games applies to adaptive fleet management. As warehouse
 > conditions change (order patterns, congestion), robots can use no-regret learning to
-> adaptively select routes and strategies. The guardian system's anomaly detection can be
+> adaptively select routes and strategies. The fleet safety monitor's anomaly detection can be
 > viewed as a game against adversarial sensor faults — the system "learns" to distinguish
 > genuine anomalies from noise.
 
@@ -940,11 +940,11 @@ MARL extends single-agent RL to multiple interacting agents:
 - During execution: each agent uses only local observations
 - Bridges cooperative game theory (centralized) with practical deployment (decentralized)
 
-> **OKS Relevance:** MARL directly applies to fleet-level AMR coordination. Robots must
+> **Robotics Relevance:** MARL directly applies to fleet-level AMR coordination. Robots must
 > cooperatively navigate a warehouse, avoid collisions, and maximize throughput. The CTDE
-> paradigm mirrors the OKS architecture: RCS has a global view during planning (centralized),
+> paradigm mirrors the AMR architecture: RCS has a global view during planning (centralized),
 > but each robot executes locally based on its sensors and local state (decentralized).
-> Guardian's multi-robot deadlock detection is essentially identifying non-convergent game
+> The safety monitor's multi-robot deadlock detection is essentially identifying non-convergent game
 > dynamics in real time.
 
 ---

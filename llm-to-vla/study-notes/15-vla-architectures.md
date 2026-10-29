@@ -1402,7 +1402,7 @@ One model. Three modalities. Compression all the way down.
 
 ### Day 100: Synthesis
 25. Build a comparison table of all VLA architectures on 10 dimensions
-26. For each of the 5 OKS subsystems (nav, sensorbar, lifter, BEC, guardian),
+26. For each of the 5 AMR subsystems (nav, line sensor, lifter, BEC, safety monitor),
     propose whether a VLA or classical approach is better and why
 27. Design a "VLA v2" architecture that combines the best of RT-2, OpenVLA, and π₀
 

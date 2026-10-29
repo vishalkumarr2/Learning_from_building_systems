@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 This week's tools model every multi-robot interaction as a game: intersection coordination (Day 92), charging station selection (Day 93), stochastic patrol (Day 94), fleet protocols (Day 95), adversarial planning (Day 96), and robust control via LP (Day 97). The complete solver below handles arbitrary $m \times n$ games — the computational backbone for game-theoretic fleet management.
 
 ---
@@ -318,7 +318,7 @@ Payoffs at (0,1): A gets 10, B gets 8. At (1,0): A gets 8, B gets 10. Neither wa
 ## Connections
 - **Week 14 recap:** Normal form → dominance (92) → pure NE (93) → mixed NE (94) → selection (95) → zero-sum (96) → LP (97)
 - **Forward:** Week 15 extends to dynamic games (extensive form, backward induction) and mechanism design
-- **OKS integration:** Every multi-robot decision maps to a game; the GameSolver class provides the computational tool
+- **AMR integration:** Every multi-robot decision maps to a game; the GameSolver class provides the computational tool
 
 ## Self-Check
 - [ ] I can classify any 2-player game as zero-sum or general and choose the right solution method

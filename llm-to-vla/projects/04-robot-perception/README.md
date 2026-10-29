@@ -44,7 +44,7 @@ Output: List of tracked 3D objects
 
 - **Minimum**: a set of static images (warehouse, robot lab, or any indoor scene)
 - **Preferred**: a short video clip from a robot camera or a webcam walkthrough
-- **Ideal**: ROS bag file with camera topic (if available from OKS attachments)
+- **Ideal**: ROS bag file with camera topic (if available from AMR attachments)
 
 If no robot data is available, use:
 - Indoor scene videos from YouTube

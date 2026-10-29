@@ -10,7 +10,7 @@
 - **Chapter:** [Chapter 10: Game Theory Reference](../../10-game-theory.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Adversarial path planning asks: what route should the robot take if nature (or an adversary) places obstacles in the worst-case position? This is a zero-sum game between the robot (maximizing progress) and the adversary (minimizing it). The minimax strategy gives the robot the best *guaranteed* performance — the foundation of robust control.
 
 ---
@@ -243,7 +243,7 @@ Let $A_{ro} = -c(r,o)$ (robot maximizes negative cost = minimizes cost). The min
 ## Connections
 - **Back:** Day 93–94 (NE in general games), Day 5 (minimax relates to convex-concave saddle points)
 - **Forward:** Day 97 (LP solution for zero-sum games), Week 15 (mechanism design)
-- **OKS:** Robust path planning under worst-case obstacles; adversarial testing of robot controllers
+- **AMR:** Robust path planning under worst-case obstacles; adversarial testing of robot controllers
 
 ## Self-Check
 - [ ] I can compute maximin and minimax values from a payoff matrix

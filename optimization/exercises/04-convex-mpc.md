@@ -67,7 +67,7 @@ $$f^* = \min_x f(x) \text{ s.t. constraints} = \max_{\lambda, \mu} g(\lambda, \m
 - Cannot handle second-order cone or semidefinite constraints
 - For very high-accuracy solutions, MOSEK or Gurobi are faster
 
-**For OKS:** OSQP or similar QP solvers are appropriate because the control problem is linearized at each timestep, producing a QP. The ~ms solve time fits within the control loop.
+**For AMRs:** OSQP or similar QP solvers are appropriate because the control problem is linearized at each timestep, producing a QP. The ~ms solve time fits within the control loop.
 
 </details>
 
@@ -185,9 +185,9 @@ Note: CVXPY can handle SOC constraints directly.
 
 ---
 
-## Section C — OKS Connection
+## Section C — AMR Connection
 
-**C1.** The OKS controller receives a reference path as a sequence of waypoints $(x_i, y_i, \theta_i)$. It must produce $(v, \omega)$ commands at 10 Hz.
+**C1.** The AMR controller receives a reference path as a sequence of waypoints $(x_i, y_i, \theta_i)$. It must produce $(v, \omega)$ commands at 10 Hz.
 
 1. How would you formulate this as an MPC problem?
 2. What is the prediction horizon in time if you use $N = 10$ steps?
@@ -216,12 +216,12 @@ Note: CVXPY can handle SOC constraints directly.
    - Option 1: Use the last successful solution (stale control — dangerous if sustained)
    - Option 2: Apply a safe default (e.g., decelerate, stop)
    - Option 3: Use a warm-started partial solution (OSQP can return after fixed iterations)
-   - OKS likely has a watchdog: if no valid command in $X$ ms → emergency stop
+   - The AMR stack likely has a watchdog: if no valid command in $X$ ms → emergency stop
    - This is why solve time must be **deterministic** and **bounded** — real-time constraint
 
 </details>
 
-**C2.** The dual variable of the velocity constraint in the MPC tells you the "shadow price" of the speed limit. In what real OKS scenario would this information be useful?
+**C2.** The dual variable of the velocity constraint in the MPC tells you the "shadow price" of the speed limit. In what real AMR scenario would this information be useful?
 
 <details><summary>Answer</summary>
 

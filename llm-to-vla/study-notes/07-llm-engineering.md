@@ -631,7 +631,7 @@ assistant using LoRA, combining all Phase III skills.
 ### 6.3 Data Sources for Fine-tuning
 
 - ROS 2 documentation
-- OKS system documentation (`knowledge/` directory)
+- AMR system documentation (`knowledge/` directory)
 - Robotics textbook excerpts
 - Robot troubleshooting conversations
 - Navigation algorithm descriptions

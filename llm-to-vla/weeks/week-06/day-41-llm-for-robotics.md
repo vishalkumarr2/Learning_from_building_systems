@@ -99,25 +99,25 @@ def stack_pyramid():
 
 ### 41.4 LLM for Log Analysis & Diagnostics
 
-Directly applicable to OKS robot fleet management:
+Directly applicable to warehouse robot fleet management:
 
 ```
 LLM-Powered Robot Diagnostics:
 
 Input: Robot error logs + telemetry
-  "[14:23:01] WARN: sensorbar SPI timeout (3 consecutive)
+  "[14:23:01] WARN: line sensor SPI timeout (3 consecutive)
    [14:23:05] ERROR: NAV_ESTIMATED_STATE_NOT_FINITE
-   [14:23:05] INFO: Guardian triggering safety stop
+   [14:23:05] INFO: Safety monitor triggering safety stop
    [14:23:06] ERROR: Robot stopped — manual recovery needed"
 
 LLM Analysis:
-  "Root cause: SPI communication failure between sensorbar and
+  "Root cause: SPI communication failure between line sensor and
    main controller. The 3 consecutive timeouts caused the navigation
    estimator to receive stale data, resulting in NaN propagation.
    
    Recommended actions:
    1. Check SPI wiring and connectors
-   2. Verify sensorbar firmware version (expect v1.2.4+)
+   2. Verify line sensor firmware version (expect v1.2.4+)
    3. Inspect for debris on sensor surface
    4. Review IMU calibration date"
 ```

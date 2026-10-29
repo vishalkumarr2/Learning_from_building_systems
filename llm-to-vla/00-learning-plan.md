@@ -1,5 +1,5 @@
 # LLM-to-VLA — Learning Plan (v2)
-### For: Engineer with ML basics + deep robotics domain knowledge (OKS AMR, ROS, control, state estimation)
+### For: Engineer with ML basics + deep robotics domain knowledge (AMR, ROS, control, state estimation)
 ### Goal: From attention mechanism to deploying Vision-Language-Action models on robots
 ### Revised after 5-persona expert panel review
 
@@ -7,7 +7,7 @@
 
 ## Why This Track Exists
 
-You investigate robot failures daily — you know ROS, estimators, controllers, sensorbar physics.
+You investigate robot failures daily — you know ROS, estimators, controllers, line sensor physics.
 The missing piece: the AI/ML revolution that's transforming robotics. VLAs (Vision-Language-Action
 models) are the frontier — robots that see, understand language, and act. This track builds you
 from "I know ML basics" to "I can train and deploy a VLA on a robot."
@@ -120,7 +120,7 @@ explicitly leverages it in Phases VI–VII with ROS2 integration and hybrid cont
 | II | Mini-LM + ablation report | Train GPT, systematic ablation experiments |
 | III | Robotics LoRA assistant | Fine-tune LLM on robotics Q&A with LoRA |
 | IV | Robot perception pipeline | 3D depth + video + object detection on camera stream |
-| V | Warehouse visual QA | Compare CLIP/LLaVA/BLIP-2 on OKS scenarios |
+| V | Warehouse visual QA | Compare CLIP/LLaVA/BLIP-2 on AMR scenarios |
 | VI | Diffusion policy from own demos | Collect demos → train diffusion policy → evaluate |
 | VII | **VLA Capstone** | End-to-end: collect data → train VLA → hybrid deploy + safety |
 
@@ -150,7 +150,7 @@ This track connects to your completed learning tracks:
 | `control-systems/` | PID/MPC → Phase VII hybrid VLA+classical control exercises |
 | `ros2-handson/` | ROS2 integration in Phase VII deployment (Days 104, 109) |
 | `optimization/` | Gradient descent, loss landscapes — same math in DL |
-| `python-oks/` | Python proficiency for all implementations |
+| `python-scripting/` | Python proficiency for all implementations |
 | `electronics/` | Understanding sensor inputs that feed into VLAs |
 
 ---

@@ -2,7 +2,7 @@
 
 > **Goal:** Master the most important optimization structure in robotics — least squares — from normal equations through Gauss-Newton and Levenberg-Marquardt to the Ceres Solver API.
 
-> **This is the highest-value chapter for OKS work.** Every sensorbar fit, every calibration, every SLAM backend runs a nonlinear least-squares solver.
+> **This is the highest-value chapter for AMR work.** Every line sensor fit, every calibration, every SLAM backend runs a nonlinear least-squares solver.
 
 ---
 
@@ -67,7 +67,7 @@ where $W = \text{diag}(w_1, \ldots, w_m)$.
 
 Normal equations become: $A^T W A x = A^T W b$.
 
-**OKS relevance:** The EKF measurement update is exactly a weighted least-squares problem. The weights are the inverse measurement covariance: $W = R^{-1}$. Sensorbar measurements with high uncertainty get low weight.
+**Robotics relevance:** The EKF measurement update is exactly a weighted least-squares problem. The weights are the inverse measurement covariance: $W = R^{-1}$. Line sensor measurements with high uncertainty get low weight.
 
 ---
 
@@ -81,7 +81,7 @@ $$\min_x \sum_{i=1}^m r_i(x)^2 = \min_x \|r(x)\|^2$$
 
 where $r : \mathbb{R}^n \to \mathbb{R}^m$ is the vector of **residuals**.
 
-**Example:** Fitting a sensorbar measurement model $f(\theta, d; p)$ where the residuals are:
+**Example:** Fitting a line sensor measurement model $f(\theta, d; p)$ where the residuals are:
 
 $$r_i(p) = \text{measured}_i - f(\theta_i, d_i; p)$$
 
@@ -204,14 +204,14 @@ Replace $\frac{1}{2}r^2$ with $\rho(r)$:
 // Standard squared error
 problem.AddResidualBlock(cost_fn, nullptr, params);
 
-// Cauchy loss with c = 40.0 (used in OKS sensorbar)
+// Cauchy loss with c = 40.0 (used in AMR line sensor)
 problem.AddResidualBlock(cost_fn, new ceres::CauchyLoss(40.0), params);
 
 // Huber loss with δ = 1.0
 problem.AddResidualBlock(cost_fn, new ceres::HuberLoss(1.0), params);
 ```
 
-**OKS sensorbar uses `CauchyLoss(c=40.0)`:** This means measurements with residual $|r| \gg 40$ have their influence heavily down-weighted. This is critical because sensorbar readings can have large outliers from reflective floor markings or partial occlusions.
+**AMR line sensor uses `CauchyLoss(c=40.0)`:** This means measurements with residual $|r| \gg 40$ have their influence heavily down-weighted. This is critical because line sensor readings can have large outliers from reflective floor markings or partial occlusions.
 
 ### Iteratively Reweighted Least Squares (IRLS)
 
@@ -243,8 +243,8 @@ Problem
 Computes residuals and Jacobians:
 
 ```cpp
-struct SensorbarCostFunctor {
-    SensorbarCostFunctor(double measured_y, double line_x)
+struct LineSensorCostFunctor {
+    LineSensorCostFunctor(double measured_y, double line_x)
         : measured_y_(measured_y), line_x_(line_x) {}
 
     template <typename T>
@@ -261,8 +261,8 @@ struct SensorbarCostFunctor {
 
 // Auto-differentiation — Ceres computes Jacobians for you
 ceres::CostFunction* cost =
-    new ceres::AutoDiffCostFunction<SensorbarCostFunctor, 1, 2>(
-        new SensorbarCostFunctor(measurement, x_position));
+    new ceres::AutoDiffCostFunction<LineSensorCostFunctor, 1, 2>(
+        new LineSensorCostFunctor(measurement, x_position));
 ```
 
 ### Solver Options
@@ -300,7 +300,7 @@ summary.message             // Human-readable status
 
 | Solver | Problem structure | Typical use |
 |--------|-------------------|-------------|
-| `DENSE_QR` | Small ($n < 100$), dense | Sensorbar fit, calibration |
+| `DENSE_QR` | Small ($n < 100$), dense | Line sensor fit, calibration |
 | `DENSE_NORMAL_CHOLESKY` | Small, normal equations OK | Fast for small dense NLLS |
 | `SPARSE_NORMAL_CHOLESKY` | Large, sparse Jacobian | Bundle adjustment |
 | `CGNR` | Large, sparse, iterative | When factorization is too expensive |
@@ -336,7 +336,7 @@ Evaluate $f$ once with dual numbers → get both $f(a)$ and $f'(a)$ for free. Ce
 
 ---
 
-## 9. Debugging Ceres: Common OKS Failure Modes
+## 9. Debugging Ceres: Common AMR Failure Modes
 
 | Symptom | Likely cause | What to check |
 |---------|--------------|---------------|

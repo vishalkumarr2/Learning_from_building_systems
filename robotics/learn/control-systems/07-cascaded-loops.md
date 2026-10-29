@@ -6,16 +6,16 @@
 
 ---
 
-## Why Should I Care? (OKS Context)
+## Why Should I Care? (Practical Context)
 
-A single PID controlling motor speed from voltage is *okay* for a toy. For an OKS warehouse robot carrying 200 kg at 1 m/s, you need **cascaded loops**: an inner current (torque) loop, a middle speed loop, and an outer position loop. Each loop handles a different timescale and gives you independent control over torque, speed, and position.
+A single PID controlling motor speed from voltage is *okay* for a toy. For an warehouse robot carrying 200 kg at 1 m/s, you need **cascaded loops**: an inner current (torque) loop, a middle speed loop, and an outer position loop. Each loop handles a different timescale and gives you independent control over torque, speed, and position.
 
 **Why cascade matters in practice:**
 - Without current limiting → motor stall at startup = 15A peak → trips the battery BMS → e-stop
 - Without speed limiting → acceleration spike → load slides off the shelf
 - Without position loop → can't hold position at a station (drift on slopes)
 
-**OKS cascade architecture:**
+**AMR cascade architecture:**
 
 ```
 Nav2 → position_cmd (50 Hz)
@@ -79,7 +79,7 @@ From the current loop's perspective, $K_e \omega$ is a disturbance (back-EMF). T
 
 $$G_i(s) = \frac{I(s)}{V(s)} = \frac{1/R}{\frac{L}{R}s + 1} = \frac{1/R}{\tau_e s + 1}$$
 
-where $\tau_e = L/R$ is the electrical time constant (~0.5 ms for OKS motor).
+where $\tau_e = L/R$ is the electrical time constant (~0.5 ms for robot motor).
 
 ## 2.3 PI Controller (No D)
 
@@ -147,7 +147,7 @@ From the speed loop's perspective, the current loop is fast enough to be "transp
 
 $$G_\omega(s) = \frac{\Omega(s)}{T(s)} = \frac{1/B}{Js/B + 1} = \frac{1/B}{\tau_m s + 1}$$
 
-where $\tau_m = J/B$ is the mechanical time constant (~50 ms for OKS with gearbox).
+where $\tau_m = J/B$ is the mechanical time constant (~50 ms for the robot with gearbox).
 
 But since the current loop output → torque: $T = K_t \times i$, the combined plant is:
 

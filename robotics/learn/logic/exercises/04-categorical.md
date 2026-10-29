@@ -11,11 +11,11 @@ Convert each statement to standard categorical form (A, E, I, or O). Identify th
 
 **A.** "Every robot in the fleet needs a firmware update."
 
-**B.** "Some of the sensorbar readings are inaccurate."
+**B.** "Some of the line sensor readings are inaccurate."
 
 **C.** "No device with hardware revision A passed the thermal test."
 
-**D.** "There are OKS robots that don't have the latest calibration."
+**D.** "There are warehouse robots that don't have the latest calibration."
 
 **E.** "Only robots with firmware ≥ v1.24 are approved for deployment."
 
@@ -80,8 +80,8 @@ All robots in building 3 (S) are devices with the SPI bug (M).
 **B.**
 ```
 All robots that crashed (P) are robots running Linux (M).
-All OKS robots (S) are robots running Linux (M).
-∴ All OKS robots (S) are robots that crashed (P).
+All warehouse robots (S) are robots running Linux (M).
+∴ All warehouse robots (S) are robots that crashed (P).
 ```
 
 **C.**
@@ -111,7 +111,7 @@ Some motors in the fleet (S) are not motors that overheated (M).
 
 Translate the following argument into standard form categorical syllogism, then test validity.
 
-"Every robot with stale sensorbar data eventually delocalizes. Some robots in the Hamamatsu warehouse have stale sensorbar data. Therefore, some robots in the Hamamatsu warehouse eventually delocalize."
+"Every robot with stale line sensor data eventually delocalizes. Some robots in the Site-A warehouse have stale line sensor data. Therefore, some robots in the Site-A warehouse eventually delocalize."
 
 ---
 
@@ -124,11 +124,11 @@ Translate the following argument into standard form categorical syllogism, then 
 
 **A.** A: All robots in the fleet (S) are things needing a firmware update (P).
 
-**B.** I: Some sensorbar readings (S) are inaccurate readings (P).
+**B.** I: Some line sensor readings (S) are inaccurate readings (P).
 
 **C.** E: No devices with hardware revision A (S) are things that passed the thermal test (P).
 
-**D.** O: Some OKS robots (S) are not things with the latest calibration (P).
+**D.** O: Some warehouse robots (S) are not things with the latest calibration (P).
 
 **E.** A: All things approved for deployment (S) are robots with firmware ≥ v1.24 (P). Note: "Only S are P" translates to "All P are S."
 
@@ -192,9 +192,9 @@ Translate the following argument into standard form categorical syllogism, then 
 
 Standard form:
 ```
-All robots with stale sensorbar data (M) are things that eventually delocalize (P).  [A]
-Some robots in Hamamatsu (S) are robots with stale sensorbar data (M).               [I]
-∴ Some robots in Hamamatsu (S) are things that eventually delocalize (P).             [I]
+All robots with stale line sensor data (M) are things that eventually delocalize (P).  [A]
+Some robots in Site-A (S) are robots with stale line sensor data (M).               [I]
+∴ Some robots in Site-A (S) are things that eventually delocalize (P).             [I]
 ```
 
 This is AII-1 (Darii). Check rules:

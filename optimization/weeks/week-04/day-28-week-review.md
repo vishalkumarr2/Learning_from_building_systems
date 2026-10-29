@@ -5,12 +5,12 @@
 
 ## Navigation
 - **Previous:** [Day 27: scipy.optimize Deep Dive](day-27-scipy-optimize.md)
-- **Next:** [Day 29: Linear Least Squares](../week-05/day-29-linear-least-squares.md)
+- **Next:** Day 29: Linear Least Squares *(not written yet)*
 - **Week:** [Week 4 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
-This capstone cements your ability to build, test, and select optimization algorithms — a skill you'll use every time you prototype a new calibration, estimation, or control algorithm for the OKS stack. The `miniopt` library mirrors how real solver libraries are structured (Ceres, OSQP, scipy) with a unified interface and method selection.
+## Robotics Relevance
+This capstone cements your ability to build, test, and select optimization algorithms — a skill you'll use every time you prototype a new calibration, estimation, or control algorithm for the AMR stack. The `miniopt` library mirrors how real solver libraries are structured (Ceres, OSQP, scipy) with a unified interface and method selection.
 
 ---
 
@@ -108,7 +108,7 @@ Tests should cover:
 
 1. Draw the inheritance diagram for `miniopt`: what's shared across methods? What differs?
 2. For each method in `miniopt`, state its convergence rate class.
-3. Which `miniopt` methods would you use on the OKS wheel calibration problem? Why?
+3. Which `miniopt` methods would you use on the AMR wheel calibration problem? Why?
 4. If you were adding one more method to `miniopt`, what would it be? (Hint: Week 5)
 5. Compare your `miniopt.minimize(method='bfgs')` with `scipy.optimize.minimize(method='BFGS')` on Rosenbrock 5D.
 

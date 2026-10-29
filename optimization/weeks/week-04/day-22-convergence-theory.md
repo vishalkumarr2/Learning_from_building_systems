@@ -9,7 +9,7 @@
 - **Week:** [Week 4 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 When the Ceres solver log shows "cost: 1.4e+03 → 2.1e-01 in 12 iterations," understanding convergence rates tells you whether those 12 iterations are good (near quadratic) or a sign of trouble (linear with $\kappa = 10^6$). Convergence theory also explains *why* trust region methods converge globally while pure Newton can diverge — crucial for solver configuration.
 
 ---

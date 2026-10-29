@@ -50,7 +50,7 @@ You have:
 - ✅ Working knowledge of ML: loss functions, backprop, SGD/Adam, basic neural nets
 - ✅ Python + PyTorch experience (can write training loops)
 - ✅ Linear algebra, probability, calculus fundamentals
-- ✅ Robotics domain knowledge (OKS AMR, ROS, state estimation, control)
+- ✅ Robotics domain knowledge (AMR, ROS, state estimation, control)
 
 You want:
 - Understand attention from first principles → transformers → LLMs → vision-language → VLA
@@ -709,7 +709,7 @@ If you fail any of these: spend 2 days on Karpathy's "micrograd" video first.
 **Theory:** RAG architecture: retrieve → augment → generate. When to use RAG vs fine-tuning vs larger context. Tool use and function calling. **Robotics applications:** RAG over robot logs, tool use for calling ROS services, code generation for control. This is a 1-day overview — depth comes from practice, not more days.
 
 ### Day 41: LLM for Robotics
-**Theory:** LLMs as code generators for robot control (SayCan, Code as Policies). Log analysis with LLMs. LLM-based task planning for robot fleets. Connection to OKS: how would an LLM help with ticket triage, log analysis, navigation debugging?
+**Theory:** LLMs as code generators for robot control (SayCan, Code as Policies). Log analysis with LLMs. LLM-based task planning for robot fleets. Connection to AMRs: how would an LLM help with ticket triage, log analysis, navigation debugging?
 
 **Implementation:** Build a simple LLM-based robot command translator: "go to the charging station" → ROS action goal.
 
@@ -718,7 +718,7 @@ If you fail any of these: spend 2 days on Karpathy's "micrograd" video first.
 **Project:** Fine-tune a robotics assistant with LoRA + evaluate
 - Fine-tune SmolLM or TinyLlama on robotics Q&A data using LoRA
 - Evaluate: compare with base model on robotics questions
-- Add RAG over OKS documentation for knowledge grounding
+- Add RAG over AMR documentation for knowledge grounding
 - **Deliverable:** Fine-tuned model, evaluation report, comparison analysis
 
 **Phase III Checkpoint (answer without notes):**
@@ -783,7 +783,7 @@ If you fail any of these: spend 2 days on Karpathy's "micrograd" video first.
 **Implementation:** Run Depth Anything v2 on robot camera images. Compare predicted depth with known distances. Visualize depth maps overlaid on RGB.
 
 ### Day 52: Point Clouds & 3D Scene Representations (NEW — Li)
-**Theory:** Point clouds: unordered 3D coordinate sets from LiDAR or depth cameras. Point cloud transformers: how to apply attention to 3D points. NeRF concepts: neural radiance fields for novel view synthesis. Multi-view geometry basics. Occupancy networks. Relevance to AMR: how OKS robots build world models from sensor data.
+**Theory:** Point clouds: unordered 3D coordinate sets from LiDAR or depth cameras. Point cloud transformers: how to apply attention to 3D points. NeRF concepts: neural radiance fields for novel view synthesis. Multi-view geometry basics. Occupancy networks. Relevance to AMR: how warehouse robots build world models from sensor data.
 
 **Implementation:** Process a point cloud with a simple point transformer. Visualize 3D occupancy grid from depth data.
 
@@ -881,7 +881,7 @@ If you fail any of these: spend 2 days on Karpathy's "micrograd" video first.
 
 ### Days 67–68: Phase V Capstone
 
-**Project:** Warehouse visual QA — compare VLMs on OKS scenarios
+**Project:** Warehouse visual QA — compare VLMs on AMR scenarios
 - Input: warehouse/robot camera images + natural language questions
 - Tasks: "What objects are on the shelf?", "Is the path blocked?", "Where should I place this box?"
 - Compare: CLIP zero-shot vs LLaVA vs BLIP-2
@@ -979,7 +979,7 @@ If you fail any of these: spend 2 days on Karpathy's "micrograd" video first.
 ### Day 82: Action Representations Day 1 (EXPANDED)
 **Theory:** What IS a robot action? Joint positions, joint velocities, end-effector pose (6-DoF), waypoints, force/torque. Absolute vs delta (relative) actions. Continuous action spaces. The action representation choice profoundly affects learning performance. Normalization and scaling.
 
-**Exercise:** For the OKS AMR, define the action space: (linear velocity, angular velocity) — continuous. For a manipulator: joint positions (7-DoF). Compare: what's easier to learn?
+**Exercise:** For the AMR, define the action space: (linear velocity, angular velocity) — continuous. For a manipulator: joint positions (7-DoF). Compare: what's easier to learn?
 
 ### Day 83: Action Tokenization Day 2 (NEW — Karpathy + Finn)
 **Theory:** Discretizing continuous actions into tokens — how RT-2 does it. Uniform binning: divide each action dimension into N bins. VQ-VAE for actions: learn a codebook of action tokens. De-tokenization: converting predicted token back to continuous action. The tradeoff: bin resolution vs vocabulary size. **This is the key bridge from LLMs to VLAs**: if actions are tokens, a language model that predicts action tokens IS a robot controller.
@@ -1110,7 +1110,7 @@ If you fail any of these: spend 2 days on Karpathy's "micrograd" video first.
 ### Day 103: Hybrid VLA + Classical Control Day 1 (EXPANDED — Levine)
 **Theory:** VLA as high-level planner, classical controller as low-level executor. Architecture: VLA outputs subgoals or waypoints → classical controller (PID, MPC) tracks them. Why hybrid: VLAs are slow (1-10 Hz), classical control is fast (100-1000 Hz). Safety: classical control enforces constraints that learned policies might violate.
 
-**Exercise:** Design a hybrid architecture for OKS AMR: VLA for task planning ("go to shelf B3, pick item") → classical navigation stack → classical motor control.
+**Exercise:** Design a hybrid architecture for AMR: VLA for task planning ("go to shelf B3, pick item") → classical navigation stack → classical motor control.
 
 ### Day 104: Hybrid Systems Day 2 — ROS2 Integration (NEW — Levine)
 **Theory:** ROS2 architecture for VLA deployment: VLA node → action server → controller manager → hardware interface. Communication patterns: action servers for long-running tasks, topics for sensor data. Latency considerations: how to pipeline VLA inference with robot execution.
@@ -1151,9 +1151,9 @@ If you fail any of these: spend 2 days on Karpathy's "micrograd" video first.
 - Logging: full observation-action pairs for offline analysis
 
 ### Day 109: Deployment Day 3 — Full Pipeline (NEW — Levine)
-**Theory:** End-to-end deployment pipeline: sensor input → preprocessing → VLA inference → safety check → command execution → state feedback → logging. ROS2 integration for a warehouse robot. Real-time adaptation: fine-tune the VLA on new data collected during deployment (continual learning). The OKS connection: how would you deploy a VLA on an OKS AMR for dynamic obstacle avoidance or manipulation?
+**Theory:** End-to-end deployment pipeline: sensor input → preprocessing → VLA inference → safety check → command execution → state feedback → logging. ROS2 integration for a warehouse robot. Real-time adaptation: fine-tune the VLA on new data collected during deployment (continual learning). The AMR connection: how would you deploy a VLA on an AMR for dynamic obstacle avoidance or manipulation?
 
-**Exercise:** Write a deployment specification document for a VLA on the OKS AMR:
+**Exercise:** Write a deployment specification document for a VLA on the AMR:
 - Hardware requirements (compute, camera, sensors)
 - Software stack (ROS2 nodes, inference server, safety layer)
 - Evaluation criteria (latency, success rate, safety violations)
@@ -1254,7 +1254,7 @@ Use these agents for expert guidance during each phase:
 | III | `ai-engineer` | LLM application patterns |
 | V | `ai-engineer` | VLM integration patterns |
 | VI–VII | `ml-engineer` | Training pipelines, MLOps |
-| VII | (Your robotics expertise) | ROS, control, OKS domain |
+| VII | (Your robotics expertise) | ROS, control, AMR domain |
 | All | `ecc-pytorch-patterns` skill | PyTorch best practices |
 | III | `ecc-claude-api` skill | Anthropic API patterns |
 | All | `ecc-deep-research` skill | Multi-source research |

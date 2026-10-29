@@ -9,7 +9,7 @@
 - **Week:** [Week 2 Overview](../README.md)
 - **Curriculum:** [CURRICULUM.md](../../CURRICULUM.md)
 
-## OKS Relevance
+## Robotics Relevance
 Ceres Solver's `AutoDiffCostFunction` is the default and recommended way to define cost functions. It uses forward-mode AD with dual numbers (Jet types) to compute exact Jacobians automatically. JAX uses reverse-mode AD for efficient gradient computation in Python prototyping. Understanding both modes tells you when each is efficient and how Ceres Jet types work under the hood.
 
 ---
